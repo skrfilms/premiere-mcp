@@ -4,6 +4,36 @@ English | [日本語](README.ja.md) | [Tiếng Việt](README.vi.md) | [简体�
 
 Control Adobe Premiere Pro through MCP using Codex, Claude Code, Claude Desktop, or any other MCP client.
 
+<a href="https://github.com/Monet-AI-Editor/Monet">
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" fill="none" width="56" height="56" aria-label="Monet logo">
+    <defs>
+      <linearGradient id="paint0_linear_monet" x1="220" y1="298" x2="676" y2="566" gradientUnits="userSpaceOnUse">
+        <stop stop-color="white"/>
+        <stop offset="1" stop-color="white" stop-opacity="0.4"/>
+      </linearGradient>
+      <linearGradient id="paint1_linear_monet" x1="804" y1="442" x2="382" y2="694" gradientUnits="userSpaceOnUse">
+        <stop stop-color="white"/>
+        <stop offset="1" stop-color="white" stop-opacity="0.4"/>
+      </linearGradient>
+    </defs>
+    <rect x="112" y="112" width="800" height="800" rx="184" fill="#000000"/>
+    <g transform="translate(0 1024) scale(1 -1)">
+      <path
+        d="M270 298H420L578 456L436 598H270C242.386 598 220 575.614 220 548V348C220 320.386 242.386 298 270 298Z"
+        fill="url(#paint0_linear_monet)"
+      />
+      <path
+        d="M604 442H754C781.614 442 804 464.386 804 492V676C804 703.614 781.614 726 754 726H604L446 568L588 442H604Z"
+        fill="url(#paint1_linear_monet)"
+      />
+    </g>
+  </svg>
+</a>
+
+> Want something built for agents from the ground up? Adobe is still powerful, but it is not AI-first. I am now building [Monet](https://github.com/Monet-AI-Editor/Monet), an AI-first video editor designed for full coding-agent control from day one.
+>
+> If you want the AI-native path, use Monet. If you need Adobe Premiere Pro today, this project is still for you.
+
 <a href="https://glama.ai/mcp/servers/@hetpatel-11/Adobe_Premiere_Pro_MCP">
   <img width="380" height="200" src="https://glama.ai/mcp/servers/@hetpatel-11/Adobe_Premiere_Pro_MCP/badge" alt="Adobe Premiere Pro MCP server" />
 </a>
@@ -52,8 +82,11 @@ Example prompts:
 - "Import these three shots and build a rough product spot."
 - "Add cross dissolves to every cut on video track 1."
 - "Apply Gaussian Blur to the middle clip."
+- "Apply the `Black & White` effect to the active short-form clip."
 - "Razor the interview sequence at 12.5 seconds across all audio and video tracks."
 - "Export the active sequence as FCP XML."
+
+For monochrome looks, prefer `apply_effect` with `Black & White` instead of trying to force black and white through generic saturation-only adjustments.
 
 Before editing, you can also attach the `premiere://config/get_instructions` resource to give the model Premiere-specific operating guidance.
 
