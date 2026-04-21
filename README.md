@@ -5,7 +5,7 @@ English | [日本語](README.ja.md) | [Tiếng Việt](README.vi.md) | [简体�
 Control Adobe Premiere Pro through MCP using Codex, Claude Code, Claude Desktop, or any other MCP client.
 
 <a href="https://github.com/Monet-AI-Editor/Monet">
-  <img src="images/monet-logo.svg" width="56" height="56" alt="Monet logo" />
+  <img src="images/monet-logo.svg" width="88" height="88" alt="Monet logo" />
 </a>
 
 > Want something built for agents from the ground up? Adobe is still powerful, but it is not AI-first. I am now building [Monet](https://github.com/Monet-AI-Editor/Monet), an AI-first video editor designed for full coding-agent control from day one.
