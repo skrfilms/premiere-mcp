@@ -8,7 +8,7 @@ Control Adobe Premiere Pro through MCP using Codex, Claude Code, Claude Desktop,
   <img src="images/monet-logo.svg" width="88" height="88" alt="Monet logo" />
 </a>
 
-> Want something built for agents from the ground up? Adobe is still powerful, but it is not AI-first. I am now building [Monet](https://github.com/Monet-AI-Editor/Monet), an AI-first video editor designed for full coding-agent control from day one.
+> Want something built for AI Agents from the ground up? Adobe is still powerful, but it is not AI-first. I am now building [Monet](https://github.com/Monet-AI-Editor/Monet), an AI-first video editor designed for full coding-agent control from day one.
 >
 > If you want the AI-native path, use Monet. If you need Adobe Premiere Pro today, this project is still for you.
 
