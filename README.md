@@ -53,13 +53,17 @@ This repository is currently validated for:
 - the included macOS installer path for Claude Desktop
 - manual MCP registration for Codex, Claude Code, and similar MCP clients
 
-Current local validation as of March 4, 2026:
+Current catalog status as of June 29, 2026:
 
-- `97` tools are exposed
-- `43` tools were live-executed against a real Premiere session
-- `50` tools were schema-validated in the same sweep
+- `278` Premiere Pro MCP tools are exposed for AI-driven video editing
+- coverage spans project setup, media ingest, bins, sequences, timeline editing, transitions, effects, keyframes, captions, markers, metadata, proxies, multicam, color, audio, exports, and higher-level assembly workflows
+- the catalog includes practical agent workflows such as product-spot assembly, motion-graphics demos, timeline razoring, caption reads, audio ducking, scene edit detection, EDL import, and linked audio/video operations
+
+Most recent completed local live validation:
+
+- `197` tools were live-executed against a real Premiere Pro 2026 session
+- `57` tools were schema-validated in the same sweep
 - `3` destructive no-arg tools were intentionally skipped (`save_project`, `undo`, `consolidate_duplicates`)
-- `1` live runtime limitation remains: `get_render_queue_status` requires Adobe Media Encoder integration
 
 The full live sweep output is written to `/tmp/premiere-mcp-bridge/live-tool-sweep.json` when you run the verifier.
 

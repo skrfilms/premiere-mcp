@@ -31,8 +31,11 @@ describe('PremiereProTools', () => {
       expect(toolNames).toContain('add_to_timeline');
       expect(toolNames).toContain('import_mogrt');
       expect(toolNames).toContain('setup_ducking');
-      expect(toolNames).not.toContain('create_nested_sequence');
-      expect(toolNames).not.toContain('unnest_sequence');
+      expect(toolNames).toContain('ping');
+      expect(toolNames).toContain('get_full_project_overview');
+      expect(toolNames).toContain('open_in_source');
+      expect(toolNames).toContain('nest_clips');
+      expect(toolNames).toContain('unnest_sequence');
     });
 
     it('returns valid tool metadata', () => {
@@ -66,6 +69,20 @@ describe('PremiereProTools', () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toContain('Tool execution failed');
+    });
+
+    it('executes expanded tools through our bridge dispatcher', async () => {
+      mockBridge.executeScript.mockResolvedValue({
+        success: true,
+        tool: 'ping',
+        data: { connected: true }
+      });
+
+      const result = await tools.executeTool('ping', {});
+
+      expect(mockBridge.executeScript).toHaveBeenCalled();
+      expect(result.success).toBe(true);
+      expect(result.data.connected).toBe(true);
     });
   });
 
