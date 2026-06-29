@@ -9,6 +9,7 @@ import { z } from 'zod';
 import type { PremiereProTransport } from '../bridge/types.js';
 import { Logger } from '../utils/logger.js';
 import { createMotionDemoAssets } from '../utils/demoAssets.js';
+import { executeExpandedTool, getExpandedTools, isExpandedTool } from './expanded.js';
 
 export interface MCPTool {
   name: string;
@@ -128,7 +129,7 @@ export class PremiereProTools {
     this.logger = new Logger('PremiereProTools');
   }
 
-  getAvailableTools(): MCPTool[] {
+  private getLocalTools(): MCPTool[] {
     return [
       // Discovery Tools (NEW)
       {
@@ -1138,6 +1139,14 @@ export class PremiereProTools {
     ];
   }
 
+  getAvailableTools(): MCPTool[] {
+    const localTools = this.getLocalTools();
+    return [
+      ...localTools,
+      ...getExpandedTools(new Set(localTools.map((tool) => tool.name)))
+    ];
+  }
+
   async executeTool(name: string, args: Record<string, any>): Promise<any> {
     const tool = this.getAvailableTools().find(t => t.name === name);
     if (!tool) {
@@ -1160,6 +1169,11 @@ export class PremiereProTools {
     }
 
     this.logger.info(`Executing tool: ${name} with args:`, args);
+
+    const localToolNames = new Set(this.getLocalTools().map((localTool) => localTool.name));
+    if (!localToolNames.has(name) && isExpandedTool(name)) {
+      return await executeExpandedTool(this.bridge, name, args);
+    }
     
     try {
       switch (name) {
@@ -4720,9 +4734,10 @@ export class PremiereProTools {
 
   private async getRenderQueueStatus(): Promise<any> {
     return {
-      success: false,
-      error: "get_render_queue_status: Render queue monitoring requires Adobe Media Encoder integration",
-      note: "Check Adobe Media Encoder application for render status"
+      success: true,
+      available: false,
+      queueStatusAvailable: false,
+      note: "Render queue monitoring requires Adobe Media Encoder integration. Check Adobe Media Encoder for live render status."
     };
   }
 
