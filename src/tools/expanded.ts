@@ -4,6 +4,7 @@ import { basename, dirname, join } from 'node:path';
 import { deflateSync } from 'node:zlib';
 import type { PremiereProTransport } from '../bridge/types.js';
 import type { MCPTool } from './index.js';
+import { buildExpandedInputSchema, expandedToolSpec } from './expanded-schemas.js';
 
 export const expandedToolNames = [
   'find_items_by_media_path',
@@ -184,11 +185,24 @@ export const unimplementedExpandedToolNames = [] as const;
 export function getExpandedTools(existingNames: Set<string>): MCPTool[] {
   return expandedToolNames
     .filter((name) => !existingNames.has(name))
-    .map((name) => ({
-      name,
-      description: `Premiere Pro expanded operation: ${name.replace(/_/g, ' ')}.`,
-      inputSchema: z.record(z.string(), z.any())
-    }));
+    .map((name) => {
+      // Prefer the real, documented schema for this tool. A tool without a spec
+      // (should be none) falls back to the original free-form record so it stays
+      // callable rather than disappearing.
+      const spec = expandedToolSpec(name);
+      if (spec) {
+        return {
+          name,
+          description: spec.description,
+          inputSchema: buildExpandedInputSchema(spec)
+        };
+      }
+      return {
+        name,
+        description: `Premiere Pro expanded operation: ${name.replace(/_/g, ' ')}.`,
+        inputSchema: z.record(z.string(), z.any())
+      };
+    });
 }
 
 export function isExpandedTool(name: string): boolean {

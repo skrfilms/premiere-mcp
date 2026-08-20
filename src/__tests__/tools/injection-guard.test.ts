@@ -29,11 +29,32 @@
  */
 
 import vm from 'vm';
+import { tmpdir } from 'node:os';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { parse } from 'acorn';
 import { PremiereProTools } from '../../tools/index.js';
 import {
   seedArgs, stringPaths, withPayloadAt, argNamesFromScript, seedFreeFormArgs,
 } from '../helpers/schema-args.js';
+
+// A few tools (e.g. consolidate_and_transfer) do real Node-side filesystem work
+// at a caller-supplied, cwd-relative path. Driving them with hostile path values
+// would otherwise scatter payload-named directories through the repo root. Run
+// the whole sweep from a throwaway temp cwd so any such write lands there and is
+// removed afterwards; the generated ExtendScript — the thing under test — is
+// unaffected by cwd.
+let originalCwd: string;
+let scratchCwd: string;
+beforeAll(() => {
+  originalCwd = process.cwd();
+  scratchCwd = mkdtempSync(join(tmpdir(), 'skry-injection-sweep-'));
+  process.chdir(scratchCwd);
+});
+afterAll(() => {
+  process.chdir(originalCwd);
+  try { rmSync(scratchCwd, { recursive: true, force: true }); } catch { /* best effort */ }
+});
 
 /** Closes a double-quoted literal, sets a flag, and reopens it so the rest parses. */
 const BREAKOUT_DOUBLE = 'zz"); __OWNED = true; ("';
@@ -86,6 +107,17 @@ const PARSE_EXEMPT = new Set([BREAKOUT_LINE_SEPARATOR]);
 const HELPER_SAMPLE = 6;
 
 /**
+ * Tools whose entire contract is to run a caller-supplied program verbatim: the
+ * argument IS the script, so there is no wrapper to break out of — a hostile
+ * value there is the caller executing their own code, exactly as documented.
+ * Fuzzing them here only proves that `eval` evaluates, so they are excluded from
+ * the breakout sweep (as they effectively were before they carried a typed
+ * `script` field to seed). Escaping is enforced for every tool that WRAPS a
+ * caller string into a generated script — which is every other tool.
+ */
+const ARBITRARY_CODE_TOOLS = new Set(['execute_extendscript']);
+
+/**
  * The 171 free-form tools emit one shared ~123 KB body, so every payload against
  * every one of them re-parses that body. They are driven with the breakout
  * payloads only: those are what detect an escape, and they exercise the parse
@@ -135,6 +167,7 @@ describe('generated scripts cannot be broken out of', () => {
     const emittingTools = new Set<string>();
 
     for (const tool of probe.getAvailableTools()) {
+      if (ARBITRARY_CODE_TOOLS.has(tool.name)) continue;
       let base = seedArgs(tool as never);
       let freeForm = false;
 

@@ -21,10 +21,29 @@
  *     come from each tool's own schema, optionals included.
  */
 
+import { tmpdir } from 'node:os';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { parse } from 'acorn';
 import { PremiereProTools } from '../../tools/index.js';
 import { expandedToolNames } from '../../tools/expanded.js';
 import { seedArgs, seedRequiredArgs } from '../helpers/schema-args.js';
+
+// Some tools do real Node-side filesystem work at a caller-supplied, cwd-relative
+// path (e.g. consolidate_and_transfer). Seeding them from their schema would
+// otherwise create directories in the repo root. Run from a throwaway temp cwd so
+// any such write is contained and cleaned up; the generated script is unaffected.
+let originalCwd: string;
+let scratchCwd: string;
+beforeAll(() => {
+  originalCwd = process.cwd();
+  scratchCwd = mkdtempSync(join(tmpdir(), 'skry-undefined-ids-'));
+  process.chdir(scratchCwd);
+});
+afterAll(() => {
+  process.chdir(originalCwd);
+  try { rmSync(scratchCwd, { recursive: true, force: true }); } catch { /* best effort */ }
+});
 
 // Provided by the ExtendScript host or by the prelude the bridge prepends.
 const HOST_GLOBALS = new Set([
@@ -35,6 +54,16 @@ const HOST_GLOBALS = new Set([
   '__samePath', '__ticksToSeconds', '__secondsToTicks', '__mcpStringify',
   '__mcpEscapeString', '__qeSequenceFor', '__findQeClipByDomClip',
 ]);
+
+/**
+ * Tools whose entire contract is to run a caller-supplied program verbatim: the
+ * argument IS the script, so there is no generated wrapper to analyse and any
+ * identifier it names is the caller's, not ours (a bare `x` is a legal ES3
+ * program, undefined at runtime by the caller's choice). Analysing them here
+ * would only re-report the caller's own code, so they are excluded — as they
+ * were before they carried a typed `script`/`expression` field to seed.
+ */
+const ARBITRARY_CODE_TOOLS = new Set(['execute_extendscript']);
 
 type Node = Record<string, any>;
 
@@ -143,6 +172,7 @@ describe('generated scripts declare everything they reference', () => {
     let checked = 0;
 
     for (const tool of probe.getAvailableTools()) {
+      if (ARBITRARY_CODE_TOOLS.has(tool.name)) continue;
       // Both argument sets. Supplying every optional was itself a blind spot: it
       // fixed "a key the map lacked hid its branch" and created the mirror of it,
       // where the branch taken when the caller omits that key is never emitted.
