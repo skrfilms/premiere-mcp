@@ -162,9 +162,13 @@ describe('bins that do not resolve', () => {
     await tools.executeTool('create_bin', { name: 'B-Roll' });
     const script = bridge.executeScript.mock.calls[0][0] as string;
 
-    // With no parent named, the root default is correct and must survive.
+    // With no parent named, the root default is correct and must survive. The
+    // resolver emits one script for all cases and guards each lookup at runtime,
+    // so the "not found" branches are present as dead text — assert on the guard
+    // that keeps them from running instead of on their absence.
+    expect(script).toContain('var parentBinName = null;');
     expect(script).toContain('var parentBin = app.project.rootItem;');
-    expect(script).not.toContain('Parent bin not found');
+    expect(script).toContain('else if (parentBinName !== null)');
   });
 
   it('import_folder refuses a destination it cannot find', async () => {
@@ -229,12 +233,12 @@ describe('bins are resolved by walking, not by string key', () => {
     tools = new PremiereProTools(bridge as never);
   });
 
-  it.each(['create_bin', 'import_folder'])('%s walks children by name', async (tool) => {
-    const args = tool === 'create_bin'
-      ? { name: 'B-Roll', parentBinName: 'Footage' }
-      : { folderPath: '/tmp/x', binName: 'Footage' };
-
-    await tools.executeTool(tool, args);
+  // import_folder still resolves a single-name destination with the original
+  // __binByName walker. create_bin gained id / path / deep-name resolution and
+  // walks with __binsByNameDeep, so the two are asserted separately rather than
+  // being pinned to one shared helper name they no longer share.
+  it('import_folder walks children by name', async () => {
+    await tools.executeTool('import_folder', { folderPath: '/tmp/x', binName: 'Footage' });
     const script = bridge.executeScript.mock.calls[0][0] as string;
 
     expect(script).toContain('__binByName(');
@@ -243,6 +247,17 @@ describe('bins are resolved by walking, not by string key', () => {
     // source-versus-emitted confusion this change exists to fix.
     expect(script).not.toContain('children["Footage"]');
     expect(script).toContain('__binByName(app.project.rootItem, "Footage")');
+  });
+
+  it('create_bin deep-walks children by name', async () => {
+    await tools.executeTool('create_bin', { name: 'B-Roll', parentBinName: 'Footage' });
+    const script = bridge.executeScript.mock.calls[0][0] as string;
+
+    // The name arrives as data and the walk indexes children numerically; a
+    // string-key lookup (children["Footage"]) would silently never match.
+    expect(script).toContain('var parentBinName = "Footage";');
+    expect(script).toContain('__binsByNameDeep(app.project.rootItem, parentBinName, [])');
+    expect(script).not.toContain('children["Footage"]');
   });
 });
 
