@@ -998,8 +998,10 @@ export class PremiereProTools {
       },
       {
         name: 'get_render_queue_status',
-        description: 'Reports whether render queue monitoring is available. This currently returns guidance for Adobe Media Encoder rather than live queue telemetry.',
-        inputSchema: z.object({})
+        description: 'Reports live render/encode status. Probes the Premiere encoder bridge (app.encoder) to report whether AME hand-off is reachable, and — when an outputPath is given — polls that file on disk (exists, size, last-modified) so a render in progress can actually be tracked. Adobe exposes no direct read of AME\'s own queue; output-file polling is the reliable signal.',
+        inputSchema: z.object({
+          outputPath: z.string().optional().describe('Absolute path to a render/export output file to poll. Reports whether it exists yet, its current byte size, and last-modified time — call repeatedly to watch a render grow to completion.')
+        })
       },
 
       // Advanced Features
@@ -1682,7 +1684,7 @@ export class PremiereProTools {
             startImmediately: args.startImmediately
           });
         case 'get_render_queue_status':
-          return await this.getRenderQueueStatus();
+          return await this.getRenderQueueStatus(args.outputPath);
 
         // Advanced Features
         case 'stabilize_clip':
@@ -7191,12 +7193,62 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.exportSequence(args);
   }
 
-  private async getRenderQueueStatus(): Promise<any> {
+  private async getRenderQueueStatus(outputPath?: string): Promise<any> {
+    // Adobe exposes no ExtendScript read of AME's live queue. Two honest signals
+    // ARE available, so report those instead of a hardcoded "unavailable":
+    //   1. Whether the encoder hand-off bridge (app.encoder) is reachable at all.
+    //   2. If the caller names an output file, its on-disk state — the reliable
+    //      way to watch an AME render actually progress (poll repeatedly).
+    const note =
+      "Premiere cannot read Adobe Media Encoder's queue directly. To track a render, " +
+      "pass outputPath and poll this tool: a growing byte size means the encode is running; " +
+      "a stable size over successive calls means it has finished (or stalled).";
+
+    // Best-effort encoder-bridge probe. A bridge failure must not sink the file report.
+    let encoder: any = { available: false, methods: [] };
+    try {
+      const probe = `
+        try {
+          var out = { available: false, methods: [] };
+          if (typeof app !== 'undefined' && app.encoder) {
+            out.available = true;
+            var names = ["encodeSequence","encodeProjectItem","encodeFile","launchEncoder","startBatch"];
+            for (var i = 0; i < names.length; i++) {
+              try { if (typeof app.encoder[names[i]] === "function") out.methods.push(names[i]); } catch (eM) {}
+            }
+          }
+          return JSON.stringify({ success: true, encoder: out });
+        } catch (e) {
+          return JSON.stringify({ success: false, error: e.toString() });
+        }
+      `;
+      const res: any = await this.bridge.executeScript(probe);
+      if (res && res.encoder) encoder = res.encoder;
+    } catch {
+      // leave encoder at its default (unreachable); the file report below still stands.
+    }
+
+    let outputFile: any = undefined;
+    if (outputPath) {
+      try {
+        const st = await fs.stat(outputPath);
+        outputFile = {
+          path: outputPath,
+          exists: true,
+          bytes: st.size,
+          modifiedIso: st.mtime.toISOString(),
+        };
+      } catch {
+        outputFile = { path: outputPath, exists: false };
+      }
+    }
+
     return {
       success: true,
-      available: false,
-      queueStatusAvailable: false,
-      note: "Render queue monitoring requires Adobe Media Encoder integration. Check Adobe Media Encoder for live render status."
+      available: encoder.available,
+      encoder,
+      ...(outputFile ? { outputFile } : {}),
+      note,
     };
   }
 
@@ -7836,12 +7888,26 @@ ${this.buildSequenceResolver(sequenceId)}
         } else {
           ok = sequence.createCaptionTrack(projectItem, startAtTime);
         }
+        // createCaptionTrack returns falsey (or throws) when the ingest fails —
+        // an SRT with no matching frame rate, a non-caption project item, etc.
+        // Only an explicit false is a hard failure; some hosts return undefined
+        // on success, so treat that as applied-but-unverified rather than lie.
+        if (ok === false) {
+          return JSON.stringify({
+            success: false,
+            error: "createCaptionTrack returned false; the item was not ingested as captions.",
+            captionFormat: usedFormat,
+            startTime: startAtTime
+          });
+        }
         return JSON.stringify({
           success: true,
           message: "Caption track created",
+          verified: ok === true || (ok !== null && ok !== undefined),
           captionFormat: usedFormat,
           startTime: startAtTime,
-          apiResult: String(ok)
+          apiResult: String(ok),
+          note: (ok === undefined || ok === null) ? "Host returned no value from createCaptionTrack; creation applied but not independently confirmed." : undefined
         });
       } catch (e) {
         return JSON.stringify({ success: false, error: e.toString() });
@@ -7882,17 +7948,43 @@ ${this.buildSequenceResolver(sequenceId)}
       try {
         var item = __findProjectItem(${JSON.stringify(projectItemId)});
         if (!item) return JSON.stringify({ success: false, error: "Project item not found" });
-        if (item.canChangeMediaPath()) {
-          item.changeMediaPath(${JSON.stringify(newFilePath)}, true);
-          return JSON.stringify({
-            success: true,
-            message: "Media relinked successfully",
-            projectItemId: ${JSON.stringify(projectItemId)},
-            newFilePath: ${JSON.stringify(newFilePath)}
-          });
-        } else {
+        // The target file must exist on disk, or changeMediaPath silently relinks to
+        // nothing and the clip stays offline while we'd have claimed success.
+        var target = new File(${JSON.stringify(newFilePath)});
+        if (!target.exists) {
+          return JSON.stringify({ success: false, error: "Target file does not exist: " + ${JSON.stringify(newFilePath)} });
+        }
+        if (!item.canChangeMediaPath()) {
           return JSON.stringify({ success: false, error: "Cannot change media path for this item" });
         }
+        // Capture offline state before, then verify it actually cleared after.
+        var wasOffline = null;
+        try { wasOffline = item.isOffline(); } catch (eB) {}
+        item.changeMediaPath(${JSON.stringify(newFilePath)}, true);
+        var stillOffline = null;
+        try { stillOffline = item.isOffline(); } catch (eA) {}
+        var pathNow = null;
+        try { pathNow = item.getMediaPath(); } catch (eP) {}
+        // If isOffline is readable and still true, the relink did not take — say so.
+        if (stillOffline === true) {
+          return JSON.stringify({
+            success: false,
+            error: "changeMediaPath ran but the item is still offline; the file may not match this clip.",
+            projectItemId: ${JSON.stringify(projectItemId)},
+            newFilePath: ${JSON.stringify(newFilePath)},
+            mediaPathNow: pathNow
+          });
+        }
+        return JSON.stringify({
+          success: true,
+          message: "Media relinked",
+          verified: stillOffline === false,
+          projectItemId: ${JSON.stringify(projectItemId)},
+          newFilePath: ${JSON.stringify(newFilePath)},
+          mediaPathNow: pathNow,
+          wasOffline: wasOffline,
+          note: stillOffline === null ? "isOffline() not readable on this host; path change was applied but online state is unverified." : undefined
+        });
       } catch (e) {
         return JSON.stringify({ success: false, error: e.toString() });
       }

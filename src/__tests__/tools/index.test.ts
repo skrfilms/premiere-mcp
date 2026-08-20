@@ -2248,4 +2248,48 @@ describe('PremiereProTools', () => {
       expect(result.error).toMatch(/app.encoder not available/);
     });
   });
+
+  describe('get_render_queue_status', () => {
+    it('reports the live encoder-bridge probe instead of a hardcoded "unavailable"', async () => {
+      mockBridge.executeScript.mockResolvedValue({
+        success: true,
+        encoder: { available: true, methods: ['encodeSequence', 'launchEncoder'] },
+      });
+
+      const result = await tools.executeTool('get_render_queue_status', {});
+
+      expect(result.success).toBe(true);
+      expect(result.available).toBe(true);
+      expect(result.encoder.methods).toContain('encodeSequence');
+      expect(mockBridge.executeScript).toHaveBeenCalled();
+    });
+
+    it('still reports the output file even when the encoder bridge throws', async () => {
+      mockBridge.executeScript.mockRejectedValue(new Error('bridge wedged'));
+      const { outputPath } = await createTempPreset();
+      await fs.writeFile(outputPath, 'partial-render-bytes', 'utf8');
+
+      const result = await tools.executeTool('get_render_queue_status', { outputPath });
+
+      expect(result.success).toBe(true);
+      expect(result.available).toBe(false); // probe failed, reported honestly
+      expect(result.outputFile.exists).toBe(true);
+      expect(result.outputFile.bytes).toBeGreaterThan(0);
+      expect(typeof result.outputFile.modifiedIso).toBe('string');
+    });
+
+    it('reports a not-yet-created output file as absent rather than erroring', async () => {
+      mockBridge.executeScript.mockResolvedValue({
+        success: true,
+        encoder: { available: false, methods: [] },
+      });
+
+      const result = await tools.executeTool('get_render_queue_status', {
+        outputPath: '/tmp/definitely-not-here-premiere-mcp-xyz.mp4',
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.outputFile.exists).toBe(false);
+    });
+  });
 });
