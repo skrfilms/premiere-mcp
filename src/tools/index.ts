@@ -14,6 +14,7 @@ import type { PremiereProTransport } from '../bridge/types.js';
 import { Logger } from '../utils/logger.js';
 import { createMotionDemoAssets } from '../utils/demoAssets.js';
 import { executeExpandedTool, getExpandedTools, isExpandedTool } from './expanded.js';
+import { applyProfile, resolveProfile, PROFILES } from './profiles.js';
 
 export interface MCPTool {
   name: string;
@@ -1414,10 +1415,12 @@ export class PremiereProTools {
 
   getAvailableTools(): MCPTool[] {
     const localTools = this.getLocalTools();
-    return [
+    const all = [
       ...localTools,
       ...getExpandedTools(new Set(localTools.map((tool) => tool.name)))
     ];
+    // Opt-in curation. Default (no env set) returns the full catalogue unchanged.
+    return applyProfile(all);
   }
 
   async executeTool(name: string, args: Record<string, any>): Promise<any> {
@@ -2095,11 +2098,32 @@ ${this.buildSequenceResolver(sequenceId)}
           support: 'not a replacement for the validated CEP bridge'
         }
       },
-      catalog: {
-        tools: this.getAvailableTools().length,
-        resources: 13,
-        prompts: 10
-      },
+      catalog: (() => {
+        const localTools = this.getLocalTools();
+        const total = localTools.length +
+          getExpandedTools(new Set(localTools.map((tool) => tool.name))).length;
+        const exposed = this.getAvailableTools();
+        const profile = resolveProfile(
+          [...localTools, ...getExpandedTools(new Set(localTools.map((t) => t.name)))]
+            .map((tool) => tool.name),
+        );
+        return {
+          tools: exposed.length,
+          toolsInFullCatalog: total,
+          profile: {
+            source: profile.source,
+            name: profile.profileName,
+            available: Object.keys(PROFILES),
+            excluded: profile.excluded,
+            unknownPatterns: profile.unknown,
+            note: profile.source === 'all'
+              ? 'Full catalogue exposed (default). Set PREMIERE_MCP_PROFILE, PREMIERE_MCP_TOOLS, or PREMIERE_MCP_EXCLUDE to curate.'
+              : `Curated set active. ${exposed.length}/${total} tools exposed.`
+          },
+          resources: 13,
+          prompts: 10
+        };
+      })(),
       liveConnection,
       safety: {
         recommendedFirstCall: 'verify_premiere_connection',

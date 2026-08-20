@@ -557,7 +557,17 @@ describe('PremiereProTools', () => {
       const result = await tools.executeTool('get_capabilities', {});
 
       expect(result.success).toBe(true);
-      expect(result.catalog).toEqual({ tools: 283, resources: 13, prompts: 10 });
+      // The full catalogue is exposed by default (no profile env set). The
+      // catalog block now also reports the active profile for introspection.
+      expect(result.catalog.tools).toBe(283);
+      expect(result.catalog.toolsInFullCatalog).toBe(283);
+      expect(result.catalog.resources).toBe(13);
+      expect(result.catalog.prompts).toBe(10);
+      expect(result.catalog.profile.source).toBe('all');
+      expect(result.catalog.profile.name).toBeNull();
+      expect(result.catalog.profile.available).toEqual(
+        expect.arrayContaining(['all', 'read-only', 'core']),
+      );
       expect(result.liveConnection.checked).toBe(false);
       expect(mockBridge.executeScript).not.toHaveBeenCalled();
     });
