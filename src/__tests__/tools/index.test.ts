@@ -2349,6 +2349,29 @@ describe('PremiereProTools', () => {
     });
   });
 
+  describe('create_bin nesting', () => {
+    it('emits path-walk, deep-search and ambiguity handling for a nested parent', async () => {
+      mockBridge.executeScript.mockResolvedValue({ success: true, binId: 'b1' });
+
+      await tools.executeTool('create_bin', { name: 'Scene-008', parentBinName: 'Scenes/Renders' });
+
+      const script = mockBridge.executeScript.mock.calls[0][0] as string;
+      expect(script).toContain('__binByPath');
+      expect(script).toContain('__binsByNameDeep');
+      expect(script).toContain('is ambiguous');
+    });
+
+    it('resolves an unambiguous parent by nodeId when parentBinId is given', async () => {
+      mockBridge.executeScript.mockResolvedValue({ success: true, binId: 'b2' });
+
+      await tools.executeTool('create_bin', { name: 'Child', parentBinId: 'node-123' });
+
+      const script = mockBridge.executeScript.mock.calls[0][0] as string;
+      expect(script).toContain('__findProjectItem(parentBinId)');
+      expect(script).toContain('"node-123"');
+    });
+  });
+
   describe('add_to_timeline_batch placement mode', () => {
     it('forwards append mode and tolerates clips with no time', async () => {
       mockBridge.addToTimelineBatch = jest.fn().mockResolvedValue({

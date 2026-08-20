@@ -464,10 +464,11 @@ export class PremiereProTools {
       },
       {
         name: 'create_bin',
-        description: 'Creates a new bin (folder) in the project panel to organize media.',
+        description: 'Creates a new bin (folder) in the project panel to organize media. Nest it by naming a parent: parentBinId (a bin nodeId, unambiguous — preferred) or parentBinName. parentBinName resolves a nested bin too — pass a "/"-separated path like "Scenes/Scene-008" to walk the hierarchy, or a single name to search the whole tree (which fails safely if two bins share that name rather than reparenting to the wrong one).',
         inputSchema: z.object({
           name: z.string().describe('The name for the new bin'),
-          parentBinName: z.string().optional().describe('The name of the parent bin to create this bin inside')
+          parentBinName: z.string().optional().describe('Parent bin to create this bin inside, by name. Use a "/"-separated path ("Scenes/Scene-008") for a nested parent, or a single name to deep-search the tree (ambiguous single names are rejected). Ignored if parentBinId is given.'),
+          parentBinId: z.string().optional().describe('Parent bin nodeId — the unambiguous way to target a nested bin. Takes precedence over parentBinName.')
         })
       },
 
@@ -1521,7 +1522,7 @@ export class PremiereProTools {
         case 'import_folder':
           return await this.importFolder(args.folderPath, args.binName, args.recursive);
         case 'create_bin':
-          return await this.createBin(args.name, args.parentBinName);
+          return await this.createBin(args.name, args.parentBinName, args.parentBinId);
 
         // Sequence Management
         case 'create_sequence':
@@ -3006,33 +3007,86 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(script);
   }
 
-  private async createBin(name: string, parentBinName?: string): Promise<any> {
+  private async createBin(name: string, parentBinName?: string, parentBinId?: string): Promise<any> {
     const script = `
       try {
+        var parentBinName = ${parentBinName !== undefined ? JSON.stringify(parentBinName) : 'null'};
+        var parentBinId = ${parentBinId !== undefined ? JSON.stringify(parentBinId) : 'null'};
         var parentBin = app.project.rootItem;
-        ${parentBinName ? `
-        // Naming a parent that does not resolve used to fall through to the project
-        // root, so the bin landed somewhere the caller never asked for while the
-        // response echoed the parent name back as though it had been used.
-        function __binByName(parent, wanted) {
-          // children[name] does not resolve: Premiere's ProjectItemCollection is
-          // index-only, so a string key returns undefined even when a child of that
-          // name exists. Verified against 26.0.2. Walk and compare instead.
-          if (!parent || !parent.children) return null;
-          for (var i = 0; i < parent.children.numItems; i++) {
-            var child = parent.children[i];
-            if (child && String(child.name) === String(wanted)) return child;
-          }
-          return null;
+        var resolvedBy = "root";
+
+        // A bin has a createBin() method; clips do not. type===2 is Premiere's BIN
+        // constant, but the duck-type is the reliable fallback across builds.
+        function __isBin(it) {
+          if (!it) return false;
+          if (it.type === 2) return true;
+          return (typeof it.createBin === "function");
         }
-        parentBin = __binByName(app.project.rootItem, ${JSON.stringify(parentBinName)});
-        if (!parentBin) {
-          return JSON.stringify({
-            success: false,
-            error: "Parent bin not found: " + ${JSON.stringify(parentBinName)} + ". Nothing was created. Omit parentBinName to create at the project root.",
-            parentBinName: ${JSON.stringify(parentBinName)}
-          });
-        }` : ''}
+        // Walk a "/"-separated path from a starting node, matching bins by name.
+        function __binByPath(root, segments) {
+          var node = root;
+          for (var s = 0; s < segments.length; s++) {
+            if (!node || !node.children) return null;
+            var next = null;
+            for (var i = 0; i < node.children.numItems; i++) {
+              var ch = node.children[i];
+              if (ch && __isBin(ch) && String(ch.name) === String(segments[s])) { next = ch; break; }
+            }
+            if (!next) return null;
+            node = next;
+          }
+          return node;
+        }
+        // Depth-first collect every bin anywhere in the tree matching a single name.
+        function __binsByNameDeep(root, wanted, acc) {
+          if (!root || !root.children) return acc;
+          for (var i = 0; i < root.children.numItems; i++) {
+            var ch = root.children[i];
+            if (ch && __isBin(ch)) {
+              if (String(ch.name) === String(wanted)) acc.push(ch);
+              __binsByNameDeep(ch, wanted, acc);
+            }
+          }
+          return acc;
+        }
+
+        if (parentBinId !== null) {
+          // Unambiguous: resolve the parent bin by nodeId.
+          var byId = __findProjectItem(parentBinId);
+          if (!byId) {
+            return JSON.stringify({ success: false, error: "Parent bin not found by id: " + parentBinId + ". Nothing was created." });
+          }
+          if (!__isBin(byId)) {
+            return JSON.stringify({ success: false, error: "parentBinId does not refer to a bin. Nothing was created." });
+          }
+          parentBin = byId;
+          resolvedBy = "id";
+        } else if (parentBinName !== null) {
+          if (String(parentBinName).indexOf("/") !== -1) {
+            // Path form: walk the hierarchy segment by segment.
+            var segs = String(parentBinName).split("/");
+            var trimmed = [];
+            for (var si = 0; si < segs.length; si++) { if (segs[si] !== "") trimmed.push(segs[si]); }
+            var byPath = __binByPath(app.project.rootItem, trimmed);
+            if (!byPath) {
+              return JSON.stringify({ success: false, error: "Parent bin path not found: " + parentBinName + ". Nothing was created.", parentBinName: parentBinName });
+            }
+            parentBin = byPath;
+            resolvedBy = "path";
+          } else {
+            // Single name: deep-search, but refuse to guess when it is ambiguous —
+            // reparenting to the wrong same-named bin is exactly the silent bug to avoid.
+            var matches = __binsByNameDeep(app.project.rootItem, parentBinName, []);
+            if (matches.length === 0) {
+              return JSON.stringify({ success: false, error: "Parent bin not found: " + parentBinName + ". Nothing was created. Omit parentBinName to create at the project root.", parentBinName: parentBinName });
+            }
+            if (matches.length > 1) {
+              return JSON.stringify({ success: false, error: "Parent bin name '" + parentBinName + "' is ambiguous (" + matches.length + " bins share it). Pass parentBinId, or a '/'-separated path, to disambiguate. Nothing was created.", parentBinName: parentBinName, matchCount: matches.length });
+            }
+            parentBin = matches[0];
+            resolvedBy = "name";
+          }
+        }
 
         var newBin = parentBin.createBin(${JSON.stringify(name)});
 
@@ -3040,7 +3094,9 @@ ${this.buildSequenceResolver(sequenceId)}
           success: true,
           binName: ${JSON.stringify(name)},
           binId: newBin.nodeId,
-          parentBin: ${parentBinName ? `${JSON.stringify(parentBinName)}` : '"Root"'}
+          parentBinId: parentBin.nodeId,
+          parentBin: (resolvedBy === "root") ? "Root" : String(parentBin.name),
+          resolvedBy: resolvedBy
         });
       } catch (e) {
         return JSON.stringify({
