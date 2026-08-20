@@ -332,10 +332,36 @@ async function createGeneratedAdjustmentLayer(bridge: PremiereProTransport, args
   const height = Number(args.height || 1080);
   const filePath = await writeGeneratedPng(`adjustment-layer-${Date.now()}.png`, width, height, () => [0, 0, 0, 0]);
   const imported = await bridge.importMedia(filePath);
-  let placement = null;
+  let placement: any = null;
   if (args.sequenceId) {
     placement = await bridge.addToTimeline(String(args.sequenceId), imported.id, Number(args.trackIndex || 1), Number(args.time || args.start || 0), false);
   }
+
+  // A placed still gets Premiere's default still-image duration (typically 5s), so a
+  // requested duration was silently dropped. When one is asked for and the layer was
+  // actually placed, extend the clip's end and read the result back — the same setter
+  // trim_clip uses (clip.end = start + duration) — reporting whether it took.
+  let durationResult: any = null;
+  const requestedDuration = args.duration !== undefined ? Number(args.duration) : undefined;
+  if (placement && placement.id && requestedDuration !== undefined && isFinite(requestedDuration) && requestedDuration > 0) {
+    durationResult = await bridge.executeScript(`
+      try {
+        var info = __findClip(${JSON.stringify(String(placement.id))});
+        if (!info) return JSON.stringify({ success: false, error: "Placed adjustment layer not found; duration not set" });
+        var clip = info.clip;
+        function secondsOf(v) { if (v === undefined || v === null) return null; if (typeof v === "number") return v; if (v.seconds !== undefined) return Number(v.seconds); if (v.ticks !== undefined) return Number(v.ticks) / 254016000000.0; return null; }
+        function timeFromSeconds(s) { var t = new Time(); t.seconds = Number(s); return t; }
+        var startSec = secondsOf(clip.start);
+        try { clip.end = timeFromSeconds(startSec + ${requestedDuration}); }
+        catch (eEnd) { return JSON.stringify({ success: false, error: "Could not set duration: " + eEnd.toString() }); }
+        var actual = secondsOf(clip.duration);
+        return JSON.stringify({ success: (actual !== null && Math.abs(actual - ${requestedDuration}) < 0.05), requestedDuration: ${requestedDuration}, actualDuration: actual });
+      } catch (e) {
+        return JSON.stringify({ success: false, error: e.toString() });
+      }
+    `);
+  }
+
   return {
     success: true,
     tool: 'add_adjustment_layer',
@@ -346,7 +372,18 @@ async function createGeneratedAdjustmentLayer(bridge: PremiereProTransport, args
       placement,
       path: filePath,
       width,
-      height
+      height,
+      ...(requestedDuration !== undefined
+        ? {
+            requestedDuration,
+            durationApplied: durationResult ? durationResult.success === true : false,
+            actualDuration: durationResult ? durationResult.actualDuration : undefined,
+            ...(durationResult && durationResult.success !== true
+              ? { durationWarning: durationResult.error || 'Duration could not be verified; layer kept its default length.' }
+              : {}),
+            ...(!placement ? { durationWarning: 'Duration ignored: no sequenceId given, so the layer was imported but not placed on a timeline.' } : {})
+          }
+        : {})
     }
   };
 }

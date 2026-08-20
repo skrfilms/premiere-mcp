@@ -2349,6 +2349,39 @@ describe('PremiereProTools', () => {
     });
   });
 
+  describe('add_adjustment_layer duration', () => {
+    it('extends the placed layer to the requested duration and reports it', async () => {
+      mockBridge.importMedia = jest.fn().mockResolvedValue({ id: 'pi-adj', name: 'adj.png' });
+      mockBridge.addToTimeline = jest.fn().mockResolvedValue({ success: true, id: 'clip-adj' });
+      mockBridge.executeScript.mockResolvedValue({ success: true, requestedDuration: 30, actualDuration: 30 });
+
+      const result: any = await tools.executeTool('add_adjustment_layer', {
+        sequenceId: 'seq-1',
+        trackIndex: 2,
+        duration: 30,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.data.requestedDuration).toBe(30);
+      expect(result.data.durationApplied).toBe(true);
+      expect(result.data.actualDuration).toBe(30);
+      const script = mockBridge.executeScript.mock.calls[0][0] as string;
+      expect(script).toContain('clip.end = timeFromSeconds');
+    });
+
+    it('warns instead of lying when duration is requested with no sequence to place into', async () => {
+      mockBridge.importMedia = jest.fn().mockResolvedValue({ id: 'pi-adj2', name: 'adj.png' });
+      mockBridge.addToTimeline = jest.fn();
+
+      const result: any = await tools.executeTool('add_adjustment_layer', { duration: 12 });
+
+      expect(result.success).toBe(true);
+      expect(result.data.durationApplied).toBe(false);
+      expect(result.data.durationWarning).toMatch(/no sequenceId/);
+      expect(mockBridge.addToTimeline).not.toHaveBeenCalled();
+    });
+  });
+
   describe('create_bin nesting', () => {
     it('emits path-walk, deep-search and ambiguity handling for a nested parent', async () => {
       mockBridge.executeScript.mockResolvedValue({ success: true, binId: 'b1' });
