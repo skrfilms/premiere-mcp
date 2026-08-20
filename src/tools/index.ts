@@ -5428,16 +5428,20 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   // Color Correction Implementation
-  private async colorCorrect(clipId: string, adjustments: any): Promise<any> {
-    const paramCode = [
-      adjustments.brightness !== undefined ? `if (p.displayName === "Brightness") p.setValue(${adjustments.brightness}, true);` : '',
-      adjustments.contrast !== undefined ? `if (p.displayName === "Contrast") p.setValue(${adjustments.contrast}, true);` : '',
-      adjustments.saturation !== undefined ? `if (p.displayName === "Saturation") p.setValue(${adjustments.saturation}, true);` : '',
-      adjustments.hue !== undefined ? `if (p.displayName === "Hue") p.setValue(${adjustments.hue}, true);` : '',
-      adjustments.temperature !== undefined ? `if (p.displayName === "Temperature") p.setValue(${adjustments.temperature}, true);` : '',
-      adjustments.tint !== undefined ? `if (p.displayName === "Tint") p.setValue(${adjustments.tint}, true);` : '',
-    ].filter(Boolean).join('\n              ');
-
+  //
+  // colorCorrect and applyLut both add a Lumetri Color effect to a QE-addressed clip
+  // and then set named properties on it. Earlier versions swallowed every setValue
+  // error in an empty catch and returned success unconditionally, so a localized
+  // Premiere (where a property's displayName differs), an unmatched property, or an
+  // invalid value silently "succeeded". Both now route through applyLumetriParams,
+  // which matches each property by displayName (exact then normalized), reads the
+  // value back, and reports precisely what took.
+  private async applyLumetriParams(
+    clipId: string,
+    requestedParams: Record<string, number | string>,
+    label: string,
+    extra: Record<string, unknown> = {}
+  ): Promise<any> {
     const script = `
       try {
         app.enableQE();
@@ -5451,18 +5455,65 @@ ${this.buildSequenceResolver(sequenceId)}
         if (!qeSeq) return JSON.stringify({ success: false, error: "Could not address sequence '" + info.sequenceName + "' through the QE API." });
         var qeTrack = qeSeq.getVideoTrackAt(info.trackIndex);
         var qeClip = __findQeClipByDomClip(qeTrack, info.clip);
+        if (!qeClip) return JSON.stringify({ success: false, error: "Could not address the clip through the QE API." });
         var effect = qe.project.getVideoEffectByName("Lumetri Color");
         if (!effect) return JSON.stringify({ success: false, error: "Lumetri Color effect not found" });
         qeClip.addVideoEffect(effect);
         var clip = info.clip;
         var lastComp = clip.components[clip.components.numItems - 1];
-        for (var j = 0; j < lastComp.properties.numItems; j++) {
-          var p = lastComp.properties[j];
-          try {
-            ${paramCode}
-          } catch (e2) {}
+
+        function normalizeName(s) { return String(s).toLowerCase().replace(/[\\s_-]+/g, ''); }
+        function valuesEquivalent(actual, requested) {
+          if (actual === requested) return true;
+          if (typeof actual === "number" && typeof requested === "number") return Math.abs(actual - requested) <= 0.0001;
+          return String(actual) === String(requested);
         }
-        return JSON.stringify({ success: true, message: "Color correction applied", clipId: ${JSON.stringify(clipId)} });
+
+        var requestedParams = ${JSON.stringify(requestedParams)};
+        var results = [];
+        for (var rn in requestedParams) {
+          if (requestedParams.hasOwnProperty && !requestedParams.hasOwnProperty(rn)) continue;
+          var reqVal = requestedParams[rn];
+          var matched = null;
+          for (var k = 0; k < lastComp.properties.numItems; k++) {
+            if (String(lastComp.properties[k].displayName) === rn) { matched = lastComp.properties[k]; break; }
+          }
+          if (!matched) {
+            var nn = normalizeName(rn);
+            for (var k2 = 0; k2 < lastComp.properties.numItems; k2++) {
+              if (normalizeName(String(lastComp.properties[k2].displayName)) === nn) { matched = lastComp.properties[k2]; break; }
+            }
+          }
+          if (!matched) { results.push({ name: rn, ok: false, status: "no_matching_property" }); continue; }
+          var before = null; var beforeOk = true;
+          try { before = matched.getValue(); } catch (eB) { beforeOk = false; }
+          var threw = false; var errMsg = null;
+          try { matched.setValue(reqVal, true); } catch (eS) { threw = true; errMsg = eS.toString(); }
+          var after = null; var afterOk = true;
+          try { after = matched.getValue(); } catch (eA) { afterOk = false; }
+          var verified = !threw && afterOk && valuesEquivalent(after, reqVal);
+          var changed = !threw && beforeOk && afterOk && !valuesEquivalent(after, before);
+          var status = threw ? "setvalue_threw" : (verified ? "verified" : (changed ? "changed_with_warning" : (!afterOk ? "unverifiable" : "unchanged")));
+          results.push({ name: rn, matchedDisplayName: String(matched.displayName), valueRequested: reqVal, valueBefore: before, valueAfter: after, status: status, ok: (verified || changed), error: errMsg });
+        }
+
+        var okCount = 0; var matchedCount = 0;
+        for (var r = 0; r < results.length; r++) {
+          if (results[r].status !== "no_matching_property") matchedCount++;
+          if (results[r].ok) okCount++;
+        }
+        var overall = results.length > 0 && okCount === results.length;
+        var payload = ${JSON.stringify(extra)};
+        payload.success = overall;
+        payload.applied = okCount;
+        payload.matched = matchedCount;
+        payload.requested = results.length;
+        payload.results = results;
+        payload.clipId = ${JSON.stringify(clipId)};
+        payload.message = overall
+          ? (${JSON.stringify(label)} + " applied and verified (" + okCount + "/" + results.length + " properties).")
+          : (${JSON.stringify(label)} + " not fully applied (" + okCount + "/" + results.length + " properties verified). See results.");
+        return JSON.stringify(payload);
       } catch (e) {
         return JSON.stringify({ success: false, error: e.toString() });
       }
@@ -5471,38 +5522,22 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(script);
   }
 
-  private async applyLut(clipId: string, lutPath: string, _intensity = 100): Promise<any> {
-    const script = `
-      try {
-        app.enableQE();
-        var info = __findClip(${JSON.stringify(clipId)});
-        if (!info) return JSON.stringify({ success: false, error: "Clip not found" });
-        // Addressed by id, not by whatever is on screen. __findClip() searches every
-        // sequence in the project, so a clip can be resolved out of one sequence and
-        // then, through getActiveSequence(), have the effect applied to whichever
-        // clip sits at the same track and index in a different one.
-        var qeSeq = __qeSequenceFor(info.sequence);
-        if (!qeSeq) return JSON.stringify({ success: false, error: "Could not address sequence '" + info.sequenceName + "' through the QE API." });
-        var qeTrack = qeSeq.getVideoTrackAt(info.trackIndex);
-        var qeClip = __findQeClipByDomClip(qeTrack, info.clip);
-        var effect = qe.project.getVideoEffectByName("Lumetri Color");
-        if (!effect) return JSON.stringify({ success: false, error: "Lumetri Color not found" });
-        qeClip.addVideoEffect(effect);
-        var clip = info.clip;
-        var lastComp = clip.components[clip.components.numItems - 1];
-        for (var j = 0; j < lastComp.properties.numItems; j++) {
-          var p = lastComp.properties[j];
-          try {
-            if (p.displayName === "Input LUT") p.setValue(${JSON.stringify(lutPath)}, true);
-          } catch (e2) {}
-        }
-        return JSON.stringify({ success: true, message: "LUT applied", clipId: ${JSON.stringify(clipId)}, lutPath: ${JSON.stringify(lutPath)} });
-      } catch (e) {
-        return JSON.stringify({ success: false, error: e.toString() });
-      }
-    `;
+  private async colorCorrect(clipId: string, adjustments: any): Promise<any> {
+    const requested: Record<string, number> = {};
+    if (adjustments.brightness !== undefined) requested["Brightness"] = adjustments.brightness;
+    if (adjustments.contrast !== undefined) requested["Contrast"] = adjustments.contrast;
+    if (adjustments.saturation !== undefined) requested["Saturation"] = adjustments.saturation;
+    if (adjustments.hue !== undefined) requested["Hue"] = adjustments.hue;
+    if (adjustments.temperature !== undefined) requested["Temperature"] = adjustments.temperature;
+    if (adjustments.tint !== undefined) requested["Tint"] = adjustments.tint;
+    if (Object.keys(requested).length === 0) {
+      return { success: false, error: "No color adjustments provided. Supply at least one of: brightness, contrast, saturation, hue, temperature, tint." };
+    }
+    return await this.applyLumetriParams(clipId, requested, "Color correction");
+  }
 
-    return await this.bridge.executeScript(script);
+  private async applyLut(clipId: string, lutPath: string, _intensity = 100): Promise<any> {
+    return await this.applyLumetriParams(clipId, { "Input LUT": lutPath }, "LUT", { lutPath });
   }
 
   // Export and Rendering Implementation
