@@ -275,6 +275,11 @@
         this.tempDirectory = '';
         this.commandQueue = [];
         this.isProcessing = false;
+        // Which command the panel is executing right now, and when it started, so the
+        // server-side heartbeat reader can distinguish "busy on a long op" from "wedged
+        // behind a modal dialog" from "crashed" — all of which used to look identical.
+        this.currentCommandId = null;
+        this.currentCommandStartedAt = null;
         this.csInterface = new CSInterface();
         this.init();
     }
@@ -367,6 +372,8 @@
             this.log('Processing command: ' + command.id, 'info');
             this.addToQueue(command);
             this.isProcessing = true;
+            this.currentCommandId = command.id;
+            this.currentCommandStartedAt = Date.now();
             this.executeCommand(command, function(result) {
                 var responseFile = filePath.replace('command-', 'response-');
                 var responsePublished = false;
@@ -390,6 +397,8 @@
                     }
                 }
                 self.isProcessing = false;
+                self.currentCommandId = null;
+                self.currentCommandStartedAt = null;
             });
         } catch (e) {
             this.log('Error processing command file: ' + e.message, 'error');
@@ -399,6 +408,8 @@
                 try { fs.unlinkSync(filePath); } catch (eUnlink) {}
             } catch (e2) {}
             this.isProcessing = false;
+            this.currentCommandId = null;
+            this.currentCommandStartedAt = null;
         }
     };
 
@@ -498,9 +509,41 @@
         return script.length <= 500000;
     };
 
+    // Liveness beacon written into the shared temp directory on every poll tick. The
+    // server reads it to fail fast (and with a specific reason) instead of blocking a
+    // caller for the whole timeout when the panel is not started, is wedged behind a
+    // modal dialog, or has crashed. Written atomically via rename so the server never
+    // reads a torn beacon, and wrapped so a heartbeat failure can never disturb the panel.
+    MCPPremiereBridge.prototype.writeHeartbeat = function() {
+        try {
+            var tempPath = this.getTempDirectory();
+            if (!tempPath) return;
+            var payload = {
+                ts: Date.now(),
+                connected: this.isConnected === true,
+                isProcessing: this.isProcessing === true,
+                currentCommandId: this.currentCommandId || null,
+                currentCommandStartedAt: this.currentCommandStartedAt || null,
+                queueLength: this.commandQueue ? this.commandQueue.length : 0
+            };
+            var hbFile = path.join(tempPath, 'bridge-heartbeat.json');
+            var staging = hbFile + '.part';
+            fs.writeFileSync(staging, JSON.stringify(payload));
+            fs.renameSync(staging, hbFile);
+        } catch (e) {
+            // A heartbeat that cannot be written is not worth surfacing or retrying; the
+            // server degrades to its original full-timeout behaviour when it sees none.
+        }
+    };
+
     MCPPremiereBridge.prototype.startCommandPolling = function() {
         var self = this;
         setInterval(function() {
+            // Beat unconditionally — including while processing — so the server can tell a
+            // panel that is busy (fresh heartbeat, isProcessing=true) apart from one that
+            // has died (heartbeat gone stale). evalScript is async, so this interval keeps
+            // firing even while a host-side script is running.
+            self.writeHeartbeat();
             if (!self.isProcessing && self.isConnected) {
                 var tempPath = self.getTempDirectory();
                 if (tempPath) self.watchDirectory(tempPath);

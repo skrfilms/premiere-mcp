@@ -18,6 +18,31 @@ const UNSUPPORTED_MODAL_PRONE_IMPORT_EXTENSIONS = new Set([
   '.ssa'
 ]);
 
+// The CEP panel writes this file into the shared temp directory on every poll tick
+// (~250ms). The server reads it to tell three failure modes apart that used to be
+// indistinguishable — all of them blocked the caller for the full timeout:
+//   1. panel never started / Premiere closed  (no heartbeat, or connected=false)
+//   2. panel alive but wedged behind a modal   (heartbeat fresh, isProcessing=true)
+//   3. panel crashed/froze mid-command         (heartbeat was fresh, now gone stale)
+// A panel old enough not to write a heartbeat simply produces none, and the server
+// falls back to its original full-timeout behaviour — so this is backward compatible.
+const HEARTBEAT_FILE = 'bridge-heartbeat.json';
+// The panel ticks every 250ms; 4s is 16 missed ticks — comfortably past any GC pause
+// or slow disk, but far short of the 60s default timeout it replaces.
+const HEARTBEAT_STALE_MS = 4000;
+// Give a freshly-clicked Start Bridge time to write its first heartbeat before the
+// server is willing to declare the panel dead.
+const HEARTBEAT_GRACE_MS = 3000;
+
+interface BridgeHeartbeat {
+  ageMs: number;
+  connected: boolean;
+  isProcessing: boolean;
+  currentCommandId: string | null;
+  currentCommandStartedAt: number | null;
+  queueLength: number;
+}
+
 const EXTENDSCRIPT_HELPERS = `
 function __mcpEscapeString(value) {
   // Built from character codes rather than backslash literals on purpose: this
@@ -652,7 +677,7 @@ export class PremiereProBridge implements PremiereProTransport {
       // Wait for response (in a real implementation, this would be handled by the UXP plugin).
       // Batch operations pass a larger timeout because a single round-trip does the work of
       // dozens of individual calls inside one ExtendScript pass.
-      return await this.waitForResponse(responseFile, timeoutMs);
+      return await this.waitForResponse(responseFile, timeoutMs, commandId);
     } catch (error) {
       this.logger.error(`Failed to execute script: ${error}`);
       throw error;
@@ -670,7 +695,107 @@ export class PremiereProBridge implements PremiereProTransport {
     }
   }
 
-  private async waitForResponse(responseFile: string, timeout = 60000): Promise<any> {
+  /**
+   * Reads the panel's liveness heartbeat, returning null when it is absent or
+   * unparseable (an older panel, or a torn write). ageMs is relative to the local
+   * clock — panel and server share the same machine, so the two wall clocks agree.
+   */
+  private async readHeartbeat(): Promise<BridgeHeartbeat | null> {
+    let raw: string;
+    try {
+      raw = await fs.readFile(join(this.tempDir, HEARTBEAT_FILE), 'utf8');
+    } catch {
+      return null;
+    }
+
+    try {
+      const hb = JSON.parse(raw);
+      if (typeof hb.ts !== 'number') return null;
+      return {
+        ageMs: Date.now() - hb.ts,
+        connected: hb.connected === true,
+        isProcessing: hb.isProcessing === true,
+        currentCommandId: typeof hb.currentCommandId === 'string' ? hb.currentCommandId : null,
+        currentCommandStartedAt:
+          typeof hb.currentCommandStartedAt === 'number' ? hb.currentCommandStartedAt : null,
+        queueLength: typeof hb.queueLength === 'number' ? hb.queueLength : 0,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Turns the last observed heartbeat into an actionable timeout message. Each branch
+   * names the ONE thing the caller can do about it, instead of the old catch-all that
+   * listed every possible cause and left the reader to guess which applied.
+   */
+  private describeTimeout(
+    timeout: number,
+    hb: BridgeHeartbeat | null,
+    commandId?: string,
+  ): string {
+    const base = `Bridge response timeout after ${timeout}ms.`;
+
+    if (!hb) {
+      return (
+        base +
+        ' No panel heartbeat was seen. Ensure Premiere Pro is open, the MCP Bridge (CEP) ' +
+        'panel is open, Temp Directory is set to ' + this.tempDir + ', and Start Bridge is ' +
+        'clicked. (An older panel build without heartbeat support also produces no heartbeat.)'
+      );
+    }
+
+    if (!hb.connected) {
+      return (
+        base +
+        ` The panel is open but the bridge is not started (heartbeat age ${hb.ageMs}ms). ` +
+        'Click Start Bridge in the MCP Bridge panel.'
+      );
+    }
+
+    if (hb.isProcessing && hb.currentCommandId && commandId && hb.currentCommandId !== commandId) {
+      const busyFor =
+        hb.currentCommandStartedAt != null
+          ? `${Date.now() - hb.currentCommandStartedAt}ms`
+          : 'an unknown time';
+      return (
+        base +
+        ` The bridge is busy: the panel has been processing another command ` +
+        `(id ${hb.currentCommandId}) for ${busyFor} and never started this one. If Premiere ` +
+        'is showing a modal dialog (an import/codec/save prompt, for example), dismiss it — ' +
+        'the bridge cannot advance queued commands until it clears.'
+      );
+    }
+
+    if (hb.isProcessing && hb.currentCommandId === commandId) {
+      return (
+        base +
+        ' The panel is still processing this command — the operation is genuinely ' +
+        'long-running. Pass a larger timeoutMs or split the work into smaller steps.'
+      );
+    }
+
+    if (hb.isProcessing) {
+      return (
+        base +
+        ' The panel reports it is processing a command but produced no response. If Premiere ' +
+        'is showing a modal dialog, dismiss it.'
+      );
+    }
+
+    return (
+      base +
+      ` The panel is alive and idle (heartbeat age ${hb.ageMs}ms) but wrote no response for ` +
+      'this command — the host-side script likely failed before it could write a result.'
+    );
+  }
+
+  private async waitForResponse(
+    responseFile: string,
+    timeout = 60000,
+    commandId?: string,
+  ): Promise<any> {
     const startTime = Date.now();
     // A response that exists but will not parse is a different failure from one that has
     // not arrived, and reporting it as the latter sends the reader to check whether
@@ -679,7 +804,11 @@ export class PremiereProBridge implements PremiereProTransport {
     // error and a sample of what was actually on disk.
     let lastParseError: Error | null = null;
     let lastRawResponse = '';
-    let parseAttempts = 0;
+    // Track the panel's liveness so a dead/frozen panel fails fast instead of blocking
+    // the caller for the whole timeout, and so the timeout message (if we get there) can
+    // say which of several unrelated things actually went wrong.
+    let sawFreshHeartbeat = false;
+    let lastHeartbeat: BridgeHeartbeat | null = null;
 
     while (Date.now() - startTime < timeout) {
       let raw: string;
@@ -687,6 +816,33 @@ export class PremiereProBridge implements PremiereProTransport {
         raw = await fs.readFile(responseFile, 'utf8');
       } catch {
         // Not written yet. This is the ordinary case while the host is still working.
+        // Before sleeping, consult the panel heartbeat: if the panel was alive and has
+        // since stopped ticking, there is no point waiting out the rest of the timeout.
+        const elapsed = Date.now() - startTime;
+        const hb = await this.readHeartbeat();
+        if (hb) {
+          lastHeartbeat = hb;
+          if (hb.ageMs <= HEARTBEAT_STALE_MS) sawFreshHeartbeat = true;
+        }
+
+        // Fail fast only with positive evidence the panel HAD a live heartbeat that has
+        // now gone stale or vanished — that means the panel or Premiere crashed, was
+        // closed, or froze while we were waiting. A panel that never wrote a heartbeat
+        // (older build) leaves sawFreshHeartbeat false and keeps the original behaviour.
+        if (
+          elapsed > HEARTBEAT_GRACE_MS &&
+          sawFreshHeartbeat &&
+          (!hb || hb.ageMs > HEARTBEAT_STALE_MS)
+        ) {
+          const age = hb ? `${hb.ageMs}ms old` : 'gone';
+          throw new Error(
+            `Bridge panel stopped responding: its heartbeat is ${age} while waiting for a ` +
+            'response. Premiere Pro or the CEP panel likely crashed, was closed, or froze. ' +
+            'Reopen the MCP Bridge panel and click Start Bridge. Temp Directory should be ' +
+            this.tempDir + '.'
+          );
+        }
+
         await new Promise(resolve => setTimeout(resolve, 150));
         continue;
       }
@@ -698,7 +854,6 @@ export class PremiereProBridge implements PremiereProTransport {
       } catch (error) {
         lastParseError = error instanceof Error ? error : new Error(String(error));
         lastRawResponse = raw;
-        parseAttempts++;
         // Keep polling to the full timeout rather than giving up after a few
         // attempts. A response written non-atomically can be unreadable for many
         // polls, and failing early would turn a slow write into a hard error. The
@@ -715,10 +870,7 @@ export class PremiereProBridge implements PremiereProTransport {
       );
     }
 
-    throw new Error(
-      'Bridge response timeout. Ensure Premiere Pro is open, MCP Bridge (CEP or UXP) panel is open, ' +
-      'Temp Directory is set to ' + this.tempDir + ', and Start Bridge is clicked.'
-    );
+    throw new Error(this.describeTimeout(timeout, lastHeartbeat, commandId));
   }
 
   // Project Management

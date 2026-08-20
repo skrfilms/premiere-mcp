@@ -32,14 +32,24 @@ export interface LoadedPanel {
   handedToEvalScript: () => string;
 }
 
+export interface LoadPanelOptions {
+  /**
+   * Replaces the default no-op `fs` stub, so a test can record what the panel
+   * writes (e.g. the heartbeat payload) or simulate disk failures. Only the
+   * methods a test needs must be supplied; the rest keep their no-op defaults.
+   */
+  fs?: Record<string, unknown>;
+}
+
 /** Minimal stand-ins for what the panel pulls in at load time. */
-function nodeStub(name: string): unknown {
+function nodeStub(name: string, options: LoadPanelOptions): unknown {
   if (name === 'fs') {
-    return {
+    const base = {
       existsSync: () => false, mkdirSync: () => {}, readdirSync: () => [],
       readFileSync: () => '', writeFileSync: () => {}, unlinkSync: () => {},
       renameSync: () => {}, statSync: () => ({ isDirectory: () => false }),
     };
+    return options.fs ? { ...base, ...options.fs } : base;
   }
   if (name === 'path') {
     return {
@@ -52,7 +62,7 @@ function nodeStub(name: string): unknown {
   return {};
 }
 
-export function loadPanel(): LoadedPanel {
+export function loadPanel(options: LoadPanelOptions = {}): LoadedPanel {
   const source = realFs.readFileSync(PANEL_PATH, 'utf8');
   let handed = '';
 
@@ -65,7 +75,7 @@ export function loadPanel(): LoadedPanel {
     setInterval: () => 0,
     clearInterval: () => {},
     console: { log() {}, warn() {}, error() {} },
-    require: nodeStub,
+    require: (name: string) => nodeStub(name, options),
     CSInterface: function () {
       return {
         getHostEnvironment: () => ({ appName: 'PPRO', appVersion: '26.0.0' }),
