@@ -2348,4 +2348,61 @@ describe('PremiereProTools', () => {
       expect(result.outputFile.exists).toBe(false);
     });
   });
+
+  describe('add_to_timeline_batch placement mode', () => {
+    it('forwards append mode and tolerates clips with no time', async () => {
+      mockBridge.addToTimelineBatch = jest.fn().mockResolvedValue({
+        success: true,
+        status: 'success',
+        placed: 2,
+        failed: 0,
+        total: 2,
+        results: [],
+      });
+
+      const result = await tools.executeTool('add_to_timeline_batch', {
+        sequenceId: 'seq-1',
+        mode: 'append',
+        clips: [
+          { projectItemId: 'a', trackIndex: 0 },
+          { projectItemId: 'b', trackIndex: 0 },
+        ],
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.mode).toBe('append');
+      expect(mockBridge.addToTimelineBatch).toHaveBeenCalledWith('seq-1', expect.any(Array), 'append');
+    });
+
+    it('rejects an absolute-mode clip that is missing its time before calling the bridge', async () => {
+      mockBridge.addToTimelineBatch = jest.fn();
+
+      const result = await tools.executeTool('add_to_timeline_batch', {
+        sequenceId: 'seq-1',
+        clips: [
+          { projectItemId: 'a', trackIndex: 0, time: 0 },
+          { projectItemId: 'b', trackIndex: 0 }, // no time in absolute mode
+        ],
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/clips\[1\] has no time/);
+      expect(mockBridge.addToTimelineBatch).not.toHaveBeenCalled();
+    });
+
+    it('passes absolute mode through when every clip has a time', async () => {
+      mockBridge.addToTimelineBatch = jest.fn().mockResolvedValue({
+        success: true, status: 'success', placed: 1, failed: 0, total: 1, results: [],
+      });
+
+      const result = await tools.executeTool('add_to_timeline_batch', {
+        sequenceId: 'seq-1',
+        clips: [{ projectItemId: 'a', trackIndex: 0, time: 3.5 }],
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.mode).toBe('absolute');
+      expect(mockBridge.addToTimelineBatch).toHaveBeenCalledWith('seq-1', expect.any(Array), 'absolute');
+    });
+  });
 });

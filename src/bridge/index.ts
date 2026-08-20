@@ -1217,16 +1217,17 @@ export class PremiereProBridge implements PremiereProTransport {
   // single-clip logic: audio-only routing by extension, Source-monitor in/out marking (mediaType
   // 4 with per-stream + no-arg fallbacks), overwriteClip. Returns a per-clip result array so a
   // single bad clip never sinks the batch.
-  async addToTimelineBatch(sequenceId: string, clips: Array<{ projectItemId: string; trackIndex: number; time: number; linkAudio?: boolean; sourceInPoint?: number; sourceOutPoint?: number }>): Promise<any> {
+  async addToTimelineBatch(sequenceId: string, clips: Array<{ projectItemId: string; trackIndex: number; time?: number; linkAudio?: boolean; sourceInPoint?: number; sourceOutPoint?: number }>, mode: 'absolute' | 'append' = 'absolute'): Promise<any> {
     const specs = clips.map(c => ({
       projectItemId: c.projectItemId,
       trackIndex: c.trackIndex,
-      time: c.time,
+      time: typeof c.time === 'number' ? c.time : 0,
       // Mirror the single-call default (true = keep Premiere's native audio linking).
       linkAudio: c.linkAudio === undefined ? true : c.linkAudio,
       sourceInPoint: c.sourceInPoint === undefined ? null : c.sourceInPoint,
       sourceOutPoint: c.sourceOutPoint === undefined ? null : c.sourceOutPoint,
     }));
+    const appendMode = mode === 'append';
     const script = `
       try {
         var sequence = __findSequence(${JSON.stringify(sequenceId)});
@@ -1234,7 +1235,21 @@ export class PremiereProBridge implements PremiereProTransport {
           return JSON.stringify({ success: false, error: "Sequence not found" });
         }
         var specs = ${JSON.stringify(specs)};
+        var appendMode = ${appendMode ? 'true' : 'false'};
         var results = [];
+        // Append mode chains clips end-to-end with no gap. Each track keeps a running
+        // cursor (in seconds) seeded from its existing content's end, then advanced to the
+        // real frame-aligned end of each placed clip, so float-second rounding cannot open
+        // a 1-frame gap between consecutive clips.
+        var cursors = {};
+        function trackEndSeconds(t) {
+          var maxEnd = 0;
+          for (var ei = 0; ei < t.clips.numItems; ei++) {
+            var ec = t.clips[ei];
+            if (ec && ec.end && ec.end.seconds > maxEnd) maxEnd = ec.end.seconds;
+          }
+          return maxEnd;
+        }
         for (var c = 0; c < specs.length; c++) {
           var spec = specs[c];
           var r = { index: c, time: spec.time, success: false };
@@ -1246,6 +1261,16 @@ export class PremiereProBridge implements PremiereProTransport {
             var isAudioOnly = /\\.(mp3|wav|aif|aiff|m4a|aac|flac|ogg|wma)$/i.test(mediaPath);
             var track = isAudioOnly ? sequence.audioTracks[spec.trackIndex] : sequence.videoTracks[spec.trackIndex];
             if (!track) { r.error = "Track not found at index " + spec.trackIndex; results.push(r); continue; }
+
+            // Resolve the placement time. In append mode, ignore spec.time and use the
+            // per-track cursor; seed it from the track's current end on first touch.
+            var placeAt = spec.time;
+            var cursorKey = (isAudioOnly ? "a" : "v") + spec.trackIndex;
+            if (appendMode) {
+              if (cursors[cursorKey] === undefined) cursors[cursorKey] = trackEndSeconds(track);
+              placeAt = cursors[cursorKey];
+            }
+            r.time = placeAt;
 
             if (spec.sourceInPoint !== null && spec.sourceOutPoint !== null) {
               try {
@@ -1266,12 +1291,12 @@ export class PremiereProBridge implements PremiereProTransport {
               }
             }
 
-            track.overwriteClip(projectItem, spec.time);
+            track.overwriteClip(projectItem, placeAt);
 
             var placedClip = null;
             for (var i = 0; i < track.clips.numItems; i++) {
               var candidate = track.clips[i];
-              if (candidate && candidate.projectItem && candidate.projectItem.nodeId === projectItem.nodeId && Math.abs(candidate.start.seconds - spec.time) < 0.1) {
+              if (candidate && candidate.projectItem && candidate.projectItem.nodeId === projectItem.nodeId && Math.abs(candidate.start.seconds - placeAt) < 0.1) {
                 placedClip = candidate;
                 break;
               }
@@ -1281,7 +1306,7 @@ export class PremiereProBridge implements PremiereProTransport {
             // linkAudio=false sweep below, so one no-op could report a pre-existing clip
             // as placed and delete an unrelated audio clip alongside it.
             if (!placedClip) {
-              r.error = "Placement could not be confirmed: no clip from this project item appears at " + spec.time + "s on the target track. No linked audio was removed.";
+              r.error = "Placement could not be confirmed: no clip from this project item appears at " + placeAt + "s on the target track. No linked audio was removed.";
               results.push(r);
               continue;
             }
@@ -1291,6 +1316,9 @@ export class PremiereProBridge implements PremiereProTransport {
             r.name = placedClip.name;
             r.inPoint = placedClip.start.seconds;
             r.outPoint = placedClip.end.seconds;
+            // Advance the append cursor to this clip's real end so the next clip on the
+            // same track butts up against it with no gap.
+            if (appendMode) cursors[cursorKey] = placedClip.end.seconds;
 
             // linkAudio=false cleanup — mirror the single-call addToTimeline path so batch
             // rebuild/overlay workflows don't reintroduce the silent embedded-audio overwrite
