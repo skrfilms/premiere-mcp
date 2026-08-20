@@ -1,9 +1,10 @@
 {
-  "name": "adobe-premiere-pro-mcp",
+  "name": "premiere-mcp",
   "version": "1.2.0",
-  "description": "MCP Bridge for Adobe Premiere Pro with 283 tools for AI-driven video editing.",
+  "description": "Premiere MCP — an MCP bridge for Adobe Premiere Pro with 283+ tools for AI-driven video editing. By Skry. Based on Adobe_Premiere_Pro_MCP (MIT).",
   "main": "dist/index.js",
   "bin": {
+    "premiere-mcp": "dist/cli.js",
     "premiere-pro-mcp": "dist/cli.js"
   },
   "files": [
@@ -46,6 +47,7 @@
     "create:self-signed-zxp-cert": "node scripts/create-self-signed-zxp-cert.mjs"
   },
   "keywords": [
+    "premiere-mcp",
     "mcp",
     "model-context-protocol",
     "adobe-premiere-pro",
@@ -54,7 +56,7 @@
     "extendscript",
     "uxp"
   ],
-  "author": "hetpatel-11",
+  "author": "Skry",
   "license": "MIT",
   "publishConfig": {
     "access": "public",

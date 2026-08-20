@@ -1,6 +1,11 @@
 MIT License
 
-Copyright (c) 2025-2026 hetpatel-11
+Copyright (c) 2026 Skry
+Copyright (c) 2025-2026 hetpatel-11 (original work: Adobe_Premiere_Pro_MCP)
+
+Premiere MCP (by Skry) is a derivative work based on Adobe_Premiere_Pro_MCP
+(https://github.com/hetpatel-11/Adobe_Premiere_Pro_MCP), used under the MIT
+License. The original copyright notice is retained below as required.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
