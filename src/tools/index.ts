@@ -477,7 +477,8 @@ export class PremiereProTools {
         description: 'Creates a new sequence from a specific installed .sqpreset file without opening Premiere\'s New Sequence dialog. For footage-driven edits, prefer create_sequence_from_clips; for an empty copy of an existing sequence, use duplicate_sequence with clearContents=true.',
         inputSchema: z.object({
           name: z.string().describe('The name for the new sequence'),
-          presetPath: z.string().describe('Absolute path to an installed Premiere .sqpreset sequence preset. Required so Premiere does not show the native New Sequence dialog.')
+          presetPath: z.string().describe('Absolute path to an installed Premiere .sqpreset sequence preset. Required so Premiere does not show the native New Sequence dialog.'),
+          frameRate: z.number().optional().describe('Optional frames per second (e.g. 23.976, 24, 25, 30). The preset sets the initial rate; when given, the new sequence is set to this rate afterward and the actual rate is read back and reported (fixes the classic 24 vs 23.976 mismatch). A warning is returned if Premiere does not accept it.')
         })
       },
       {
@@ -1523,7 +1524,7 @@ export class PremiereProTools {
 
         // Sequence Management
         case 'create_sequence':
-          return await this.createSequence(args.name, args.presetPath);
+          return await this.createSequence(args.name, args.presetPath, args.frameRate);
         case 'duplicate_sequence':
           return await this.duplicateSequence(args.sequenceId, args.newName, args.clearContents);
         case 'delete_sequence':
@@ -3052,7 +3053,7 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   // Sequence Management Implementation
-  private async createSequence(name: string, presetPath: string): Promise<any> {
+  private async createSequence(name: string, presetPath: string, frameRate?: number): Promise<any> {
     try {
       const result: any = await this.bridge.createSequence(name, presetPath);
       if (result?.success === false) {
@@ -3062,11 +3063,35 @@ ${this.buildSequenceResolver(sequenceId)}
         };
       }
 
+      // The preset dictates the initial frame rate, so 24 vs 23.976 is whatever the
+      // .sqpreset happens to carry. When the caller asks for a specific rate, set it
+      // on the freshly created sequence and read it back through the already-validated
+      // setSequenceSettings path, surfacing a warning if Premiere refused it.
+      let frameRateResult: any = undefined;
+      if (frameRate !== undefined && result?.id) {
+        frameRateResult = await this.setSequenceSettings(result.id, { frameRate });
+      }
+
       return {
         success: true,
         message: `Sequence "${name}" created successfully`,
         sequenceName: name,
-        ...result
+        ...result,
+        ...(frameRateResult
+          ? {
+              frameRateRequested: frameRate,
+              frameRateApplied: frameRateResult.success !== false,
+              // setSequenceSettings reads the rate back after writing: `after` on the
+              // success path, `settings` on the no-op / rejected branches.
+              ...((): any => {
+                const actual = frameRateResult.after?.frameRate ?? frameRateResult.settings?.frameRate;
+                return actual !== undefined && actual !== null ? { frameRateActual: actual } : {};
+              })(),
+              ...(frameRateResult.success === false || frameRateResult.warning
+                ? { frameRateWarning: frameRateResult.error || frameRateResult.warning }
+                : {})
+            }
+          : {})
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

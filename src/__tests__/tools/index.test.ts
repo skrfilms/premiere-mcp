@@ -733,6 +733,62 @@ describe('PremiereProTools', () => {
       expect(mockBridge.createSequence).not.toHaveBeenCalled();
     });
 
+    it('applies and reports a requested frameRate on the new sequence', async () => {
+      mockBridge.createSequence = jest.fn().mockResolvedValue({ success: true, id: 'seq-42', name: 'FR Seq' });
+      // setSequenceSettings reads the rate back through executeScript.
+      mockBridge.executeScript.mockResolvedValue({
+        success: true,
+        applied: ['frameRate'],
+        before: { frameRate: 24 },
+        after: { frameRate: 23.976 },
+        changed: true,
+      });
+
+      const result = await tools.executeTool('create_sequence', {
+        name: 'FR Seq',
+        presetPath: '/tmp/sequence.sqpreset',
+        frameRate: 23.976,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.frameRateRequested).toBe(23.976);
+      expect(result.frameRateApplied).toBe(true);
+      expect(result.frameRateActual).toBe(23.976);
+      expect(mockBridge.executeScript).toHaveBeenCalled();
+    });
+
+    it('surfaces a frameRateWarning when Premiere refuses the requested rate', async () => {
+      mockBridge.createSequence = jest.fn().mockResolvedValue({ success: true, id: 'seq-43', name: 'FR Seq2' });
+      mockBridge.executeScript.mockResolvedValue({
+        success: false,
+        error: 'Premiere accepted the assignment but did not apply: frameRate',
+        after: { frameRate: 30 },
+      });
+
+      const result = await tools.executeTool('create_sequence', {
+        name: 'FR Seq2',
+        presetPath: '/tmp/sequence.sqpreset',
+        frameRate: 23.976,
+      });
+
+      expect(result.success).toBe(true); // the sequence WAS created
+      expect(result.frameRateApplied).toBe(false);
+      expect(result.frameRateWarning).toMatch(/did not apply/);
+    });
+
+    it('does not touch sequence settings when no frameRate is requested', async () => {
+      mockBridge.createSequence = jest.fn().mockResolvedValue({ success: true, id: 'seq-44', name: 'Plain Seq' });
+
+      const result = await tools.executeTool('create_sequence', {
+        name: 'Plain Seq',
+        presetPath: '/tmp/sequence.sqpreset',
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.frameRateRequested).toBeUndefined();
+      expect(mockBridge.executeScript).not.toHaveBeenCalled();
+    });
+
     it('blocks EDL import before calling Premiere because it requires an interactive dialog', async () => {
       const result = await tools.executeTool('import_edl', {
         filePath: '/tmp/edit.edl'

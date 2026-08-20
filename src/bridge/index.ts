@@ -990,10 +990,14 @@ export class PremiereProBridge implements PremiereProTransport {
           }
         }
 
+        // Last-resort name match, newest first. This MUST still exclude sequences that
+        // existed before the call — without the beforeIds guard it would happily return
+        // a pre-existing same-named sequence and report it as freshly created, the exact
+        // false-positive this fallback used to produce.
         if (!created && app.project && app.project.sequences) {
           for (var k = app.project.sequences.numSequences - 1; k >= 0; k--) {
             var fallback = app.project.sequences[k];
-            if (fallback.name === sequenceName) {
+            if (!beforeIds[fallback.sequenceID] && fallback.name === sequenceName) {
               created = fallback;
               break;
             }
