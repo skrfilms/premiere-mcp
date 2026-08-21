@@ -1361,6 +1361,14 @@ export class PremiereProTools {
         })
       },
       {
+        name: 'diff_sequences',
+        description: 'Compares two sequences clip-by-clip and reports exactly what changed between them -- the version-diff for an edit. Walks both timelines and classifies every difference as ADDED (a clip only in B), REMOVED (only in A), MOVED (the same clip at a new start time) or RETIMED (the same clip with a new duration). Read-only -- it changes nothing. Ideal for reviewing an AI edit against the original, or a restored recovery checkpoint against the current cut, so you can SEE what an operation did instead of trusting that it worked. Clips are matched within a track by name (nearest start time wins when a name repeats) and compared with a half-frame tolerance. Returns a change count and per-category lists; identical timelines report changeCount 0.',
+        inputSchema: z.object({
+          sequenceIdA: z.string().describe('The "before" sequence (the baseline / original).'),
+          sequenceIdB: z.string().describe('The "after" sequence (the edited / current version) to compare against A.')
+        })
+      },
+      {
         name: 'rename_project_item',
         description: 'Renames a project item (sequence, bin, clip) by setting its name. Use this when duplicate_sequence does not propagate the new name to the project panel.',
         inputSchema: z.object({
@@ -1945,6 +1953,8 @@ export class PremiereProTools {
           return await this.normalizeLoudness(args.mediaPath, args.projectItemId, args.targetLufs, args.truePeakDb, args.loudnessRange, args.outputPath);
         case 'lint_timeline':
           return await this.lintTimeline(args.sequenceId, args.flashFrameThresholdFrames, args.gapThresholdFrames, args.checks);
+        case 'diff_sequences':
+          return await this.diffSequences(args.sequenceIdA, args.sequenceIdB);
 
         // Subclip
         case 'create_subclip':
@@ -5798,6 +5808,169 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   /**
+   * Read a sequence's full track structure (video + audio clips with times and
+   * best-effort source frame rate, plus the sequence frame rate). Read-only.
+   * Shared by lint_timeline and diff_sequences. Defaults to the active sequence.
+   */
+  private async walkSequence(sequenceId?: string): Promise<any> {
+    const seqExpr = sequenceId ? `__findSequence(${JSON.stringify(sequenceId)})` : 'app.project.activeSequence';
+    const script = `
+      try {
+        var sequence = ${seqExpr};
+        if (!sequence) return JSON.stringify({ success: false, error: ${sequenceId ? `"Sequence not found by id: " + ${JSON.stringify(sequenceId)}` : '"No active sequence"'} });
+
+        var fps = 30;
+        try { if (sequence.timebase) fps = 254016000000.0 / parseInt(sequence.timebase, 10); } catch (eFps) {}
+
+        function readClipFps(clip) {
+          try {
+            var pit = clip.projectItem;
+            if (pit && pit.getFootageInterpretation) {
+              var interp = pit.getFootageInterpretation();
+              if (interp && interp.frameRate) return Number(interp.frameRate);
+            }
+          } catch (eInterp) {}
+          return null;
+        }
+
+        function walk(trackGroup) {
+          var out = [];
+          for (var i = 0; i < trackGroup.numTracks; i++) {
+            var track = trackGroup[i];
+            var clips = [];
+            for (var j = 0; j < track.clips.numItems; j++) {
+              var clip = track.clips[j];
+              var srcFps = readClipFps(clip);
+              var entry = {
+                name: clip.name,
+                startTime: clip.start.seconds,
+                endTime: clip.end.seconds,
+                duration: clip.duration.seconds
+              };
+              if (srcFps) entry.sourceFrameRate = srcFps;
+              clips.push(entry);
+            }
+            out.push({ index: i, name: track.name || "", clips: clips });
+          }
+          return out;
+        }
+
+        return JSON.stringify({
+          success: true,
+          sequenceId: sequence.sequenceID,
+          sequenceName: sequence.name,
+          frameRate: Math.round(fps * 1000) / 1000,
+          videoTracks: walk(sequence.videoTracks),
+          audioTracks: walk(sequence.audioTracks)
+        });
+      } catch (e) {
+        return JSON.stringify({ success: false, error: e.toString() });
+      }
+    `;
+    return await this.bridge.executeScript(script);
+  }
+
+  /**
+   * Pure sequence-diff. Compares two walked timelines track-by-track and reports
+   * what changed: clips added, removed, moved (same clip, new start time) and
+   * retimed (same clip, new duration). Side-effect-free and bridge-independent so
+   * it can be unit-tested against fixtures. Clips are matched within a track by
+   * name (nearest start time wins when a name repeats); comparisons use a
+   * half-frame epsilon. Pairs with the recovery checkpoints so an agent can see
+   * exactly what an edit changed.
+   */
+  private diffTimelineData(
+    a: { frameRate?: number; videoTracks?: any[]; audioTracks?: any[] },
+    b: { frameRate?: number; videoTracks?: any[]; audioTracks?: any[] },
+  ): { added: any[]; removed: any[]; moved: any[]; retimed: any[] } {
+    const fps = (b.frameRate && b.frameRate > 0) ? b.frameRate : (a.frameRate && a.frameRate > 0 ? a.frameRate : 30);
+    const epsilon = (1 / fps) / 2;
+    const added: any[] = [];
+    const removed: any[] = [];
+    const moved: any[] = [];
+    const retimed: any[] = [];
+
+    const groupKey = (type: string, idx: number): string => `${type}:${idx}`;
+    const collect = (data: { videoTracks?: any[]; audioTracks?: any[] }): Map<string, any[]> => {
+      const map = new Map<string, any[]>();
+      for (const t of (data.videoTracks || [])) map.set(groupKey('video', t.index), (t.clips || []).slice());
+      for (const t of (data.audioTracks || [])) map.set(groupKey('audio', t.index), (t.clips || []).slice());
+      return map;
+    };
+
+    const mapA = collect(a);
+    const mapB = collect(b);
+    const keys = new Set<string>([...mapA.keys(), ...mapB.keys()]);
+
+    for (const key of keys) {
+      const [trackType, trackIdxStr] = key.split(':');
+      const trackIndex = Number(trackIdxStr);
+      const clipsA = (mapA.get(key) || []).slice();
+      const remainingB = (mapB.get(key) || []).slice();
+
+      for (const ca of clipsA) {
+        // Find the best B-match by name (closest start time).
+        let bestIdx = -1;
+        let bestDelta = Infinity;
+        for (let k = 0; k < remainingB.length; k++) {
+          if (remainingB[k].name === ca.name) {
+            const delta = Math.abs(remainingB[k].startTime - ca.startTime);
+            if (delta < bestDelta) { bestDelta = delta; bestIdx = k; }
+          }
+        }
+        if (bestIdx === -1) {
+          removed.push({ trackType, trackIndex, name: ca.name, startTime: ca.startTime, duration: ca.duration });
+          continue;
+        }
+        const cb = remainingB.splice(bestIdx, 1)[0];
+        if (Math.abs(cb.startTime - ca.startTime) > epsilon) {
+          moved.push({ trackType, trackIndex, name: ca.name, fromStart: ca.startTime, toStart: cb.startTime, deltaSeconds: Math.round((cb.startTime - ca.startTime) * 1000) / 1000 });
+        }
+        if (Math.abs(cb.duration - ca.duration) > epsilon) {
+          retimed.push({ trackType, trackIndex, name: ca.name, fromDuration: ca.duration, toDuration: cb.duration, deltaSeconds: Math.round((cb.duration - ca.duration) * 1000) / 1000 });
+        }
+      }
+      for (const cb of remainingB) {
+        added.push({ trackType, trackIndex, name: cb.name, startTime: cb.startTime, duration: cb.duration });
+      }
+    }
+    return { added, removed, moved, retimed };
+  }
+
+  /**
+   * Compare two sequences and report what changed between them. Read-only: it
+   * walks both timelines and runs the pure diffTimelineData. Useful for
+   * reviewing an AI edit against the original, or a restored recovery checkpoint
+   * against the current cut.
+   */
+  private async diffSequences(sequenceIdA?: string, sequenceIdB?: string): Promise<any> {
+    if (!sequenceIdA || !sequenceIdB) {
+      return { success: false, error: 'Provide both sequenceIdA and sequenceIdB (the "before" and "after" sequences to compare).' };
+    }
+    const [wa, wb] = await Promise.all([this.walkSequence(sequenceIdA), this.walkSequence(sequenceIdB)]);
+    if (!wa || !wa.success) return { success: false, error: `Could not read sequenceIdA: ${(wa && wa.error) || 'unknown error'}` };
+    if (!wb || !wb.success) return { success: false, error: `Could not read sequenceIdB: ${(wb && wb.error) || 'unknown error'}` };
+
+    const diff = this.diffTimelineData(wa, wb);
+    const changeCount = diff.added.length + diff.removed.length + diff.moved.length + diff.retimed.length;
+    return {
+      success: true,
+      sequenceA: { id: wa.sequenceId, name: wa.sequenceName, frameRate: wa.frameRate },
+      sequenceB: { id: wb.sequenceId, name: wb.sequenceName, frameRate: wb.frameRate },
+      identical: changeCount === 0,
+      changeCount,
+      counts: { added: diff.added.length, removed: diff.removed.length, moved: diff.moved.length, retimed: diff.retimed.length },
+      added: diff.added,
+      removed: diff.removed,
+      moved: diff.moved,
+      retimed: diff.retimed,
+      note: changeCount === 0
+        ? 'The two sequences have the same clips in the same positions (within a half-frame). Read-only comparison.'
+        : 'Read-only comparison. "moved" = same clip at a new start time; "retimed" = same clip with a new duration. Clips are matched within a track by name.',
+    };
+  }
+
+  /**
    * Pure timeline QC analyzer. Given the walked track data, produce a list of
    * findings. Kept side-effect-free and independent of the bridge so it can be
    * unit-tested directly against fixtures (like parseSilenceIntervals). All time
@@ -5928,62 +6101,7 @@ ${this.buildSequenceResolver(sequenceId)}
     gapThresholdFrames = 1,
     checks?: string[],
   ): Promise<any> {
-    const seqExpr = sequenceId ? `__findSequence(${JSON.stringify(sequenceId)})` : 'app.project.activeSequence';
-    const script = `
-      try {
-        var sequence = ${seqExpr};
-        if (!sequence) return JSON.stringify({ success: false, error: ${sequenceId ? `"Sequence not found by id: " + ${JSON.stringify(sequenceId)}` : '"No active sequence to lint"'} });
-
-        var fps = 30;
-        try { if (sequence.timebase) fps = 254016000000.0 / parseInt(sequence.timebase, 10); } catch (eFps) {}
-
-        function readClipFps(clip) {
-          try {
-            var pit = clip.projectItem;
-            if (pit && pit.getFootageInterpretation) {
-              var interp = pit.getFootageInterpretation();
-              if (interp && interp.frameRate) return Number(interp.frameRate);
-            }
-          } catch (eInterp) {}
-          return null;
-        }
-
-        function walk(trackGroup) {
-          var out = [];
-          for (var i = 0; i < trackGroup.numTracks; i++) {
-            var track = trackGroup[i];
-            var clips = [];
-            for (var j = 0; j < track.clips.numItems; j++) {
-              var clip = track.clips[j];
-              var srcFps = readClipFps(clip);
-              var entry = {
-                name: clip.name,
-                startTime: clip.start.seconds,
-                endTime: clip.end.seconds,
-                duration: clip.duration.seconds
-              };
-              if (srcFps) entry.sourceFrameRate = srcFps;
-              clips.push(entry);
-            }
-            out.push({ index: i, name: track.name || "", clips: clips });
-          }
-          return out;
-        }
-
-        return JSON.stringify({
-          success: true,
-          sequenceId: sequence.sequenceID,
-          sequenceName: sequence.name,
-          frameRate: Math.round(fps * 1000) / 1000,
-          videoTracks: walk(sequence.videoTracks),
-          audioTracks: walk(sequence.audioTracks)
-        });
-      } catch (e) {
-        return JSON.stringify({ success: false, error: e.toString() });
-      }
-    `;
-
-    const walked = await this.bridge.executeScript(script);
+    const walked = await this.walkSequence(sequenceId);
     if (!walked || !walked.success) {
       return { success: false, error: (walked && walked.error) || 'Could not read the sequence for linting.' };
     }
