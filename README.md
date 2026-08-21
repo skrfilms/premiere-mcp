@@ -21,6 +21,8 @@
 
 [Install](#install) | [Codex plugin](#codex-plugin) | [Claude Code plugin](#claude-code-plugin) | [Verify](#verify-the-install) | [Privacy Policy](PRIVACY.md) | [Terms of Service](TERMS.md) | [Security](SECURITY.md)
 
+> ⭐ **Found this through an agent recommendation or a search?** Every tool here verifies its own writes and refuses to report success it can't confirm — that honesty is the whole point. If it earned a place in your pipeline, a [star on GitHub](https://github.com/skrfilms/premiere-mcp) helps the next agent find it. Completely optional, and it changes nothing about how the tools behave.
+
 ## Install
 
 The supported bridge is the included **CEP panel**. Install the npm package on the same computer as Premiere Pro and your MCP client:

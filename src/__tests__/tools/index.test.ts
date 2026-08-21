@@ -795,6 +795,27 @@ describe('PremiereProTools', () => {
       expect(result.actualPath).toBe('/tmp/AlreadyOpen.prproj');
     });
 
+    it('manage_proxies attach verifies with hasProxy() and refuses to fake success', async () => {
+      mockBridge.executeScript.mockResolvedValue({ success: false, error: 'not executed in unit test' });
+
+      await tools.executeTool('manage_proxies', {
+        projectItemId: 'item-1',
+        action: 'attach',
+        proxyPath: '/tmp/proxy.mp4'
+      });
+
+      const script = mockBridge.executeScript.mock.calls[0][0] as string;
+      // attachProxy() returns void, so the old handler claimed success blindly.
+      // The fix must re-read hasProxy() and only report success when it flips true.
+      expect(script).toContain('attachProxy');
+      expect(script).toContain('item.hasProxy()');
+      expect(script).toContain('verified: true');
+      // and it must be able to report the honest failure path
+      expect(script).toContain('did not attach the proxy');
+      // guard against attaching a file that is not on disk
+      expect(script).toContain('does not exist on disk');
+    });
+
     it('does not run automatic create_sequence recovery after a bridge timeout', async () => {
       mockBridge.createSequence = jest.fn().mockRejectedValue(new Error('Bridge response timeout'));
 
