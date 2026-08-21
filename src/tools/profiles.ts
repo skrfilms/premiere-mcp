@@ -42,7 +42,7 @@ export const PROFILES: Record<string, string[]> = {
     'get_*', 'list_*', 'read_*', 'find_*', 'search_*', 'inspect_*',
     'is_*', 'check_*', 'detect_*',
     // non-mutating media analysis that doesn't fit the verb-prefix globs
-    'probe_media', 'capture_program_output',
+    'probe_media', 'capture_program_output', 'lint_timeline',
   ],
 
   // The everyday editorial core: sequences, clips, timeline, bins, markers,
@@ -53,6 +53,7 @@ export const PROFILES: Record<string, string[]> = {
     'get_capabilities', 'get_project_info', 'get_active_sequence', 'set_active_sequence',
     'list_sequences', 'list_sequence_tracks', 'list_project_items', 'get_sequence_settings',
     'get_selected_clips', 'get_clip_at_position', 'get_clip_properties', 'get_playhead_position',
+    'lint_timeline',
     'set_playhead_position', 'find_project_item_by_name', 'search_project_items',
     // project / media
     'create_project', 'open_project', 'save_project', 'save_project_as',

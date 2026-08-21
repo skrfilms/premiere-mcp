@@ -52,6 +52,14 @@ result on disk before reporting success:
   or normalization. Targets an integrated LUFS / true-peak / LRA (defaults
   `-14 LUFS`, `-1 dBTP`, `11 LU`) and writes a new file, returning the measured
   input loudness so the change is auditable.
+- Added `lint_timeline`: automated, read-only timeline QC — the "layout lint"
+  half of the render-truth loop. Walks every video and audio track and flags
+  gaps (black/silence), flash frames (clips shorter than a frame threshold),
+  overlaps, a leading gap before the first clip, and mixed frame rates (a clip
+  whose source frame rate differs from the sequence). Each finding carries a
+  severity, the track and time, and a plain-English message; the checks and
+  thresholds are configurable and the analysis is a pure, independently tested
+  function. Changes nothing — it reports.
 - Added a recovery boundary — `create_recovery_checkpoint`,
   `list_recovery_checkpoints`, `restore_recovery_checkpoint` — that snapshots a
   sequence before risky edits. The automatic checkpoint taken before
@@ -64,7 +72,7 @@ result on disk before reporting success:
 - Enriched the expanded-tool catalogue with real input schemas so every
   advertised tool exposes a typed, discoverable argument shape.
 
-Catalogue grew to `292` tools.
+Catalogue grew to `293` tools.
 
 ## [1.2.0] - 2026-08-17
 
