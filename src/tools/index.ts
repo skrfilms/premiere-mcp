@@ -1351,6 +1351,16 @@ export class PremiereProTools {
         })
       },
       {
+        name: 'lint_timeline',
+        description: 'Runs automated quality-control checks on a sequence and returns a list of findings -- the "layout lint" half of the render-truth loop. Walks every video and audio track and flags common editorial defects an agent (or human) cannot easily see from the DOM: GAPS between clips (black/silence), FLASH FRAMES (clips shorter than a frame threshold, usually accidental), OVERLAPS, a LEADING GAP before the first clip, and MIXED FRAME RATES (a clip whose source frame rate differs from the sequence, which stutters or drops frames). Read-only -- it changes nothing, it reports. Each finding carries a severity, the track and time, and a plain-English message. Defaults to the active sequence. Use it after assembling a timeline to catch mistakes before export.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional().describe('Sequence to lint. Defaults to the active sequence.'),
+          flashFrameThresholdFrames: z.number().optional().describe('Clips shorter than this many frames are flagged as flash frames (default 2).'),
+          gapThresholdFrames: z.number().optional().describe('Gaps larger than this many frames are flagged (default 1). Set to 0 to flag any gap.'),
+          checks: z.array(z.enum(['gaps', 'flash_frames', 'overlaps', 'leading_gap', 'mixed_frame_rate'])).optional().describe('Subset of checks to run. Defaults to all.')
+        })
+      },
+      {
         name: 'rename_project_item',
         description: 'Renames a project item (sequence, bin, clip) by setting its name. Use this when duplicate_sequence does not propagate the new name to the project panel.',
         inputSchema: z.object({
@@ -1933,6 +1943,8 @@ export class PremiereProTools {
           return await this.bakeSpeedChange(args.mediaPath, args.projectItemId, args.speed, args.outputPath, args.includeAudio, args.preservePitch);
         case 'normalize_loudness':
           return await this.normalizeLoudness(args.mediaPath, args.projectItemId, args.targetLufs, args.truePeakDb, args.loudnessRange, args.outputPath);
+        case 'lint_timeline':
+          return await this.lintTimeline(args.sequenceId, args.flashFrameThresholdFrames, args.gapThresholdFrames, args.checks);
 
         // Subclip
         case 'create_subclip':
@@ -5783,6 +5795,225 @@ ${this.buildSequenceResolver(sequenceId)}
         });
       });
     });
+  }
+
+  /**
+   * Pure timeline QC analyzer. Given the walked track data, produce a list of
+   * findings. Kept side-effect-free and independent of the bridge so it can be
+   * unit-tested directly against fixtures (like parseSilenceIntervals). All time
+   * comparisons use a half-frame epsilon so floating-point clip boundaries do not
+   * masquerade as gaps or overlaps.
+   */
+  private lintTimelineData(
+    data: {
+      frameRate?: number;
+      videoTracks?: Array<{ index: number; name?: string; clips: Array<{ name?: string; startTime: number; endTime: number; duration: number; sourceFrameRate?: number }> }>;
+      audioTracks?: Array<{ index: number; name?: string; clips: Array<{ name?: string; startTime: number; endTime: number; duration: number; sourceFrameRate?: number }> }>;
+    },
+    flashFrameThresholdFrames = 2,
+    gapThresholdFrames = 1,
+    checks?: string[],
+  ): Array<Record<string, unknown>> {
+    const fps = data.frameRate && data.frameRate > 0 ? data.frameRate : 30;
+    const frame = 1 / fps;
+    const epsilon = frame / 2;
+    const run = (name: string): boolean => !checks || checks.length === 0 || checks.includes(name);
+    const findings: Array<Record<string, unknown>> = [];
+
+    const tracks = [
+      ...(data.videoTracks || []).map((t) => ({ ...t, trackType: 'video' as const })),
+      ...(data.audioTracks || []).map((t) => ({ ...t, trackType: 'audio' as const })),
+    ];
+
+    for (const track of tracks) {
+      const label = `${track.trackType === 'video' ? 'Video' : 'Audio'} ${track.index + 1}`;
+      // Sort defensively; a track's clips should already be in order.
+      const clips = [...(track.clips || [])].sort((a, b) => a.startTime - b.startTime);
+
+      // Leading gap: black/silence before the first clip.
+      if (run('leading_gap') && clips.length > 0) {
+        const first = clips[0]!;
+        if (first.startTime > gapThresholdFrames * frame + epsilon) {
+          findings.push({
+            type: 'leading_gap',
+            severity: 'warning',
+            trackType: track.trackType,
+            trackIndex: track.index,
+            startTime: 0,
+            endTime: first.startTime,
+            gapFrames: Math.round(first.startTime * fps),
+            message: `${label}: ${(Math.round(first.startTime * fps))}-frame gap before the first clip ("${first.name ?? 'unnamed'}").`,
+          });
+        }
+      }
+
+      for (let i = 0; i < clips.length; i++) {
+        const clip = clips[i]!;
+        // Flash frame: a clip shorter than the threshold.
+        if (run('flash_frames')) {
+          const durFrames = clip.duration * fps;
+          if (durFrames < flashFrameThresholdFrames - 1e-6) {
+            findings.push({
+              type: 'flash_frame',
+              severity: 'warning',
+              trackType: track.trackType,
+              trackIndex: track.index,
+              clipName: clip.name,
+              startTime: clip.startTime,
+              endTime: clip.endTime,
+              durationFrames: Math.round(durFrames * 1000) / 1000,
+              message: `${label}: clip "${clip.name ?? 'unnamed'}" is ${Math.round(durFrames * 100) / 100} frames long -- likely an accidental flash frame.`,
+            });
+          }
+        }
+        // Mixed frame rate: a clip whose source fps differs from the sequence.
+        if (run('mixed_frame_rate') && typeof clip.sourceFrameRate === 'number' && clip.sourceFrameRate > 0) {
+          if (Math.abs(clip.sourceFrameRate - fps) > 0.01) {
+            findings.push({
+              type: 'mixed_frame_rate',
+              severity: 'warning',
+              trackType: track.trackType,
+              trackIndex: track.index,
+              clipName: clip.name,
+              startTime: clip.startTime,
+              sourceFrameRate: clip.sourceFrameRate,
+              sequenceFrameRate: Math.round(fps * 1000) / 1000,
+              message: `${label}: clip "${clip.name ?? 'unnamed'}" is ${clip.sourceFrameRate} fps in a ${Math.round(fps * 1000) / 1000} fps sequence -- may stutter or drop frames.`,
+            });
+          }
+        }
+        // Gap / overlap versus the next clip.
+        const next = clips[i + 1];
+        if (next) {
+          const delta = next.startTime - clip.endTime;
+          if (run('overlaps') && delta < -epsilon) {
+            findings.push({
+              type: 'overlap',
+              severity: 'warning',
+              trackType: track.trackType,
+              trackIndex: track.index,
+              startTime: next.startTime,
+              endTime: clip.endTime,
+              overlapFrames: Math.round(-delta * fps),
+              message: `${label}: "${clip.name ?? 'unnamed'}" overlaps "${next.name ?? 'unnamed'}" by ${Math.round(-delta * fps)} frame(s).`,
+            });
+          } else if (run('gaps') && delta > gapThresholdFrames * frame + epsilon) {
+            findings.push({
+              type: 'gap',
+              severity: 'info',
+              trackType: track.trackType,
+              trackIndex: track.index,
+              startTime: clip.endTime,
+              endTime: next.startTime,
+              gapFrames: Math.round(delta * fps),
+              message: `${label}: ${Math.round(delta * fps)}-frame gap between "${clip.name ?? 'unnamed'}" and "${next.name ?? 'unnamed'}".`,
+            });
+          }
+        }
+      }
+    }
+    return findings;
+  }
+
+  /**
+   * Walk a sequence's tracks and run automated QC checks on it. The walk (via
+   * the bridge) only reads; the analysis is the pure lintTimelineData above.
+   * Defaults to the active sequence. Source frame rate is read best-effort from
+   * each clip's project item -- when Premiere will not give it up, the
+   * mixed-frame-rate check simply skips that clip rather than guessing.
+   */
+  private async lintTimeline(
+    sequenceId?: string,
+    flashFrameThresholdFrames = 2,
+    gapThresholdFrames = 1,
+    checks?: string[],
+  ): Promise<any> {
+    const seqExpr = sequenceId ? `__findSequence(${JSON.stringify(sequenceId)})` : 'app.project.activeSequence';
+    const script = `
+      try {
+        var sequence = ${seqExpr};
+        if (!sequence) return JSON.stringify({ success: false, error: ${sequenceId ? `"Sequence not found by id: " + ${JSON.stringify(sequenceId)}` : '"No active sequence to lint"'} });
+
+        var fps = 30;
+        try { if (sequence.timebase) fps = 254016000000.0 / parseInt(sequence.timebase, 10); } catch (eFps) {}
+
+        function readClipFps(clip) {
+          try {
+            var pit = clip.projectItem;
+            if (pit && pit.getFootageInterpretation) {
+              var interp = pit.getFootageInterpretation();
+              if (interp && interp.frameRate) return Number(interp.frameRate);
+            }
+          } catch (eInterp) {}
+          return null;
+        }
+
+        function walk(trackGroup) {
+          var out = [];
+          for (var i = 0; i < trackGroup.numTracks; i++) {
+            var track = trackGroup[i];
+            var clips = [];
+            for (var j = 0; j < track.clips.numItems; j++) {
+              var clip = track.clips[j];
+              var srcFps = readClipFps(clip);
+              var entry = {
+                name: clip.name,
+                startTime: clip.start.seconds,
+                endTime: clip.end.seconds,
+                duration: clip.duration.seconds
+              };
+              if (srcFps) entry.sourceFrameRate = srcFps;
+              clips.push(entry);
+            }
+            out.push({ index: i, name: track.name || "", clips: clips });
+          }
+          return out;
+        }
+
+        return JSON.stringify({
+          success: true,
+          sequenceId: sequence.sequenceID,
+          sequenceName: sequence.name,
+          frameRate: Math.round(fps * 1000) / 1000,
+          videoTracks: walk(sequence.videoTracks),
+          audioTracks: walk(sequence.audioTracks)
+        });
+      } catch (e) {
+        return JSON.stringify({ success: false, error: e.toString() });
+      }
+    `;
+
+    const walked = await this.bridge.executeScript(script);
+    if (!walked || !walked.success) {
+      return { success: false, error: (walked && walked.error) || 'Could not read the sequence for linting.' };
+    }
+
+    const findings = this.lintTimelineData(
+      { frameRate: walked.frameRate, videoTracks: walked.videoTracks, audioTracks: walked.audioTracks },
+      flashFrameThresholdFrames,
+      gapThresholdFrames,
+      checks,
+    );
+
+    const bySeverity = { warning: 0, info: 0 };
+    for (const f of findings) {
+      const sev = f.severity as 'warning' | 'info';
+      if (sev in bySeverity) bySeverity[sev] += 1;
+    }
+
+    return {
+      success: true,
+      sequenceId: walked.sequenceId,
+      sequenceName: walked.sequenceName,
+      frameRate: walked.frameRate,
+      clean: findings.length === 0,
+      findingCount: findings.length,
+      countsBySeverity: bySeverity,
+      findings,
+      note: findings.length === 0
+        ? 'No issues found for the selected checks. Read-only -- nothing was changed.'
+        : 'Read-only QC report -- nothing was changed. Fix gaps with ripple delete/close-gap, flash frames by removing or extending the clip, and mixed frame rates by interpreting footage or re-rendering.',
+    };
   }
 
   /**
