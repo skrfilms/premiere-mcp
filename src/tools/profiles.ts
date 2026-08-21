@@ -44,6 +44,8 @@ export const PROFILES: Record<string, string[]> = {
     // non-mutating media analysis that doesn't fit the verb-prefix globs
     'probe_media', 'capture_program_output', 'lint_timeline', 'diff_sequences',
     'index_footage', 'search_footage',
+    // offline caption reading/QC on the .srt file (Premiere's DOM cannot read captions)
+    'read_srt', 'validate_srt',
   ],
 
   // The everyday editorial core: sequences, clips, timeline, bins, markers,
@@ -88,6 +90,9 @@ export const PROFILES: Record<string, string[]> = {
     'apply_audio_effect_to_all_clips', 'list_available_audio_effects',
     'list_available_audio_transitions', 'setup_ducking', 'detect_silence',
     'transcribe_to_srt', 'create_caption_track', 'read_sequence_captions',
+    // SRT subtitle CRUD on disk — read/validate/write/edit captions before ingest
+    'read_srt', 'validate_srt', 'write_srt',
+    'update_srt_cue', 'insert_srt_cue', 'remove_srt_cue', 'shift_srt_timing',
     'mute_track', 'lock_track', 'link_audio_video', 'link_selection', 'unlink_selection',
     // loudness delivery spec (EBU R128) via ffmpeg two-pass loudnorm
     'normalize_loudness',

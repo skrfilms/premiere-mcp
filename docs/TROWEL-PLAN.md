@@ -182,8 +182,20 @@ chip that hides the NDI/Syphon/Spout acronyms behind the Doctor.
 5. NDI tap (adds live audio + monitoring) → Syphon/Spout taps.
 
 **Tier 2 — cheap/novel**
-- ElevenLabs TTS; caption CRUD (add/update/remove/import/export) + native `transcribeSequence`;
-  `import_ae_comps`; edit-plan-with-SHA256-token; keyframe easing; frame vision.
+- ElevenLabs TTS; `import_ae_comps`; edit-plan-with-SHA256-token; keyframe easing; frame vision.
+- **Caption CRUD.** ✅ **SHIPPED** (2026-08-21) as SRT-file CRUD, the only honest option:
+  Premiere's scripting DOM can INGEST an .srt (`create_caption_track`) but exposes NO
+  caption read/update/delete API (long-standing Adobe limitation), so all caption editing
+  happens on the .srt file itself, on disk, before (re-)ingest. Seven host-independent tools
+  (no Premiere request) over a pure parse/serialize/edit module (`src/tools/srt.ts`):
+  `read_srt` (the caption READ path Premiere itself can't give — BOM/CRLF/no-index/WebVTT-token
+  tolerant, returns cues + validation + malformed blocks), `validate_srt` (QC only), `write_srt`
+  (author from cues, refuses structural errors unless `allowInvalid`), `update_srt_cue`,
+  `insert_srt_cue` (chronological placement), `remove_srt_cue`, and `shift_srt_timing`
+  (offset ± a range, plus a scale factor for frame-rate mismatch). Every write is verified by a
+  full read-back **round-trip** (catches silent text corruption a count-only check misses).
+  Native `transcribeSequence` (in-Premiere transcription) is NOT offered — Premiere has no such
+  scripting API; `transcribe_to_srt` (local Whisper) already fills that gap.
 - Local persistent footage index (footage *discovery* is the real bottleneck).
   ✅ **SHIPPED** (2026-08-21) as `index_footage` + `search_footage`: walks a folder,
   ffprobes each media file for real metadata, persists an incremental JSON index
