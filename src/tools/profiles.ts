@@ -43,6 +43,7 @@ export const PROFILES: Record<string, string[]> = {
     'is_*', 'check_*', 'detect_*',
     // non-mutating media analysis that doesn't fit the verb-prefix globs
     'probe_media', 'capture_program_output', 'lint_timeline', 'diff_sequences',
+    'index_footage', 'search_footage',
   ],
 
   // The everyday editorial core: sequences, clips, timeline, bins, markers,
@@ -58,6 +59,8 @@ export const PROFILES: Record<string, string[]> = {
     // project / media
     'create_project', 'open_project', 'save_project', 'save_project_as',
     'import_media', 'import_folder', 'create_bin', 'move_item_to_bin', 'rename_project_item',
+    // offline footage discovery: index media on disk, then find it before importing
+    'index_footage', 'search_footage',
     // sequence
     'create_sequence', 'duplicate_sequence', 'delete_sequence', 'set_sequence_settings',
     // recovery boundary — snapshot before risky edits, list, restore

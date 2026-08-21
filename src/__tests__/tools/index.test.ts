@@ -93,7 +93,9 @@ describe('PremiereProTools', () => {
       expect(toolNames).toContain('normalize_loudness');
       expect(toolNames).toContain('lint_timeline');
       expect(toolNames).toContain('diff_sequences');
-      expect(availableTools).toHaveLength(294);
+      expect(toolNames).toContain('index_footage');
+      expect(toolNames).toContain('search_footage');
+      expect(availableTools).toHaveLength(296);
       expect(unimplementedExpandedToolNames).toEqual([]);
       for (const name of expandedToolNames) {
         expect(toolNames).toContain(name);
@@ -570,8 +572,8 @@ describe('PremiereProTools', () => {
       expect(result.success).toBe(true);
       // The full catalogue is exposed by default (no profile env set). The
       // catalog block now also reports the active profile for introspection.
-      expect(result.catalog.tools).toBe(294);
-      expect(result.catalog.toolsInFullCatalog).toBe(294);
+      expect(result.catalog.tools).toBe(296);
+      expect(result.catalog.toolsInFullCatalog).toBe(296);
       expect(result.catalog.resources).toBe(13);
       expect(result.catalog.prompts).toBe(10);
       expect(result.catalog.profile.source).toBe('all');

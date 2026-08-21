@@ -1370,6 +1370,36 @@ export class PremiereProTools {
         })
       },
       {
+        name: 'index_footage',
+        description: 'Builds or refreshes a local, persistent index of media files on disk so footage DISCOVERY stops requiring the media to be imported into Premiere first. Walks a folder (recursively by default), reads each file\'s technical metadata with ffprobe, and writes a JSON index. Incremental: files whose path + size + modified-time already match the index are skipped, so re-running after adding a few clips is cheap. Entirely local -- ffprobe + filesystem, no Premiere request. Query the result with search_footage. Needs ffprobe (ships with ffmpeg); returns install guidance if it is missing.',
+        inputSchema: z.object({
+          rootPath: z.string().describe('Absolute path of the folder to scan for media.'),
+          recursive: z.boolean().optional().describe('Descend into subfolders. Defaults to true. Hidden folders (dot-prefixed) are always skipped.'),
+          extensions: z.array(z.string()).optional().describe('File extensions to include (without the dot, e.g. ["mov","wav"]). Defaults to a broad video/audio/image set.'),
+          indexPath: z.string().optional().describe('Where to store the index JSON. Defaults to PREMIERE_MCP_FOOTAGE_INDEX or ~/.premiere-mcp/footage-index.json.'),
+          pruneMissing: z.boolean().optional().describe('When true, drop index entries whose files are no longer on disk. Defaults to false (missing files are kept and reported).')
+        })
+      },
+      {
+        name: 'search_footage',
+        description: 'Searches the local footage index built by index_footage, entirely offline -- no Premiere request. Find the right clip before importing it by filtering on filename substring, file extension, codec, duration/resolution/frame-rate ranges, and whether the file has audio or video. Returns matches with their distilled technical summary. Build or refresh the index with index_footage first.',
+        inputSchema: z.object({
+          query: z.string().optional().describe('Case-insensitive substring matched against the full file path (filename or folder).'),
+          extension: z.string().optional().describe('Match a single file extension (with or without the dot).'),
+          codec: z.string().optional().describe('Match a video OR audio codec name (e.g. "h264", "prores", "pcm_s24le").'),
+          minDurationSeconds: z.number().optional().describe('Only files at least this long.'),
+          maxDurationSeconds: z.number().optional().describe('Only files at most this long.'),
+          minWidth: z.number().optional().describe('Minimum video width in pixels.'),
+          minHeight: z.number().optional().describe('Minimum video height in pixels.'),
+          minFps: z.number().optional().describe('Minimum video frame rate.'),
+          maxFps: z.number().optional().describe('Maximum video frame rate.'),
+          hasAudio: z.boolean().optional().describe('Require (true) or exclude (false) files with an audio stream.'),
+          hasVideo: z.boolean().optional().describe('Require (true) or exclude (false) files with a video stream.'),
+          indexPath: z.string().optional().describe('Which index JSON to read. Defaults to PREMIERE_MCP_FOOTAGE_INDEX or ~/.premiere-mcp/footage-index.json.'),
+          limit: z.number().optional().describe('Maximum number of results to return (default 100).')
+        })
+      },
+      {
         name: 'rename_project_item',
         description: 'Renames a project item (sequence, bin, clip) by setting its name. Use this when duplicate_sequence does not propagate the new name to the project panel.',
         inputSchema: z.object({
@@ -1956,6 +1986,19 @@ export class PremiereProTools {
           return await this.lintTimeline(args.sequenceId, args.flashFrameThresholdFrames, args.gapThresholdFrames, args.checks);
         case 'diff_sequences':
           return await this.diffSequences(args.sequenceIdA, args.sequenceIdB);
+        case 'index_footage':
+          return await this.indexFootage(args.rootPath, args.recursive, args.extensions, args.indexPath, args.pruneMissing);
+        case 'search_footage':
+          return await this.searchFootage(
+            {
+              query: args.query, extension: args.extension, codec: args.codec,
+              minDurationSeconds: args.minDurationSeconds, maxDurationSeconds: args.maxDurationSeconds,
+              minWidth: args.minWidth, minHeight: args.minHeight, minFps: args.minFps, maxFps: args.maxFps,
+              hasAudio: args.hasAudio, hasVideo: args.hasVideo,
+            },
+            args.indexPath,
+            args.limit,
+          );
 
         // Subclip
         case 'create_subclip':
@@ -5453,6 +5496,348 @@ ${this.buildSequenceResolver(sequenceId)}
    * install guidance if absent, and only return parsed data (never a fabricated
    * shape) when ffprobe actually produced JSON.
    */
+  /**
+   * Distil a parsed ffprobe JSON payload down to the fields we care about.
+   * Shared by probe_media and the footage index so both describe media the same
+   * way. Pure (no I/O), so it is unit-testable against fixtures.
+   */
+  private buildProbeSummary(parsed: any): any {
+    const streams: any[] = Array.isArray(parsed?.streams) ? parsed.streams : [];
+    const video = streams.find((s) => s.codec_type === 'video');
+    const audio = streams.find((s) => s.codec_type === 'audio');
+    const fmt = parsed?.format || {};
+    return {
+      durationSeconds: fmt.duration != null ? Number(fmt.duration) : undefined,
+      formatName: fmt.format_name,
+      sizeBytes: fmt.size != null ? Number(fmt.size) : undefined,
+      bitRate: fmt.bit_rate != null ? Number(fmt.bit_rate) : undefined,
+      videoStreamCount: streams.filter((s) => s.codec_type === 'video').length,
+      audioStreamCount: streams.filter((s) => s.codec_type === 'audio').length,
+      video: video
+        ? {
+            codec: video.codec_name,
+            profile: video.profile,
+            width: video.width,
+            height: video.height,
+            pixelFormat: video.pix_fmt,
+            colorSpace: video.color_space,
+            colorRange: video.color_range,
+            bitDepth: video.bits_per_raw_sample != null ? Number(video.bits_per_raw_sample) : undefined,
+            fps: typeof video.r_frame_rate === 'string' ? this.parseFrameRate(video.r_frame_rate) : undefined,
+          }
+        : null,
+      audio: audio
+        ? {
+            codec: audio.codec_name,
+            sampleRate: audio.sample_rate != null ? Number(audio.sample_rate) : undefined,
+            channels: audio.channels,
+            channelLayout: audio.channel_layout,
+          }
+        : null,
+    };
+  }
+
+  /** Default media extensions the footage index scans (lowercase, no dot). */
+  private static readonly FOOTAGE_EXTENSIONS = [
+    'mov', 'mp4', 'm4v', 'mxf', 'avi', 'mkv', 'webm', 'r3d', 'braw', 'prores',
+    'wav', 'aif', 'aiff', 'mp3', 'aac', 'flac', 'm4a',
+    'png', 'jpg', 'jpeg', 'tif', 'tiff', 'exr', 'dpx', 'psd',
+  ];
+
+  /** Resolve where the footage index JSON lives (arg > env > default under home). */
+  private footageIndexPath(indexPath?: string): string {
+    if (indexPath && indexPath.trim()) return indexPath.trim();
+    const fromEnv = (process.env.PREMIERE_MCP_FOOTAGE_INDEX || '').trim();
+    if (fromEnv) return fromEnv;
+    return join(homedir(), '.premiere-mcp', 'footage-index.json');
+  }
+
+  /**
+   * Decide, purely, what a footage rescan must do. Given the entries already in
+   * the index and the files just discovered on disk (each with size + mtimeMs),
+   * classify every discovered file as unchanged (same path, size and mtime),
+   * needs-probe (new or modified), and report which previously-indexed paths are
+   * now missing. No I/O, so it is directly unit-testable -- the incremental
+   * behaviour (don't re-ffprobe files that haven't changed) is the whole point of
+   * an index, and this is where that logic lives.
+   */
+  private planFootageScan(
+    existing: Array<{ path: string; size?: number; mtimeMs?: number }>,
+    discovered: Array<{ path: string; size: number; mtimeMs: number }>,
+  ): {
+    toProbe: Array<{ path: string; size: number; mtimeMs: number }>;
+    unchanged: string[];
+    missing: string[];
+  } {
+    const byPath = new Map<string, { path: string; size?: number; mtimeMs?: number }>();
+    for (const e of existing) byPath.set(e.path, e);
+    const discoveredPaths = new Set(discovered.map((d) => d.path));
+
+    const toProbe: Array<{ path: string; size: number; mtimeMs: number }> = [];
+    const unchanged: string[] = [];
+    for (const d of discovered) {
+      const prev = byPath.get(d.path);
+      if (prev && prev.size === d.size && prev.mtimeMs === d.mtimeMs) {
+        unchanged.push(d.path);
+      } else {
+        toProbe.push(d);
+      }
+    }
+    const missing = existing.map((e) => e.path).filter((p) => !discoveredPaths.has(p));
+    return { toProbe, unchanged, missing };
+  }
+
+  /**
+   * Whether a footage index entry matches a set of search criteria. Pure and
+   * side-effect-free so search_footage's filtering is unit-testable. All supplied
+   * criteria must match (AND); an omitted criterion is ignored.
+   */
+  private matchFootageEntry(entry: any, criteria: any): boolean {
+    if (!entry) return false;
+    const s = entry.summary || {};
+    const v = s.video || {};
+    if (criteria.query) {
+      const hay = String(entry.path || '').toLowerCase();
+      if (!hay.includes(String(criteria.query).toLowerCase())) return false;
+    }
+    if (criteria.extension) {
+      const want = String(criteria.extension).toLowerCase().replace(/^\./, '');
+      const got = (entry.path.split('.').pop() || '').toLowerCase();
+      if (got !== want) return false;
+    }
+    if (criteria.codec) {
+      const want = String(criteria.codec).toLowerCase();
+      const vc = String(v.codec || '').toLowerCase();
+      const ac = String((s.audio || {}).codec || '').toLowerCase();
+      if (vc !== want && ac !== want) return false;
+    }
+    if (criteria.minDurationSeconds != null && !(Number(s.durationSeconds) >= criteria.minDurationSeconds)) return false;
+    if (criteria.maxDurationSeconds != null && !(Number(s.durationSeconds) <= criteria.maxDurationSeconds)) return false;
+    if (criteria.minWidth != null && !(Number(v.width) >= criteria.minWidth)) return false;
+    if (criteria.minHeight != null && !(Number(v.height) >= criteria.minHeight)) return false;
+    if (criteria.minFps != null && !(Number(v.fps) >= criteria.minFps)) return false;
+    if (criteria.maxFps != null && !(Number(v.fps) <= criteria.maxFps)) return false;
+    if (criteria.hasAudio === true && !(s.audioStreamCount > 0)) return false;
+    if (criteria.hasAudio === false && s.audioStreamCount > 0) return false;
+    if (criteria.hasVideo === true && !(s.videoStreamCount > 0)) return false;
+    if (criteria.hasVideo === false && s.videoStreamCount > 0) return false;
+    return true;
+  }
+
+  /** Pure filter over an array of footage entries; see matchFootageEntry. */
+  private queryFootageIndex(entries: any[], criteria: any): any[] {
+    return (entries || []).filter((e) => this.matchFootageEntry(e, criteria));
+  }
+
+  /** Recursively collect media files under a root, with size + mtime for the scan plan. */
+  private async walkMediaFiles(
+    root: string,
+    recursive: boolean,
+    extensions: string[],
+  ): Promise<Array<{ path: string; size: number; mtimeMs: number }>> {
+    const wanted = new Set(extensions.map((e) => e.toLowerCase().replace(/^\./, '')));
+    const out: Array<{ path: string; size: number; mtimeMs: number }> = [];
+    const walk = async (dir: string): Promise<void> => {
+      let entries: any[];
+      try {
+        entries = await fs.readdir(dir, { withFileTypes: true });
+      } catch {
+        return; // unreadable dir -- skip, don't fail the whole scan
+      }
+      for (const ent of entries) {
+        const full = join(dir, ent.name);
+        if (ent.isDirectory()) {
+          if (recursive && !ent.name.startsWith('.')) await walk(full);
+          continue;
+        }
+        if (!ent.isFile()) continue;
+        const ext = (ent.name.split('.').pop() || '').toLowerCase();
+        if (!wanted.has(ext)) continue;
+        try {
+          const st = await fs.stat(full);
+          out.push({ path: full, size: st.size, mtimeMs: Math.round(st.mtimeMs) });
+        } catch { /* vanished between readdir and stat -- skip */ }
+      }
+    };
+    await walk(root);
+    return out;
+  }
+
+  /**
+   * Build or refresh a local, persistent index of media on disk so footage
+   * DISCOVERY -- the real bottleneck -- stops requiring the media to be imported
+   * into Premiere first. Walks a folder, ffprobes each new or changed file (files
+   * whose path + size + mtime already match the index are skipped, so a rescan is
+   * cheap), and writes a JSON index. Entirely local (ffprobe + filesystem); makes
+   * no Premiere request. Honesty contract: needs ffprobe (returns install
+   * guidance if absent) and reports exactly what it scanned, added, updated,
+   * skipped, and could not read.
+   */
+  private async indexFootage(
+    rootPath?: string,
+    recursive = true,
+    extensions?: string[],
+    indexPath?: string,
+    pruneMissing = false,
+  ): Promise<any> {
+    if (!rootPath || !rootPath.trim()) {
+      return { success: false, error: 'Provide rootPath -- the folder to scan for media.' };
+    }
+    if (!isAbsolute(rootPath)) {
+      return { success: false, error: `rootPath must be an absolute path. Got: ${rootPath}` };
+    }
+    try {
+      const st = await fs.stat(rootPath);
+      if (!st.isDirectory()) return { success: false, error: `rootPath is not a folder: ${rootPath}` };
+    } catch {
+      return { success: false, error: `Folder not found or unreadable: ${rootPath}` };
+    }
+
+    const ffprobe = this.ffprobeCmd();
+    const available = await this.checkCommandAvailable(ffprobe, ['-version']);
+    if (!available) {
+      return {
+        success: false,
+        error: `ffprobe ('${ffprobe}') was not found on PATH. index_footage reads media metadata with ffprobe, which ships with ffmpeg. Install ffmpeg (e.g. \`brew install ffmpeg\` on macOS) or set PREMIERE_MCP_FFPROBE_CMD to the binary name, then try again.`,
+      };
+    }
+
+    const resolvedIndexPath = this.footageIndexPath(indexPath);
+    const exts = extensions && extensions.length ? extensions : PremiereProTools.FOOTAGE_EXTENSIONS;
+
+    // Load the existing index (tolerate absence / corruption -- start fresh).
+    let existingEntries: any[] = [];
+    try {
+      const raw = await fs.readFile(resolvedIndexPath, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed?.entries)) existingEntries = parsed.entries;
+    } catch { /* no usable prior index */ }
+
+    const discovered = await this.walkMediaFiles(rootPath, recursive, exts);
+    const plan = this.planFootageScan(existingEntries, discovered);
+
+    // Probe the new/changed files.
+    const byPath = new Map<string, any>(existingEntries.map((e) => [e.path, e]));
+    const errors: Array<{ path: string; error: string }> = [];
+    let added = 0;
+    let updated = 0;
+    for (const file of plan.toProbe) {
+      const probe = await this.ffprobeFile(file.path, ffprobe);
+      if (!probe.success) {
+        errors.push({ path: file.path, error: probe.error || 'ffprobe failed' });
+        continue;
+      }
+      const wasPresent = byPath.has(file.path);
+      byPath.set(file.path, {
+        path: file.path,
+        size: file.size,
+        mtimeMs: file.mtimeMs,
+        summary: probe.summary,
+      });
+      if (wasPresent) updated += 1; else added += 1;
+    }
+
+    // Optionally drop entries whose files are gone; otherwise keep them.
+    let pruned = 0;
+    if (pruneMissing) {
+      for (const p of plan.missing) {
+        if (byPath.delete(p)) pruned += 1;
+      }
+    }
+
+    const mergedEntries = Array.from(byPath.values()).sort((a, b) => String(a.path).localeCompare(String(b.path)));
+    const indexDoc = {
+      version: 1,
+      root: rootPath,
+      entryCount: mergedEntries.length,
+      entries: mergedEntries,
+    };
+
+    // Write the index (verify-after-write: read it back and confirm the count).
+    try {
+      await fs.mkdir(dirname(resolvedIndexPath), { recursive: true });
+      const tmp = `${resolvedIndexPath}.tmp`;
+      await fs.writeFile(tmp, JSON.stringify(indexDoc, null, 2), 'utf8');
+      await fs.rename(tmp, resolvedIndexPath);
+      const back = JSON.parse(await fs.readFile(resolvedIndexPath, 'utf8'));
+      if (!Array.isArray(back?.entries) || back.entries.length !== mergedEntries.length) {
+        return { success: false, error: 'Wrote the footage index but read-back did not match. The index may be on a full or read-only disk.', indexPath: resolvedIndexPath };
+      }
+    } catch (e) {
+      return { success: false, error: `Could not write the footage index at ${resolvedIndexPath}: ${e instanceof Error ? e.message : String(e)}` };
+    }
+
+    return {
+      success: true,
+      indexPath: resolvedIndexPath,
+      root: rootPath,
+      scanned: discovered.length,
+      added,
+      updated,
+      unchanged: plan.unchanged.length,
+      missing: plan.missing.length,
+      pruned,
+      probeErrors: errors.length,
+      errors: errors.slice(0, 20),
+      totalIndexed: mergedEntries.length,
+      note: pruneMissing
+        ? 'Rescan complete. Entries for files no longer on disk were pruned. Query it with search_footage.'
+        : `Rescan complete. ${plan.missing.length} previously-indexed file(s) were not found on disk this pass but were KEPT (pass pruneMissing=true to drop them). Query it with search_footage.`,
+    };
+  }
+
+  /** Run ffprobe on one file and return its distilled summary. */
+  private ffprobeFile(path: string, ffprobe: string): Promise<{ success: boolean; summary?: any; error?: string }> {
+    return new Promise((resolve) => {
+      const argv = ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', path];
+      const proc = spawn(ffprobe, argv);
+      let stdout = '';
+      let stderr = '';
+      proc.stdout.on('data', (c) => { stdout += c.toString(); });
+      proc.stderr.on('data', (c) => { stderr += c.toString(); });
+      proc.on('error', (err) => resolve({ success: false, error: err.message }));
+      proc.on('close', () => {
+        try {
+          resolve({ success: true, summary: this.buildProbeSummary(JSON.parse(stdout)) });
+        } catch {
+          resolve({ success: false, error: stderr.slice(-300) || 'ffprobe returned no parseable metadata' });
+        }
+      });
+    });
+  }
+
+  /**
+   * Query the local footage index built by index_footage. Read-only, entirely
+   * local -- no Premiere request. Filters by filename substring, extension,
+   * codec, duration/resolution/fps ranges, and audio/video presence. Returns
+   * matches (path + distilled technical summary) so an agent can FIND the right
+   * footage before importing it.
+   */
+  private async searchFootage(criteria: any = {}, indexPath?: string, limit = 100): Promise<any> {
+    const resolvedIndexPath = this.footageIndexPath(indexPath);
+    let doc: any;
+    try {
+      doc = JSON.parse(await fs.readFile(resolvedIndexPath, 'utf8'));
+    } catch {
+      return {
+        success: false,
+        error: `No footage index found at ${resolvedIndexPath}. Build one first with index_footage (pass the folder as rootPath), or point indexPath / PREMIERE_MCP_FOOTAGE_INDEX at an existing index.`,
+      };
+    }
+    const entries: any[] = Array.isArray(doc?.entries) ? doc.entries : [];
+    const matches = this.queryFootageIndex(entries, criteria);
+    const capped = matches.slice(0, Math.max(0, limit));
+    return {
+      success: true,
+      indexPath: resolvedIndexPath,
+      totalIndexed: entries.length,
+      matchCount: matches.length,
+      returned: capped.length,
+      truncated: matches.length > capped.length,
+      results: capped,
+    };
+  }
+
   private async probeMedia(mediaPath?: string, projectItemId?: string): Promise<any> {
     let resolvedPath = mediaPath;
     if (!resolvedPath && projectItemId) {
@@ -5500,39 +5885,7 @@ ${this.buildSequenceResolver(sequenceId)}
           });
           return;
         }
-        const streams: any[] = Array.isArray(parsed.streams) ? parsed.streams : [];
-        const video = streams.find((s) => s.codec_type === 'video');
-        const audio = streams.find((s) => s.codec_type === 'audio');
-        const fmt = parsed.format || {};
-        const summary = {
-          durationSeconds: fmt.duration != null ? Number(fmt.duration) : undefined,
-          formatName: fmt.format_name,
-          sizeBytes: fmt.size != null ? Number(fmt.size) : undefined,
-          bitRate: fmt.bit_rate != null ? Number(fmt.bit_rate) : undefined,
-          videoStreamCount: streams.filter((s) => s.codec_type === 'video').length,
-          audioStreamCount: streams.filter((s) => s.codec_type === 'audio').length,
-          video: video
-            ? {
-                codec: video.codec_name,
-                profile: video.profile,
-                width: video.width,
-                height: video.height,
-                pixelFormat: video.pix_fmt,
-                colorSpace: video.color_space,
-                colorRange: video.color_range,
-                bitDepth: video.bits_per_raw_sample != null ? Number(video.bits_per_raw_sample) : undefined,
-                fps: typeof video.r_frame_rate === 'string' ? this.parseFrameRate(video.r_frame_rate) : undefined,
-              }
-            : null,
-          audio: audio
-            ? {
-                codec: audio.codec_name,
-                sampleRate: audio.sample_rate != null ? Number(audio.sample_rate) : undefined,
-                channels: audio.channels,
-                channelLayout: audio.channel_layout,
-              }
-            : null,
-        };
+        const summary = this.buildProbeSummary(parsed);
         resolve({ success: true, mediaPath: resolvedPath, summary, probe: parsed });
       });
     });
