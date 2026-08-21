@@ -115,12 +115,24 @@ describe('easing — sampleEaseKeyframes', () => {
   });
 
   it('eases from a higher to a lower value (fade out)', () => {
-    const kf = sampleEaseKeyframes({ startTime: 1, endTime: 2, startValue: 100, endValue: 0, samples: 2, easing: 'linear' });
+    const kf = sampleEaseKeyframes({
+      startTime: 1,
+      endTime: 2,
+      startValue: 100,
+      endValue: 0,
+      samples: 2,
+      easing: 'linear',
+    });
     expect(kf.map((k) => k.value)).toEqual([100, 50, 0]);
   });
 
   it('bezier overrides a named easing', () => {
-    const kf = sampleEaseKeyframes({ ...base, samples: 2, easing: 'easeOutBounce', bezier: [0, 0, 1, 1] });
+    const kf = sampleEaseKeyframes({
+      ...base,
+      samples: 2,
+      easing: 'easeOutBounce',
+      bezier: [0, 0, 1, 1],
+    });
     expect(kf[1]!.value).toBeCloseTo(50, 3); // straight bezier, not bounce
   });
 
@@ -141,8 +153,12 @@ describe('easing — sampleEaseKeyframes', () => {
   });
 
   it('rejects an unknown easing and a malformed bezier', () => {
-    expect(() => sampleEaseKeyframes({ ...base, samples: 2, easing: 'wobble' })).toThrow(/unknown easing/);
-    expect(() => sampleEaseKeyframes({ ...base, samples: 2, bezier: [0, 0, 1] as never })).toThrow(/\[x1, y1, x2, y2\]/);
+    expect(() => sampleEaseKeyframes({ ...base, samples: 2, easing: 'wobble' })).toThrow(
+      /unknown easing/,
+    );
+    expect(() => sampleEaseKeyframes({ ...base, samples: 2, bezier: [0, 0, 1] as never })).toThrow(
+      /\[x1, y1, x2, y2\]/,
+    );
   });
 
   it('rejects non-finite start/end values', () => {
@@ -178,7 +194,11 @@ describe('bake_keyframe_ease — host tool (mock bridge)', () => {
 
   it('bakes and verifies when every value reads back (echo bridge)', async () => {
     const { tools, executeScript } = toolsWith((script) =>
-      JSON.stringify({ success: true, readback: bakedValues(script), keyCount: bakedValues(script).length }),
+      JSON.stringify({
+        success: true,
+        readback: bakedValues(script),
+        keyCount: bakedValues(script).length,
+      }),
     );
     const res = await tools.executeTool('bake_keyframe_ease', good);
     expect(res.success).toBe(true);
@@ -207,7 +227,11 @@ describe('bake_keyframe_ease — host tool (mock bridge)', () => {
 
   it('passes through a host-side scalar refusal', async () => {
     const { tools } = toolsWith(() =>
-      JSON.stringify({ success: false, error: "bake_keyframe_ease supports scalar parameters only; 'Position' is not scalar (its value is object)." }),
+      JSON.stringify({
+        success: false,
+        error:
+          "bake_keyframe_ease supports scalar parameters only; 'Position' is not scalar (its value is object).",
+      }),
     );
     const res = await tools.executeTool('bake_keyframe_ease', { ...good, paramName: 'Position' });
     expect(res.success).toBe(false);
@@ -222,7 +246,9 @@ describe('bake_keyframe_ease — host tool (mock bridge)', () => {
   });
 
   it('rejects an invalid time span before touching the bridge', async () => {
-    const { tools, executeScript } = toolsWith(() => JSON.stringify({ success: true, readback: [] }));
+    const { tools, executeScript } = toolsWith(() =>
+      JSON.stringify({ success: true, readback: [] }),
+    );
     const res = await tools.executeTool('bake_keyframe_ease', { ...good, endTime: 0 });
     expect(res.success).toBe(false);
     expect(res.error).toMatch(/greater than/);

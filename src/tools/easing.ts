@@ -154,12 +154,7 @@ export function getEasing(name: string): ((p: number) => number) | undefined {
  * (the x axis), it solves for the bezier parameter t, then returns the y value.
  * x1 and x2 must lie in [0, 1] so the curve is a function of x (CSS's rule).
  */
-export function cubicBezier(
-  x1: number,
-  y1: number,
-  x2: number,
-  y2: number,
-): (p: number) => number {
+export function cubicBezier(x1: number, y1: number, x2: number, y2: number): (p: number) => number {
   if (![x1, y1, x2, y2].every((n) => Number.isFinite(n))) {
     throw new Error('cubic-bezier control points must all be finite numbers');
   }
