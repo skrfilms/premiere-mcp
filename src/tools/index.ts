@@ -39,6 +39,13 @@ import {
   shiftCues,
   scaleCues,
 } from './srt.js';
+import {
+  type EaseKeyframe,
+  type EaseSampleOptions,
+  EASING_NAMES,
+  MAX_EASE_SAMPLES,
+  sampleEaseKeyframes,
+} from './easing.js';
 
 export interface MCPTool {
   name: string;
@@ -1169,6 +1176,23 @@ export class PremiereProTools {
           paramName: z.string().describe('The display name of the parameter')
         })
       },
+      {
+        name: 'bake_keyframe_ease',
+        description:
+          'Animates a SCALAR clip parameter (e.g. Opacity, Scale, Rotation) from a start value to an end value along an eased curve, by baking a dense run of keyframes whose values trace the easing shape. This is the honest path to eased motion: Premiere lets script SET a keyframe interpolation type but exposes no getter to read it back, and never exposed the temporal-ease amount to script at all — so a native "set the ease" call cannot be verified. Baked keyframe VALUES are readable back, so every written point is verified. Supports Penner easings and a CSS-style cubic-bezier. Scalar parameters only (multi-dimensional params like Position are refused).',
+        inputSchema: z.object({
+          clipId: z.string().describe('The ID of the clip'),
+          componentName: z.string().default('Opacity').describe('The display name of the component (e.g., "Motion", "Opacity")'),
+          paramName: z.string().default('Opacity').describe('The display name of the scalar parameter to animate (e.g., "Opacity", "Scale", "Rotation")'),
+          startTime: z.number().describe('Clip-local start time in seconds'),
+          endTime: z.number().describe('Clip-local end time in seconds (must be greater than startTime)'),
+          startValue: z.number().describe('Parameter value at startTime'),
+          endValue: z.number().describe('Parameter value at endTime'),
+          easing: z.enum(EASING_NAMES as [string, ...string[]]).default('easeInOutCubic').describe('Named easing curve; ignored when bezier is provided'),
+          bezier: z.array(z.number()).length(4).optional().describe('CSS-style cubic-bezier [x1, y1, x2, y2]; overrides easing. x1 and x2 must be within [0, 1]'),
+          samples: z.number().int().min(1).max(MAX_EASE_SAMPLES).default(24).describe('Number of segments between the endpoints; keyframes written = samples + 1')
+        })
+      },
 
       // Work Area
       {
@@ -2033,6 +2057,8 @@ export class PremiereProTools {
           return await this.removeKeyframe(args.clipId, args.componentName, args.paramName, args.time);
         case 'get_keyframes':
           return await this.getKeyframes(args.clipId, args.componentName, args.paramName);
+        case 'bake_keyframe_ease':
+          return await this.bakeKeyframeEase(args);
 
         // Work Area
         case 'set_work_area':
@@ -9992,6 +10018,134 @@ ${this.buildSequenceResolver(sequenceId)}
       }
     `;
     return await this.bridge.executeScript(script);
+  }
+
+  /**
+   * Bakes an eased value curve for a SCALAR parameter into a dense run of
+   * keyframes, then reads every written value back and verifies it landed.
+   *
+   * Why bake instead of setting a native ease: Premiere's DOM can set a
+   * keyframe interpolation type but offers no getter to confirm it, and the
+   * temporal-ease amount has never been scriptable — so a native ease can't be
+   * verified. Keyframe *values* CAN be read back, so a curve baked from an
+   * easing function is both arbitrary in shape and provable after the fact.
+   */
+  private async bakeKeyframeEase(args: any): Promise<any> {
+    const componentName = String(args.componentName ?? 'Opacity');
+    const paramName = String(args.paramName ?? 'Opacity');
+
+    let keyframes: EaseKeyframe[];
+    try {
+      const opts: EaseSampleOptions = {
+        startTime: Number(args.startTime),
+        endTime: Number(args.endTime),
+        startValue: Number(args.startValue),
+        endValue: Number(args.endValue),
+        samples: Number(args.samples ?? 24),
+      };
+      if (Array.isArray(args.bezier)) {
+        opts.bezier = args.bezier.map(Number) as [number, number, number, number];
+      } else if (args.easing != null) {
+        opts.easing = String(args.easing);
+      }
+      keyframes = sampleEaseKeyframes(opts);
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) };
+    }
+
+    const times = keyframes.map((k) => k.time);
+    const values = keyframes.map((k) => k.value);
+
+    const script = `
+      try {
+        var info = __findClip(${JSON.stringify(args.clipId)});
+        if (!info) return JSON.stringify({ success: false, error: "Clip not found" });
+        var clip = info.clip;
+        var param = null;
+        for (var i = 0; i < clip.components.numItems; i++) {
+          var comp = clip.components[i];
+          if (comp.displayName === ${JSON.stringify(componentName)}) {
+            for (var j = 0; j < comp.properties.numItems; j++) {
+              if (comp.properties[j].displayName === ${JSON.stringify(paramName)}) {
+                param = comp.properties[j];
+                break;
+              }
+            }
+            if (param) break;
+          }
+        }
+        if (!param) return JSON.stringify({ success: false, error: "Parameter " + ${JSON.stringify(paramName)} + " not found in component " + ${JSON.stringify(componentName)} });
+        if (param.areKeyframesSupported && !param.areKeyframesSupported()) {
+          return JSON.stringify({ success: false, error: "Parameter " + ${JSON.stringify(paramName)} + " does not support keyframes" });
+        }
+        var probe = param.getValue();
+        if (typeof probe !== "number") {
+          return JSON.stringify({ success: false, error: "bake_keyframe_ease supports scalar parameters only; '" + ${JSON.stringify(paramName)} + "' is not scalar (its value is " + (typeof probe) + "). Use a scalar parameter such as Opacity, Scale, or Rotation." });
+        }
+        var times = ${JSON.stringify(times)};
+        var values = ${JSON.stringify(values)};
+        param.setTimeVarying(true);
+        for (var w = 0; w < times.length; w++) {
+          param.addKey(times[w]);
+          param.setValueAtKey(times[w], values[w], true);
+        }
+        var readback = [];
+        for (var r = 0; r < times.length; r++) {
+          readback.push(param.getValueAtKey(times[r]));
+        }
+        return JSON.stringify({ success: true, readback: readback, keyCount: times.length });
+      } catch (e) {
+        return JSON.stringify({ success: false, error: e.toString() });
+      }
+    `;
+
+    const raw = await this.bridge.executeScript(script);
+    const res = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!res || res.success !== true) {
+      return { success: false, error: res?.error ?? 'bake_keyframe_ease failed in host', raw: res };
+    }
+
+    // Verify-after-write: every written value must read back within tolerance.
+    const readback: unknown[] = Array.isArray(res.readback) ? res.readback : [];
+    const mismatches: Array<{ index: number; time: number; expected: number; actual: unknown }> = [];
+    for (let i = 0; i < values.length; i++) {
+      const expected = values[i] as number;
+      const actual = readback[i];
+      const tol = Math.max(0.01, Math.abs(expected) * 1e-4);
+      if (typeof actual !== 'number' || Math.abs(actual - expected) > tol) {
+        mismatches.push({ index: i, time: times[i] as number, expected, actual });
+      }
+    }
+
+    const verifiedCount = values.length - mismatches.length;
+    if (mismatches.length > 0) {
+      return {
+        success: false,
+        verified: false,
+        error: `Wrote ${values.length} eased keyframes but ${mismatches.length} did not read back at the requested value (Premiere may have clamped values outside the parameter's valid range).`,
+        componentName,
+        paramName,
+        keyCount: values.length,
+        verifiedCount,
+        mismatches: mismatches.slice(0, 10),
+      };
+    }
+
+    return {
+      success: true,
+      verified: true,
+      message: `Baked and verified ${values.length} keyframes tracing ${args.bezier ? 'a cubic-bezier' : (args.easing ?? 'easeInOutCubic')} ease.`,
+      componentName,
+      paramName,
+      easing: args.bezier ? 'cubic-bezier' : (args.easing ?? 'easeInOutCubic'),
+      bezier: args.bezier ?? undefined,
+      startTime: times[0],
+      endTime: times[times.length - 1],
+      startValue: values[0],
+      endValue: values[values.length - 1],
+      keyCount: values.length,
+      verifiedCount,
+    };
   }
 
   // Work Area Implementation
