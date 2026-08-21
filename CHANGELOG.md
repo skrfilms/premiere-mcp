@@ -60,6 +60,14 @@ result on disk before reporting success:
   severity, the track and time, and a plain-English message; the checks and
   thresholds are configurable and the analysis is a pure, independently tested
   function. Changes nothing — it reports.
+- Added `diff_sequences`: a read-only version diff. Walks two sequences and
+  classifies every difference between them — clips `added`, `removed`, `moved`
+  (same clip, new start time) or `retimed` (same clip, new duration) — so an
+  agent can *see* exactly what an edit did rather than trusting a call returned.
+  Pairs with the recovery checkpoints (diff a restored snapshot against the
+  current cut) and with `lint_timeline` (find defects, then attribute them to a
+  change). Clips are matched within a track by name with a half-frame tolerance;
+  the comparison is a pure, independently tested function.
 - Added a recovery boundary — `create_recovery_checkpoint`,
   `list_recovery_checkpoints`, `restore_recovery_checkpoint` — that snapshots a
   sequence before risky edits. The automatic checkpoint taken before
@@ -72,7 +80,7 @@ result on disk before reporting success:
 - Enriched the expanded-tool catalogue with real input schemas so every
   advertised tool exposes a typed, discoverable argument shape.
 
-Catalogue grew to `293` tools.
+Catalogue grew to `294` tools.
 
 ## [1.2.0] - 2026-08-17
 

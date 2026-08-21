@@ -166,9 +166,14 @@ chip that hides the NDI/Syphon/Spout acronyms behind the Doctor.
    taps, `probeOnly` mode, receiver env overrides. Next: wire a live NDI/Syphon/Spout
    receiver so the real-time taps flip to available.
 2. Timeline **QC/lint** (flash frames, gaps, mixed fps, dupes, level/safe-zone) — the
-   "layout lint" half of the feedback loop; parse the FCPXML we already export.
+   "layout lint" half of the feedback loop. ✅ **SHIPPED** as `lint_timeline`
+   (2026-08-21): pure, independently tested analyzer over a shared sequence walk;
+   flags gaps, flash frames, overlaps, leading gap, mixed frame rates; configurable
+   checks/thresholds; read-only.
 3. **Capability self-probe** — extend `get_capabilities` to live-test per-tool on the build.
-4. **Speed / time-remap** via honest ffmpeg bake-to-clip.
+4. **Speed / time-remap** via honest ffmpeg bake-to-clip. ✅ **SHIPPED** as
+   `bake_speed_change` (2026-08-21): frame-accurate constant-speed bake (`setpts` +
+   chained pitch-preserving `atempo`), verify-after-write, install guidance.
 5. NDI tap (adds live audio + monitoring) → Syphon/Spout taps.
 
 **Tier 2 — cheap/novel**
@@ -178,7 +183,11 @@ chip that hides the NDI/Syphon/Spout acronyms behind the Doctor.
 
 **Tier 3 — infra/positioning**
 - Remote HTTP/SSE + auth; non-destructive self-healing `doctor` (Win + mac);
-  loudness normalization; sequence/version diff; immersive/HDR (Rec2100) delivery.
+  loudness normalization (✅ **SHIPPED** as `normalize_loudness`, 2026-08-21:
+  two-pass EBU R128 `loudnorm`, returns measured input loudness); sequence/version
+  diff (✅ **SHIPPED** early as `diff_sequences`, 2026-08-21: read-only
+  added/removed/moved/retimed classification over a shared sequence walk);
+  immersive/HDR (Rec2100) delivery.
 - The Liquid-Glass panel build (CEP hero + UXP twin).
 
 **Strategic**

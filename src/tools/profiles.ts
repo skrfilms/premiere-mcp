@@ -42,7 +42,7 @@ export const PROFILES: Record<string, string[]> = {
     'get_*', 'list_*', 'read_*', 'find_*', 'search_*', 'inspect_*',
     'is_*', 'check_*', 'detect_*',
     // non-mutating media analysis that doesn't fit the verb-prefix globs
-    'probe_media', 'capture_program_output', 'lint_timeline',
+    'probe_media', 'capture_program_output', 'lint_timeline', 'diff_sequences',
   ],
 
   // The everyday editorial core: sequences, clips, timeline, bins, markers,
