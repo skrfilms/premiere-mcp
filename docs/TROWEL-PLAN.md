@@ -183,8 +183,13 @@ chip that hides the NDI/Syphon/Spout acronyms behind the Doctor.
 
 **Tier 2 — cheap/novel**
 - ElevenLabs TTS; caption CRUD (add/update/remove/import/export) + native `transcribeSequence`;
-  `import_ae_comps`; edit-plan-with-SHA256-token; keyframe easing; local persistent
-  footage index + frame vision (footage *discovery* is the real bottleneck).
+  `import_ae_comps`; edit-plan-with-SHA256-token; keyframe easing; frame vision.
+- Local persistent footage index (footage *discovery* is the real bottleneck).
+  ✅ **SHIPPED** (2026-08-21) as `index_footage` + `search_footage`: walks a folder,
+  ffprobes each media file for real metadata, persists an incremental JSON index
+  (unchanged files not re-probed; atomic write + read-back verify), and searches it
+  by name/extension/codec/duration/resolution/fps/audio-video-presence — all before
+  any import into Premiere. Host-independent; pure scan-planner + query filter, tested.
 
 **Tier 3 — infra/positioning**
 - Remote HTTP/SSE + auth; non-destructive self-healing `doctor` (Win + mac);

@@ -68,6 +68,21 @@ result on disk before reporting success:
   current cut) and with `lint_timeline` (find defects, then attribute them to a
   change). Clips are matched within a track by name with a half-frame tolerance;
   the comparison is a pure, independently tested function.
+- Added a local footage index — `index_footage` and `search_footage` — so an
+  agent can discover media on disk *before* importing it into Premiere. Premiere
+  can only search project items it has already ingested; this walks a folder,
+  ffprobes each media file for real technical metadata (codec, resolution, frame
+  rate, duration, audio/video stream presence), and persists a JSON index
+  (`~/.premiere-mcp/footage-index.json` by default, overridable via
+  `PREMIERE_MCP_FOOTAGE_INDEX` or a per-call `indexPath`). The scan is
+  incremental — files unchanged by size and mtime are not re-probed — and the
+  index is written atomically then read back to confirm it landed before
+  reporting success. `search_footage` filters the index by filename substring,
+  extension, codec, duration/resolution/frame-rate ranges and audio/video
+  presence, all ANDed, capped by `limit` with honest truncation reporting. The
+  scan planner and the query filter are pure, independently tested functions.
+  Requires `ffprobe`; returns install guidance instead of failing silently when
+  it is absent, and rejects a non-absolute or missing `rootPath` before writing.
 - Extended `get_capabilities` with an opt-in local-backend self-probe
   (`probeLocalTools: true`): spawn-probes ffmpeg, ffprobe and the Whisper CLI, and
   reports the render-truth capture taps, so an agent or human learns which
@@ -88,7 +103,7 @@ result on disk before reporting success:
 - Enriched the expanded-tool catalogue with real input schemas so every
   advertised tool exposes a typed, discoverable argument shape.
 
-Catalogue grew to `294` tools.
+Catalogue grew to `296` tools.
 
 ## [1.2.0] - 2026-08-17
 
