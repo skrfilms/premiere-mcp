@@ -301,7 +301,7 @@ All `309` advertised tools have an implementation. Tool schemas are available th
 | Tools | What they do |
 | :--- | :--- |
 | `list_available_effects` / `list_clip_effects` / `get_effect_properties` | Discover installed effects, applied effects, and their properties. |
-| `apply_effect` / `remove_effect` / `remove_effect_by_name` / `remove_all_effects` | Add or remove visual/audio effect components. `apply_effect` identifies and reads back the new component, reports its `matchName`, and accepts an optional `expectedMatchName` identity guard. |
+| `apply_effect` / `remove_effect` / `remove_effect_by_name` / `remove_all_effects` | Add or remove visual/audio effect components. `apply_effect` identifies and reads back the new component, reports its `matchName`, and accepts an optional `expectedMatchName` identity guard. Removal goes through QE `removeEffects()` (the only working path) and verifies by diffing the component list: it is all-or-nothing, so `remove_effect` only succeeds when the target is the sole user effect, and both preserve intrinsic Motion/Opacity/Volume and Lumetri Color (reported in `preservedLumetri`). |
 | `apply_video_effect` | Add a video effect and verify it by diffing the clip's components, reporting the `matchName` that actually landed. Because effects resolve by display name, a stock name like "Gaussian Blur" can silently resolve to a third-party plugin; pass `expected_match_name` to enforce identity and roll the add back (when safe) on a mismatch. |
 | `batch_apply_effect` / `copy_effects_between_clips` / `copy_effect_values` | Apply or copy effect treatments across clips. |
 | `set_effect_property` / `set_color_value` / `set_blend_mode` | Change supported effect parameters, color values, and blend modes. |
@@ -351,7 +351,7 @@ All `309` advertised tools have an implementation. Tool schemas are available th
 | `export_sequence` / `add_to_render_queue` | Queue a sequence through Adobe Media Encoder using a real preset path or exact preset name. |
 | `get_render_queue_status` / `start_batch_encode` | Report queue-monitoring availability or start supported batch encoding. |
 | `get_timeline_render_status` | Report the timeline's render-bar state (green rendered / yellow real-time / red drop-risk / empty), with timed segments, totals, and a rendered fraction. Reads the QE DOM and addresses the sequence by guid. Distinct from `get_render_queue_status` (Media Encoder). |
-| `export_frame` / `capture_frame` | Write a still image from a sequence or capture a frame. |
+| `export_frame` / `capture_frame` | Write a still image from a sequence at a given time. Formats verified against Premiere's QE exporters: png, jpg/jpeg, tiff/tif, dpx, tga/targa. Hands Premiere the path stem so no double extension is written, and verifies the file landed on disk before reporting the real path. |
 | `export_as_fcp_xml` / `export_aaf` / `export_omf` | Export supported interchange formats. |
 | `encode_project_item` / `encode_file` / `export_as_project` | Encode a source item/file or export a project representation. |
 | `manage_proxies` / `has_proxy` / `detach_proxy` | Inspect, attach, or detach proxies. |
