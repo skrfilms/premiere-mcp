@@ -4,7 +4,7 @@
 
 **Operate local Adobe Premiere Pro projects through MCP.**
 
-289 tools, 13 context resources, and 10 guided prompts for Codex, Claude Code, Claude Desktop, and other MCP clients. CEP is the supported production bridge; UXP remains experimental.
+305 tools, 13 context resources, and 10 guided prompts for Codex, Claude Code, Claude Desktop, and other MCP clients. CEP is the supported production bridge; UXP remains experimental.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-5fd3c6.svg)](LICENSE.md)
 [![Node.js](https://img.shields.io/badge/Node.js-20%2B-339933.svg)](https://nodejs.org/)
@@ -122,9 +122,9 @@ This repository is currently validated for:
 - the included Windows installer path for GitHub Copilot in VS Code and Claude Desktop config
 - manual MCP registration for Codex, Claude Code, and similar MCP clients
 
-Current catalog status as of August 20, 2026:
+Current catalog status as of August 21, 2026:
 
-- `289` MCP tools are exposed for AI-driven video editing
+- `305` MCP tools are exposed for AI-driven video editing
 - coverage spans project setup, media ingest, bins, sequences, timeline editing, transitions, effects, keyframes, captions, markers, metadata, proxies, multicam, color, audio, exports, and higher-level assembly workflows
 - the catalog includes practical agent workflows such as product-spot assembly, motion-graphics demos, timeline razoring, caption reads, audio ducking, scene edit detection, EDL import, export readiness validation, and linked audio/video operations
 - local-compute tools that Premiere's scripting API cannot provide: `detect_silence` (ffmpeg), `transcribe_to_srt` (local OpenAI Whisper speech-to-text), `probe_media` (ffprobe ground-truth metadata), and `generate_scope` (ffmpeg waveform / vectorscope / histogram / RGB-parade images) — each probes for its binary and returns install guidance instead of failing silently
@@ -133,7 +133,7 @@ Current catalog status as of August 20, 2026:
 
 Most recent completed local live validation:
 
-- `289` active tools are exposed; `get_capabilities` reports local installation and optional live connection state, while `verify_premiere_connection` is the canonical read-only bridge and host readiness check
+- `305` active tools are exposed; `get_capabilities` reports local installation and optional live connection state, while `verify_premiere_connection` is the canonical read-only bridge and host readiness check
 - `0` known parked or placeholder tools are advertised
 - `import_ae_comps` is intentionally not advertised because Premiere returned `false` for real `.aep` fixtures in this environment and a generic `.aep` import can wedge the CEP bridge
 
@@ -233,7 +233,7 @@ For a real-host sweep, use a disposable Premiere project and run `node scripts/l
 
 ## Tools
 
-All `289` advertised tools have an implementation. Tool schemas are available through MCP discovery; this catalog explains the editing surface in human terms. Start with `verify_premiere_connection`, then inspect the project before asking an agent to mutate it.
+All `305` advertised tools have an implementation. Tool schemas are available through MCP discovery; this catalog explains the editing surface in human terms. Start with `verify_premiere_connection`, then inspect the project before asking an agent to mutate it.
 
 ### Discovery and project inspection
 
@@ -292,6 +292,7 @@ All `289` advertised tools have an implementation. Tool schemas are available th
 | `trim_clip` / `roll_edit` / `slide_edit` / `slip_edit` | Adjust edit points and clip content timing. Structural QE edits are read back rather than trusted blindly. |
 | `lift_selection` / `extract_selection` / `nest_clips` / `unnest_sequence` | Lift/extract a selected range or create/remove nests. |
 | `duplicate_clip` / `replace_clip` / `enable_disable_clip` / `freeze_frame` | Duplicate, replace, enable, or freeze timeline material. |
+| `speed_change` / `bake_speed_change` | Change clip speed/duration. `bake_speed_change` renders a true constant-speed clip on disk with ffmpeg where the host cannot honor a scripted remap, then verifies the output. |
 | `link_audio_video` / `link_selection` / `unlink_selection` / `get_linked_items` | Manage audio/video link relationships. |
 | `undo` / `redo` / `multiple_undo` | Revert or reapply recent Premiere operations. |
 
@@ -309,6 +310,7 @@ All `289` advertised tools have an implementation. Tool schemas are available th
 | `set_clip_position` / `set_clip_scale` / `set_clip_rotation` / `set_clip_anchor_point` | Address individual Motion transform values. |
 | `add_keyframe` / `get_keyframes` / `remove_keyframe` / `remove_keyframe_range` | Create, inspect, and remove parameter keyframes. |
 | `set_keyframe_interpolation` / `get_value_at_time` | Set interpolation or query a parameter value at a given time. |
+| `bake_keyframe_ease` | Animate a scalar parameter (opacity, scale, rotation, volume) along any of 30 Penner easings or a CSS cubic-bezier, baked as a dense run of value keyframes. Premiere exposes no way to read a keyframe's ease back, so the shape is baked into readable values and every written point is verified — a genuine eased move that cannot silently misland. |
 
 ### Audio, transitions, and captions
 
@@ -323,6 +325,8 @@ All `289` advertised tools have an implementation. Tool schemas are available th
 | `add_transition` / `add_transition_to_clip` / `batch_add_transitions` | Add one or many transitions. Results distinguish verified changes from accepted-but-unverified host responses. |
 | `create_caption_track` | Create a caption track from an imported subtitle project item, such as an SRT. Pair with `transcribe_to_srt` → `import_media` to caption a clip end to end. |
 | `read_sequence_captions` | Reports scripting-visible caption data and explicitly flags that Premiere's DOM often cannot read existing caption text. |
+| `read_srt` / `validate_srt` / `write_srt` | Read, QC, and write `.srt` subtitle files on disk. Because Premiere's DOM often cannot read caption text back, editing the `.srt` before ingest is the honest caption path. |
+| `update_srt_cue` / `insert_srt_cue` / `remove_srt_cue` / `shift_srt_timing` | Full cue-level CRUD and bulk timing shifts on an `.srt`, verified against the re-read file. |
 
 ### Markers, selection, navigation, and playback
 
@@ -365,6 +369,7 @@ All `289` advertised tools have an implementation. Tool schemas are available th
 | `get_workspaces` / `set_workspace` | Inspect and switch Premiere workspace layouts. |
 | `create_bars_and_tone` / `set_transcode_on_ingest` / `set_scratch_disk_path` | Generate utility media or manage ingest and scratch-disk behavior. |
 | `execute_extendscript` / `evaluate_expression` / `inspect_dom_object` | Advanced diagnostic and scripting operations. Use only with trusted inputs and explicit user intent. |
+| `reflect_dom_object` | Enumerate the callable API surface of any DOM object via ExtendScript's `.reflect` interface — every method with its return type and argument names/types, plus properties — revealing native methods `inspect_dom_object` cannot see. Roots `qe.*` paths at the QE engine (auto-enabled). Read-only; pairs with `execute_extendscript` to discover a hidden capability and then drive it. |
 
 ### Additional supported operations
 
