@@ -580,7 +580,38 @@ describe('PremiereProTools', () => {
         expect.arrayContaining(['all', 'read-only', 'core']),
       );
       expect(result.liveConnection.checked).toBe(false);
+      // Local backends are not spawn-probed unless asked (keeps discovery fast).
+      expect(result.localBackends.probed).toBe(false);
       expect(mockBridge.executeScript).not.toHaveBeenCalled();
+    });
+
+    it('live-probes local backends when probeLocalTools is true', async () => {
+      const result = await tools.executeTool('get_capabilities', { probeLocalTools: true });
+
+      expect(result.success).toBe(true);
+      // No Premiere request is made even while probing local CLIs.
+      expect(mockBridge.executeScript).not.toHaveBeenCalled();
+      const backends = result.localBackends;
+      expect(backends.probed).not.toBe(false);
+      const names = backends.dependencies.map((d: { name: string }) => d.name);
+      expect(names).toEqual(expect.arrayContaining(['ffmpeg', 'ffprobe', 'whisper']));
+      for (const dep of backends.dependencies) {
+        expect(typeof dep.available).toBe('boolean');
+        expect(Array.isArray(dep.unlocks)).toBe(true);
+        expect(typeof dep.envOverride).toBe('string');
+        // Honesty: an unavailable backend must carry install guidance, an
+        // available one must not pretend it needs installing.
+        if (dep.available) {
+          expect(dep.install).toBeUndefined();
+        } else {
+          expect(typeof dep.install).toBe('string');
+          expect(dep.install.length).toBeGreaterThan(0);
+        }
+      }
+      // The capture taps are reported here too (render tap is always present).
+      expect(Array.isArray(backends.captureTaps)).toBe(true);
+      expect(backends.captureTaps.some((t: { tap: string }) => t.tap === 'render')).toBe(true);
+      expect(backends.summary.total).toBe(backends.dependencies.length);
     });
 
     it('can include an explicit read-only live connection check in capabilities', async () => {

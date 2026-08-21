@@ -360,9 +360,10 @@ export class PremiereProTools {
       },
       {
         name: 'get_capabilities',
-        description: 'Reports the local MCP runtime, installed bridge status, tool/resource/prompt catalog sizes, and supported versus experimental integration surfaces. Set checkConnection to true to run the read-only live Premiere connection check; otherwise no Premiere request is made.',
+        description: 'Reports the local MCP runtime, installed bridge status, tool/resource/prompt catalog sizes, and supported versus experimental integration surfaces. Set checkConnection to true to run the read-only live Premiere connection check; otherwise no Premiere request is made. Set probeLocalTools to true to live-test the local backends this build relies on for capabilities Premiere cannot provide -- ffmpeg, ffprobe, the Whisper speech-to-text CLI, and the render-truth capture taps -- so you know which tools will actually work on THIS machine before calling them.',
         inputSchema: z.object({
-          checkConnection: z.boolean().optional().describe('When true, run verify_premiere_connection and include its live result. Defaults to false so capability discovery is fast and non-invasive.')
+          checkConnection: z.boolean().optional().describe('When true, run verify_premiere_connection and include its live result. Defaults to false so capability discovery is fast and non-invasive.'),
+          probeLocalTools: z.boolean().optional().describe('When true, spawn-probe the local ffmpeg/ffprobe/Whisper backends and the capture taps, reporting availability, the env override, what each unlocks, and install guidance when absent. Defaults to false.')
         })
       },
       {
@@ -1665,7 +1666,7 @@ export class PremiereProTools {
         case 'verify_premiere_connection':
           return await this.verifyPremiereConnection();
         case 'get_capabilities':
-          return await this.getCapabilities(args.checkConnection);
+          return await this.getCapabilities(args.checkConnection, args.probeLocalTools);
         case 'validate_project_for_export':
           return await this.validateProjectForExport(args.sequenceId, args.outputPath, args.presetPath, args.requireNonEmptyTimeline, args.checkGaps);
         case 'get_encoder_presets':
@@ -2236,7 +2237,70 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(script);
   }
 
-  private async getCapabilities(checkConnection = false): Promise<any> {
+  /**
+   * Live-probe the local, non-Premiere backends this build relies on for the
+   * capabilities Premiere's own API cannot provide (ffmpeg/ffprobe escape
+   * hatches, the Whisper speech-to-text, and the render-truth capture taps). Each
+   * dependency is spawn-probed on THIS machine so an agent or human learns which
+   * tools will actually work before calling them, rather than discovering it at
+   * failure time. Reports the resolved command, its env override, what each
+   * dependency unlocks, and per-dependency install guidance when absent. The CLI
+   * probes run concurrently and are killed the instant they launch (speed).
+   */
+  private async probeLocalBackends(): Promise<any> {
+    const ffmpeg = this.ffmpegCmd();
+    const ffprobe = this.ffprobeCmd();
+    const whisper = (process.env.PREMIERE_MCP_WHISPER_CMD || 'whisper').trim() || 'whisper';
+
+    const [ffmpegAvailable, ffprobeAvailable, whisperAvailable] = await Promise.all([
+      this.checkCommandAvailable(ffmpeg, ['-version']),
+      this.checkCommandAvailable(ffprobe, ['-version']),
+      // Whisper imports torch on --help (slow); the probe is killed on spawn, so this is cheap.
+      this.checkCommandAvailable(whisper),
+    ]);
+
+    const dependencies = [
+      {
+        name: 'ffmpeg',
+        command: ffmpeg,
+        available: ffmpegAvailable,
+        envOverride: 'PREMIERE_MCP_FFMPEG_CMD',
+        unlocks: ['generate_scope', 'bake_speed_change', 'normalize_loudness', 'detect_silence', 'capture_program_output (NDI/Syphon/Spout taps)'],
+        install: ffmpegAvailable ? undefined : 'Install ffmpeg and put it on PATH (macOS: `brew install ffmpeg`; Windows: `winget install Gyan.FFmpeg`), or set PREMIERE_MCP_FFMPEG_CMD to its full path.',
+      },
+      {
+        name: 'ffprobe',
+        command: ffprobe,
+        available: ffprobeAvailable,
+        envOverride: 'PREMIERE_MCP_FFPROBE_CMD',
+        unlocks: ['probe_media'],
+        install: ffprobeAvailable ? undefined : 'ffprobe ships with ffmpeg (macOS: `brew install ffmpeg`; Windows: `winget install Gyan.FFmpeg`), or set PREMIERE_MCP_FFPROBE_CMD to its full path.',
+      },
+      {
+        name: 'whisper',
+        command: whisper,
+        available: whisperAvailable,
+        envOverride: 'PREMIERE_MCP_WHISPER_CMD',
+        unlocks: ['transcribe_to_srt'],
+        install: whisperAvailable ? undefined : 'Install the OpenAI Whisper CLI with `pip install -U openai-whisper` (also needs ffmpeg on PATH), or set PREMIERE_MCP_WHISPER_CMD to the binary name.',
+      },
+    ];
+
+    const availableCount = dependencies.filter((d) => d.available).length;
+    return {
+      dependencies,
+      captureTaps: this.probeCaptureTaps(),
+      summary: {
+        available: availableCount,
+        total: dependencies.length,
+        note: availableCount === dependencies.length
+          ? 'All local backends are available on this machine.'
+          : `${availableCount}/${dependencies.length} local backends available; the rest return install guidance instead of faking success.`,
+      },
+    };
+  }
+
+  private async getCapabilities(checkConnection = false, probeLocalTools = false): Promise<any> {
     const currentPlatform = platform();
     const cepExtensionPath = currentPlatform === 'darwin'
       ? join(homedir(), 'Library', 'Application Support', 'Adobe', 'CEP', 'extensions', 'MCPBridgeCEP')
@@ -2274,6 +2338,13 @@ ${this.buildSequenceResolver(sequenceId)}
       }
     }
 
+    const localBackends = probeLocalTools
+      ? await this.probeLocalBackends()
+      : {
+          probed: false,
+          note: 'Call get_capabilities with probeLocalTools=true to live-test ffmpeg/ffprobe/Whisper and the capture taps on this machine.',
+        };
+
     return {
       success: true,
       runtime: {
@@ -2281,6 +2352,7 @@ ${this.buildSequenceResolver(sequenceId)}
         transport: 'stdio',
         bridgeDirectory: process.env.PREMIERE_TEMP_DIR || null
       },
+      localBackends,
       bridge: {
         cep: {
           status: cepInstalled ? 'installed' : 'not_detected',

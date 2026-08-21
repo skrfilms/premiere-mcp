@@ -171,6 +171,11 @@ chip that hides the NDI/Syphon/Spout acronyms behind the Doctor.
    flags gaps, flash frames, overlaps, leading gap, mixed frame rates; configurable
    checks/thresholds; read-only.
 3. **Capability self-probe** — extend `get_capabilities` to live-test per-tool on the build.
+   ✅ **SHIPPED** (2026-08-21): `get_capabilities({probeLocalTools:true})` spawn-probes
+   ffmpeg/ffprobe/Whisper + reports the capture taps; each dependency reports command,
+   env override, what it unlocks, and install guidance when absent. Off by default (fast
+   path, no Premiere request). Next: extend to a per-tool host-verified matrix once a live
+   host is wired in CI.
 4. **Speed / time-remap** via honest ffmpeg bake-to-clip. ✅ **SHIPPED** as
    `bake_speed_change` (2026-08-21): frame-accurate constant-speed bake (`setpts` +
    chained pitch-preserving `atempo`), verify-after-write, install guidance.
