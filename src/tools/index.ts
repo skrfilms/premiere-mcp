@@ -24,6 +24,21 @@ import {
   SEQUENCE_DESTRUCTIVE_TOOLS,
   autoCheckpointEnabled,
 } from './recovery.js';
+import {
+  type SrtCue,
+  type SrtValidationIssue,
+  parseSrt,
+  serializeSrt,
+  formatTimecode,
+  coerceSeconds,
+  validateCues,
+  cueErrors,
+  insertCue,
+  updateCue,
+  removeCue,
+  shiftCues,
+  scaleCues,
+} from './srt.js';
 
 export interface MCPTool {
   name: string;
@@ -1283,9 +1298,81 @@ export class PremiereProTools {
       },
       {
         name: 'read_sequence_captions',
-        description: 'Reads caption tracks of a sequence, returning each caption clip as { start, end, text } in seconds. IMPORTANT: Premiere Pro exposes no caption-read API in its scripting DOM, so in practice this returns trackCount:0 / captions:[] even when the sequence HAS a working caption track. The response field captionReadSupported:false (plus note) signals this — a 0 result does NOT mean the sequence has no captions. To read cue text/timing, parse the source .srt file directly instead.',
+        description: 'Reads caption tracks of a sequence, returning each caption clip as { start, end, text } in seconds. IMPORTANT: Premiere Pro exposes no caption-read API in its scripting DOM, so in practice this returns trackCount:0 / captions:[] even when the sequence HAS a working caption track. The response field captionReadSupported:false (plus note) signals this — a 0 result does NOT mean the sequence has no captions. To read cue text/timing, parse the source .srt file directly instead (see read_srt).',
         inputSchema: z.object({
           sequenceId: z.string().optional().describe('Optional sequence ID. Defaults to the active sequence.')
+        })
+      },
+      // SRT subtitle CRUD — the honest way to READ and EDIT captions. Premiere's
+      // DOM can ingest an .srt (create_caption_track) but exposes NO read/update/
+      // delete API for caption tracks, so all caption editing happens on the .srt
+      // file itself, on disk, before (re-)ingest. These tools are host-independent
+      // (no Premiere request) and verify every write by reading it back.
+      {
+        name: 'read_srt',
+        description: 'Reads and parses an .srt subtitle file off disk into structured cues [{ index, start, end, startTimecode, endTimecode, text }] with start/end in seconds. This is the caption READ path Premiere itself cannot provide (read_sequence_captions is blocked by an Adobe DOM limitation). Robust to a UTF-8 BOM, CRLF/CR/LF endings, a missing index line, and WebVTT-style position tokens. Also returns a validation report (overlaps, zero-duration cues, empty text, out-of-order) and any malformed blocks it had to skip — nothing is dropped silently. Entirely local; no Premiere request.',
+        inputSchema: z.object({
+          srtPath: z.string().describe('Absolute path to the .srt file to read.')
+        })
+      },
+      {
+        name: 'validate_srt',
+        description: 'Reads an .srt file and returns ONLY a QC report on its cues without modifying anything: structural errors (negative time, zero/negative-duration cues) and quality warnings (overlapping cues, out-of-chronological-order starts, empty text), plus a count of malformed blocks. Read-only; no Premiere request. Use before create_caption_track to catch captions that would render wrong.',
+        inputSchema: z.object({
+          srtPath: z.string().describe('Absolute path to the .srt file to validate.')
+        })
+      },
+      {
+        name: 'write_srt',
+        description: 'Writes a complete .srt file from a full list of cues, replacing any existing file at the path. Cues are renumbered sequentially from 1 and written in canonical `HH:MM:SS,mmm --> HH:MM:SS,mmm` form. Refuses to write cues with structural errors (e.g. end not after start) unless allowInvalid=true, and always verifies by reading the file back and re-parsing it. Creates parent directories as needed. Host-independent; no Premiere request. Pair with import_media + create_caption_track to lay the result onto a sequence.',
+        inputSchema: z.object({
+          srtPath: z.string().describe('Absolute path to write the .srt to (overwritten if it exists).'),
+          cues: z.array(z.object({
+            start: z.union([z.number(), z.string()]).describe('Cue start: seconds (number) or an "HH:MM:SS,mmm" timecode string.'),
+            end: z.union([z.number(), z.string()]).describe('Cue end: seconds (number) or an "HH:MM:SS,mmm" timecode string.'),
+            text: z.string().describe('Cue text; may contain newlines for multi-line captions.')
+          })).describe('The full ordered list of cues to write. An empty list writes an empty file.'),
+          allowInvalid: z.boolean().optional().describe('When true, write even if validation finds structural errors (they are still reported). Default false = refuse and report the errors.')
+        })
+      },
+      {
+        name: 'update_srt_cue',
+        description: 'Edits one cue in an existing .srt file, addressed by its 1-based index, changing any of start / end / text (omitted fields are left unchanged). Reads the file, applies the change, and writes it back with read-back verification. Returns the before/after of the edited cue. Host-independent; no Premiere request.',
+        inputSchema: z.object({
+          srtPath: z.string().describe('Absolute path to the .srt file to edit.'),
+          index: z.number().int().describe('1-based cue number to edit (as shown by read_srt).'),
+          start: z.union([z.number(), z.string()]).optional().describe('New start: seconds or "HH:MM:SS,mmm". Omit to keep.'),
+          end: z.union([z.number(), z.string()]).optional().describe('New end: seconds or "HH:MM:SS,mmm". Omit to keep.'),
+          text: z.string().optional().describe('New cue text. Omit to keep.')
+        })
+      },
+      {
+        name: 'insert_srt_cue',
+        description: 'Inserts a new cue into an existing .srt file. The cue is placed in chronological order by its start time (the file stays time-sorted) and all cues are renumbered. Reads, inserts, and writes back with read-back verification. Host-independent; no Premiere request.',
+        inputSchema: z.object({
+          srtPath: z.string().describe('Absolute path to the .srt file to edit.'),
+          start: z.union([z.number(), z.string()]).describe('Cue start: seconds or "HH:MM:SS,mmm".'),
+          end: z.union([z.number(), z.string()]).describe('Cue end: seconds or "HH:MM:SS,mmm".'),
+          text: z.string().describe('Cue text; may contain newlines.')
+        })
+      },
+      {
+        name: 'remove_srt_cue',
+        description: 'Removes one cue from an existing .srt file, addressed by its 1-based index, and renumbers the rest. Reads, removes, and writes back with read-back verification. Returns the removed cue. Host-independent; no Premiere request.',
+        inputSchema: z.object({
+          srtPath: z.string().describe('Absolute path to the .srt file to edit.'),
+          index: z.number().int().describe('1-based cue number to remove (as shown by read_srt).')
+        })
+      },
+      {
+        name: 'shift_srt_timing',
+        description: 'Shifts caption timing in an .srt file to fix sync drift. Adds a fixed offset in seconds (negative pulls captions earlier) to every cue, or to a contiguous 1-based range only (fromIndex..toIndex) when the head is in sync but a later section drifts. Optionally also scales all timing by a positive factor about t=0 first (the honest fix for a frame-rate mismatch, e.g. 25/23.976). Times are clamped at 0. Reads, retimes, and writes back with read-back verification. Host-independent; no Premiere request.',
+        inputSchema: z.object({
+          srtPath: z.string().describe('Absolute path to the .srt file to retime.'),
+          offsetSeconds: z.number().optional().describe('Seconds to add to each cue (may be negative). Default 0.'),
+          scaleFactor: z.number().optional().describe('Positive multiplier applied to all timing about t=0 BEFORE the offset. Use for frame-rate mismatch (e.g. 25/23.976 ≈ 1.0427). Applies to the whole file regardless of the index range.'),
+          fromIndex: z.number().int().optional().describe('1-based first cue the offset applies to. Default 1 (all).'),
+          toIndex: z.number().int().optional().describe('1-based last cue the offset applies to. Default last (all).')
         })
       },
       {
@@ -1745,6 +1832,20 @@ export class PremiereProTools {
           return await this.deleteSequence(args.sequenceId);
         case 'read_sequence_captions':
           return await this.readSequenceCaptions(args.sequenceId);
+        case 'read_srt':
+          return await this.readSrtFile(args.srtPath);
+        case 'validate_srt':
+          return await this.validateSrtFile(args.srtPath);
+        case 'write_srt':
+          return await this.writeSrtFile(args.srtPath, args.cues, args.allowInvalid);
+        case 'update_srt_cue':
+          return await this.updateSrtCue(args.srtPath, args.index, { start: args.start, end: args.end, text: args.text });
+        case 'insert_srt_cue':
+          return await this.insertSrtCue(args.srtPath, args.start, args.end, args.text);
+        case 'remove_srt_cue':
+          return await this.removeSrtCue(args.srtPath, args.index);
+        case 'shift_srt_timing':
+          return await this.shiftSrtTiming(args.srtPath, args.offsetSeconds, args.scaleFactor, args.fromIndex, args.toIndex);
         case 'rename_project_item':
           return await this.renameProjectItem(args.projectItemId, args.newName);
 
@@ -3935,6 +4036,332 @@ ${this.buildSequenceResolver(sequenceId)}
       }
     `;
     return await this.bridge.executeScript(script);
+  }
+
+  // ---------------------------------------------------------------------------
+  // SRT subtitle CRUD (host-independent; operates on the .srt file on disk).
+  // Premiere's DOM can ingest an .srt (create_caption_track) but exposes no
+  // caption read/update/delete, so all caption editing lives here on the file.
+  // Every write is verified by reading it back and re-parsing. The pure parse/
+  // serialize/edit logic is in ./srt; these methods add only the I/O shell.
+  // ---------------------------------------------------------------------------
+
+  /** Shape one cue for a tool response: 1-based index + seconds + timecodes. */
+  private srtCueOut(cue: SrtCue, i: number) {
+    return {
+      index: i + 1,
+      start: cue.start,
+      end: cue.end,
+      startTimecode: formatTimecode(cue.start),
+      endTimecode: formatTimecode(cue.end),
+      text: cue.text,
+    };
+  }
+
+  /** Distill a cue list's validation into counts plus the issues themselves. */
+  private srtValidationReport(cues: SrtCue[]): { errorCount: number; warningCount: number; issues: SrtValidationIssue[] } {
+    const issues = validateCues(cues);
+    return {
+      errorCount: issues.filter((x) => x.severity === 'error').length,
+      warningCount: issues.filter((x) => x.severity === 'warning').length,
+      issues,
+    };
+  }
+
+  /**
+   * Read + parse an .srt off disk. Requires an absolute path (matches the
+   * footage tools). Returns the cues + any malformed blocks, or a caller-facing
+   * error (bad path / missing file) without throwing.
+   */
+  private async loadSrt(
+    srtPath: string,
+  ): Promise<{ ok: true; cues: SrtCue[]; malformed: any[] } | { ok: false; error: string }> {
+    if (typeof srtPath !== 'string' || srtPath.trim() === '') {
+      return { ok: false, error: 'srtPath is required.' };
+    }
+    if (!isAbsolute(srtPath)) {
+      return { ok: false, error: `srtPath must be an absolute path (got ${JSON.stringify(srtPath)}).` };
+    }
+    let raw: string;
+    try {
+      raw = await fs.readFile(srtPath, 'utf8');
+    } catch (e: any) {
+      if (e && e.code === 'ENOENT') {
+        return { ok: false, error: `No file at ${srtPath}. Check the path, or create it with write_srt.` };
+      }
+      return { ok: false, error: `Could not read ${srtPath}: ${e instanceof Error ? e.message : String(e)}` };
+    }
+    const parsed = parseSrt(raw);
+    return { ok: true, cues: parsed.cues, malformed: parsed.malformed };
+  }
+
+  /**
+   * Serialize cues and write them to srtPath (atomic tmp+rename, parents made),
+   * then read the file back and re-parse to confirm the on-disk cue count
+   * matches. Never reports success on an unverified write. Refuses cues with
+   * structural errors unless allowInvalid is set.
+   */
+  private async persistSrt(
+    srtPath: string,
+    cues: SrtCue[],
+    allowInvalid?: boolean,
+  ): Promise<{ ok: true } | { ok: false; error: string; errors?: SrtValidationIssue[] }> {
+    const errs = cueErrors(cues);
+    if (errs.length > 0 && !allowInvalid) {
+      return {
+        ok: false,
+        error: `Refusing to write: ${errs.length} structural error(s) in the cues. Fix them, or pass allowInvalid=true to write anyway.`,
+        errors: errs,
+      };
+    }
+    const doc = serializeSrt(cues);
+    try {
+      await fs.mkdir(dirname(srtPath), { recursive: true });
+      const tmp = `${srtPath}.tmp`;
+      await fs.writeFile(tmp, doc, 'utf8');
+      await fs.rename(tmp, srtPath);
+      // Verify a full round-trip, not just the cue count: re-parse the file and
+      // re-serialize it; a clean write reproduces `doc` exactly. This catches
+      // silent text corruption (e.g. a blank line inside a cue's text, which SRT
+      // cannot represent because a blank line ends a cue) that a count-only check
+      // would miss when the truncated tail parses away as a malformed block.
+      const back = parseSrt(await fs.readFile(srtPath, 'utf8'));
+      if (back.malformed.length > 0 || serializeSrt(back.cues) !== doc) {
+        return {
+          ok: false,
+          error: `Wrote ${srtPath} but it did not round-trip (read-back parsed ${back.cues.length} cue(s)${back.malformed.length ? ` plus ${back.malformed.length} unparseable block(s)` : ''}). A cue's text likely contains a blank line, which SRT cannot represent — a blank line ends a cue. Remove interior blank lines from cue text, or the disk may be full/read-only.`,
+        };
+      }
+    } catch (e) {
+      return { ok: false, error: `Could not write ${srtPath}: ${e instanceof Error ? e.message : String(e)}` };
+    }
+    return { ok: true };
+  }
+
+  private async readSrtFile(srtPath: string): Promise<any> {
+    const loaded = await this.loadSrt(srtPath);
+    if (!loaded.ok) return { success: false, error: loaded.error };
+    return {
+      success: true,
+      srtPath,
+      cueCount: loaded.cues.length,
+      cues: loaded.cues.map((c, i) => this.srtCueOut(c, i)),
+      validation: this.srtValidationReport(loaded.cues),
+      malformedBlockCount: loaded.malformed.length,
+      malformed: loaded.malformed,
+      note:
+        loaded.malformed.length > 0
+          ? `${loaded.malformed.length} block(s) could not be parsed and were skipped (see malformed).`
+          : undefined,
+    };
+  }
+
+  private async validateSrtFile(srtPath: string): Promise<any> {
+    const loaded = await this.loadSrt(srtPath);
+    if (!loaded.ok) return { success: false, error: loaded.error };
+    const report = this.srtValidationReport(loaded.cues);
+    return {
+      success: true,
+      srtPath,
+      cueCount: loaded.cues.length,
+      valid: report.errorCount === 0,
+      errorCount: report.errorCount,
+      warningCount: report.warningCount,
+      issues: report.issues,
+      malformedBlockCount: loaded.malformed.length,
+      malformed: loaded.malformed,
+    };
+  }
+
+  private async writeSrtFile(
+    srtPath: string,
+    cuesIn: Array<{ start: number | string; end: number | string; text: string }>,
+    allowInvalid?: boolean,
+  ): Promise<any> {
+    if (typeof srtPath !== 'string' || !isAbsolute(srtPath)) {
+      return { success: false, error: `srtPath must be an absolute path (got ${JSON.stringify(srtPath)}).` };
+    }
+    if (!Array.isArray(cuesIn)) return { success: false, error: 'cues must be an array of { start, end, text }.' };
+    const cues: SrtCue[] = [];
+    for (let i = 0; i < cuesIn.length; i++) {
+      const c = cuesIn[i] || ({} as any);
+      const start = coerceSeconds(c.start);
+      const end = coerceSeconds(c.end);
+      if (Number.isNaN(start) || Number.isNaN(end)) {
+        return {
+          success: false,
+          error: `cue ${i + 1}: start and end must each be seconds (number) or an "HH:MM:SS,mmm" timecode (got start=${JSON.stringify(c.start)}, end=${JSON.stringify(c.end)}).`,
+        };
+      }
+      cues.push({ start, end, text: typeof c.text === 'string' ? c.text : '' });
+    }
+    const report = this.srtValidationReport(cues);
+    const wrote = await this.persistSrt(srtPath, cues, allowInvalid);
+    if (!wrote.ok) {
+      return { success: false, error: wrote.error, validation: report, ...(wrote.errors ? { errors: wrote.errors } : {}) };
+    }
+    return {
+      success: true,
+      srtPath,
+      cueCount: cues.length,
+      verified: true,
+      validation: report,
+      note:
+        report.errorCount > 0 && allowInvalid
+          ? 'Written with allowInvalid=true despite structural errors — see validation.'
+          : undefined,
+    };
+  }
+
+  private async updateSrtCue(
+    srtPath: string,
+    index: number,
+    patch: { start?: number | string; end?: number | string; text?: string },
+  ): Promise<any> {
+    const loaded = await this.loadSrt(srtPath);
+    if (!loaded.ok) return { success: false, error: loaded.error };
+    const cues = loaded.cues;
+    if (!Number.isInteger(index) || index < 1 || index > cues.length) {
+      return { success: false, error: `cue index ${index} is out of range (file has ${cues.length} cue${cues.length === 1 ? '' : 's'}).` };
+    }
+    if (patch.start === undefined && patch.end === undefined && patch.text === undefined) {
+      return { success: false, error: 'Provide at least one of start, end, or text to change.' };
+    }
+    const before = this.srtCueOut(cues[index - 1] as SrtCue, index - 1);
+    const resolved: Partial<SrtCue> = {};
+    if (patch.start !== undefined) {
+      const s = coerceSeconds(patch.start);
+      if (Number.isNaN(s)) return { success: false, error: `start must be seconds or "HH:MM:SS,mmm" (got ${JSON.stringify(patch.start)}).` };
+      resolved.start = s;
+    }
+    if (patch.end !== undefined) {
+      const e = coerceSeconds(patch.end);
+      if (Number.isNaN(e)) return { success: false, error: `end must be seconds or "HH:MM:SS,mmm" (got ${JSON.stringify(patch.end)}).` };
+      resolved.end = e;
+    }
+    if (patch.text !== undefined) resolved.text = patch.text;
+
+    let next: SrtCue[];
+    try {
+      next = updateCue(cues, index, resolved);
+    } catch (e: any) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) };
+    }
+    const report = this.srtValidationReport(next);
+    // A surgical edit applies and reports; the round-trip verify still guards
+    // file integrity. (Refusing here would cite an allowInvalid flag this tool
+    // doesn't expose.) Structural problems surface in `validation` + `note`.
+    const wrote = await this.persistSrt(srtPath, next, true);
+    if (!wrote.ok) return { success: false, error: wrote.error, validation: report };
+    return {
+      success: true,
+      srtPath,
+      cueCount: next.length,
+      index,
+      before,
+      after: this.srtCueOut(next[index - 1] as SrtCue, index - 1),
+      validation: report,
+      note: report.errorCount > 0 ? `Applied, but ${report.errorCount} cue(s) now have structural errors — see validation.` : undefined,
+    };
+  }
+
+  private async insertSrtCue(
+    srtPath: string,
+    start: number | string,
+    end: number | string,
+    text: string,
+  ): Promise<any> {
+    const loaded = await this.loadSrt(srtPath);
+    if (!loaded.ok) return { success: false, error: loaded.error };
+    const s = coerceSeconds(start);
+    const e = coerceSeconds(end);
+    if (Number.isNaN(s) || Number.isNaN(e)) {
+      return { success: false, error: `start and end must each be seconds or an "HH:MM:SS,mmm" timecode (got start=${JSON.stringify(start)}, end=${JSON.stringify(end)}).` };
+    }
+    const cues = loaded.cues;
+    // Mirror insertCue's placement rule to report where the cue landed.
+    let at = cues.length;
+    for (let i = 0; i < cues.length; i++) {
+      if ((cues[i] as SrtCue).start > s) { at = i; break; }
+    }
+    const insertedIndex = at + 1;
+    const next = insertCue(cues, { start: s, end: e, text: typeof text === 'string' ? text : '' });
+    const report = this.srtValidationReport(next);
+    const wrote = await this.persistSrt(srtPath, next, true);
+    if (!wrote.ok) return { success: false, error: wrote.error, validation: report };
+    return {
+      success: true,
+      srtPath,
+      cueCount: next.length,
+      insertedIndex,
+      inserted: this.srtCueOut(next[insertedIndex - 1] as SrtCue, insertedIndex - 1),
+      validation: report,
+      note: report.errorCount > 0 ? `Inserted, but ${report.errorCount} cue(s) now have structural errors — see validation.` : undefined,
+    };
+  }
+
+  private async removeSrtCue(srtPath: string, index: number): Promise<any> {
+    const loaded = await this.loadSrt(srtPath);
+    if (!loaded.ok) return { success: false, error: loaded.error };
+    const cues = loaded.cues;
+    if (!Number.isInteger(index) || index < 1 || index > cues.length) {
+      return { success: false, error: `cue index ${index} is out of range (file has ${cues.length} cue${cues.length === 1 ? '' : 's'}).` };
+    }
+    const removed = this.srtCueOut(cues[index - 1] as SrtCue, index - 1);
+    let next: SrtCue[];
+    try {
+      next = removeCue(cues, index);
+    } catch (e: any) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) };
+    }
+    const report = this.srtValidationReport(next);
+    // Removing a cue can only fix or preserve validity, so it never needs allowInvalid.
+    const wrote = await this.persistSrt(srtPath, next, true);
+    if (!wrote.ok) return { success: false, error: wrote.error, validation: report };
+    return { success: true, srtPath, cueCount: next.length, removedIndex: index, removed, validation: report };
+  }
+
+  private async shiftSrtTiming(
+    srtPath: string,
+    offsetSeconds?: number,
+    scaleFactor?: number,
+    fromIndex?: number,
+    toIndex?: number,
+  ): Promise<any> {
+    const loaded = await this.loadSrt(srtPath);
+    if (!loaded.ok) return { success: false, error: loaded.error };
+    let cues = loaded.cues;
+    if (cues.length === 0) {
+      return { success: true, srtPath, cueCount: 0, offsetSeconds: offsetSeconds || 0, scaleFactor: scaleFactor ?? null, cues: [], validation: this.srtValidationReport(cues), note: 'File has no cues; nothing to shift.' };
+    }
+    if (scaleFactor !== undefined) {
+      try {
+        cues = scaleCues(cues, scaleFactor);
+      } catch (e: any) {
+        return { success: false, error: e instanceof Error ? e.message : String(e) };
+      }
+    }
+    const offset = offsetSeconds || 0;
+    try {
+      cues = shiftCues(cues, offset, fromIndex, toIndex);
+    } catch (e: any) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) };
+    }
+    const report = this.srtValidationReport(cues);
+    const wrote = await this.persistSrt(srtPath, cues, true);
+    if (!wrote.ok) return { success: false, error: wrote.error, validation: report };
+    return {
+      success: true,
+      srtPath,
+      cueCount: cues.length,
+      offsetSeconds: offset,
+      scaleFactor: scaleFactor ?? null,
+      fromIndex: fromIndex ?? 1,
+      toIndex: toIndex ?? cues.length,
+      cues: cues.map((c, i) => this.srtCueOut(c, i)),
+      validation: report,
+      note: report.errorCount > 0 ? `Retimed, but ${report.errorCount} cue(s) now have structural errors (e.g. timing clamped to 0) — see validation.` : undefined,
+    };
   }
 
   private async deleteSequence(sequenceId: string): Promise<any> {
