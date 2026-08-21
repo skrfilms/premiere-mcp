@@ -4,7 +4,7 @@
 
 **Operate local Adobe Premiere Pro projects through MCP.**
 
-305 tools, 13 context resources, and 10 guided prompts for Codex, Claude Code, Claude Desktop, and other MCP clients. CEP is the supported production bridge; UXP remains experimental.
+308 tools, 13 context resources, and 10 guided prompts for Codex, Claude Code, Claude Desktop, and other MCP clients. CEP is the supported production bridge; UXP remains experimental.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-5fd3c6.svg)](LICENSE.md)
 [![Node.js](https://img.shields.io/badge/Node.js-20%2B-339933.svg)](https://nodejs.org/)
@@ -124,7 +124,7 @@ This repository is currently validated for:
 
 Current catalog status as of August 21, 2026:
 
-- `305` MCP tools are exposed for AI-driven video editing
+- `308` MCP tools are exposed for AI-driven video editing
 - coverage spans project setup, media ingest, bins, sequences, timeline editing, transitions, effects, keyframes, captions, markers, metadata, proxies, multicam, color, audio, exports, and higher-level assembly workflows
 - the catalog includes practical agent workflows such as product-spot assembly, motion-graphics demos, timeline razoring, caption reads, audio ducking, scene edit detection, EDL import, export readiness validation, and linked audio/video operations
 - local-compute tools that Premiere's scripting API cannot provide: `detect_silence` (ffmpeg), `transcribe_to_srt` (local OpenAI Whisper speech-to-text), `probe_media` (ffprobe ground-truth metadata), and `generate_scope` (ffmpeg waveform / vectorscope / histogram / RGB-parade images) — each probes for its binary and returns install guidance instead of failing silently
@@ -133,7 +133,7 @@ Current catalog status as of August 21, 2026:
 
 Most recent completed local live validation:
 
-- `305` active tools are exposed; `get_capabilities` reports local installation and optional live connection state, while `verify_premiere_connection` is the canonical read-only bridge and host readiness check
+- `308` active tools are exposed; `get_capabilities` reports local installation and optional live connection state, while `verify_premiere_connection` is the canonical read-only bridge and host readiness check
 - `0` known parked or placeholder tools are advertised
 - `import_ae_comps` is intentionally not advertised because Premiere returned `false` for real `.aep` fixtures in this environment and a generic `.aep` import can wedge the CEP bridge
 
@@ -233,7 +233,7 @@ For a real-host sweep, use a disposable Premiere project and run `node scripts/l
 
 ## Tools
 
-All `305` advertised tools have an implementation. Tool schemas are available through MCP discovery; this catalog explains the editing surface in human terms. Start with `verify_premiere_connection`, then inspect the project before asking an agent to mutate it.
+All `308` advertised tools have an implementation. Tool schemas are available through MCP discovery; this catalog explains the editing surface in human terms. Start with `verify_premiere_connection`, then inspect the project before asking an agent to mutate it.
 
 ### Discovery and project inspection
 
@@ -305,6 +305,7 @@ All `305` advertised tools have an implementation. Tool schemas are available th
 | `batch_apply_effect` / `copy_effects_between_clips` / `copy_effect_values` | Apply or copy effect treatments across clips. |
 | `set_effect_property` / `set_color_value` / `set_blend_mode` | Change supported effect parameters, color values, and blend modes. |
 | `color_correct` / `apply_lut` / `stabilize_clip` | Apply basic correction, LUTs, or Warp Stabilizer. |
+| `list_lumetri_presets` / `apply_lumetri_preset` | List every installed Lumetri color preset, then apply one to a video clip. `apply_lumetri_preset` verifies the grade landed (component gained or property values changed) rather than trusting the engine's always-true return. |
 | `crop_clip` / `add_adjustment_layer` / `get_clip_adjustment_layer` | Crop a clip or use an adjustment layer for shared treatment. |
 | `set_clip_properties` / `set_clip_properties_batch` | Set opacity, scale, rotation, and position with verified per-property output. |
 | `set_clip_position` / `set_clip_scale` / `set_clip_rotation` / `set_clip_anchor_point` | Address individual Motion transform values. |
@@ -348,6 +349,7 @@ All `305` advertised tools have an implementation. Tool schemas are available th
 | `validate_project_for_export` / `get_encoder_presets` / `get_export_file_extension` | Validate a delivery, discover readable user `.epr` presets, and resolve output extensions. |
 | `export_sequence` / `add_to_render_queue` | Queue a sequence through Adobe Media Encoder using a real preset path or exact preset name. |
 | `get_render_queue_status` / `start_batch_encode` | Report queue-monitoring availability or start supported batch encoding. |
+| `get_timeline_render_status` | Report the timeline's render-bar state (green rendered / yellow real-time / red drop-risk / empty), with timed segments, totals, and a rendered fraction. Reads the QE DOM and addresses the sequence by guid. Distinct from `get_render_queue_status` (Media Encoder). |
 | `export_frame` / `capture_frame` | Write a still image from a sequence or capture a frame. |
 | `export_as_fcp_xml` / `export_aaf` / `export_omf` | Export supported interchange formats. |
 | `encode_project_item` / `encode_file` / `export_as_project` | Encode a source item/file or export a project representation. |

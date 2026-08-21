@@ -24,6 +24,9 @@ export const expandedToolNames = [
   'evaluate_expression',
   'inspect_dom_object',
   'reflect_dom_object',
+  'list_lumetri_presets',
+  'apply_lumetri_preset',
+  'get_timeline_render_status',
   'list_clip_effects',
   'get_sequence_structure',
   'get_premiere_state',
@@ -1225,6 +1228,207 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
             propertyCount: reflectProps.length,
             methods: reflectMethods,
             properties: reflectProps
+          });
+
+        case "list_lumetri_presets":
+          // The full Lumetri preset catalogue (built-in plus any the user has
+          // installed), read straight from the engine. Names returned here are
+          // exactly what apply_lumetri_preset expects.
+          if (!app.project || typeof app.project.getAllLumetriPresetsList !== "function") {
+            return fail("Lumetri preset list is unavailable (app.project.getAllLumetriPresetsList not found in this build).");
+          }
+          var lumFilter = args.name_filter ? normalizeName(String(args.name_filter)) : null;
+          var rawPresets = app.project.getAllLumetriPresetsList();
+          var totalPresets = (rawPresets && rawPresets.length !== undefined) ? rawPresets.length : 0;
+          var presetNames = [];
+          for (var lpi = 0; lpi < totalPresets; lpi++) {
+            var presetName = String(rawPresets[lpi]);
+            if (lumFilter && normalizeName(presetName).indexOf(lumFilter) === -1) continue;
+            presetNames.push(presetName);
+          }
+          presetNames.sort(function (a, b) { return a < b ? -1 : (a > b ? 1 : 0); });
+          return ok({ count: presetNames.length, totalAvailable: totalPresets, presets: presetNames });
+
+        case "apply_lumetri_preset":
+          // Applies a named Lumetri preset to a video clip and VERIFIES it took:
+          // the engine's applyLumetriPreset() returns true even when nothing
+          // changed, so success here means a Lumetri component was gained, or an
+          // already-present one's property values changed. Otherwise it reports
+          // failure honestly.
+          var presetArg = args.preset_name || args.presetName || args.preset;
+          if (!presetArg) return fail("preset_name is required. Use list_lumetri_presets to see available presets.");
+          if (!app.project || typeof app.project.applyLumetriPreset !== "function") {
+            return fail("app.project.applyLumetriPreset is unavailable in this Premiere build.");
+          }
+          // Validate against the real catalogue (case/format-insensitive) and
+          // resolve to the exact spelling the engine expects.
+          var wantPreset = normalizeName(String(presetArg));
+          var canonicalPreset = null;
+          var catalogue = [];
+          try { catalogue = app.project.getAllLumetriPresetsList() || []; } catch (eList) {}
+          for (var cpi = 0; cpi < catalogue.length; cpi++) {
+            if (normalizeName(String(catalogue[cpi])) === wantPreset) { canonicalPreset = String(catalogue[cpi]); break; }
+          }
+          if (canonicalPreset === null) {
+            return fail("Preset not found: " + String(presetArg) + ". Use list_lumetri_presets for the exact names.");
+          }
+          var lpSeqErr = sequenceRequestError();
+          if (lpSeqErr) return fail(lpSeqErr);
+          var lpSeq = targetSequence();
+          if (!lpSeq) return fail("No active sequence to apply a Lumetri preset to.");
+          // applyLumetriPreset() acts on the SELECTED clips of the ACTIVE
+          // sequence, so the target sequence must be made active.
+          try { app.project.activeSequence = lpSeq; } catch (eAct) {}
+
+          function lpLumetriComponent(clip) {
+            for (var ci = 0; ci < clip.components.numItems; ci++) {
+              if (String(clip.components[ci].matchName).indexOf("Lumetri") !== -1) return clip.components[ci];
+            }
+            return null;
+          }
+          // Fingerprint = component presence plus a checksum over every property
+          // value, so re-applying onto an already-graded clip is still detectable
+          // even though the component list does not change.
+          function lpFingerprint(clip) {
+            var comp = lpLumetriComponent(clip);
+            if (!comp) return { hasLumetri: false, checksum: 0, propCount: 0 };
+            var sum = 0, n = 0;
+            for (var p = 0; p < comp.properties.numItems; p++) {
+              var v;
+              try { v = comp.properties[p].getValue(); } catch (eV) { v = "ERR"; }
+              var s = String(v);
+              for (var k = 0; k < s.length; k++) { sum = (sum + s.charCodeAt(k) * (p + 1)) % 2147483647; }
+              n++;
+            }
+            return { hasLumetri: true, checksum: sum, propCount: n };
+          }
+          function lpDeselectAll(coll) {
+            for (var t = 0; t < coll.numTracks; t++) {
+              var track = coll[t];
+              for (var c = 0; c < track.clips.numItems; c++) {
+                try { track.clips[c].setSelected(0, 1); } catch (eD) {}
+              }
+            }
+          }
+
+          var lpClipId = args.clipNodeId || args.clip_node_id || args.nodeId || args.node_id || args.clipId || args.clip_id || args.clip_name || args.clipName;
+          var lpTargets = [];
+          if (lpClipId) {
+            // Deselect everything, then select only the named video clip so the
+            // preset cannot leak onto whatever else happened to be selected.
+            lpDeselectAll(lpSeq.videoTracks);
+            lpDeselectAll(lpSeq.audioTracks);
+            for (var vt = 0; vt < lpSeq.videoTracks.numTracks; vt++) {
+              var vtrack = lpSeq.videoTracks[vt];
+              for (var vc = 0; vc < vtrack.clips.numItems; vc++) {
+                var vclip = vtrack.clips[vc];
+                if (vclip.nodeId === lpClipId || vclip.name === lpClipId) {
+                  try { vclip.setSelected(1, 1); } catch (eSel) {}
+                  lpTargets.push({ clip: vclip, trackIndex: vt, clipIndex: vc });
+                }
+              }
+            }
+            if (!lpTargets.length) return fail("Video clip not found in the target sequence: " + String(lpClipId) + ". Lumetri presets apply to video clips.");
+          } else {
+            for (var svt = 0; svt < lpSeq.videoTracks.numTracks; svt++) {
+              var strack = lpSeq.videoTracks[svt];
+              for (var svc = 0; svc < strack.clips.numItems; svc++) {
+                var sclip = strack.clips[svc];
+                var isSel = false;
+                try { isSel = sclip.isSelected(); } catch (eIs) {}
+                if (isSel) lpTargets.push({ clip: sclip, trackIndex: svt, clipIndex: svc });
+              }
+            }
+            if (!lpTargets.length) return fail("No video clip is selected. applyLumetriPreset acts on the selection; pass clip_name/clipNodeId or select a video clip first.");
+          }
+
+          var lpBefore = [];
+          for (var lb = 0; lb < lpTargets.length; lb++) lpBefore.push(lpFingerprint(lpTargets[lb].clip));
+          var lpRet = null;
+          try { lpRet = app.project.applyLumetriPreset(canonicalPreset); }
+          catch (eApply) { return fail("applyLumetriPreset threw: " + eApply.toString(), { preset: canonicalPreset }); }
+
+          var lpResults = [];
+          var lpAllVerified = true;
+          for (var la = 0; la < lpTargets.length; la++) {
+            var afterFp = lpFingerprint(lpTargets[la].clip);
+            var beforeFp = lpBefore[la];
+            var gained = (!beforeFp.hasLumetri && afterFp.hasLumetri);
+            var changed = (beforeFp.hasLumetri && afterFp.hasLumetri && beforeFp.checksum !== afterFp.checksum);
+            var verified = gained || changed;
+            if (!verified) lpAllVerified = false;
+            lpResults.push({
+              nodeId: lpTargets[la].clip.nodeId,
+              name: String(lpTargets[la].clip.name),
+              trackIndex: lpTargets[la].trackIndex,
+              gainedLumetri: gained,
+              valuesChanged: changed,
+              verified: verified
+            });
+          }
+          if (!lpAllVerified) {
+            return fail("Preset applied but the change could not be verified on every target clip (no Lumetri component gained and no property values changed). The clip may already carry this exact grade.", {
+              preset: canonicalPreset,
+              applyReturned: lpRet,
+              clips: lpResults
+            });
+          }
+          return ok({
+            preset: canonicalPreset,
+            sequence: { name: lpSeq.name, id: lpSeq.sequenceID },
+            applyReturned: lpRet,
+            clipsAffected: lpResults.length,
+            clips: lpResults,
+            verified: true
+          });
+
+        case "get_timeline_render_status":
+          // The timeline's render-bar state, read from the QE DOM: green = a
+          // rendered preview exists; yellow = unrendered but expected to play in
+          // real time; red = unrendered and may drop frames; empty = no media.
+          // Addresses the sequence by guid (never blindly the on-screen one).
+          // Distinct from get_render_queue_status, which reports Media Encoder.
+          var rsSeqErr = sequenceRequestError();
+          if (rsSeqErr) return fail(rsSeqErr);
+          var rsSeq = targetSequence();
+          if (!rsSeq) return fail("No active sequence to report render status for.");
+          var rsQe = qeSequenceFor(rsSeq);
+          if (!rsQe) return fail("Could not address the sequence through the QE DOM (render bars are a QE-only feature). Open the sequence in a timeline and retry.");
+          function rsSegments(getter) {
+            var times;
+            try { times = getter(); } catch (eG) { return { available: false, error: eG.toString(), segmentCount: 0, totalSeconds: 0, segments: [] }; }
+            var segs = [];
+            var total = 0;
+            if (times && times.length !== undefined) {
+              // Bar times arrive as a flat, alternating start/end list.
+              for (var i = 0; i + 1 < times.length; i += 2) {
+                var start = Number(times[i].secs);
+                var end = Number(times[i + 1].secs);
+                var dur = end - start;
+                if (dur < 0) dur = 0;
+                total += dur;
+                segs.push({ start: start, end: end, duration: dur });
+              }
+            }
+            return { available: true, segmentCount: segs.length, totalSeconds: total, segments: segs };
+          }
+          var rsGreen = rsSegments(function () { return rsQe.getGreenBarTimes(); });
+          var rsYellow = rsSegments(function () { return rsQe.getYellowBarTimes(); });
+          var rsRed = rsSegments(function () { return rsQe.getRedBarTimes(); });
+          var rsEmpty = rsSegments(function () { return rsQe.getEmptyBarTimes(); });
+          var rsRenderable = rsGreen.totalSeconds + rsYellow.totalSeconds + rsRed.totalSeconds;
+          var rsUnrendered = rsYellow.totalSeconds + rsRed.totalSeconds;
+          return ok({
+            sequence: { name: rsSeq.name, id: rsSeq.sequenceID },
+            green: rsGreen,
+            yellow: rsYellow,
+            red: rsRed,
+            empty: rsEmpty,
+            renderableSeconds: rsRenderable,
+            renderedSeconds: rsGreen.totalSeconds,
+            unrenderedSeconds: rsUnrendered,
+            renderedFraction: (rsRenderable > 0 ? (rsGreen.totalSeconds / rsRenderable) : null),
+            fullyRendered: (rsUnrendered === 0 && rsRenderable > 0)
           });
 
         case "get_version_info":
