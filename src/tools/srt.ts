@@ -66,9 +66,7 @@ const MS_PER_HOUR = 60 * MS_PER_MINUTE;
  */
 export function parseTimecode(tc: string): number {
   if (typeof tc !== 'string') return NaN;
-  const m = tc
-    .trim()
-    .match(/^(\d{1,3}):([0-5]?\d):([0-5]?\d)(?:[,.](\d{1,3}))?$/);
+  const m = tc.trim().match(/^(\d{1,3}):([0-5]?\d):([0-5]?\d)(?:[,.](\d{1,3}))?$/);
   if (!m) return NaN;
   const hours = Number(m[1]);
   const minutes = Number(m[2]);
@@ -76,10 +74,7 @@ export function parseTimecode(tc: string): number {
   // Right-pad the fractional part so "5" => 500ms, "05" => 50ms, "005" => 5ms.
   const millis = m[4] ? Number(m[4].padEnd(3, '0')) : 0;
   return (
-    (hours * MS_PER_HOUR +
-      minutes * MS_PER_MINUTE +
-      seconds * MS_PER_SECOND +
-      millis) /
+    (hours * MS_PER_HOUR + minutes * MS_PER_MINUTE + seconds * MS_PER_SECOND + millis) /
     MS_PER_SECOND
   );
 }
@@ -146,7 +141,7 @@ export function parseSrt(text: string): SrtParseResult {
   }
 
   // Strip BOM and normalize line endings so block-splitting is uniform.
-  const normalized = text.replace(/^﻿/, '').replace(/\r\n?/g, '\n');
+  const normalized = text.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
   // Blocks are separated by one or more blank lines.
   const blocks = normalized.split(/\n[ \t]*\n/);
 
@@ -251,10 +246,18 @@ export function validateCues(cues: SrtCue[]): SrtValidationIssue[] {
       });
     }
     if (cue.start < prevStart) {
-      issues.push({ severity: 'warning', index: n, message: 'cue starts before the previous cue (out of chronological order)' });
+      issues.push({
+        severity: 'warning',
+        index: n,
+        message: 'cue starts before the previous cue (out of chronological order)',
+      });
     }
     if (cue.start < prevEnd) {
-      issues.push({ severity: 'warning', index: n, message: 'cue overlaps the previous cue in time' });
+      issues.push({
+        severity: 'warning',
+        index: n,
+        message: 'cue overlaps the previous cue in time',
+      });
     }
     if (!cue.text || cue.text.trim() === '') {
       issues.push({ severity: 'warning', index: n, message: 'cue text is empty' });
@@ -308,11 +311,7 @@ export function insertCue(cues: SrtCue[], cue: SrtCue): SrtCue[] {
 }
 
 /** Replace fields of one cue (1-based). Omitted fields are left unchanged. */
-export function updateCue(
-  cues: SrtCue[],
-  index1: number,
-  patch: Partial<SrtCue>,
-): SrtCue[] {
+export function updateCue(cues: SrtCue[], index1: number, patch: Partial<SrtCue>): SrtCue[] {
   const i = requireIndex(cues, index1);
   const next = cues.slice();
   const cur = next[i] as SrtCue;

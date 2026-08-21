@@ -640,8 +640,9 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
         if (value !== Math.floor(value) || value < 0 || value > 7) return "invalid";
         return value;
       }
-      // \\s, not \s: inside a template literal \s collapses to a bare "s",
-      // so the emitted code would strip the letter s instead of whitespace.
+      // The regex below doubles its backslash on purpose: inside this template
+      // literal a single backslash-s would collapse to a bare "s" and strip the
+      // letter instead of whitespace.
       var text = String(value).replace(/^\\s+|\\s+$/g, "").toLowerCase();
       if (/^[0-7]$/.test(text)) return Number(text);
       for (var ci = 0; ci < MARKER_COLOR_NAMES.length; ci++) {
@@ -733,8 +734,9 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
       var requested = args.sequenceId;
       if (requested === undefined || requested === null) requested = args.sequence_id;
       if (requested === undefined || requested === null) return null;
-      // \\s, not \s: this lives in a template literal, where \s collapses to a
-      // bare "s" and would strip the letter s instead of whitespace.
+      // The regex below doubles its backslash on purpose: inside this template
+      // literal a single backslash-s would collapse to a bare "s" and strip the
+      // letter instead of whitespace.
       requested = String(requested).replace(/^\\s+|\\s+$/g, "");
       if (requested === "") {
         return "sequenceId was supplied but empty. Omit it to use the active sequence, " +

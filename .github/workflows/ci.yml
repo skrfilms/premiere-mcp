@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+# Cancel superseded runs on the same ref so a fresh push doesn't queue behind stale work.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-lint-test:
+    name: Build, lint & test (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (tsc)
+        run: npm run build
+
+      - name: Lint (eslint)
+        run: npm run lint
+
+      # Formatting is not yet enforced tree-wide (53 legacy files predate the
+      # prettier config). New/edited files should pass `npm run format`; a
+      # tree-wide --check gate will be added once the backlog is reformatted.
+
+      - name: Test (jest)
+        run: npm test -- --runInBand --ci --testTimeout=60000
