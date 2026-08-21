@@ -109,4 +109,19 @@ describe('remove_all_effects — generated script', () => {
     const script = getScript();
     expect(script).toContain('requires clipId');
   });
+
+  it('defines the shared effect helpers at top level, not inside a sibling case', async () => {
+    // ExtendScript only ASSIGNS a function declared inside a case block when that
+    // case executes, so remove_all_effects (which calls reIsIntrinsic/reIsLumetri/
+    // reSnapshot) would see them as undefined if they lived inside the remove_effect
+    // case. Confirmed live: cross-case use threw "reIsIntrinsic is not a function".
+    // Pin the helpers ahead of every case that uses them.
+    const { bridge, getScript } = captureBridge();
+    await executeExpandedTool(bridge as any, 'remove_all_effects', { clipId: 'node-1' });
+    const script = getScript();
+    const helperPos = script.indexOf('function reIsIntrinsic');
+    expect(helperPos).toBeGreaterThan(-1);
+    expect(helperPos).toBeLessThan(script.indexOf('case "remove_all_effects"'));
+    expect(helperPos).toBeLessThan(script.indexOf('case "remove_effect"'));
+  });
 });
