@@ -195,8 +195,14 @@ chip that hides the NDI/Syphon/Spout acronyms behind the Doctor.
   (UIA/AutoHotkey) alongside macOS System Events.
 
 ## 6. Self-audits owed on our own catalog
-- `add_text_overlay`: confirm it verifies the MOGRT text actually changed and does not
-  return `success:true` on the opaque-token no-op (possible inherited honesty bug).
+- `add_text_overlay`: ✅ **AUDITED CLEAN** (2026-08-21). The ExtendScript writes the
+  Source Text, reads it back, and only marks a field `ok` when the read-back equals
+  the requested string; `evaluateTextInjectionResult` then flips the whole result to
+  `success:false` when zero fields landed, `partial` (with a warning) when some did,
+  `complete` when all did — so the opaque-token no-op reports failure, not fake
+  success. A `rollbackOnTextFailure` path removes the imported Graphic. Covered by
+  five tests (failed / partial / complete / not_requested / strategy-markers-not-attempts).
+  No honesty bug remains.
 - Confirm `razor_timeline_at_time` (cut-through-all-layers) + active-sequence defaults
   remain correct — both are explicitly requested elsewhere; keep as strengths.
 
