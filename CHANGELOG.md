@@ -38,6 +38,20 @@ result on disk before reporting success:
   advertised via `PREMIERE_MCP_NDI_RECEIVER` / `PREMIERE_MCP_SYPHON_RECEIVER` /
   `PREMIERE_MCP_SPOUT_RECEIVER`. This is the first piece of the render-truth
   feedback loop.
+- Added `bake_speed_change`: the honest escape hatch for time-remapping.
+  Premiere's scripting API has never exposed the time-remap/speed-keyframe graph,
+  so agents that set a speed ramp through the DOM get silently ignored keyframes
+  at render. This bakes a real, frame-accurate constant-speed clip to disk with
+  ffmpeg (video via `setpts`; audio pitch-preserved via a chained `atempo`, or
+  dropped) that you then import and place. `speed>1` is faster/shorter, `<1`
+  slower/longer. Verifies the output exists and is non-empty before reporting
+  success.
+- Added `normalize_loudness`: two-pass EBU R128 loudness normalization with
+  ffmpeg's `loudnorm` (measure, then apply linear correction seeded with the
+  measured values), because Premiere exposes no scriptable loudness measurement
+  or normalization. Targets an integrated LUFS / true-peak / LRA (defaults
+  `-14 LUFS`, `-1 dBTP`, `11 LU`) and writes a new file, returning the measured
+  input loudness so the change is auditable.
 - Added a recovery boundary — `create_recovery_checkpoint`,
   `list_recovery_checkpoints`, `restore_recovery_checkpoint` — that snapshots a
   sequence before risky edits. The automatic checkpoint taken before
@@ -50,7 +64,7 @@ result on disk before reporting success:
 - Enriched the expanded-tool catalogue with real input schemas so every
   advertised tool exposes a typed, discoverable argument shape.
 
-Catalogue grew to `290` tools.
+Catalogue grew to `292` tools.
 
 ## [1.2.0] - 2026-08-17
 

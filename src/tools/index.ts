@@ -1323,6 +1323,34 @@ export class PremiereProTools {
         })
       },
       {
+        name: 'bake_speed_change',
+        description: 'Renders a NEW media file at a constant changed speed using ffmpeg (run via child_process), NOT via Premiere. This is the honest escape hatch for time-remapping: Premiere\'s scripting API has never exposed the time-remap/speed keyframe graph, so agents that "set a speed ramp" through the DOM get silently ignored keyframes at render. Instead this bakes a real, frame-accurate constant-speed clip to disk that you then import_media and place. Video is retimed with setpts; audio is retimed pitch-preserved with an atempo chain (or dropped with includeAudio:false). speed>1 is faster/shorter, speed<1 is slower/longer (e.g. 0.5 = half speed, 2 = double). Requires ffmpeg on PATH (overridable via PREMIERE_MCP_FFMPEG_CMD); returns install guidance if absent and verifies the output file was written and non-empty before reporting success. For a variable ramp, bake several constant-speed segments and butt them together. Note: this is a straight time-scale, not optical-flow frame interpolation.',
+        inputSchema: z.object({
+          mediaPath: z.string().optional().describe('Direct filesystem path to the source media file'),
+          projectItemId: z.string().optional().describe('Project item ID to resolve to a media path instead of passing mediaPath directly'),
+          speed: z.number().optional().describe('Speed multiplier (required). >1 faster/shorter, <1 slower/longer. Must be > 0.'),
+          outputPath: z.string().optional().describe('Where to write the retimed file. Defaults to <mediaDir>/<basename>_<speed>x.<ext>.'),
+          includeAudio: z.boolean().optional().describe('Retime and keep audio, pitch-preserved (default true). false drops audio (-an).'),
+          preservePitch: z.boolean().optional().describe('When keeping audio, preserve pitch via atempo (default true). false lets pitch shift with speed via asetrate resample.')
+        }).refine((data) => Boolean(data.mediaPath) || Boolean(data.projectItemId), {
+          message: 'Provide either mediaPath or projectItemId'
+        })
+      },
+      {
+        name: 'normalize_loudness',
+        description: 'Renders a NEW audio-normalized media file to a broadcast loudness target using ffmpeg\'s two-pass loudnorm (EBU R128), run via child_process, NOT via Premiere. Premiere exposes no scriptable loudness measurement or normalization, so agents cannot hit a delivery spec (e.g. -14 LUFS for streaming, -23 LUFS for broadcast) from the DOM. This measures the source in a first pass, then applies linear loudnorm with the measured values in a second pass for an accurate result, and writes the normalized file to disk. Requires ffmpeg + ffprobe on PATH (overridable via PREMIERE_MCP_FFMPEG_CMD / PREMIERE_MCP_FFPROBE_CMD); returns install guidance if absent and verifies the output before reporting success. Returns the measured input loudness and the target so the change is auditable.',
+        inputSchema: z.object({
+          mediaPath: z.string().optional().describe('Direct filesystem path to the source media file'),
+          projectItemId: z.string().optional().describe('Project item ID to resolve to a media path instead of passing mediaPath directly'),
+          targetLufs: z.number().optional().describe('Integrated loudness target in LUFS (default -14, common streaming target; -23 for EBU R128 broadcast).'),
+          truePeakDb: z.number().optional().describe('Maximum true peak in dBTP (default -1.0).'),
+          loudnessRange: z.number().optional().describe('Target loudness range (LRA) in LU (default 11).'),
+          outputPath: z.string().optional().describe('Where to write the normalized file. Defaults to <mediaDir>/<basename>_norm<targetLufs>LUFS.<ext>.')
+        }).refine((data) => Boolean(data.mediaPath) || Boolean(data.projectItemId), {
+          message: 'Provide either mediaPath or projectItemId'
+        })
+      },
+      {
         name: 'rename_project_item',
         description: 'Renames a project item (sequence, bin, clip) by setting its name. Use this when duplicate_sequence does not propagate the new name to the project panel.',
         inputSchema: z.object({
@@ -1901,6 +1929,10 @@ export class PremiereProTools {
           return await this.generateScope(args.mediaPath, args.projectItemId, args.scope, args.timeSeconds, args.outputPath);
         case 'capture_program_output':
           return await this.captureProgramOutput(args.sequenceId, args.time, args.format, args.outputPath, args.tap, args.probeOnly);
+        case 'bake_speed_change':
+          return await this.bakeSpeedChange(args.mediaPath, args.projectItemId, args.speed, args.outputPath, args.includeAudio, args.preservePitch);
+        case 'normalize_loudness':
+          return await this.normalizeLoudness(args.mediaPath, args.projectItemId, args.targetLufs, args.truePeakDb, args.loudnessRange, args.outputPath);
 
         // Subclip
         case 'create_subclip':
@@ -5498,6 +5530,256 @@ ${this.buildSequenceResolver(sequenceId)}
           sizeBytes,
           mediaPath: resolvedPath,
           note: `Scope image written. ffmpeg filter used: "${filter}" at t=${seek}s.`,
+        });
+      });
+    });
+  }
+
+  /**
+   * Build an ffmpeg atempo filter chain for an arbitrary speed factor. A single
+   * atempo is only valid in [0.5, 2.0], so a factor outside that range is
+   * decomposed into a product of in-range steps (e.g. 4x -> atempo=2,atempo=2;
+   * 0.25x -> atempo=0.5,atempo=0.5). Pitch is preserved. Returns a comma-joined
+   * chain suitable for -af.
+   */
+  private buildAtempoChain(speed: number): string {
+    const steps: number[] = [];
+    let remaining = speed;
+    // Factor down while too fast (>2), and up while too slow (<0.5).
+    while (remaining > 2.0 + 1e-9) { steps.push(2.0); remaining /= 2.0; }
+    while (remaining < 0.5 - 1e-9) { steps.push(0.5); remaining *= 2.0; }
+    steps.push(Math.round(remaining * 1e6) / 1e6);
+    return steps.map((s) => `atempo=${s}`).join(',');
+  }
+
+  /**
+   * Bake a constant speed change to a NEW media file with ffmpeg. This is the
+   * honest escape hatch for Premiere's never-scriptable time-remap graph: rather
+   * than writing speed keyframes the renderer ignores, produce a real retimed
+   * clip on disk the caller can import and place. Same honesty contract as
+   * generate_scope: resolve the source, fail with install guidance if ffmpeg is
+   * absent, and verify-after-write (the output must exist and be non-empty)
+   * before claiming success.
+   */
+  private async bakeSpeedChange(
+    mediaPath?: string,
+    projectItemId?: string,
+    speed?: number,
+    outputPath?: string,
+    includeAudio = true,
+    preservePitch = true,
+  ): Promise<any> {
+    if (typeof speed !== 'number' || !Number.isFinite(speed) || speed <= 0) {
+      return { success: false, error: 'Provide a speed multiplier greater than 0 (e.g. 0.5 for half speed, 2 for double).' };
+    }
+
+    let resolvedPath = mediaPath;
+    if (!resolvedPath && projectItemId) {
+      const resolved = await this.resolveProjectItemMediaPath(projectItemId);
+      if (resolved.error) return { success: false, error: resolved.error };
+      resolvedPath = resolved.path;
+    }
+    if (!resolvedPath) return { success: false, error: 'Provide either mediaPath or projectItemId' };
+
+    try {
+      await fs.access(resolvedPath, fsConstants.R_OK);
+    } catch {
+      return { success: false, error: `Media file not found or unreadable: ${resolvedPath}` };
+    }
+
+    const ffmpeg = this.ffmpegCmd();
+    const available = await this.checkCommandAvailable(ffmpeg, ['-version']);
+    if (!available) {
+      return {
+        success: false,
+        error: `ffmpeg ('${ffmpeg}') was not found on PATH. bake_speed_change retimes clips with ffmpeg because Premiere's time-remap graph cannot be scripted. Install ffmpeg (e.g. \`brew install ffmpeg\` on macOS) or set PREMIERE_MCP_FFMPEG_CMD to the binary name, then try again.`,
+      };
+    }
+
+    const ext = extname(resolvedPath) || '.mp4';
+    const speedLabel = String(speed).replace(/\./g, '_');
+    const outFile = (outputPath && outputPath.trim())
+      || join(dirname(resolvedPath), `${basename(resolvedPath, extname(resolvedPath))}_${speedLabel}x${ext}`);
+
+    // Video: setpts scales presentation timestamps by 1/speed.
+    const argv: string[] = ['-y', '-i', resolvedPath as string, '-vf', `setpts=${(1 / speed).toFixed(6)}*PTS`];
+    if (includeAudio) {
+      const audioFilter = preservePitch
+        ? this.buildAtempoChain(speed)
+        // Pitch shifts with speed: resample the sample clock then reset to 48k.
+        : `asetrate=48000*${speed},aresample=48000`;
+      argv.push('-af', audioFilter);
+    } else {
+      argv.push('-an');
+    }
+    argv.push(outFile);
+
+    return await new Promise((resolve) => {
+      const proc = spawn(ffmpeg, argv);
+      let stderr = '';
+      proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+      proc.on('error', (err) => {
+        resolve({ success: false, error: `Failed to run ffmpeg ('${ffmpeg}'): ${err.message}`, mediaPath: resolvedPath });
+      });
+      proc.on('close', async (code) => {
+        let sizeBytes = 0;
+        try {
+          await fs.access(outFile, fsConstants.R_OK);
+          sizeBytes = (await fs.stat(outFile)).size;
+        } catch {
+          resolve({
+            success: false,
+            error: `ffmpeg exited with code ${code} but no retimed file was written to ${outFile}. The source may be unreadable or the codec unsupported.`,
+            mediaPath: resolvedPath,
+            ffmpegStderr: stderr.slice(-2000),
+          });
+          return;
+        }
+        if (sizeBytes === 0) {
+          resolve({
+            success: false,
+            error: `ffmpeg wrote an empty file to ${outFile} (0 bytes). The retime did not produce usable output.`,
+            mediaPath: resolvedPath,
+            ffmpegStderr: stderr.slice(-2000),
+          });
+          return;
+        }
+        resolve({
+          success: true,
+          speed,
+          includeAudio,
+          preservePitch: includeAudio ? preservePitch : undefined,
+          outputPath: outFile,
+          sizeBytes,
+          mediaPath: resolvedPath,
+          note: `Retimed clip written at ${speed}x. Import it with import_media and place it on a timeline. This is a constant time-scale (not optical-flow interpolation); for a ramp, bake segments and butt them together.`,
+        });
+      });
+    });
+  }
+
+  /**
+   * Normalize a file to an EBU R128 loudness target with ffmpeg's two-pass
+   * loudnorm, writing a NEW file. Premiere exposes no scriptable loudness
+   * measurement or normalization, so this is the only honest way to hit a
+   * delivery spec from the pipeline. Pass 1 measures the source (loudnorm in
+   * print mode over ffprobe/ffmpeg); pass 2 applies linear normalization seeded
+   * with the measured values for an accurate result. Same honesty contract:
+   * install guidance if ffmpeg is absent, verify-after-write before success, and
+   * the measured input loudness is returned so the change is auditable.
+   */
+  private async normalizeLoudness(
+    mediaPath?: string,
+    projectItemId?: string,
+    targetLufs = -14,
+    truePeakDb = -1.0,
+    loudnessRange = 11,
+    outputPath?: string,
+  ): Promise<any> {
+    let resolvedPath = mediaPath;
+    if (!resolvedPath && projectItemId) {
+      const resolved = await this.resolveProjectItemMediaPath(projectItemId);
+      if (resolved.error) return { success: false, error: resolved.error };
+      resolvedPath = resolved.path;
+    }
+    if (!resolvedPath) return { success: false, error: 'Provide either mediaPath or projectItemId' };
+
+    try {
+      await fs.access(resolvedPath, fsConstants.R_OK);
+    } catch {
+      return { success: false, error: `Media file not found or unreadable: ${resolvedPath}` };
+    }
+
+    const ffmpeg = this.ffmpegCmd();
+    const available = await this.checkCommandAvailable(ffmpeg, ['-version']);
+    if (!available) {
+      return {
+        success: false,
+        error: `ffmpeg ('${ffmpeg}') was not found on PATH. normalize_loudness measures and corrects loudness with ffmpeg's loudnorm filter because Premiere exposes no scriptable loudness control. Install ffmpeg (e.g. \`brew install ffmpeg\` on macOS) or set PREMIERE_MCP_FFMPEG_CMD to the binary name, then try again.`,
+      };
+    }
+
+    const loudnormBase = `I=${targetLufs}:TP=${truePeakDb}:LRA=${loudnessRange}`;
+    const ext = extname(resolvedPath) || '.wav';
+    const outFile = (outputPath && outputPath.trim())
+      || join(dirname(resolvedPath), `${basename(resolvedPath, extname(resolvedPath))}_norm${targetLufs}LUFS${ext}`);
+
+    // Pass 1: measure. loudnorm prints a JSON blob to stderr in print_format=json.
+    const measured = await new Promise<{ ok: boolean; data?: any; stderr: string }>((resolve) => {
+      const argv = ['-i', resolvedPath as string, '-af', `loudnorm=${loudnormBase}:print_format=json`, '-f', 'null', '-'];
+      const proc = spawn(ffmpeg, argv);
+      let stderr = '';
+      proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+      proc.on('error', () => resolve({ ok: false, stderr }));
+      proc.on('close', () => {
+        // The JSON is the last {...} block in stderr.
+        const match = stderr.match(/\{[\s\S]*?\}/g);
+        if (!match || match.length === 0) { resolve({ ok: false, stderr }); return; }
+        try { resolve({ ok: true, data: JSON.parse(match[match.length - 1] as string), stderr }); }
+        catch { resolve({ ok: false, stderr }); }
+      });
+    });
+
+    if (!measured.ok || !measured.data) {
+      return {
+        success: false,
+        error: 'ffmpeg could not measure the source loudness (loudnorm pass 1 produced no JSON). The file may have no audio stream or be unreadable.',
+        mediaPath: resolvedPath,
+        ffmpegStderr: measured.stderr.slice(-2000),
+      };
+    }
+
+    const m = measured.data;
+    // Pass 2: apply linear normalization seeded with the measured values.
+    const loudnormApply =
+      `loudnorm=${loudnormBase}:measured_I=${m.input_i}:measured_TP=${m.input_tp}:` +
+      `measured_LRA=${m.input_lra}:measured_thresh=${m.input_thresh}:` +
+      `offset=${m.target_offset}:linear=true:print_format=summary`;
+
+    return await new Promise((resolve) => {
+      const argv = ['-y', '-i', resolvedPath as string, '-af', loudnormApply, outFile];
+      const proc = spawn(ffmpeg, argv);
+      let stderr = '';
+      proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+      proc.on('error', (err) => {
+        resolve({ success: false, error: `Failed to run ffmpeg ('${ffmpeg}'): ${err.message}`, mediaPath: resolvedPath });
+      });
+      proc.on('close', async (code) => {
+        let sizeBytes = 0;
+        try {
+          await fs.access(outFile, fsConstants.R_OK);
+          sizeBytes = (await fs.stat(outFile)).size;
+        } catch {
+          resolve({
+            success: false,
+            error: `ffmpeg exited with code ${code} but no normalized file was written to ${outFile}.`,
+            mediaPath: resolvedPath,
+            ffmpegStderr: stderr.slice(-2000),
+          });
+          return;
+        }
+        if (sizeBytes === 0) {
+          resolve({
+            success: false,
+            error: `ffmpeg wrote an empty file to ${outFile} (0 bytes).`,
+            mediaPath: resolvedPath,
+            ffmpegStderr: stderr.slice(-2000),
+          });
+          return;
+        }
+        resolve({
+          success: true,
+          outputPath: outFile,
+          sizeBytes,
+          target: { integratedLufs: targetLufs, truePeakDb, loudnessRangeLu: loudnessRange },
+          measuredInput: {
+            integratedLufs: Number(m.input_i),
+            truePeakDb: Number(m.input_tp),
+            loudnessRangeLu: Number(m.input_lra),
+            thresholdLufs: Number(m.input_thresh),
+          },
+          mediaPath: resolvedPath,
+          note: `Normalized to ${targetLufs} LUFS (true peak <= ${truePeakDb} dBTP) with two-pass loudnorm. Import the output with import_media to use it.`,
         });
       });
     });
