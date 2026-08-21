@@ -77,6 +77,8 @@ export const PROFILES: Record<string, string[]> = {
     'add_marker', 'update_marker', 'delete_marker', 'list_markers',
     // transitions / effects (light)
     'add_transition', 'apply_effect', 'list_available_effects', 'list_available_transitions',
+    // eased scalar animation (fades/scale/rotation), baked with verifiable values
+    'bake_keyframe_ease',
     // export
     'export_frame', 'export_sequence', 'add_to_render_queue', 'get_render_queue_status',
     // render-truth: capture the composited Program frame for the feedback loop
