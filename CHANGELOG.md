@@ -2,6 +2,39 @@
 
 All notable changes are documented here. Releases use semantic versioning.
 
+## [Unreleased]
+
+New capabilities that Premiere's scripting API cannot provide on its own, each
+built to the same honesty contract as the rest of the server — probe for the
+dependency, return install guidance instead of failing silently, and verify the
+result on disk before reporting success:
+
+- Added `transcribe_to_srt`: local OpenAI Whisper speech-to-text that writes an
+  `.srt` from a media file, closing the gap before `create_caption_track`
+  (Premiere can ingest a subtitle file but cannot generate one, and exposes no
+  speech-to-text API). The `whisper` binary is overridable via
+  `PREMIERE_MCP_WHISPER_CMD`; a hard timeout kills a runaway run.
+- Added `probe_media`: ffprobe-backed ground-truth technical metadata (codec,
+  pixel format, color space/range, bit depth, frame rate, sample rate, channel
+  layout, duration) for any file on disk, imported or not. Overridable via
+  `PREMIERE_MCP_FFPROBE_CMD`.
+- Added `generate_scope`: renders a waveform, vectorscope, histogram, or RGB
+  parade image from one frame with ffmpeg, because Premiere's Lumetri scopes
+  cannot be scripted or exported. Overridable via `PREMIERE_MCP_FFMPEG_CMD`.
+- Added a recovery boundary — `create_recovery_checkpoint`,
+  `list_recovery_checkpoints`, `restore_recovery_checkpoint` — that snapshots a
+  sequence before risky edits. The automatic checkpoint taken before
+  sequence-destructive tools fails **closed**: if the snapshot cannot be made,
+  the destructive edit is refused rather than run unprotected.
+- Added opt-in tool profiles: `PREMIERE_MCP_PROFILE` (`core`, `read-only`,
+  `audio`, `color`) or an explicit `PREMIERE_MCP_TOOLS` allowlist, with
+  `PREMIERE_MCP_EXCLUDE` to subtract. The default remains the full catalogue —
+  nothing is hidden unless asked for.
+- Enriched the expanded-tool catalogue with real input schemas so every
+  advertised tool exposes a typed, discoverable argument shape.
+
+Catalogue grew to `289` tools.
+
 ## [1.2.0] - 2026-08-17
 
 - Fixed `add_marker`, `update_marker`, `delete_marker`, `list_markers`, `lock_track` and

@@ -41,6 +41,8 @@ export const PROFILES: Record<string, string[]> = {
   'read-only': [
     'get_*', 'list_*', 'read_*', 'find_*', 'search_*', 'inspect_*',
     'is_*', 'check_*', 'detect_*',
+    // non-mutating media analysis that doesn't fit the verb-prefix globs
+    'probe_media',
   ],
 
   // The everyday editorial core: sequences, clips, timeline, bins, markers,
@@ -86,6 +88,8 @@ export const PROFILES: Record<string, string[]> = {
     'get_capabilities', 'get_active_sequence', 'get_selected_clips', 'get_clip_properties',
     'color_correct', 'apply_lut', 'apply_effect', 'set_effect_property',
     'get_color_label', 'set_color_label', 'export_frame',
+    // QC: ground-truth metadata and signal scopes for grade checks
+    'probe_media', 'generate_scope',
   ],
 };
 

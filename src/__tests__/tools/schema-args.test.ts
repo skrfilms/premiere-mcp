@@ -58,7 +58,9 @@ describe('seeded arguments', () => {
     // These are excluded by construction, not by convenience: each requires one
     // of mediaPath or projectItemId and both are optional, so an object holding
     // only required fields cannot satisfy the cross-field refinement.
-    const CANNOT_BE_SATISFIED_BY_REQUIRED_ONLY = new Set(['detect_silence', 'transcribe_to_srt']);
+    const CANNOT_BE_SATISFIED_BY_REQUIRED_ONLY = new Set([
+      'detect_silence', 'transcribe_to_srt', 'probe_media', 'generate_scope',
+    ]);
     const rejected: string[] = [];
 
     for (const tool of tools) {

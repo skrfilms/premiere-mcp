@@ -1275,6 +1275,29 @@ export class PremiereProTools {
         })
       },
       {
+        name: 'probe_media',
+        description: 'Reads ground-truth technical metadata from a media file with ffprobe (run via child_process), NOT via Premiere -- so it works on any file on disk whether or not it is imported, online, or offline, and reports the container/stream facts Premiere\'s own get_metadata cannot: exact codec and profile, pixel format, color space/range, bit depth, frame rate, sample rate, channel layout, stream counts, duration, and bit rate. Requires ffprobe on PATH (ships with ffmpeg; overridable via PREMIERE_MCP_FFPROBE_CMD) and returns explicit install guidance if it is absent rather than failing silently. Returns a distilled `summary` plus the full parsed ffprobe JSON under `probe`.',
+        inputSchema: z.object({
+          mediaPath: z.string().optional().describe('Direct filesystem path to the media file to probe'),
+          projectItemId: z.string().optional().describe('Project item ID to resolve to a media path instead of passing mediaPath directly')
+        }).refine((data) => Boolean(data.mediaPath) || Boolean(data.projectItemId), {
+          message: 'Provide either mediaPath or projectItemId'
+        })
+      },
+      {
+        name: 'generate_scope',
+        description: 'Renders a signal/QC scope image -- waveform, vectorscope, histogram, or RGB parade -- from a single frame of a media file using ffmpeg (run via child_process), NOT via Premiere, whose Lumetri scopes cannot be scripted or exported. Grabs the frame at timeSeconds, applies the chosen scope filter, and writes a PNG. Requires ffmpeg on PATH (overridable via PREMIERE_MCP_FFMPEG_CMD) and returns explicit install guidance if it is absent; verifies the PNG was actually written before reporting success. Use for exposure/color QC and before/after grade checks.',
+        inputSchema: z.object({
+          mediaPath: z.string().optional().describe('Direct filesystem path to the media file to analyze'),
+          projectItemId: z.string().optional().describe('Project item ID to resolve to a media path instead of passing mediaPath directly'),
+          scope: z.enum(['waveform', 'vectorscope', 'histogram', 'rgb_parade']).optional().describe('Which scope to render (default "waveform"). "rgb_parade" is a per-channel RGB waveform.'),
+          timeSeconds: z.number().optional().describe('Timestamp of the frame to analyze, in seconds from the file start (default 0).'),
+          outputPath: z.string().optional().describe('Where to write the PNG. Defaults to <mediaDir>/<mediaBasename>_<scope>.png.')
+        }).refine((data) => Boolean(data.mediaPath) || Boolean(data.projectItemId), {
+          message: 'Provide either mediaPath or projectItemId'
+        })
+      },
+      {
         name: 'rename_project_item',
         description: 'Renames a project item (sequence, bin, clip) by setting its name. Use this when duplicate_sequence does not propagate the new name to the project panel.',
         inputSchema: z.object({
@@ -1847,6 +1870,10 @@ export class PremiereProTools {
           return await this.transcribeToSrt(args.mediaPath, args.projectItemId, args.outputDir, args.model, args.language, args.translateToEnglish, args.timeoutSeconds);
         case 'create_caption_track':
           return await this.createCaptionTrack(args.sequenceId, args.projectItemId, args.startTime, args.captionFormat);
+        case 'probe_media':
+          return await this.probeMedia(args.mediaPath, args.projectItemId);
+        case 'generate_scope':
+          return await this.generateScope(args.mediaPath, args.projectItemId, args.scope, args.timeSeconds, args.outputPath);
 
         // Subclip
         case 'create_subclip':
@@ -5238,6 +5265,212 @@ ${this.buildSequenceResolver(sequenceId)}
           note: cueCount === 0
             ? 'Whisper produced an .srt with no cues (no detectable speech, or the wrong language hint). The file exists but is empty of captions.'
             : 'Import this srtPath with import_media, then pass the resulting project item id to create_caption_track to lay the captions onto a sequence.',
+        });
+      });
+    });
+  }
+
+  /** The ffprobe binary, overridable for installs that expose a different name. */
+  private ffprobeCmd(): string {
+    return (process.env.PREMIERE_MCP_FFPROBE_CMD || 'ffprobe').trim() || 'ffprobe';
+  }
+
+  /** The ffmpeg binary, overridable for installs that expose a different name. */
+  private ffmpegCmd(): string {
+    return (process.env.PREMIERE_MCP_FFMPEG_CMD || 'ffmpeg').trim() || 'ffmpeg';
+  }
+
+  /** Parse an ffprobe "num/den" (or plain) frame-rate string to fps. */
+  private parseFrameRate(rate: string): number | undefined {
+    const parts = rate.split('/');
+    if (parts.length === 2) {
+      const num = Number(parts[0]);
+      const den = Number(parts[1]);
+      if (den) return Math.round((num / den) * 1000) / 1000;
+    }
+    const single = Number(rate);
+    return Number.isFinite(single) ? single : undefined;
+  }
+
+  /**
+   * Read technical metadata from a media file with ffprobe. Premiere's scripting
+   * DOM exposes only a thin slice of a clip's metadata (and nothing at all for
+   * files that are not imported), so this shells out to ffprobe -- the same
+   * child_process pattern as detect_silence: probe for the tool, fail with clear
+   * install guidance if absent, and only return parsed data (never a fabricated
+   * shape) when ffprobe actually produced JSON.
+   */
+  private async probeMedia(mediaPath?: string, projectItemId?: string): Promise<any> {
+    let resolvedPath = mediaPath;
+    if (!resolvedPath && projectItemId) {
+      const resolved = await this.resolveProjectItemMediaPath(projectItemId);
+      if (resolved.error) return { success: false, error: resolved.error };
+      resolvedPath = resolved.path;
+    }
+    if (!resolvedPath) return { success: false, error: 'Provide either mediaPath or projectItemId' };
+
+    try {
+      await fs.access(resolvedPath, fsConstants.R_OK);
+    } catch {
+      return { success: false, error: `Media file not found or unreadable: ${resolvedPath}` };
+    }
+
+    const ffprobe = this.ffprobeCmd();
+    const available = await this.checkCommandAvailable(ffprobe, ['-version']);
+    if (!available) {
+      return {
+        success: false,
+        error: `ffprobe ('${ffprobe}') was not found on PATH. probe_media reads media metadata with ffprobe, which ships with ffmpeg, not via Premiere's scripting API. Install ffmpeg (e.g. \`brew install ffmpeg\` on macOS) or set PREMIERE_MCP_FFPROBE_CMD to the binary name, then try again.`,
+      };
+    }
+
+    return await new Promise((resolve) => {
+      const argv = ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', resolvedPath as string];
+      const proc = spawn(ffprobe, argv);
+      let stdout = '';
+      let stderr = '';
+      proc.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+      proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+      proc.on('error', (err) => {
+        resolve({ success: false, error: `Failed to run ffprobe ('${ffprobe}'): ${err.message}`, mediaPath: resolvedPath });
+      });
+      proc.on('close', (code) => {
+        let parsed: any;
+        try {
+          parsed = JSON.parse(stdout);
+        } catch {
+          resolve({
+            success: false,
+            error: `ffprobe exited with code ${code} and did not return parseable metadata. The file may be unreadable or not a media file.`,
+            mediaPath: resolvedPath,
+            ffprobeStderr: stderr.slice(-2000),
+          });
+          return;
+        }
+        const streams: any[] = Array.isArray(parsed.streams) ? parsed.streams : [];
+        const video = streams.find((s) => s.codec_type === 'video');
+        const audio = streams.find((s) => s.codec_type === 'audio');
+        const fmt = parsed.format || {};
+        const summary = {
+          durationSeconds: fmt.duration != null ? Number(fmt.duration) : undefined,
+          formatName: fmt.format_name,
+          sizeBytes: fmt.size != null ? Number(fmt.size) : undefined,
+          bitRate: fmt.bit_rate != null ? Number(fmt.bit_rate) : undefined,
+          videoStreamCount: streams.filter((s) => s.codec_type === 'video').length,
+          audioStreamCount: streams.filter((s) => s.codec_type === 'audio').length,
+          video: video
+            ? {
+                codec: video.codec_name,
+                profile: video.profile,
+                width: video.width,
+                height: video.height,
+                pixelFormat: video.pix_fmt,
+                colorSpace: video.color_space,
+                colorRange: video.color_range,
+                bitDepth: video.bits_per_raw_sample != null ? Number(video.bits_per_raw_sample) : undefined,
+                fps: typeof video.r_frame_rate === 'string' ? this.parseFrameRate(video.r_frame_rate) : undefined,
+              }
+            : null,
+          audio: audio
+            ? {
+                codec: audio.codec_name,
+                sampleRate: audio.sample_rate != null ? Number(audio.sample_rate) : undefined,
+                channels: audio.channels,
+                channelLayout: audio.channel_layout,
+              }
+            : null,
+        };
+        resolve({ success: true, mediaPath: resolvedPath, summary, probe: parsed });
+      });
+    });
+  }
+
+  /** Map a scope name to its (verified) ffmpeg video filter. */
+  private scopeFilter(scope: string): string {
+    switch (scope) {
+      case 'vectorscope': return 'vectorscope';
+      case 'histogram': return 'histogram';
+      case 'rgb_parade': return 'waveform=display=parade:components=7';
+      case 'waveform':
+      default: return 'waveform';
+    }
+  }
+
+  /**
+   * Render a signal scope (waveform / vectorscope / histogram / RGB parade) from
+   * one frame of a media file to a PNG, via ffmpeg. Premiere's Lumetri scopes
+   * are not scriptable, so this is the only way to get scope output from the
+   * pipeline. Same honesty contract as detect_silence/transcribe_to_srt: probe
+   * for ffmpeg, fail with install guidance if absent, and verify-after-write
+   * (the PNG must exist) before claiming success -- so an out-of-range timestamp
+   * or unreadable file returns a clear error, not a fake success.
+   */
+  private async generateScope(
+    mediaPath?: string,
+    projectItemId?: string,
+    scope = 'waveform',
+    timeSeconds = 0,
+    outputPath?: string,
+  ): Promise<any> {
+    let resolvedPath = mediaPath;
+    if (!resolvedPath && projectItemId) {
+      const resolved = await this.resolveProjectItemMediaPath(projectItemId);
+      if (resolved.error) return { success: false, error: resolved.error };
+      resolvedPath = resolved.path;
+    }
+    if (!resolvedPath) return { success: false, error: 'Provide either mediaPath or projectItemId' };
+
+    try {
+      await fs.access(resolvedPath, fsConstants.R_OK);
+    } catch {
+      return { success: false, error: `Media file not found or unreadable: ${resolvedPath}` };
+    }
+
+    const ffmpeg = this.ffmpegCmd();
+    const available = await this.checkCommandAvailable(ffmpeg, ['-version']);
+    if (!available) {
+      return {
+        success: false,
+        error: `ffmpeg ('${ffmpeg}') was not found on PATH. generate_scope renders scopes with ffmpeg because Premiere's Lumetri scopes cannot be scripted or exported. Install ffmpeg (e.g. \`brew install ffmpeg\` on macOS) or set PREMIERE_MCP_FFMPEG_CMD to the binary name, then try again.`,
+      };
+    }
+
+    const outPng = (outputPath && outputPath.trim())
+      || join(dirname(resolvedPath), `${basename(resolvedPath, extname(resolvedPath))}_${scope}.png`);
+    const filter = this.scopeFilter(scope);
+    const seek = Math.max(0, timeSeconds);
+
+    return await new Promise((resolve) => {
+      const argv = ['-y', '-ss', String(seek), '-i', resolvedPath as string, '-frames:v', '1', '-vf', filter, outPng];
+      const proc = spawn(ffmpeg, argv);
+      let stderr = '';
+      proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+      proc.on('error', (err) => {
+        resolve({ success: false, error: `Failed to run ffmpeg ('${ffmpeg}'): ${err.message}`, mediaPath: resolvedPath });
+      });
+      proc.on('close', async (code) => {
+        // Verify-after-write: the PNG must actually exist before we claim success.
+        try {
+          await fs.access(outPng, fsConstants.R_OK);
+        } catch {
+          resolve({
+            success: false,
+            error: `ffmpeg exited with code ${code} but no scope image was written to ${outPng}. The frame at ${seek}s may be past the end of the clip, or the file couldn't be read.`,
+            mediaPath: resolvedPath,
+            ffmpegStderr: stderr.slice(-2000),
+          });
+          return;
+        }
+        let sizeBytes: number | undefined;
+        try { sizeBytes = (await fs.stat(outPng)).size; } catch { /* size is best-effort */ }
+        resolve({
+          success: true,
+          scope,
+          scopePath: outPng,
+          timeSeconds: seek,
+          sizeBytes,
+          mediaPath: resolvedPath,
+          note: `Scope image written. ffmpeg filter used: "${filter}" at t=${seek}s.`,
         });
       });
     });

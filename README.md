@@ -4,7 +4,7 @@
 
 **Operate local Adobe Premiere Pro projects through MCP.**
 
-283 tools, 13 context resources, and 10 guided prompts for Codex, Claude Code, Claude Desktop, and other MCP clients. CEP is the supported production bridge; UXP remains experimental.
+289 tools, 13 context resources, and 10 guided prompts for Codex, Claude Code, Claude Desktop, and other MCP clients. CEP is the supported production bridge; UXP remains experimental.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-5fd3c6.svg)](LICENSE.md)
 [![Node.js](https://img.shields.io/badge/Node.js-20%2B-339933.svg)](https://nodejs.org/)
@@ -122,15 +122,18 @@ This repository is currently validated for:
 - the included Windows installer path for GitHub Copilot in VS Code and Claude Desktop config
 - manual MCP registration for Codex, Claude Code, and similar MCP clients
 
-Current catalog status as of August 5, 2026:
+Current catalog status as of August 20, 2026:
 
-- `283` MCP tools are exposed for AI-driven video editing
+- `289` MCP tools are exposed for AI-driven video editing
 - coverage spans project setup, media ingest, bins, sequences, timeline editing, transitions, effects, keyframes, captions, markers, metadata, proxies, multicam, color, audio, exports, and higher-level assembly workflows
 - the catalog includes practical agent workflows such as product-spot assembly, motion-graphics demos, timeline razoring, caption reads, audio ducking, scene edit detection, EDL import, export readiness validation, and linked audio/video operations
+- local-compute tools that Premiere's scripting API cannot provide: `detect_silence` (ffmpeg), `transcribe_to_srt` (local OpenAI Whisper speech-to-text), `probe_media` (ffprobe ground-truth metadata), and `generate_scope` (ffmpeg waveform / vectorscope / histogram / RGB-parade images) — each probes for its binary and returns install guidance instead of failing silently
+- a recovery boundary — `create_recovery_checkpoint`, `list_recovery_checkpoints`, `restore_recovery_checkpoint` — snapshots a sequence before risky edits; the auto-checkpoint before destructive edits fails **closed** (the edit is refused if the snapshot cannot be taken)
+- opt-in tool profiles (`PREMIERE_MCP_PROFILE=core|read-only|audio|color`, or an explicit `PREMIERE_MCP_TOOLS` allowlist) trim the menu for small tool budgets without hiding anything by default
 
 Most recent completed local live validation:
 
-- `283` active tools are exposed; `get_capabilities` reports local installation and optional live connection state, while `verify_premiere_connection` is the canonical read-only bridge and host readiness check
+- `289` active tools are exposed; `get_capabilities` reports local installation and optional live connection state, while `verify_premiere_connection` is the canonical read-only bridge and host readiness check
 - `0` known parked or placeholder tools are advertised
 - `import_ae_comps` is intentionally not advertised because Premiere returned `false` for real `.aep` fixtures in this environment and a generic `.aep` import can wedge the CEP bridge
 
@@ -230,7 +233,7 @@ For a real-host sweep, use a disposable Premiere project and run `node scripts/l
 
 ## Tools
 
-All `283` advertised tools have an implementation. Tool schemas are available through MCP discovery; this catalog explains the editing surface in human terms. Start with `verify_premiere_connection`, then inspect the project before asking an agent to mutate it.
+All `289` advertised tools have an implementation. Tool schemas are available through MCP discovery; this catalog explains the editing surface in human terms. Start with `verify_premiere_connection`, then inspect the project before asking an agent to mutate it.
 
 ### Discovery and project inspection
 
@@ -269,6 +272,7 @@ All `283` advertised tools have an implementation. Tool schemas are available th
 | `create_sequence_from_clips` | Derive a sequence from pre-imported media when the clip settings should define the sequence. |
 | `duplicate_sequence` | Copy a sequence; `clearContents: true` makes an empty reusable template with the source settings. |
 | `delete_sequence` / `close_sequence` / `set_active_sequence` | Manage which sequence is open or active. |
+| `create_recovery_checkpoint` / `list_recovery_checkpoints` / `restore_recovery_checkpoint` | Snapshot a sequence (as a reserved-name clone) before a risky edit, list snapshots, and restore one. The auto-checkpoint before destructive edits fails **closed** — if the snapshot cannot be taken, the destructive edit is refused rather than run unprotected. |
 | `get_sequence_structure` / `get_sequence_count` | Inspect a sequence layout or count project sequences. |
 | `set_sequence_settings` / `set_sequence_frame_rate` / `set_sequence_resolution` | Change supported sequence settings. Verify results because Premiere can quantize or reject changes. |
 | `set_sequence_audio_settings` / `set_sequence_pixel_aspect_ratio` / `set_sequence_field_type` | Adjust supported audio, pixel-aspect, and field settings. |
@@ -314,9 +318,10 @@ All `283` advertised tools have an implementation. Tool schemas are available th
 | `add_audio_keyframes` / `setup_ducking` | Build volume automation or a full ducking curve from supplied windows. |
 | `mute_track` / `apply_audio_effect` / `apply_audio_effect_to_all_clips` | Mute a track or apply audio processing to one or many clips. |
 | `detect_silence` | Analyze a local media file with ffmpeg and return silence ranges. It does not edit the timeline. |
+| `transcribe_to_srt` | Transcribe a media file's speech to an `.srt` with a local OpenAI Whisper install (Premiere has no speech-to-text API). Probes for the `whisper` CLI, returns install guidance if absent, and verifies the `.srt` was written before reporting its cue count. |
 | `list_available_transitions` / `list_available_audio_transitions` | Discover installed transition names. |
 | `add_transition` / `add_transition_to_clip` / `batch_add_transitions` | Add one or many transitions. Results distinguish verified changes from accepted-but-unverified host responses. |
-| `create_caption_track` | Create a caption track from an imported subtitle project item, such as an SRT. |
+| `create_caption_track` | Create a caption track from an imported subtitle project item, such as an SRT. Pair with `transcribe_to_srt` → `import_media` to caption a clip end to end. |
 | `read_sequence_captions` | Reports scripting-visible caption data and explicitly flags that Premiere's DOM often cannot read existing caption text. |
 
 ### Markers, selection, navigation, and playback
@@ -345,6 +350,8 @@ All `283` advertised tools have an implementation. Tool schemas are available th
 | `manage_proxies` / `has_proxy` / `detach_proxy` | Inspect, attach, or detach proxies. |
 | `set_offline` / `refresh_media` / `set_scale_to_frame_size` | Change offline status, refresh media, or apply frame-size scaling. |
 | `consolidate_duplicates` / `consolidate_and_transfer` | Consolidate duplicate items or prepare a transfer workflow. |
+| `probe_media` | Read ground-truth technical metadata from any file on disk with ffprobe — exact codec, pixel format, color space/range, bit depth, frame rate, sample rate, channel layout, duration — including files Premiere has not imported. Returns a distilled summary plus the full ffprobe JSON. |
+| `generate_scope` | Render a signal scope (waveform, vectorscope, histogram, or RGB parade) from one frame to a PNG with ffmpeg, because Premiere's Lumetri scopes cannot be scripted or exported. Verifies the image was written before reporting success. |
 
 ### Graphics, workflows, workspace, and advanced operations
 
