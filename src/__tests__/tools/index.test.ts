@@ -103,7 +103,8 @@ describe('PremiereProTools', () => {
       expect(toolNames).toContain('remove_srt_cue');
       expect(toolNames).toContain('shift_srt_timing');
       expect(toolNames).toContain('bake_keyframe_ease');
-      expect(availableTools).toHaveLength(304);
+      expect(toolNames).toContain('reflect_dom_object');
+      expect(availableTools).toHaveLength(305);
       expect(unimplementedExpandedToolNames).toEqual([]);
       for (const name of expandedToolNames) {
         expect(toolNames).toContain(name);
@@ -580,8 +581,8 @@ describe('PremiereProTools', () => {
       expect(result.success).toBe(true);
       // The full catalogue is exposed by default (no profile env set). The
       // catalog block now also reports the active profile for introspection.
-      expect(result.catalog.tools).toBe(304);
-      expect(result.catalog.toolsInFullCatalog).toBe(304);
+      expect(result.catalog.tools).toBe(305);
+      expect(result.catalog.toolsInFullCatalog).toBe(305);
       expect(result.catalog.resources).toBe(13);
       expect(result.catalog.prompts).toBe(10);
       expect(result.catalog.profile.source).toBe('all');

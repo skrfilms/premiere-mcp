@@ -23,6 +23,7 @@ export const expandedToolNames = [
   'execute_extendscript',
   'evaluate_expression',
   'inspect_dom_object',
+  'reflect_dom_object',
   'list_clip_effects',
   'get_sequence_structure',
   'get_premiere_state',
@@ -917,6 +918,32 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
       }
       return current;
     }
+    // Like resolvePath, but also roots "qe.*" paths at the QE DOM (enabling it
+    // first) so reflection can map the undocumented engine, not just the public
+    // app object. A bare path with no "app"/"qe" prefix is resolved from app.
+    function resolveReflectPath(pathValue) {
+      var raw = String(pathValue || "app").replace(/\\[([0-9]+)\\]/g, ".$1");
+      var parts = raw.split(".");
+      var current;
+      var startIdx;
+      if (parts[0] === "qe") {
+        app.enableQE();
+        current = qe;
+        startIdx = 1;
+      } else if (parts[0] === "app") {
+        current = app;
+        startIdx = 1;
+      } else {
+        current = app;
+        startIdx = 0;
+      }
+      for (var i = startIdx; i < parts.length; i++) {
+        if (!parts[i]) continue;
+        if (current === null || typeof current === "undefined") return undefined;
+        current = current[parts[i]];
+      }
+      return current;
+    }
     function secondsToTime(seconds) {
       var time = new Time();
       time.seconds = Number(seconds || 0);
@@ -1098,6 +1125,107 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
             return out;
           }
           return ok({ path: objectPath, value: inspect(target, 0) });
+
+        case "reflect_dom_object":
+          // The escape-hatch companion to execute_extendscript: enumerate the
+          // *callable* surface of any DOM object via ExtendScript's .reflect
+          // interface. Unlike inspect_dom_object (for..in), this reveals native
+          // methods -- their return type, argument names/types, and description --
+          // which are non-enumerable and invisible to property iteration. Pure
+          // read: reflection never mutates.
+          var reflectPath = String(args.object_path || args.path || "app");
+          var nameFilter = args.name_filter ? normalizeName(String(args.name_filter)) : null;
+          var includeValues = (args.include_values === true);
+          var reflectTarget = resolveReflectPath(reflectPath);
+          if (reflectTarget === null || typeof reflectTarget === "undefined") {
+            return fail("Path did not resolve to a value: " + reflectPath);
+          }
+          if (typeof reflectTarget !== "object" && typeof reflectTarget !== "function") {
+            return ok({
+              path: reflectPath,
+              dataType: typeof reflectTarget,
+              value: String(reflectTarget),
+              reflectable: false,
+              methods: [],
+              properties: []
+            });
+          }
+          var reflectApi = null;
+          try { reflectApi = reflectTarget.reflect; } catch (eR) {}
+          if (!reflectApi) return fail("Object at " + reflectPath + " exposes no reflect interface");
+
+          var reflectClassName = null;
+          try { reflectClassName = String(reflectApi.name); } catch (eN) {}
+
+          function skipReflectName(nm) {
+            return nm.length >= 2 && nm.substr(0, 2) === "__";
+          }
+          function passesFilter(nm) {
+            return !nameFilter || normalizeName(nm).indexOf(nameFilter) !== -1;
+          }
+
+          var reflectMethods = [];
+          try {
+            var ms = reflectApi.methods;
+            for (var rmi = 0; rmi < ms.length; rmi++) {
+              var mEntry = ms[rmi];
+              var mName = String(mEntry.name);
+              if (skipReflectName(mName) || !passesFilter(mName)) continue;
+              var mArgs = [];
+              try {
+                if (mEntry.arguments != null) {
+                  for (var ma = 0; ma < mEntry.arguments.length; ma++) {
+                    var aEntry = mEntry.arguments[ma];
+                    mArgs.push({
+                      name: String(aEntry.name),
+                      type: (aEntry.dataType != null ? String(aEntry.dataType) : null)
+                    });
+                  }
+                }
+              } catch (eMa) {}
+              var mRec = {
+                name: mName,
+                returns: (mEntry.dataType != null ? String(mEntry.dataType) : null),
+                args: mArgs
+              };
+              var mDesc = "";
+              try { mDesc = String(mEntry.description || ""); } catch (eMd) {}
+              if (mDesc) mRec.description = mDesc;
+              reflectMethods.push(mRec);
+            }
+          } catch (eMethods) {}
+
+          var reflectProps = [];
+          try {
+            var ps = reflectApi.properties;
+            for (var rpi = 0; rpi < ps.length; rpi++) {
+              var pEntry = ps[rpi];
+              var pName = String(pEntry.name);
+              if (skipReflectName(pName) || !passesFilter(pName)) continue;
+              var pRec = { name: pName, type: (pEntry.dataType != null ? String(pEntry.dataType) : null) };
+              if (includeValues) {
+                try {
+                  var pv = reflectTarget[pName];
+                  if (pv === null || typeof pv !== "object") pRec.value = pv;
+                  else pRec.value = "[" + (typeof pv) + "]";
+                } catch (ePv) { pRec.value = "<threw: " + ePv.toString() + ">"; }
+              }
+              reflectProps.push(pRec);
+            }
+          } catch (eProps) {}
+
+          reflectMethods.sort(function (a, b) { return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0); });
+          reflectProps.sort(function (a, b) { return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0); });
+
+          return ok({
+            path: reflectPath,
+            className: reflectClassName,
+            dataType: typeof reflectTarget,
+            methodCount: reflectMethods.length,
+            propertyCount: reflectProps.length,
+            methods: reflectMethods,
+            properties: reflectProps
+          });
 
         case "get_version_info":
           return ok({ version: app.version, build: app.build });
