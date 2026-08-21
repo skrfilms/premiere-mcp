@@ -1086,6 +1086,23 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
       if (!qeTrack) return null;
       return __findQeClipByDomClip(qeTrack, found.clip);
     }
+    // Effect-removal helpers, shared by remove_effect and remove_all_effects. Defined
+    // here (not inside a case) because ExtendScript only assigns a function declared in
+    // a case block when that case executes, so a sibling case would see it as undefined.
+    function reIsIntrinsic(comp) {
+      var m = String(comp.matchName);
+      if (m === "AE.ADBE Motion" || m === "AE.ADBE Opacity" || m === "AE.ADBE Volume" || m === "AE.ADBE Pan") return true;
+      var n = normalizeName(comp.displayName);
+      return n === "motion" || n === "opacity" || n === "volume" || n === "pan";
+    }
+    function reIsLumetri(comp) {
+      return String(comp.matchName).indexOf("Lumetri") !== -1 || normalizeName(comp.displayName) === "lumetricolor";
+    }
+    function reSnapshot(clip) {
+      var a = [];
+      for (var i = 0; i < clip.components.numItems; i++) a.push(String(clip.components[i].matchName));
+      return a;
+    }
     function markerCollectionForTool() {
       var seqErr = sequenceRequestError();
       if (seqErr) { pendingSequenceError = seqErr; return null; }
@@ -2123,20 +2140,10 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           // all-or-nothing: it strips every user-added effect at once while preserving the
           // intrinsic Motion/Opacity/Volume and any Lumetri Color. Surgical single-effect
           // removal is therefore only honest when the target is the SOLE removable effect.
-          function reIsIntrinsic(comp) {
-            var m = String(comp.matchName);
-            if (m === "AE.ADBE Motion" || m === "AE.ADBE Opacity" || m === "AE.ADBE Volume" || m === "AE.ADBE Pan") return true;
-            var n = normalizeName(comp.displayName);
-            return n === "motion" || n === "opacity" || n === "volume" || n === "pan";
-          }
-          function reIsLumetri(comp) {
-            return String(comp.matchName).indexOf("Lumetri") !== -1 || normalizeName(comp.displayName) === "lumetricolor";
-          }
-          function reSnapshot(clip) {
-            var a = [];
-            for (var i = 0; i < clip.components.numItems; i++) a.push(String(clip.components[i].matchName));
-            return a;
-          }
+          // (reIsIntrinsic/reIsLumetri/reSnapshot are declared with the other top-level
+          // helpers, because ExtendScript does not assign a function declared inside a
+          // case block unless that case actually executes -- so remove_all_effects, a
+          // different case, could not see them if they lived here.)
           var effectToRemove = findComponent(removeEffectClip.clip, removeEffectName);
           if (!effectToRemove) return ok({ removed: true, changed: false, effect: removeEffectName, note: "Effect was already absent from clip" });
           if (reIsIntrinsic(effectToRemove.component)) return fail("'" + String(effectToRemove.component.displayName) + "' is an intrinsic component (Motion/Opacity/Volume/Pan) and cannot be removed.", { effect: removeEffectName, intrinsic: true });
@@ -3155,23 +3162,6 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           if (!matchClip || !matchClip.clip.projectItem) return commandByName("Match Frame");
           if (app.sourceMonitor && app.sourceMonitor.openProjectItem) app.sourceMonitor.openProjectItem(matchClip.clip.projectItem);
           return ok({ matched: true, clipId: matchClip.clip.nodeId, item: matchClip.clip.projectItem.name, time: matchTime, method: "sourceMonitor.openProjectItem" });
-
-        case "get_project_scratch_disks":
-        case "get_project_panel_metadata":
-        case "get_xmp_metadata":
-        case "get_color_space":
-        case "get_graphics_white_luminance":
-        case "is_work_area_enabled":
-        case "get_insertion_bin":
-        case "get_all_project_paths":
-        case "get_timeline_gaps":
-        case "get_clip_markers":
-        case "get_sequence_markers_by_type":
-        case "get_next_edit_point":
-          return fail("This expanded read tool is not implemented with a verifiable Premiere DOM readback yet.", {
-            available: false,
-            project: app.project ? app.project.name : null
-          });
 
         default:
           return fail("Expanded tool is advertised but has no implemented handler.", {

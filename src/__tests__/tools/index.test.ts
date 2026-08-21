@@ -748,10 +748,15 @@ describe('PremiereProTools', () => {
       expect(missingHandlerScript).toContain('Expanded tool is advertised but has no implemented handler');
       expect(missingHandlerScript).not.toContain('accepted: true');
 
+      // capture_frame used to be a placeholder read that faked completion; it is now a
+      // real QE frame exporter. It must still be fail-closed: refuse without an output
+      // path, and prove the write by re-reading disk rather than trusting the call.
       await executeExpandedTool(mockBridge, 'capture_frame', {});
-      const placeholderReadScript = mockBridge.executeScript.mock.calls[1][0];
-      expect(placeholderReadScript).toContain('not implemented with a verifiable Premiere DOM readback yet');
-      expect(placeholderReadScript).not.toContain('Read operation completed');
+      const captureFrameScript = mockBridge.executeScript.mock.calls[1][0];
+      expect(captureFrameScript).toContain('capture_frame requires outputPath');
+      expect(captureFrameScript).toContain('frameWritten');
+      expect(captureFrameScript).not.toContain('Read operation completed');
+      expect(captureFrameScript).not.toContain('not implemented with a verifiable Premiere DOM readback yet');
     });
   });
 
