@@ -102,6 +102,17 @@ result on disk before reporting success:
   nothing is hidden unless asked for.
 - Enriched the expanded-tool catalogue with real input schemas so every
   advertised tool exposes a typed, discoverable argument shape.
+- Made the install `doctor` (macOS + Windows) honest and self-checking. It now
+  samples the bridge heartbeat to report automatically whether the CEP panel is
+  **live and connected**, **stale** (running but not polling), or **not running**
+  — replacing the old "go click Test Connection yourself" punt. Adobe CEP debug
+  mode now passes when enabled for *any* installed CSXS version instead of
+  failing per-version (Premiere 26.x uses CSXS.11/12, so demanding all of
+  10/11/12 flagged a correct setup); a missing MCP-client config for a client you
+  do not use is now a note, not a failure, and the check covers the Claude Code
+  project `.mcp.json` alongside Claude Desktop and VS Code; and it reports which
+  optional local backends (ffmpeg/ffprobe/whisper) are present. Blocking failures
+  and non-blocking warnings are now tallied separately in the verdict.
 
 Catalogue grew to `296` tools.
 
