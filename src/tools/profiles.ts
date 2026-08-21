@@ -57,6 +57,8 @@ export const PROFILES: Record<string, string[]> = {
     'import_media', 'import_folder', 'create_bin', 'move_item_to_bin', 'rename_project_item',
     // sequence
     'create_sequence', 'duplicate_sequence', 'delete_sequence', 'set_sequence_settings',
+    // recovery boundary — snapshot before risky edits, list, restore
+    'create_recovery_checkpoint', 'list_recovery_checkpoints', 'restore_recovery_checkpoint',
     // timeline editing
     'add_to_timeline', 'add_to_timeline_batch', 'remove_from_timeline', 'move_clip',
     'trim_clip', 'split_clip', 'razor_timeline_at_time', 'replace_clip', 'duplicate_clip',
@@ -75,6 +77,7 @@ export const PROFILES: Record<string, string[]> = {
     'adjust_audio_levels', 'add_audio_keyframes', 'apply_audio_effect',
     'apply_audio_effect_to_all_clips', 'list_available_audio_effects',
     'list_available_audio_transitions', 'setup_ducking', 'detect_silence',
+    'transcribe_to_srt', 'create_caption_track', 'read_sequence_captions',
     'mute_track', 'lock_track', 'link_audio_video', 'link_selection', 'unlink_selection',
   ],
 

@@ -15,6 +15,15 @@ import { Logger } from '../utils/logger.js';
 import { createMotionDemoAssets } from '../utils/demoAssets.js';
 import { executeExpandedTool, getExpandedTools, isExpandedTool } from './expanded.js';
 import { applyProfile, resolveProfile, PROFILES } from './profiles.js';
+import {
+  RECOVERY_PREFIX,
+  buildRecoveryCheckpointName,
+  formatCheckpointTimestamp,
+  isRecoveryCheckpointName,
+  parseRecoveryCheckpointName,
+  SEQUENCE_DESTRUCTIVE_TOOLS,
+  autoCheckpointEnabled,
+} from './recovery.js';
 
 export interface MCPTool {
   name: string;
@@ -497,6 +506,32 @@ export class PremiereProTools {
         description: 'Deletes a sequence from the project.',
         inputSchema: z.object({
           sequenceId: z.string().describe('The ID of the sequence to delete')
+        })
+      },
+
+      // Recovery Boundary — cheap, explicit snapshots before risky work.
+      {
+        name: 'create_recovery_checkpoint',
+        description: 'Takes a recovery snapshot of a sequence by cloning it into a tagged copy named "[recovery] <label> @ <timestamp>". Use this BEFORE a risky or bulk edit so you can get the pre-edit state back with restore_recovery_checkpoint. The snapshot travels with the project (it is a real sequence), so it survives save/close/reopen without any external store. Non-destructive: the source sequence is untouched. Set PREMIERE_MCP_AUTO_CHECKPOINT=1 to have bulk/destructive operations do this automatically.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional().describe('ID of the sequence to snapshot. Defaults to the active sequence when omitted.'),
+          label: z.string().optional().describe('Short human label recorded in the checkpoint name (e.g. "before ripple cleanup"). Defaults to "checkpoint".')
+        })
+      },
+      {
+        name: 'list_recovery_checkpoints',
+        description: 'Lists the recovery checkpoints in the project — every sequence whose name carries the "[recovery]" tag — with each one\'s parsed label and creation timestamp, most recent first. Use this to find a snapshot to restore_recovery_checkpoint, or to prune old ones with delete_sequence.',
+        inputSchema: z.object({
+          labelContains: z.string().optional().describe('Optional case-insensitive substring; only checkpoints whose label contains it are returned.')
+        })
+      },
+      {
+        name: 'restore_recovery_checkpoint',
+        description: 'Restores a recovery checkpoint by cloning it into a fresh working sequence (optionally made active), leaving the checkpoint itself intact so it can be restored again. This does NOT surgically rewind the original sequence in place — Premiere offers no safe API for that — it hands you a clean copy of the snapshot to continue from. Pass the checkpoint\'s sequence ID from list_recovery_checkpoints.',
+        inputSchema: z.object({
+          checkpointSequenceId: z.string().describe('The sequence ID of the checkpoint to restore (from list_recovery_checkpoints).'),
+          newName: z.string().optional().describe('Name for the restored working sequence. Defaults to the checkpoint\'s label with " (restored)" appended.'),
+          setActive: z.boolean().optional().describe('Open the restored sequence as the active timeline. Default true.')
         })
       },
 
@@ -1208,6 +1243,21 @@ export class PremiereProTools {
 
       // Captions
       {
+        name: 'transcribe_to_srt',
+        description: 'Transcribes a media file\'s speech to an .srt subtitle file using a LOCAL OpenAI Whisper install (the `whisper` CLI), run via child_process -- NOT via Premiere, which has no speech-to-text scripting API at all. This fills the gap before create_caption_track: Premiere can ingest an .srt but cannot generate one. Requires the whisper CLI on PATH (`pip install -U openai-whisper`, plus ffmpeg); returns an explicit error with install guidance if it is not found rather than failing silently. Verifies the .srt was actually written and reports its path and cue count. Whisper is CPU/GPU-heavy and can take minutes on long files. Typical chain: transcribe_to_srt -> import_media (the returned srtPath) -> create_caption_track (the imported item id).',
+        inputSchema: z.object({
+          mediaPath: z.string().optional().describe('Direct filesystem path to the audio/video file to transcribe'),
+          projectItemId: z.string().optional().describe('Project item ID to resolve to a media path instead of passing mediaPath directly'),
+          outputDir: z.string().optional().describe('Directory to write the .srt into. Defaults to the media file\'s own directory. The file is named <mediaBasename>.srt.'),
+          model: z.string().optional().describe('Whisper model size: tiny, base, small, medium, large (default "base"). Larger = more accurate but much slower.'),
+          language: z.string().optional().describe('Spoken language hint, e.g. "en" or "English". Omit to let Whisper auto-detect.'),
+          translateToEnglish: z.boolean().optional().describe('When true, transcribe AND translate the speech into English subtitles (Whisper task=translate). Default false = transcribe in the original language.'),
+          timeoutSeconds: z.number().optional().describe('Hard cap on the transcription run in seconds (default 1800 = 30 min). On timeout the process is killed and an error is returned.')
+        }).refine((data) => Boolean(data.mediaPath) || Boolean(data.projectItemId), {
+          message: 'Provide either mediaPath or projectItemId'
+        })
+      },
+      {
         name: 'create_caption_track',
         description: 'Creates a caption track on a sequence from an imported caption/subtitle file (e.g. an .srt imported via import_media). Pass the SRT project item ID directly.',
         inputSchema: z.object({
@@ -1474,9 +1524,37 @@ export class PremiereProTools {
 
     this.logger.info(`Executing tool: ${name} with args:`, args);
 
+    // Opt-in recovery boundary: snapshot the sequence before a bulk/destructive
+    // operation so the pre-edit state can be restored. Fail-closed — if the user
+    // asked for protection and the snapshot cannot be taken, the operation is
+    // NOT run, so nothing is changed without a recovery point to fall back to.
+    // The taken checkpoint is attached to the operation's result below.
+    let recoveryCheckpoint: { sequenceId: string | null; name: string | null; projectItemId: string | null } | undefined;
+    if (autoCheckpointEnabled() && SEQUENCE_DESTRUCTIVE_TOOLS.has(name)) {
+      const cp = await this.createRecoveryCheckpoint(args.sequenceId, `auto before ${name}`);
+      if (!cp || cp.success === false) {
+        return {
+          success: false,
+          error: `Auto-checkpoint before destructive '${name}' failed, so the operation was NOT run and nothing was changed. ${cp?.error || ''}`.trim(),
+          autoCheckpoint: false,
+          tool: name,
+        };
+      }
+      recoveryCheckpoint = {
+        sequenceId: cp.checkpointSequenceId ?? null,
+        name: cp.checkpointName ?? null,
+        projectItemId: cp.checkpointProjectItemId ?? null,
+      };
+      this.logger.info(`Auto-checkpoint created before ${name}: ${recoveryCheckpoint.name}`);
+    }
+    const withCheckpoint = (result: any): any =>
+      recoveryCheckpoint && result && typeof result === 'object' && !Array.isArray(result)
+        ? { ...result, recoveryCheckpoint }
+        : result;
+
     const localToolNames = new Set(this.getLocalTools().map((localTool) => localTool.name));
     if (!localToolNames.has(name) && isExpandedTool(name)) {
-      return await executeExpandedTool(this.bridge, name, args);
+      return withCheckpoint(await executeExpandedTool(this.bridge, name, args));
     }
     
     try {
@@ -1532,6 +1610,12 @@ export class PremiereProTools {
           return await this.createSequence(args.name, args.presetPath, args.frameRate);
         case 'duplicate_sequence':
           return await this.duplicateSequence(args.sequenceId, args.newName, args.clearContents);
+        case 'create_recovery_checkpoint':
+          return await this.createRecoveryCheckpoint(args.sequenceId, args.label);
+        case 'list_recovery_checkpoints':
+          return await this.listRecoveryCheckpoints(args.labelContains);
+        case 'restore_recovery_checkpoint':
+          return await this.restoreRecoveryCheckpoint(args.checkpointSequenceId, args.newName, args.setActive);
         case 'delete_sequence':
           return await this.deleteSequence(args.sequenceId);
         case 'read_sequence_captions':
@@ -1759,6 +1843,8 @@ export class PremiereProTools {
           return await this.detectSceneEdits(args.sequenceId, args.action, args.applyCutsToLinkedAudio, args.sensitivity, args.allowUnsafeSynchronous);
 
         // Captions
+        case 'transcribe_to_srt':
+          return await this.transcribeToSrt(args.mediaPath, args.projectItemId, args.outputDir, args.model, args.language, args.translateToEnglish, args.timeoutSeconds);
         case 'create_caption_track':
           return await this.createCaptionTrack(args.sequenceId, args.projectItemId, args.startTime, args.captionFormat);
 
@@ -3353,6 +3439,146 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(script);
   }
 
+  /**
+   * Snapshot a sequence into a tagged clone. Reuses duplicateSequence (which
+   * verifies the clone by reading its new sequenceID back) so the checkpoint
+   * cannot be reported as created unless it actually exists. Resolves the active
+   * sequence when no id is given.
+   */
+  private async createRecoveryCheckpoint(sequenceId?: string, label?: string): Promise<any> {
+    let sourceId = sequenceId;
+    let sourceName: string | undefined;
+    if (!sourceId) {
+      const active = await this.getActiveSequence();
+      if (!active || active.success === false || !active.id) {
+        return {
+          success: false,
+          error: 'No sequenceId was given and there is no active sequence to snapshot. Open a sequence or pass sequenceId.',
+        };
+      }
+      sourceId = active.id;
+      sourceName = active.name;
+    }
+
+    const createdAt = formatCheckpointTimestamp(new Date());
+    const checkpointName = buildRecoveryCheckpointName(label || 'checkpoint', createdAt);
+    const dup = await this.duplicateSequence(sourceId as string, checkpointName, false);
+    if (!dup || dup.success === false) {
+      return {
+        success: false,
+        error: `Recovery checkpoint clone failed: ${dup?.error || 'unknown error'}`,
+        sourceSequenceId: sourceId,
+      };
+    }
+
+    return {
+      success: true,
+      checkpointSequenceId: dup.newSequenceId ?? null,
+      checkpointProjectItemId: dup.newProjectItemId ?? null,
+      checkpointName: dup.newName || checkpointName,
+      sourceSequenceId: sourceId,
+      sourceName: sourceName ?? null,
+      createdAt,
+    };
+  }
+
+  /** List every sequence tagged as a recovery checkpoint, newest first. */
+  private async listRecoveryCheckpoints(labelContains?: string): Promise<any> {
+    const list = await this.listSequences();
+    if (!list || list.success === false || !Array.isArray(list.sequences)) {
+      return {
+        success: false,
+        error: `Could not list sequences to find checkpoints: ${list?.error || 'unknown error'}`,
+      };
+    }
+
+    const filter = (labelContains || '').trim().toLowerCase();
+    const checkpoints = list.sequences
+      .filter((seq: any) => isRecoveryCheckpointName(seq.name))
+      .map((seq: any) => {
+        const parsed = parseRecoveryCheckpointName(seq.name);
+        return {
+          sequenceId: seq.id,
+          name: seq.name,
+          label: parsed?.label ?? null,
+          createdAt: parsed?.createdAt ?? null,
+          duration: seq.duration,
+        };
+      })
+      .filter((cp: any) => !filter || (cp.label && cp.label.toLowerCase().indexOf(filter) !== -1))
+      // createdAt is a sortable YYYYMMDD-HHMMSS.mmm string; newest first.
+      .sort((a: any, b: any) => String(b.createdAt).localeCompare(String(a.createdAt)));
+
+    return {
+      success: true,
+      checkpoints,
+      count: checkpoints.length,
+      tag: RECOVERY_PREFIX,
+    };
+  }
+
+  /**
+   * Restore a checkpoint by cloning it into a fresh working sequence. The
+   * checkpoint is never consumed, so this can be repeated. Optionally opens the
+   * restored sequence as the active timeline.
+   */
+  private async restoreRecoveryCheckpoint(
+    checkpointSequenceId: string,
+    newName?: string,
+    setActive: boolean = true,
+  ): Promise<any> {
+    // Resolve the checkpoint so we can name the restored copy from its label and
+    // fail clearly if the id is wrong (rather than cloning something unexpected).
+    const list = await this.listSequences();
+    if (!list || list.success === false || !Array.isArray(list.sequences)) {
+      return {
+        success: false,
+        error: `Could not read sequences to locate the checkpoint: ${list?.error || 'unknown error'}`,
+      };
+    }
+    const checkpoint = list.sequences.find((seq: any) => String(seq.id) === String(checkpointSequenceId));
+    if (!checkpoint) {
+      return {
+        success: false,
+        error: `No sequence found with id '${checkpointSequenceId}'. Use list_recovery_checkpoints to get a valid checkpoint id.`,
+      };
+    }
+
+    const parsed = parseRecoveryCheckpointName(checkpoint.name);
+    const restoredName =
+      (newName && newName.trim()) ||
+      `${parsed?.label || checkpoint.name} (restored)`;
+
+    const dup = await this.duplicateSequence(String(checkpointSequenceId), restoredName, false);
+    if (!dup || dup.success === false) {
+      return {
+        success: false,
+        error: `Failed to clone the checkpoint into a working sequence: ${dup?.error || 'unknown error'}`,
+        checkpointSequenceId,
+      };
+    }
+
+    let activated = false;
+    let activateError: string | undefined;
+    if (setActive !== false && dup.newSequenceId) {
+      const active = await this.setActiveSequence(String(dup.newSequenceId));
+      activated = !!active && active.success !== false;
+      if (!activated) activateError = active?.error || 'could not open the restored sequence';
+    }
+
+    return {
+      success: true,
+      restoredSequenceId: dup.newSequenceId ?? null,
+      restoredProjectItemId: dup.newProjectItemId ?? null,
+      restoredName: dup.newName || restoredName,
+      fromCheckpointId: checkpointSequenceId,
+      fromCheckpointName: checkpoint.name,
+      active: activated,
+      ...(activateError ? { activateWarning: activateError } : {}),
+      note: 'The checkpoint was left intact; this is a fresh working copy of the snapshot.',
+    };
+  }
+
   private async renameProjectItem(projectItemId: string, newName: string): Promise<any> {
     const safeName = JSON.stringify(newName);
     const script = `
@@ -4855,6 +5081,163 @@ ${this.buildSequenceResolver(sequenceId)}
           minDurationSeconds,
           silenceIntervals,
           note: 'Detection only -- nothing was cut. Use split_clip/ripple_delete/razor_timeline_at_time on a sequence to remove any of these intervals.'
+        });
+      });
+    });
+  }
+
+  /**
+   * Whether a command can be launched at all. Uses the child_process 'spawn'
+   * event so we learn the binary exists WITHOUT waiting for a heavy tool
+   * (whisper imports torch on --help, several seconds) to finish; the probe is
+   * killed the instant it launches. ENOENT (not on PATH) surfaces as 'error'.
+   */
+  private checkCommandAvailable(command: string, probeArgs: string[] = ['--help']): Promise<boolean> {
+    return new Promise((resolve) => {
+      let settled = false;
+      const done = (value: boolean): void => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+      };
+      try {
+        const proc = spawn(command, probeArgs);
+        proc.on('error', () => done(false));
+        proc.on('spawn', () => {
+          done(true);
+          try { proc.kill(); } catch { /* already gone */ }
+        });
+        // Fallback for runtimes that never emit 'spawn': a clean close still means it ran.
+        proc.on('close', () => done(true));
+      } catch {
+        done(false);
+      }
+    });
+  }
+
+  /** Count subtitle cues in SRT text by its time-arrow lines. */
+  private countSrtCues(srt: string): number {
+    const matches = srt.match(/-->/g);
+    return matches ? matches.length : 0;
+  }
+
+  /**
+   * Transcribe speech in a media file to an .srt using the local OpenAI Whisper
+   * CLI. Premiere has no speech-to-text scripting surface, so this runs entirely
+   * server-side via child_process, mirroring detect_silence's ffmpeg pattern:
+   * probe for the tool, fail with clear install guidance if absent, and
+   * verify-after-write (the .srt must exist and be readable before we claim
+   * success). Whisper is configurable via PREMIERE_MCP_WHISPER_CMD for installs
+   * that expose a differently-named binary.
+   */
+  private async transcribeToSrt(
+    mediaPath?: string,
+    projectItemId?: string,
+    outputDir?: string,
+    model = 'base',
+    language?: string,
+    translateToEnglish = false,
+    timeoutSeconds = 1800,
+  ): Promise<any> {
+    let resolvedPath = mediaPath;
+    if (!resolvedPath && projectItemId) {
+      const resolved = await this.resolveProjectItemMediaPath(projectItemId);
+      if (resolved.error) {
+        return { success: false, error: resolved.error };
+      }
+      resolvedPath = resolved.path;
+    }
+    if (!resolvedPath) {
+      return { success: false, error: 'Provide either mediaPath or projectItemId' };
+    }
+
+    // The media must exist before we spend minutes launching Whisper on it.
+    try {
+      await fs.access(resolvedPath, fsConstants.R_OK);
+    } catch {
+      return { success: false, error: `Media file not found or unreadable: ${resolvedPath}` };
+    }
+
+    const whisperCmd = (process.env.PREMIERE_MCP_WHISPER_CMD || 'whisper').trim() || 'whisper';
+    const whisperAvailable = await this.checkCommandAvailable(whisperCmd);
+    if (!whisperAvailable) {
+      return {
+        success: false,
+        error: `The Whisper CLI ('${whisperCmd}') was not found on PATH. transcribe_to_srt generates subtitles with a local OpenAI Whisper install, not Premiere's scripting API (which has no speech-to-text). Install it with \`pip install -U openai-whisper\` (also needs ffmpeg on PATH), or set PREMIERE_MCP_WHISPER_CMD to the binary name, then try again.`,
+      };
+    }
+
+    const targetDir = (outputDir && outputDir.trim()) || dirname(resolvedPath);
+    const baseName = basename(resolvedPath, extname(resolvedPath));
+    const expectedSrt = join(targetDir, `${baseName}.srt`);
+
+    const whisperArgs = [
+      resolvedPath,
+      '--model', model,
+      '--output_format', 'srt',
+      '--output_dir', targetDir,
+    ];
+    if (language && language.trim()) whisperArgs.push('--language', language.trim());
+    if (translateToEnglish) whisperArgs.push('--task', 'translate');
+
+    return await new Promise((resolve) => {
+      let settled = false;
+      const finish = (value: any): void => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+      };
+
+      const proc = spawn(whisperCmd, whisperArgs);
+      let stderr = '';
+      let stdout = '';
+      proc.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+      proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+
+      const timeoutMs = Math.max(1, timeoutSeconds) * 1000;
+      const timer = setTimeout(() => {
+        try { proc.kill('SIGKILL'); } catch { /* already gone */ }
+        finish({
+          success: false,
+          error: `Whisper transcription exceeded the ${timeoutSeconds}s timeout and was stopped. Nothing was reported as captions. Try a smaller --model, a shorter clip, or a larger timeoutSeconds.`,
+          mediaPath: resolvedPath,
+        });
+      }, timeoutMs);
+
+      proc.on('error', (err) => {
+        clearTimeout(timer);
+        finish({ success: false, error: `Failed to run Whisper ('${whisperCmd}'): ${err.message}`, mediaPath: resolvedPath });
+      });
+
+      proc.on('close', async (code) => {
+        clearTimeout(timer);
+        // Verify-after-write: only claim success if the .srt is actually on disk.
+        let srt: string;
+        try {
+          srt = await fs.readFile(expectedSrt, 'utf8');
+        } catch {
+          finish({
+            success: false,
+            error: `Whisper exited with code ${code} but no subtitle file was found at ${expectedSrt}. The transcription did not produce captions.`,
+            mediaPath: resolvedPath,
+            whisperStderr: stderr.slice(-2000) || stdout.slice(-2000),
+          });
+          return;
+        }
+
+        const cueCount = this.countSrtCues(srt);
+        finish({
+          success: true,
+          srtPath: expectedSrt,
+          cueCount,
+          model,
+          language: language || 'auto-detected',
+          task: translateToEnglish ? 'translate' : 'transcribe',
+          mediaPath: resolvedPath,
+          empty: cueCount === 0,
+          note: cueCount === 0
+            ? 'Whisper produced an .srt with no cues (no detectable speech, or the wrong language hint). The file exists but is empty of captions.'
+            : 'Import this srtPath with import_media, then pass the resulting project item id to create_caption_track to lay the captions onto a sequence.',
         });
       });
     });

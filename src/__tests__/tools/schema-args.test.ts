@@ -15,12 +15,31 @@
  * the seeder is written: whatever it produces, the schema takes it.
  */
 
+import { tmpdir } from 'node:os';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { PremiereProTools } from '../../tools/index.js';
 import { seedArgs, seedRequiredArgs, accepts } from '../helpers/schema-args.js';
 
 describe('seeded arguments', () => {
   const tools = new PremiereProTools({ executeScript: async () => ({ success: true }) } as never)
     .getAvailableTools();
+
+  // The "reach a meaningful share" test drives every tool with seeded args, and
+  // a few tools (e.g. consolidate_and_transfer) write files to a path taken from
+  // those args — a bare relative seed like "x" would land in the repo root. Run
+  // the whole suite from a throwaway temp cwd so nothing leaks into the tree.
+  let originalCwd: string;
+  let scratchCwd: string;
+  beforeAll(() => {
+    originalCwd = process.cwd();
+    scratchCwd = mkdtempSync(join(tmpdir(), 'skry-schema-args-'));
+    process.chdir(scratchCwd);
+  });
+  afterAll(() => {
+    process.chdir(originalCwd);
+    try { rmSync(scratchCwd, { recursive: true, force: true }); } catch { /* best effort */ }
+  });
 
   it('are accepted by the schema of every tool', () => {
     const rejected: string[] = [];
@@ -36,10 +55,10 @@ describe('seeded arguments', () => {
   });
 
   it('are accepted when only the required parameters are supplied', () => {
-    // detect_silence is excluded by construction, not by convenience: it requires
-    // one of mediaPath or projectItemId and both are optional, so an object
-    // holding only required fields cannot satisfy it.
-    const CANNOT_BE_SATISFIED_BY_REQUIRED_ONLY = new Set(['detect_silence']);
+    // These are excluded by construction, not by convenience: each requires one
+    // of mediaPath or projectItemId and both are optional, so an object holding
+    // only required fields cannot satisfy the cross-field refinement.
+    const CANNOT_BE_SATISFIED_BY_REQUIRED_ONLY = new Set(['detect_silence', 'transcribe_to_srt']);
     const rejected: string[] = [];
 
     for (const tool of tools) {

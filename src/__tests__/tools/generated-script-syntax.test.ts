@@ -1,4 +1,7 @@
 import { parse } from "acorn";
+import { tmpdir } from "node:os";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { expandedToolNames, executeExpandedTool } from "../../tools/expanded";
 import { PremiereProTools } from "../../tools/index";
 import { seedArgs } from "../helpers/schema-args";
@@ -18,6 +21,23 @@ import { seedArgs } from "../helpers/schema-args";
  * the TypeScript compiled.
  */
 describe("generated ExtendScript is syntactically valid", () => {
+  // Some fuzzed tools (e.g. consolidate_and_transfer) write files relative to
+  // the process cwd when seeded with a bare relative path. Drive the whole sweep
+  // from a throwaway temp dir so nothing lands in the repo root (an "x/" was
+  // leaking here because this sweep — unlike the injection/undefined ones —
+  // never chdir'd away).
+  let originalCwd: string;
+  let scratchCwd: string;
+  beforeAll(() => {
+    originalCwd = process.cwd();
+    scratchCwd = mkdtempSync(join(tmpdir(), "skry-genscript-"));
+    process.chdir(scratchCwd);
+  });
+  afterAll(() => {
+    process.chdir(originalCwd);
+    try { rmSync(scratchCwd, { recursive: true, force: true }); } catch { /* best effort */ }
+  });
+
   const capture = async (name: string): Promise<string> => {
     let script = "";
     const bridge = {

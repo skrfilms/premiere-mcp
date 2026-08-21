@@ -82,7 +82,11 @@ describe('PremiereProTools', () => {
       expect(toolNames).toContain('add_tracks');
       expect(toolNames).toContain('get_encoder_presets');
       expect(toolNames).not.toContain('import_ae_comps');
-      expect(availableTools).toHaveLength(283);
+      expect(toolNames).toContain('create_recovery_checkpoint');
+      expect(toolNames).toContain('list_recovery_checkpoints');
+      expect(toolNames).toContain('restore_recovery_checkpoint');
+      expect(toolNames).toContain('transcribe_to_srt');
+      expect(availableTools).toHaveLength(287);
       expect(unimplementedExpandedToolNames).toEqual([]);
       for (const name of expandedToolNames) {
         expect(toolNames).toContain(name);
@@ -559,8 +563,8 @@ describe('PremiereProTools', () => {
       expect(result.success).toBe(true);
       // The full catalogue is exposed by default (no profile env set). The
       // catalog block now also reports the active profile for introspection.
-      expect(result.catalog.tools).toBe(283);
-      expect(result.catalog.toolsInFullCatalog).toBe(283);
+      expect(result.catalog.tools).toBe(287);
+      expect(result.catalog.toolsInFullCatalog).toBe(287);
       expect(result.catalog.resources).toBe(13);
       expect(result.catalog.prompts).toBe(10);
       expect(result.catalog.profile.source).toBe('all');
