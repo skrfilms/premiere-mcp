@@ -4,7 +4,7 @@
 
 **Operate local Adobe Premiere Pro projects through MCP.**
 
-308 tools, 13 context resources, and 10 guided prompts for Codex, Claude Code, Claude Desktop, and other MCP clients. CEP is the supported production bridge; UXP remains experimental.
+309 tools, 13 context resources, and 10 guided prompts for Codex, Claude Code, Claude Desktop, and other MCP clients. CEP is the supported production bridge; UXP remains experimental.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-5fd3c6.svg)](LICENSE.md)
 [![Node.js](https://img.shields.io/badge/Node.js-20%2B-339933.svg)](https://nodejs.org/)
@@ -124,7 +124,7 @@ This repository is currently validated for:
 
 Current catalog status as of August 21, 2026:
 
-- `308` MCP tools are exposed for AI-driven video editing
+- `309` MCP tools are exposed for AI-driven video editing
 - coverage spans project setup, media ingest, bins, sequences, timeline editing, transitions, effects, keyframes, captions, markers, metadata, proxies, multicam, color, audio, exports, and higher-level assembly workflows
 - the catalog includes practical agent workflows such as product-spot assembly, motion-graphics demos, timeline razoring, caption reads, audio ducking, scene edit detection, EDL import, export readiness validation, and linked audio/video operations
 - local-compute tools that Premiere's scripting API cannot provide: `detect_silence` (ffmpeg), `transcribe_to_srt` (local OpenAI Whisper speech-to-text), `probe_media` (ffprobe ground-truth metadata), and `generate_scope` (ffmpeg waveform / vectorscope / histogram / RGB-parade images) — each probes for its binary and returns install guidance instead of failing silently
@@ -133,7 +133,7 @@ Current catalog status as of August 21, 2026:
 
 Most recent completed local live validation:
 
-- `308` active tools are exposed; `get_capabilities` reports local installation and optional live connection state, while `verify_premiere_connection` is the canonical read-only bridge and host readiness check
+- `309` active tools are exposed; `get_capabilities` reports local installation and optional live connection state, while `verify_premiere_connection` is the canonical read-only bridge and host readiness check
 - `0` known parked or placeholder tools are advertised
 - `import_ae_comps` is intentionally not advertised because Premiere returned `false` for real `.aep` fixtures in this environment and a generic `.aep` import can wedge the CEP bridge
 
@@ -233,7 +233,7 @@ For a real-host sweep, use a disposable Premiere project and run `node scripts/l
 
 ## Tools
 
-All `308` advertised tools have an implementation. Tool schemas are available through MCP discovery; this catalog explains the editing surface in human terms. Start with `verify_premiere_connection`, then inspect the project before asking an agent to mutate it.
+All `309` advertised tools have an implementation. Tool schemas are available through MCP discovery; this catalog explains the editing surface in human terms. Start with `verify_premiere_connection`, then inspect the project before asking an agent to mutate it.
 
 ### Discovery and project inspection
 
@@ -301,7 +301,8 @@ All `308` advertised tools have an implementation. Tool schemas are available th
 | Tools | What they do |
 | :--- | :--- |
 | `list_available_effects` / `list_clip_effects` / `get_effect_properties` | Discover installed effects, applied effects, and their properties. |
-| `apply_effect` / `remove_effect` / `remove_effect_by_name` / `remove_all_effects` | Add or remove visual/audio effect components. `apply_effect` identifies and reads back the new component. |
+| `apply_effect` / `remove_effect` / `remove_effect_by_name` / `remove_all_effects` | Add or remove visual/audio effect components. `apply_effect` identifies and reads back the new component, reports its `matchName`, and accepts an optional `expectedMatchName` identity guard. |
+| `apply_video_effect` | Add a video effect and verify it by diffing the clip's components, reporting the `matchName` that actually landed. Because effects resolve by display name, a stock name like "Gaussian Blur" can silently resolve to a third-party plugin; pass `expected_match_name` to enforce identity and roll the add back (when safe) on a mismatch. |
 | `batch_apply_effect` / `copy_effects_between_clips` / `copy_effect_values` | Apply or copy effect treatments across clips. |
 | `set_effect_property` / `set_color_value` / `set_blend_mode` | Change supported effect parameters, color values, and blend modes. |
 | `color_correct` / `apply_lut` / `stabilize_clip` | Apply basic correction, LUTs, or Warp Stabilizer. |
