@@ -504,6 +504,33 @@ describe('PremiereProTools', () => {
         expect(jpg).toContain('".jpg"');
       });
 
+      it('uses the correctly-cased exportFrameTIFF (not the silently-failing exportFrameTiff)', async () => {
+        // ExtendScript property access is case-sensitive; the real QE method is
+        // exportFrameTIFF, so "exportFrameTiff" resolved to undefined and every
+        // TIFF export failed the typeof-function guard. Confirmed live on 26.3.2.
+        const tiff = await scriptFor({
+          sequenceId: 'seq-guid', time: 1, outputPath: '/tmp/shot.tiff', format: 'tiff',
+        });
+        expect(tiff).toContain('methodName = "exportFrameTIFF"');
+      });
+
+      it('wires the DPX and Targa exporters that QE actually exposes', async () => {
+        const dpx = await scriptFor({ sequenceId: 'seq-guid', time: 1, outputPath: '/tmp/shot.dpx', format: 'dpx' });
+        expect(dpx).toContain('exportFrameDPX');
+        expect(dpx).toContain('".dpx"');
+        const tga = await scriptFor({ sequenceId: 'seq-guid', time: 1, outputPath: '/tmp/shot.tga', format: 'tga' });
+        expect(tga).toContain('exportFrameTarga');
+        expect(tga).toContain('".tga"');
+      });
+
+      it('strips alias extensions (.tiff/.jpeg/.targa) so no double extension is written', async () => {
+        // A caller passing the alias ".tiff" must still get a single canonical
+        // ".tif" file, never "shot.tiff.tif". Confirmed live.
+        const tiff = await scriptFor({ sequenceId: 'seq-guid', time: 1, outputPath: '/tmp/shot.tiff', format: 'tiff' });
+        expect(tiff).toContain('formatExts');
+        expect(tiff).toContain('".tiff"');
+      });
+
       it('escapes the output path instead of interpolating it', async () => {
         const path = 'INJ"+(1000*1000+7)+"END';
         const script = await scriptFor({ sequenceId: 'seq-guid', time: 1, outputPath: path });

@@ -2113,13 +2113,52 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
 
         case "remove_effect":
         case "remove_effect_by_name":
-          var removeEffectClip = findClip(args.clipId || args.node_id || args.nodeId);
+          var removeEffectName = args.effectName || args.name;
+          if (!removeEffectName) return fail(toolName + " requires effectName.");
+          var removeEffectNodeId = args.clipId || args.node_id || args.nodeId;
+          var removeEffectClip = findClip(removeEffectNodeId);
           if (!removeEffectClip) return fail(pendingSequenceError || "Clip not found");
-          var effectToRemove = findComponent(removeEffectClip.clip, args.effectName || args.name);
-          if (!effectToRemove) return ok({ removed: true, changed: false, effect: args.effectName || args.name, note: "Effect was already absent from clip" });
-          var removeEffectResult = tryCall(effectToRemove.component, ["remove", "delete"], []);
-          if (!removeEffectResult.called) return fail(removeEffectResult.error, { effect: args.effectName || args.name, note: "Premiere's public ExtendScript DOM often exposes effect read/set APIs without an effect removal API." });
-          return ok({ removed: true, effect: args.effectName || args.name, method: removeEffectResult.method });
+          // DOM effect components expose no remove()/delete() method (reflect.methods is
+          // empty), so the only real removal path is QE removeEffects(). That call is
+          // all-or-nothing: it strips every user-added effect at once while preserving the
+          // intrinsic Motion/Opacity/Volume and any Lumetri Color. Surgical single-effect
+          // removal is therefore only honest when the target is the SOLE removable effect.
+          function reIsIntrinsic(comp) {
+            var m = String(comp.matchName);
+            if (m === "AE.ADBE Motion" || m === "AE.ADBE Opacity" || m === "AE.ADBE Volume" || m === "AE.ADBE Pan") return true;
+            var n = normalizeName(comp.displayName);
+            return n === "motion" || n === "opacity" || n === "volume" || n === "pan";
+          }
+          function reIsLumetri(comp) {
+            return String(comp.matchName).indexOf("Lumetri") !== -1 || normalizeName(comp.displayName) === "lumetricolor";
+          }
+          function reSnapshot(clip) {
+            var a = [];
+            for (var i = 0; i < clip.components.numItems; i++) a.push(String(clip.components[i].matchName));
+            return a;
+          }
+          var effectToRemove = findComponent(removeEffectClip.clip, removeEffectName);
+          if (!effectToRemove) return ok({ removed: true, changed: false, effect: removeEffectName, note: "Effect was already absent from clip" });
+          if (reIsIntrinsic(effectToRemove.component)) return fail("'" + String(effectToRemove.component.displayName) + "' is an intrinsic component (Motion/Opacity/Volume/Pan) and cannot be removed.", { effect: removeEffectName, intrinsic: true });
+          if (reIsLumetri(effectToRemove.component)) return fail("'" + String(effectToRemove.component.displayName) + "' is a Lumetri Color component; QE removeEffects() preserves Lumetri, so it cannot be removed through this API.", { effect: removeEffectName, lumetri: true });
+          var reRemovableOthers = [];
+          for (var rei = 0; rei < removeEffectClip.clip.components.numItems; rei++) {
+            var reComp = removeEffectClip.clip.components[rei];
+            if (rei === effectToRemove.index) continue;
+            if (reIsIntrinsic(reComp) || reIsLumetri(reComp)) continue;
+            reRemovableOthers.push(String(reComp.displayName));
+          }
+          if (reRemovableOthers.length) return fail("Cannot surgically remove '" + String(effectToRemove.component.displayName) + "': the only removal API (QE removeEffects) strips ALL user effects at once, and this clip has " + reRemovableOthers.length + " other user effect(s) that would also be removed. Use remove_all_effects to clear them all, or leave them in place.", { effect: removeEffectName, otherUserEffects: reRemovableOthers, allOrNothing: true });
+          var reQeClip = qeClipForClip(removeEffectClip);
+          if (!reQeClip || !reQeClip.removeEffects) return fail("Could not address this clip through the QE API to remove effects.", { effect: removeEffectName });
+          var reTargetMatch = String(effectToRemove.component.matchName);
+          try { reQeClip.removeEffects(); } catch (reErr) { return fail("QE removeEffects() threw: " + reErr.toString(), { effect: removeEffectName }); }
+          var reAfterClip = findClip(removeEffectNodeId);
+          var reAfter = reAfterClip ? reSnapshot(reAfterClip.clip) : [];
+          var reStillPresent = false;
+          for (var rej = 0; rej < reAfter.length; rej++) if (reAfter[rej] === reTargetMatch) { reStillPresent = true; break; }
+          if (reStillPresent) return fail("removeEffects() ran but '" + String(effectToRemove.component.displayName) + "' is still on the clip.", { effect: removeEffectName, verified: false });
+          return ok({ removed: true, changed: true, effect: removeEffectName, matchName: reTargetMatch, method: "qe.removeEffects", verified: true });
 
         case "ripple_delete":
           if (!args.clipId && !args.node_id && !args.nodeId) return fail("ripple_delete requires clipId.");
@@ -2181,21 +2220,43 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           return ok({ moved: true, trackIndex: moveTargetIndex, method: "remove+overwriteClip", start: moveStart, beforeTargetCount: beforeTargetCount, afterTargetCount: afterTargetCount });
 
         case "remove_all_effects":
-          if (!args.clipId && !args.node_id && !args.nodeId) return fail("remove_all_effects requires clipId.");
-          var removeAllClip = findClip(args.clipId || args.node_id || args.nodeId);
+          var removeAllNodeId = args.clipId || args.node_id || args.nodeId;
+          if (!removeAllNodeId) return fail("remove_all_effects requires clipId.");
+          var removeAllClip = findClip(removeAllNodeId);
           if (!removeAllClip) return fail(pendingSequenceError || "Clip not found");
-          var removedEffects = [];
-          var failedEffects = [];
-          for (var rai = removeAllClip.clip.components.numItems - 1; rai >= 0; rai--) {
-            var componentToRemove = removeAllClip.clip.components[rai];
-            var componentName = String(componentToRemove.displayName);
-            if (normalizeName(componentName) === "motion" || normalizeName(componentName) === "opacity" || normalizeName(componentName) === "volume") continue;
-            var oneRemove = tryCall(componentToRemove, ["remove", "delete"], []);
-            if (oneRemove.called) removedEffects.push({ name: componentName, method: oneRemove.method });
-            else failedEffects.push({ name: componentName, error: oneRemove.error });
+          // Removal goes through QE removeEffects(), the only working path (DOM effect
+          // components have no remove() method). It strips every user-added effect while
+          // preserving intrinsic Motion/Opacity/Volume/Pan AND any Lumetri Color. We name
+          // what will be removed vs. preserved up front, then diff to verify what actually
+          // went, so Lumetri surviving is reported plainly rather than silently.
+          var raWillRemove = [];
+          var raPreservedLumetri = [];
+          for (var rai = 0; rai < removeAllClip.clip.components.numItems; rai++) {
+            var raComp = removeAllClip.clip.components[rai];
+            if (reIsIntrinsic(raComp)) continue;
+            if (reIsLumetri(raComp)) { raPreservedLumetri.push(String(raComp.displayName)); continue; }
+            raWillRemove.push({ name: String(raComp.displayName), matchName: String(raComp.matchName) });
           }
-          if (failedEffects.length) return fail("One or more effects could not be removed", { removed: removedEffects, failed: failedEffects });
-          return ok({ removed: removedEffects });
+          if (!raWillRemove.length) {
+            return ok({ removed: [], changed: false, note: raPreservedLumetri.length ? "No removable user effects. Lumetri Color is preserved by the removal API and was left in place: " + raPreservedLumetri.join(", ") : "Clip has no user effects to remove.", preservedLumetri: raPreservedLumetri });
+          }
+          var raBefore = reSnapshot(removeAllClip.clip);
+          var raQeClip = qeClipForClip(removeAllClip);
+          if (!raQeClip || !raQeClip.removeEffects) return fail("Could not address this clip through the QE API to remove effects.");
+          try { raQeClip.removeEffects(); } catch (raErr) { return fail("QE removeEffects() threw: " + raErr.toString()); }
+          var raAfterClip = findClip(removeAllNodeId);
+          var raAfter = raAfterClip ? reSnapshot(raAfterClip.clip) : [];
+          var raAfterCounts = {};
+          for (var rak = 0; rak < raAfter.length; rak++) raAfterCounts[raAfter[rak]] = (raAfterCounts[raAfter[rak]] || 0) + 1;
+          var raRemoved = [];
+          var raStillPresent = [];
+          for (var ram = 0; ram < raWillRemove.length; ram++) {
+            var raMatch = raWillRemove[ram].matchName;
+            if (raAfterCounts[raMatch] > 0) { raAfterCounts[raMatch]--; raStillPresent.push(raWillRemove[ram].name); }
+            else raRemoved.push(raWillRemove[ram].name);
+          }
+          if (raStillPresent.length) return fail("removeEffects() ran but " + raStillPresent.length + " effect(s) remain on the clip.", { removed: raRemoved, stillPresent: raStillPresent, verified: false });
+          return ok({ removed: raRemoved, changed: raRemoved.length > 0, method: "qe.removeEffects", verified: true, preservedLumetri: raPreservedLumetri, note: raPreservedLumetri.length ? "Lumetri Color is preserved by the removal API and was left in place: " + raPreservedLumetri.join(", ") : undefined });
 
         case "set_clip_speed_qe":
           if (!args.clipId && !args.node_id && !args.nodeId) return fail("set_clip_speed_qe requires clipId.");
@@ -2782,8 +2843,19 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           app.enableQE();
           var qeFrameSeq = qeSequenceFor(frameSeq);
           if (!qeFrameSeq) return fail("Could not address sequence '" + frameSeq.name + "' through the QE API.");
+          // Format -> QE method + extension, confirmed live. The method name is
+          // case-sensitive, so the old "exportFrameTiff" silently failed every TIFF
+          // capture; the real method is "exportFrameTIFF".
           var frameFormat = String(args.format || "png").toLowerCase();
-          var frameMethod = frameFormat === "jpg" || frameFormat === "jpeg" ? "exportFrameJPEG" : (frameFormat === "tiff" || frameFormat === "tif" ? "exportFrameTiff" : "exportFramePNG");
+          if (frameFormat === "jpeg") frameFormat = "jpg";
+          else if (frameFormat === "tiff") frameFormat = "tif";
+          else if (frameFormat === "targa") frameFormat = "tga";
+          var frameMethod, frameExt, frameExts;
+          if (frameFormat === "jpg") { frameMethod = "exportFrameJPEG"; frameExt = ".jpg"; frameExts = [".jpg", ".jpeg"]; }
+          else if (frameFormat === "tif") { frameMethod = "exportFrameTIFF"; frameExt = ".tif"; frameExts = [".tif", ".tiff"]; }
+          else if (frameFormat === "dpx") { frameMethod = "exportFrameDPX"; frameExt = ".dpx"; frameExts = [".dpx"]; }
+          else if (frameFormat === "tga") { frameMethod = "exportFrameTarga"; frameExt = ".tga"; frameExts = [".tga", ".targa"]; }
+          else { frameMethod = "exportFramePNG"; frameExt = ".png"; frameExts = [".png"]; }
           if (typeof qeFrameSeq[frameMethod] !== "function") return fail("Frame export method unavailable: " + frameMethod, { available: false });
           var frameSeconds = Number(args.time || args.seconds || 0);
           var frameTimeString = String(frameSeconds);
@@ -2793,25 +2865,57 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
             frameTime.seconds = frameSeconds;
             frameTicks = frameTime.ticks;
           } catch (frameTimeError) {}
-          var frameExportError = null;
-          function tryFrameExport(arg1, arg2) {
-            try {
-              qeFrameSeq[frameMethod](arg1, arg2);
-              return true;
-            } catch (frameError) {
-              frameExportError = frameError.toString();
-              return false;
+          // Premiere appends "." + ext to whatever path it is handed, so passing
+          // "shot.png" wrote "shot.png.png" while the tool reported "shot.png" -- a
+          // path with no file. Hand it the stem and let it add the extension back.
+          var frameStem = framePath;
+          for (var fex = 0; fex < frameExts.length; fex++) {
+            var fexExt = frameExts[fex];
+            if (framePath.length > fexExt.length && framePath.substring(framePath.length - fexExt.length).toLowerCase() === fexExt) {
+              frameStem = framePath.substring(0, framePath.length - fexExt.length);
+              break;
             }
           }
+          var frameCandidates = [frameStem + frameExt];
+          for (var fcx = 0; fcx < frameExts.length; fcx++) frameCandidates.push(frameStem + frameExts[fcx]);
+          frameCandidates.push(framePath);
+          // A non-throwing call is not proof of a write, so record disk state first and
+          // compare stamp/length afterward rather than trusting the return.
+          var frameBefore = [];
+          for (var fbi = 0; fbi < frameCandidates.length; fbi++) {
+            var fbState = { existed: false, stamp: 0, length: -1 };
+            try { var fbProbe = new File(frameCandidates[fbi]); if (fbProbe.exists) { fbState.existed = true; fbState.stamp = fbProbe.modified ? fbProbe.modified.getTime() : 0; fbState.length = fbProbe.length; } } catch (fbErr) {}
+            frameBefore.push(fbState);
+          }
+          function frameWritten(acceptUnchanged) {
+            for (var fwi = 0; fwi < frameCandidates.length; fwi++) {
+              try {
+                var fwFile = new File(frameCandidates[fwi]);
+                if (!fwFile.exists) continue;
+                if (!frameBefore[fwi].existed) return frameCandidates[fwi];
+                var fwStamp = fwFile.modified ? fwFile.modified.getTime() : 0;
+                if (fwStamp !== frameBefore[fwi].stamp) return frameCandidates[fwi];
+                if (fwFile.length !== frameBefore[fwi].length) return frameCandidates[fwi];
+                if (acceptUnchanged) return frameCandidates[fwi];
+              } catch (fwErr) {}
+            }
+            return null;
+          }
+          var frameExportError = null;
+          function tryFrameExport(arg1, arg2) {
+            try { qeFrameSeq[frameMethod](arg1, arg2); } catch (frameError) { frameExportError = frameError.toString(); return false; }
+            return frameWritten(false) !== null;
+          }
           var frameExported =
-            tryFrameExport(frameSeconds, framePath) ||
-            tryFrameExport(framePath, frameSeconds) ||
-            tryFrameExport(frameTimeString, framePath) ||
-            tryFrameExport(framePath, frameTimeString) ||
-            tryFrameExport(frameTicks, framePath) ||
-            tryFrameExport(framePath, frameTicks);
-          if (!frameExported) return fail(frameExportError || "Frame export failed");
-          return ok({ exported: true, outputPath: framePath, method: frameMethod, seconds: frameSeconds });
+            tryFrameExport(frameTicks, frameStem) ||
+            tryFrameExport(frameStem, frameTicks) ||
+            tryFrameExport(frameTimeString, frameStem) ||
+            tryFrameExport(frameStem, frameTimeString) ||
+            tryFrameExport(frameSeconds, frameStem) ||
+            tryFrameExport(frameStem, frameSeconds);
+          var frameFinal = frameWritten(true);
+          if (!frameExported && !frameFinal) return fail(frameExportError || "Frame export produced no file on disk", { verified: false });
+          return ok({ exported: true, outputPath: frameFinal || (frameStem + frameExt), method: frameMethod, format: frameFormat, seconds: frameSeconds, verified: true });
 
         case "nest_clips":
           if (!app.project || !app.project.createNewSequenceFromClips) return commandByName("Nest...");
@@ -3052,7 +3156,6 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           if (app.sourceMonitor && app.sourceMonitor.openProjectItem) app.sourceMonitor.openProjectItem(matchClip.clip.projectItem);
           return ok({ matched: true, clipId: matchClip.clip.nodeId, item: matchClip.clip.projectItem.name, time: matchTime, method: "sourceMonitor.openProjectItem" });
 
-        case "capture_frame":
         case "get_project_scratch_disks":
         case "get_project_panel_metadata":
         case "get_xmp_metadata":

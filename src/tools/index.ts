@@ -839,12 +839,12 @@ export class PremiereProTools {
       },
       {
         name: 'export_frame',
-        description: 'Exports a single frame from a sequence as an image file.',
+        description: 'Exports a single frame from a sequence as an image file. Supported formats (all verified against Premiere\'s QE exporters): png, jpg/jpeg, tiff/tif, dpx, tga/targa.',
         inputSchema: z.object({
           sequenceId: z.string().describe('The ID of the sequence'),
           time: z.number().describe('The time in seconds to export the frame from'),
           outputPath: z.string().describe('The absolute path where the image file will be saved'),
-          format: z.enum(['png', 'jpg', 'tiff']).optional().describe('The image format')
+          format: z.enum(['png', 'jpg', 'jpeg', 'tiff', 'tif', 'dpx', 'tga', 'targa']).optional().describe('The image format (default png)')
         })
       },
 
@@ -1429,7 +1429,7 @@ export class PremiereProTools {
         inputSchema: z.object({
           sequenceId: z.string().optional().describe('Sequence to capture. Defaults to the active sequence.'),
           time: z.number().optional().describe('Timestamp in seconds to capture. Defaults to the current playhead position of the sequence.'),
-          format: z.enum(['png', 'jpg', 'tiff']).optional().describe('Image format for the render/export tap (default "png").'),
+          format: z.enum(['png', 'jpg', 'jpeg', 'tiff', 'tif', 'dpx', 'tga', 'targa']).optional().describe('Image format for the render/export tap (default "png").'),
           outputPath: z.string().optional().describe('Where to write the captured frame. Defaults to a timestamped file in the system temp directory.'),
           tap: z.enum(['auto', 'render', 'ndi', 'syphon', 'spout']).optional().describe('Which capture tap to use. "auto" (default) picks the best available, falling back to render/export. The GPU/network taps (ndi/syphon/spout) require a Transmit plugin and a native receiver; if forced and unavailable the call fails with install guidance rather than silently using render/export.'),
           probeOnly: z.boolean().optional().describe('If true, do not capture -- just return which taps are available on this machine and their install guidance.')
@@ -1902,8 +1902,6 @@ export class PremiereProTools {
             zoom: args.zoom,
             edgeFeather: args.edgeFeather
           });
-        case 'remove_effect':
-          return await this.removeEffect(args.clipId, args.effectName);
         case 'add_transition':
           return await this.addTransition(args.clipId1, args.clipId2, args.transitionName, args.duration);
         case 'add_transition_to_clip':
@@ -5495,32 +5493,6 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(script);
   }
 
-  private async removeEffect(clipId: string, effectName: string): Promise<any> {
-    const script = `
-      try {
-        var info = __findClip(${JSON.stringify(clipId)});
-        if (!info) return JSON.stringify({ success: false, error: "Clip not found" });
-        var clip = info.clip;
-        var found = false;
-        for (var i = 0; i < clip.components.numItems; i++) {
-          if (clip.components[i].displayName === ${JSON.stringify(effectName)} || clip.components[i].matchName === ${JSON.stringify(effectName)}) {
-            found = true;
-            break;
-          }
-        }
-        return JSON.stringify({
-          success: false,
-          error: "Effect removal is not supported by the ExtendScript API. The effect '" + ${JSON.stringify(effectName)} + "' was " + (found ? "found" : "not found") + " on this clip.",
-          note: "Remove effects manually in Premiere Pro"
-        });
-      } catch (e) {
-        return JSON.stringify({ success: false, error: e.toString() });
-      }
-    `;
-
-    return await this.bridge.executeScript(script);
-  }
-
   private async addTransition(clipId1: string, clipId2: string, transitionName: string, duration: number): Promise<any> {
     const script = `
       try {
@@ -8439,7 +8411,21 @@ ${this.buildSequenceResolver(sequenceId)}
           });
         }
 
-        var methodName = ${JSON.stringify(format)} === "jpg" ? "exportFrameJPEG" : (${JSON.stringify(format)} === "tiff" ? "exportFrameTiff" : "exportFramePNG");
+        // Normalize the format to the exact QE method + extension, confirmed live:
+        // exportFramePNG/.png, exportFrameJPEG/.jpg, exportFrameTIFF/.tif,
+        // exportFrameDPX/.dpx, exportFrameTarga/.tga. The method name is
+        // case-sensitive in ExtendScript, so "exportFrameTiff" (wrong casing) silently
+        // failed every TIFF export until this was corrected to "exportFrameTIFF".
+        var fmt = ${JSON.stringify(format)}.toLowerCase();
+        if (fmt === "jpeg") fmt = "jpg";
+        else if (fmt === "tiff") fmt = "tif";
+        else if (fmt === "targa") fmt = "tga";
+        var methodName, formatExtension, formatExts;
+        if (fmt === "jpg") { methodName = "exportFrameJPEG"; formatExtension = ".jpg"; formatExts = [".jpg", ".jpeg"]; }
+        else if (fmt === "tif") { methodName = "exportFrameTIFF"; formatExtension = ".tif"; formatExts = [".tif", ".tiff"]; }
+        else if (fmt === "dpx") { methodName = "exportFrameDPX"; formatExtension = ".dpx"; formatExts = [".dpx"]; }
+        else if (fmt === "tga") { methodName = "exportFrameTarga"; formatExtension = ".tga"; formatExts = [".tga", ".targa"]; }
+        else { methodName = "exportFramePNG"; formatExtension = ".png"; formatExts = [".png"]; }
         if (typeof qeSequence[methodName] !== "function") {
           return JSON.stringify({
             success: false,
@@ -8459,23 +8445,26 @@ ${this.buildSequenceResolver(sequenceId)}
         // Premiere's exportFrame* methods always append "." + format to the
         // path they are handed, so passing the caller's "shot.png" wrote
         // "shot.png.png" while the tool reported "shot.png" — a path with no
-        // file at it. Hand Premiere the stem and let it add the extension back,
-        // so the frame lands exactly where the caller asked.
-        var formatExtension = ${JSON.stringify(format)} === "jpg"
-          ? ".jpg"
-          : (${JSON.stringify(format)} === "tiff" ? ".tiff" : ".png");
+        // file at it. Hand Premiere the stem and let it add the extension back.
+        // Strip any accepted spelling of the extension (".tiff" as well as the
+        // canonical ".tif", ".jpeg" as well as ".jpg") so the double-extension
+        // never reappears for an alias; Premiere writes the canonical extension.
         var requestedPath = ${JSON.stringify(outputPath)};
         var exportStem = requestedPath;
-        if (requestedPath.length > formatExtension.length) {
-          var tail = requestedPath.substring(requestedPath.length - formatExtension.length);
-          if (tail.toLowerCase() === formatExtension) {
-            exportStem = requestedPath.substring(0, requestedPath.length - formatExtension.length);
+        for (var fx = 0; fx < formatExts.length; fx++) {
+          var fxExt = formatExts[fx];
+          if (requestedPath.length > fxExt.length && requestedPath.substring(requestedPath.length - fxExt.length).toLowerCase() === fxExt) {
+            exportStem = requestedPath.substring(0, requestedPath.length - fxExt.length);
+            break;
           }
         }
 
-        // Where the frame should land, and where it would land if some future
-        // version stopped appending the extension.
-        var candidatePaths = [exportStem + formatExtension, requestedPath];
+        // Where the frame can land: the canonical extension Premiere writes, each
+        // accepted alias off the stem, and the raw requested path (in case a future
+        // version stops appending). writtenPath() picks whichever actually appeared.
+        var candidatePaths = [exportStem + formatExtension];
+        for (var cf = 0; cf < formatExts.length; cf++) candidatePaths.push(exportStem + formatExts[cf]);
+        candidatePaths.push(requestedPath);
 
         // A non-throwing call is not proof that a file was written, so record
         // what is on disk first. Comparing modification stamps rather than mere
