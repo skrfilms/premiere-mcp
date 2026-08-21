@@ -60,6 +60,7 @@ describe('seeded arguments', () => {
     // only required fields cannot satisfy the cross-field refinement.
     const CANNOT_BE_SATISFIED_BY_REQUIRED_ONLY = new Set([
       'detect_silence', 'transcribe_to_srt', 'probe_media', 'generate_scope',
+      'bake_speed_change', 'normalize_loudness',
     ]);
     const rejected: string[] = [];
 

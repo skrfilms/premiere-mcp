@@ -65,6 +65,8 @@ export const PROFILES: Record<string, string[]> = {
     'add_to_timeline', 'add_to_timeline_batch', 'remove_from_timeline', 'move_clip',
     'trim_clip', 'split_clip', 'razor_timeline_at_time', 'replace_clip', 'duplicate_clip',
     'enable_disable_clip', 'set_clip_properties', 'speed_change', 'add_track', 'delete_track',
+    // honest time-remap escape hatch: bake a constant-speed clip with ffmpeg
+    'bake_speed_change',
     // markers
     'add_marker', 'update_marker', 'delete_marker', 'list_markers',
     // transitions / effects (light)
@@ -83,6 +85,8 @@ export const PROFILES: Record<string, string[]> = {
     'list_available_audio_transitions', 'setup_ducking', 'detect_silence',
     'transcribe_to_srt', 'create_caption_track', 'read_sequence_captions',
     'mute_track', 'lock_track', 'link_audio_video', 'link_selection', 'unlink_selection',
+    // loudness delivery spec (EBU R128) via ffmpeg two-pass loudnorm
+    'normalize_loudness',
   ],
 
   // Color / grading.
