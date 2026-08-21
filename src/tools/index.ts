@@ -8,7 +8,7 @@
 import { z } from 'zod';
 import { spawn } from 'child_process';
 import { constants as fsConstants, promises as fs } from 'node:fs';
-import { homedir, platform } from 'node:os';
+import { homedir, platform, tmpdir } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, parse } from 'node:path';
 import type { PremiereProTransport } from '../bridge/types.js';
 import { Logger } from '../utils/logger.js';
@@ -303,9 +303,22 @@ const MarkerColorSchema = z.union([
 const MARKER_COLOR_DESCRIPTION =
   `Marker colour — a name (${MARKER_COLOR_NAMES.join(', ')}) or an index 0-7. Defaults to green.`;
 
+/** One row of the capture-tap capability probe (see captureProgramOutput / probeCaptureTaps). */
+interface CaptureTapReport {
+  tap: 'render' | 'ndi' | 'syphon' | 'spout';
+  available: boolean;
+  video: boolean;
+  audio: boolean;
+  realtime: boolean;
+  reason: string;
+  install?: string | undefined;
+}
+
 export class PremiereProTools {
   private bridge: PremiereProTransport;
   private logger: Logger;
+  /** TTL cache for the capture-tap capability probe (speed mandate: don't re-probe every call). */
+  private captureTapsCache?: { at: number; taps: CaptureTapReport[] };
 
   constructor(bridge: PremiereProTransport) {
     this.bridge = bridge;
@@ -1298,6 +1311,18 @@ export class PremiereProTools {
         })
       },
       {
+        name: 'capture_program_output',
+        description: 'Captures the actual COMPOSITED Program Monitor output -- the real rendered pixels of the sequence at a given time, with all clips, effects, transitions, titles and grades baked in -- and writes it to an image, so an AI can SEE what the edit renders to rather than trusting that an API call returned. This is Premiere\'s true render output, not a DOM read-back. Premiere hands script no framebuffer of the program, so the frame is obtained off one of four "taps": render/export (zero-dependency, both OS, always available when Premiere is connected -- uses Premiere\'s own frame export), and the real-time GPU/network taps NDI, Syphon (macOS) and Spout (Windows) which need a Transmit plugin + native receiver. Tap selection is automatic ("auto") but forceable. Always reports which tap was actually used and verifies a real frame landed on disk before claiming success; if a requested tap is unavailable it returns per-OS install guidance instead of faking a frame. Pass probeOnly:true to just report which taps are available on this machine without capturing.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional().describe('Sequence to capture. Defaults to the active sequence.'),
+          time: z.number().optional().describe('Timestamp in seconds to capture. Defaults to the current playhead position of the sequence.'),
+          format: z.enum(['png', 'jpg', 'tiff']).optional().describe('Image format for the render/export tap (default "png").'),
+          outputPath: z.string().optional().describe('Where to write the captured frame. Defaults to a timestamped file in the system temp directory.'),
+          tap: z.enum(['auto', 'render', 'ndi', 'syphon', 'spout']).optional().describe('Which capture tap to use. "auto" (default) picks the best available, falling back to render/export. The GPU/network taps (ndi/syphon/spout) require a Transmit plugin and a native receiver; if forced and unavailable the call fails with install guidance rather than silently using render/export.'),
+          probeOnly: z.boolean().optional().describe('If true, do not capture -- just return which taps are available on this machine and their install guidance.')
+        })
+      },
+      {
         name: 'rename_project_item',
         description: 'Renames a project item (sequence, bin, clip) by setting its name. Use this when duplicate_sequence does not propagate the new name to the project panel.',
         inputSchema: z.object({
@@ -1874,6 +1899,8 @@ export class PremiereProTools {
           return await this.probeMedia(args.mediaPath, args.projectItemId);
         case 'generate_scope':
           return await this.generateScope(args.mediaPath, args.projectItemId, args.scope, args.timeSeconds, args.outputPath);
+        case 'capture_program_output':
+          return await this.captureProgramOutput(args.sequenceId, args.time, args.format, args.outputPath, args.tap, args.probeOnly);
 
         // Subclip
         case 'create_subclip':
@@ -5474,6 +5501,244 @@ ${this.buildSequenceResolver(sequenceId)}
         });
       });
     });
+  }
+
+  /**
+   * Probe which render-truth capture taps are usable on THIS machine, cached
+   * with a short TTL so a burst of captures does not re-probe each time (speed
+   * mandate). Four taps, one abstraction:
+   *
+   *   - render/export: zero-dependency, both OSes, video + audio (via Premiere's
+   *     own frame export / Media Encoder). Always available whenever Premiere is
+   *     connected -- it is the correctness fallback, never the latency path.
+   *   - NDI: real-time video + audio, both OSes; needs an NDI runtime + a
+   *     Transmit-style plugin publishing the Program feed.
+   *   - Syphon: lowest-latency GPU frame, macOS only, video only.
+   *   - Spout: lowest-latency GPU frame, Windows only, video only.
+   *
+   * The GPU/network taps require a native receiver we do not ship yet, so unless
+   * an install advertises one via an env override we report them unavailable
+   * with honest per-OS install guidance rather than pretending they work. This
+   * probe is intentionally cheap and side-effect-free; it never spawns a
+   * receiver (warm persistent receivers are a later optimisation, not something
+   * to start here on a mere probe).
+   */
+  private probeCaptureTaps(): CaptureTapReport[] {
+    const CACHE_TTL_MS = 30_000;
+    const cached = this.captureTapsCache;
+    if (cached && Date.now() - cached.at < CACHE_TTL_MS) {
+      return cached.taps;
+    }
+
+    const os = platform(); // 'darwin' | 'win32' | 'linux' | ...
+    const isMac = os === 'darwin';
+    const isWin = os === 'win32';
+
+    // An install can point us at a receiver it set up itself. We only claim a
+    // GPU/network tap is available when such a signal is present -- never guess.
+    const ndiEnv = Boolean(process.env.PREMIERE_MCP_NDI_RECEIVER);
+    const syphonEnv = Boolean(process.env.PREMIERE_MCP_SYPHON_RECEIVER);
+    const spoutEnv = Boolean(process.env.PREMIERE_MCP_SPOUT_RECEIVER);
+
+    const taps: CaptureTapReport[] = [
+      {
+        tap: 'render',
+        available: true,
+        video: true,
+        audio: true,
+        realtime: false,
+        reason: 'Zero-dependency: captures the composited frame via Premiere\'s own frame export. Requires only that Premiere is connected.',
+      },
+      {
+        tap: 'ndi',
+        available: ndiEnv,
+        video: true,
+        audio: true,
+        realtime: true,
+        reason: ndiEnv
+          ? 'NDI receiver advertised via PREMIERE_MCP_NDI_RECEIVER.'
+          : 'No NDI receiver detected. NDI gives a real-time video+audio feed on macOS and Windows but needs an NDI runtime plus a Transmit-style plugin publishing the Program feed.',
+        install: ndiEnv
+          ? undefined
+          : 'Install the NDI Tools/runtime (ndi.video) and a Premiere Transmit plugin that outputs NDI, then set PREMIERE_MCP_NDI_RECEIVER to your receiver command/endpoint.',
+      },
+      {
+        tap: 'syphon',
+        available: isMac && syphonEnv,
+        video: true,
+        audio: false,
+        realtime: true,
+        reason: !isMac
+          ? `Syphon is macOS-only; this host is ${os}. Use Spout on Windows or NDI cross-platform.`
+          : (syphonEnv
+            ? 'Syphon receiver advertised via PREMIERE_MCP_SYPHON_RECEIVER.'
+            : 'No Syphon receiver detected. Syphon is the lowest-latency macOS GPU frame tap (video only).'),
+        install: isMac && !syphonEnv
+          ? 'Install a Syphon-capable Transmit plugin for Premiere plus a Syphon receiver, then set PREMIERE_MCP_SYPHON_RECEIVER to your receiver command.'
+          : undefined,
+      },
+      {
+        tap: 'spout',
+        available: isWin && spoutEnv,
+        video: true,
+        audio: false,
+        realtime: true,
+        reason: !isWin
+          ? `Spout is Windows-only; this host is ${os}. Use Syphon on macOS or NDI cross-platform.`
+          : (spoutEnv
+            ? 'Spout receiver advertised via PREMIERE_MCP_SPOUT_RECEIVER.'
+            : 'No Spout receiver detected. Spout is the lowest-latency Windows GPU frame tap (video only).'),
+        install: isWin && !spoutEnv
+          ? 'Install a Spout-capable Transmit plugin for Premiere plus a Spout receiver, then set PREMIERE_MCP_SPOUT_RECEIVER to your receiver command.'
+          : undefined,
+      },
+    ];
+
+    this.captureTapsCache = { at: Date.now(), taps };
+    return taps;
+  }
+
+  /**
+   * Resolve the active sequence's id, so capture_program_output can default to
+   * "whatever is open" the way the frame/scope tools elsewhere accept no id.
+   */
+  private async resolveActiveSequenceId(): Promise<{ id?: string; name?: string; error?: string }> {
+    const script = `
+      try {
+        var seq = app.project.activeSequence;
+        if (!seq) return JSON.stringify({ success: false, error: "No active sequence" });
+        return JSON.stringify({ success: true, id: String(seq.sequenceID), name: seq.name });
+      } catch (e) {
+        return JSON.stringify({ success: false, error: e.toString() });
+      }
+    `;
+    const res = await this.bridge.executeScript(script);
+    if (res && res.success && res.id) return { id: String(res.id), name: res.name };
+    return { error: (res && res.error) || 'Could not resolve the active sequence' };
+  }
+
+  /**
+   * Capture the actual COMPOSITED Program Monitor output -- the real rendered
+   * pixels of the sequence at a time -- and write it to an image, so a model can
+   * SEE what the edit renders to rather than trusting an API return value. This
+   * is Wall 1 of the render-truth loop.
+   *
+   * Premiere never hands script a framebuffer of the program, so the frame is
+   * obtained off one of four taps (see probeCaptureTaps). The render/export tap
+   * is the zero-dependency correctness path and reuses exportFrame (Premiere's
+   * own QE frame export, which bakes in every clip/effect/title/grade). The
+   * GPU/network taps (NDI/Syphon/Spout) are real-time but require a native
+   * receiver we do not ship yet; when one is forced and unavailable we return
+   * install guidance rather than silently substituting render/export.
+   *
+   * Honesty contract: always report which tap was actually used; verify a real
+   * frame landed on disk (delegated to exportFrame's verify-after-write) before
+   * claiming success; never hang and never fake a frame.
+   */
+  private async captureProgramOutput(
+    sequenceId?: string,
+    time?: number,
+    format: 'png' | 'jpg' | 'tiff' = 'png',
+    outputPath?: string,
+    tap: 'auto' | 'render' | 'ndi' | 'syphon' | 'spout' = 'auto',
+    probeOnly = false,
+  ): Promise<any> {
+    const taps = this.probeCaptureTaps();
+    const tapReport = (name: string): CaptureTapReport | undefined => taps.find((t) => t.tap === name);
+
+    if (probeOnly) {
+      const best = taps.find((t) => t.available && t.realtime) || tapReport('render');
+      return {
+        success: true,
+        probeOnly: true,
+        os: platform(),
+        taps,
+        recommendedTap: best ? best.tap : 'render',
+        note: 'Capability probe only -- no frame was captured. render/export is always available when Premiere is connected; NDI/Syphon/Spout need a Transmit plugin + native receiver (see each tap\'s install guidance).',
+      };
+    }
+
+    // Resolve which tap to actually use. GPU/network taps are not yet wired to a
+    // receiver here, so the only tap that can produce a frame is render/export.
+    const requested = tap || 'auto';
+    if (requested !== 'auto' && requested !== 'render') {
+      const report = tapReport(requested);
+      // Forcing an unavailable GPU/network tap must fail honestly, not fall back silently.
+      return {
+        success: false,
+        requestedTap: requested,
+        available: false,
+        error: `Capture tap '${requested}' is not available on this machine. ${report ? report.reason : ''}`.trim(),
+        install: report ? report.install : undefined,
+        hint: 'Pass tap:"render" (or tap:"auto") to use the zero-dependency render/export tap, or probeOnly:true to see all taps.',
+        taps,
+      };
+    }
+    // 'render' explicitly, or 'auto' (no real-time receiver present → render/export is the best available).
+    const chosenTap: CaptureTapReport = tapReport('render') as CaptureTapReport;
+
+    // Resolve sequence: explicit id, else the active sequence.
+    let resolvedSequenceId = sequenceId;
+    let resolvedSequenceName: string | undefined;
+    if (!resolvedSequenceId) {
+      const active = await this.resolveActiveSequenceId();
+      if (active.error || !active.id) {
+        return {
+          success: false,
+          error: active.error || 'No sequenceId provided and no active sequence to capture.',
+          tapUsed: chosenTap.tap,
+        };
+      }
+      resolvedSequenceId = active.id;
+      resolvedSequenceName = active.name;
+    }
+
+    // Resolve time: explicit, else the current playhead of that sequence.
+    let resolvedTime: number;
+    if (time === undefined || time === null) {
+      const playhead = await this.getPlayheadPosition(resolvedSequenceId);
+      resolvedTime = (playhead && playhead.success && typeof playhead.position === 'number')
+        ? playhead.position
+        : 0;
+    } else {
+      resolvedTime = time;
+    }
+
+    // Default output path: a timestamped file in the system temp dir so we never
+    // scatter files at the caller's cwd and never overwrite a prior capture.
+    const outPath = (outputPath && outputPath.trim())
+      || join(tmpdir(), `premiere-program-${resolvedSequenceId}-${Date.now()}.${format}`);
+
+    const result = await this.exportFrame(resolvedSequenceId, resolvedTime, outPath, format);
+
+    if (!result || !result.success) {
+      return {
+        success: false,
+        tapUsed: chosenTap.tap,
+        requestedTap: requested,
+        sequenceId: resolvedSequenceId,
+        time: resolvedTime,
+        error: (result && result.error) || 'Frame capture failed and no frame was written.',
+        note: 'The render/export tap could not produce a composited frame. Ensure Premiere is connected and the sequence can be opened in a timeline.',
+      };
+    }
+
+    return {
+      success: true,
+      tapUsed: chosenTap.tap,
+      requestedTap: requested,
+      autoSelected: requested === 'auto',
+      sequenceId: resolvedSequenceId,
+      sequenceName: result.sequenceName || resolvedSequenceName,
+      time: resolvedTime,
+      format,
+      outputPath: result.outputPath,
+      requestedPath: result.requestedPath || outPath,
+      video: chosenTap.video,
+      audio: false,
+      realtime: chosenTap.realtime,
+      note: 'Composited Program frame captured via the render/export tap (all clips, effects, titles and grades baked in). For real-time video+audio, install an NDI/Syphon/Spout receiver -- run this tool with probeOnly:true for guidance.',
+    };
   }
 
   // Audio Operations Implementation

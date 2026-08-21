@@ -42,7 +42,7 @@ export const PROFILES: Record<string, string[]> = {
     'get_*', 'list_*', 'read_*', 'find_*', 'search_*', 'inspect_*',
     'is_*', 'check_*', 'detect_*',
     // non-mutating media analysis that doesn't fit the verb-prefix globs
-    'probe_media',
+    'probe_media', 'capture_program_output',
   ],
 
   // The everyday editorial core: sequences, clips, timeline, bins, markers,
@@ -71,6 +71,8 @@ export const PROFILES: Record<string, string[]> = {
     'add_transition', 'apply_effect', 'list_available_effects', 'list_available_transitions',
     // export
     'export_frame', 'export_sequence', 'add_to_render_queue', 'get_render_queue_status',
+    // render-truth: capture the composited Program frame for the feedback loop
+    'capture_program_output',
   ],
 
   // Audio-focused work.
@@ -88,8 +90,8 @@ export const PROFILES: Record<string, string[]> = {
     'get_capabilities', 'get_active_sequence', 'get_selected_clips', 'get_clip_properties',
     'color_correct', 'apply_lut', 'apply_effect', 'set_effect_property',
     'get_color_label', 'set_color_label', 'export_frame',
-    // QC: ground-truth metadata and signal scopes for grade checks
-    'probe_media', 'generate_scope',
+    // QC: ground-truth metadata, signal scopes, and the composited frame for grade checks
+    'probe_media', 'generate_scope', 'capture_program_output',
   ],
 };
 

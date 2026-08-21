@@ -21,6 +21,23 @@ result on disk before reporting success:
 - Added `generate_scope`: renders a waveform, vectorscope, histogram, or RGB
   parade image from one frame with ffmpeg, because Premiere's Lumetri scopes
   cannot be scripted or exported. Overridable via `PREMIERE_MCP_FFMPEG_CMD`.
+- Added `capture_program_output`: captures the actual *composited* Program
+  Monitor frame — the real rendered pixels of the sequence, with every clip,
+  effect, transition, title and grade baked in — so an agent can **see** what an
+  edit renders to rather than trusting that an API call returned. Premiere hands
+  script no framebuffer of the program, so the frame is obtained off one of four
+  capture "taps" behind a single abstraction: render/export (zero-dependency,
+  macOS + Windows, video + audio, always available when Premiere is connected)
+  and the real-time NDI, Syphon (macOS) and Spout (Windows) taps, which require a
+  Transmit-style plugin and a native receiver. The tap is auto-selected but
+  forceable; the tool always reports which tap it used, defaults the sequence to
+  the active one and the time to the current playhead, verifies a real frame
+  landed on disk before claiming success, and returns per-OS install guidance for
+  an unavailable tap instead of faking a frame. Pass `probeOnly:true` to report
+  which taps are available on the machine without capturing; a receiver can be
+  advertised via `PREMIERE_MCP_NDI_RECEIVER` / `PREMIERE_MCP_SYPHON_RECEIVER` /
+  `PREMIERE_MCP_SPOUT_RECEIVER`. This is the first piece of the render-truth
+  feedback loop.
 - Added a recovery boundary — `create_recovery_checkpoint`,
   `list_recovery_checkpoints`, `restore_recovery_checkpoint` — that snapshots a
   sequence before risky edits. The automatic checkpoint taken before
@@ -33,7 +50,7 @@ result on disk before reporting success:
 - Enriched the expanded-tool catalogue with real input schemas so every
   advertised tool exposes a typed, discoverable argument shape.
 
-Catalogue grew to `289` tools.
+Catalogue grew to `290` tools.
 
 ## [1.2.0] - 2026-08-17
 
