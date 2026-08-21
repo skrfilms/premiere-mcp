@@ -26,6 +26,7 @@ export const expandedToolNames = [
   'reflect_dom_object',
   'list_lumetri_presets',
   'apply_lumetri_preset',
+  'apply_video_effect',
   'get_timeline_render_status',
   'list_clip_effects',
   'get_sequence_structure',
@@ -1379,6 +1380,169 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
             applyReturned: lpRet,
             clipsAffected: lpResults.length,
             clips: lpResults,
+            verified: true
+          });
+
+        case "apply_video_effect":
+          // Adds a video effect to a clip through the QE DOM and VERIFIES it by
+          // diffing the clip's component list before and after. The value here is
+          // honesty about identity: qe.project.getVideoEffectByName() resolves by
+          // DISPLAY name only, and on a system with third-party plugins a stock
+          // name like "Gaussian Blur" can silently resolve to a plugin's effect
+          // (e.g. AE.Impact_Blur_FX) instead of Adobe's AE.ADBE Gaussian Blur 2.
+          // So this reports the matchName that ACTUALLY landed, and if the caller
+          // passes expected_match_name it enforces the identity — rolling the add
+          // back when it is safe to do so (no other user effects would be lost).
+          var aveEffect = args.effect_name || args.effectName || args.effect;
+          if (!aveEffect) return fail("effect_name is required. Use list_available_effects to see the display names Premiere accepts.");
+          aveEffect = String(aveEffect);
+          var aveExpected = args.expected_match_name || args.expectedMatchName || args.match_name || args.matchName || null;
+          if (aveExpected) aveExpected = String(aveExpected);
+
+          var aveSeqErr = sequenceRequestError();
+          if (aveSeqErr) return fail(aveSeqErr);
+          var aveSeq = targetSequence();
+          if (!aveSeq) return fail("No active sequence to apply a video effect in.");
+
+          var aveClipId = args.clipNodeId || args.clip_node_id || args.nodeId || args.node_id || args.clipId || args.clip_id || args.clip_name || args.clipName;
+          if (!aveClipId) return fail("clip_name or clipNodeId is required (the video clip to receive the effect).");
+          var aveInfo = null;
+          for (var avt = 0; avt < aveSeq.videoTracks.numTracks; avt++) {
+            var avtrack = aveSeq.videoTracks[avt];
+            for (var avc = 0; avc < avtrack.clips.numItems; avc++) {
+              var avclip = avtrack.clips[avc];
+              if (avclip.nodeId === aveClipId || String(avclip.name) === String(aveClipId)) {
+                aveInfo = { clip: avclip, trackIndex: avt, clipIndex: avc };
+                break;
+              }
+            }
+            if (aveInfo) break;
+          }
+          if (!aveInfo) return fail("Video clip not found in the target sequence: " + String(aveClipId) + ". apply_video_effect targets video clips.");
+
+          // matchName + a checksum over property values, so two components with
+          // the same name are still told apart by their current parameter state.
+          function aveFingerprint(component) {
+            var matchName = "";
+            try { matchName = String(component.matchName || ""); } catch (eM) {}
+            var displayName = "";
+            try { displayName = String(component.displayName || ""); } catch (eDn) {}
+            var sum = 0, propCount = 0;
+            try {
+              propCount = component.properties.numItems;
+              for (var p = 0; p < propCount; p++) {
+                var v;
+                try { v = component.properties[p].getValue(); } catch (eV) { v = "ERR"; }
+                var s = String(v);
+                for (var k = 0; k < s.length; k++) { sum = (sum + s.charCodeAt(k) * (p + 1)) % 2147483647; }
+              }
+            } catch (eP) { propCount = -1; }
+            return { matchName: matchName, displayName: displayName, propCount: propCount, key: displayName + "|" + matchName + "|" + propCount + "|" + sum };
+          }
+          function aveSnapshot(clip) {
+            var arr = [];
+            for (var i = 0; i < clip.components.numItems; i++) arr.push(aveFingerprint(clip.components[i]));
+            return arr;
+          }
+          function aveKeysEqual(left, right) {
+            if (left.length !== right.length) return false;
+            for (var i = 0; i < left.length; i++) if (left[i].key !== right[i].key) return false;
+            return true;
+          }
+          function aveIsIntrinsic(matchName) {
+            return matchName === "AE.ADBE Opacity" || matchName === "AE.ADBE Motion" || matchName.indexOf("Lumetri") !== -1;
+          }
+
+          var aveBefore = aveSnapshot(aveInfo.clip);
+          // removeEffects() strips every user effect at once (Lumetri excepted), so
+          // a rollback is only clean when our add is the sole non-intrinsic effect.
+          var aveUserEffectsBefore = 0;
+          for (var aub = 0; aub < aveBefore.length; aub++) if (!aveIsIntrinsic(aveBefore[aub].matchName)) aveUserEffectsBefore++;
+
+          var aveQeSeq = qeSequenceFor(aveSeq);
+          if (!aveQeSeq) return fail("Could not address the sequence through the QE DOM (effect add is a QE-only operation). Open the sequence in a timeline and retry.");
+          var aveQeTrack = aveQeSeq.getVideoTrackAt(aveInfo.trackIndex);
+          var aveQeClip = __findQeClipByDomClip(aveQeTrack, aveInfo.clip);
+          if (!aveQeClip) return fail("Could not locate the matching QE clip for the effect add.");
+          var aveFx = qe.project.getVideoEffectByName(aveEffect);
+          if (!aveFx) return fail("Effect not found: " + aveEffect + ". Use list_available_effects for the exact display names.");
+          try { aveQeClip.addVideoEffect(aveFx); }
+          catch (eAdd) { return fail("addVideoEffect threw: " + eAdd.toString(), { requestedEffectName: aveEffect }); }
+
+          var aveAfter = aveSnapshot(aveInfo.clip);
+          if (aveAfter.length <= aveBefore.length) {
+            return fail("Effect add created no new component on the clip — a silent no-op (some builds ignore QE structural edits).", {
+              requestedEffectName: aveEffect, beforeComponentCount: aveBefore.length, afterComponentCount: aveAfter.length
+            });
+          }
+          // Identify the inserted component: the one index whose removal restores
+          // the exact pre-add sequence. Ambiguous only if an identical component
+          // already existed (same name AND same property values).
+          var aveCandidates = [];
+          if (aveAfter.length === aveBefore.length + 1) {
+            for (var aci = 0; aci < aveAfter.length; aci++) {
+              var without = [];
+              for (var aj = 0; aj < aveAfter.length; aj++) if (aj !== aci) without.push(aveAfter[aj]);
+              if (aveKeysEqual(aveBefore, without)) aveCandidates.push(aci);
+            }
+          }
+          var aveAddedMatch = null, aveAddedDisplay = null, aveAddedIdx = -1, aveConfidence = "unique";
+          if (aveCandidates.length === 1) {
+            aveAddedIdx = aveCandidates[0];
+            aveAddedMatch = aveAfter[aveAddedIdx].matchName;
+            aveAddedDisplay = aveAfter[aveAddedIdx].displayName;
+          } else {
+            // Could not pin the exact index. If every extra component shares one
+            // matchName, identity is still known even though the slot is not.
+            aveConfidence = "ambiguous";
+            var extraMatches = {};
+            var firstExtra = null;
+            for (var aem = 0; aem < aveAfter.length; aem++) {
+              var mn = aveAfter[aem].matchName;
+              extraMatches[mn] = (extraMatches[mn] || 0) + 1;
+            }
+            var distinctNonIntrinsic = [];
+            for (var mnk in extraMatches) {
+              if (extraMatches.hasOwnProperty && !extraMatches.hasOwnProperty(mnk)) continue;
+              if (!aveIsIntrinsic(mnk)) { distinctNonIntrinsic.push(mnk); if (firstExtra === null) firstExtra = mnk; }
+            }
+            if (distinctNonIntrinsic.length === 1) aveAddedMatch = distinctNonIntrinsic[0];
+          }
+
+          // Identity guard: did the display name resolve to the effect the caller meant?
+          if (aveExpected) {
+            var identityKnown = (aveAddedMatch !== null);
+            var identityMatches = identityKnown && (normalizeName(aveAddedMatch) === normalizeName(aveExpected));
+            if (!identityMatches) {
+              var aveRolledBack = false;
+              if (aveUserEffectsBefore === 0) {
+                try { aveQeClip.removeEffects(); } catch (eRb) {}
+                aveRolledBack = aveKeysEqual(aveBefore, aveSnapshot(aveInfo.clip));
+              }
+              return fail(
+                identityKnown
+                  ? ("Requested '" + aveEffect + "' resolved to matchName '" + aveAddedMatch + "', not the expected '" + aveExpected + "'. A plugin or legacy variant likely shadows this display name on this system.")
+                  : ("Requested '" + aveEffect + "' was added but its identity could not be confirmed against the expected '" + aveExpected + "' (an identical component already existed)."),
+                {
+                  requestedEffectName: aveEffect,
+                  expectedMatchName: aveExpected,
+                  actualMatchName: aveAddedMatch,
+                  identityMismatch: identityKnown,
+                  identityConfidence: aveConfidence,
+                  rolledBack: aveRolledBack,
+                  rollbackNote: aveUserEffectsBefore === 0 ? undefined : "Left in place: the clip carried other user effects and removeEffects() would strip all of them."
+                }
+              );
+            }
+          }
+
+          return ok({
+            sequence: { name: aveSeq.name, id: aveSeq.sequenceID },
+            clip: { nodeId: aveInfo.clip.nodeId, name: String(aveInfo.clip.name), trackIndex: aveInfo.trackIndex },
+            requestedEffectName: aveEffect,
+            addedComponent: { displayName: aveAddedDisplay, matchName: aveAddedMatch, componentIndex: aveAddedIdx },
+            identityConfidence: aveConfidence,
+            identityVerified: aveExpected ? true : undefined,
             verified: true
           });
 

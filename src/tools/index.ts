@@ -657,11 +657,12 @@ export class PremiereProTools {
       // Effects and Transitions
       {
         name: 'apply_effect',
-        description: 'Applies a visual or audio effect to a clip, identifies the exact newly created component, and verifies parameter readbacks.',
+        description: 'Applies a visual or audio effect to a clip, identifies the exact newly created component (reporting its matchName), and verifies parameter readbacks. Effects resolve by display name only, so a stock name can silently resolve to a third-party plugin; pass expectedMatchName to enforce the effect\'s identity and fail (rolling back when safe) on a mismatch.',
         inputSchema: z.object({
           clipId: z.string().describe('The ID of the clip to apply the effect to'),
           effectName: z.string().describe('The name of the effect to apply (e.g., "Gaussian Blur", "Lumetri Color")'),
-          parameters: z.record(z.string(), z.any()).optional().describe('Key-value pairs for the effect\'s parameters')
+          parameters: z.record(z.string(), z.any()).optional().describe('Key-value pairs for the effect\'s parameters'),
+          expectedMatchName: z.string().optional().describe('Optional identity guard: the effect\'s internal matchName (e.g. "AE.ADBE Gaussian Blur 2"). If the landed effect\'s matchName differs, the add fails and is rolled back when it is the only user effect on the clip.')
         })
       },
       {
@@ -1891,7 +1892,7 @@ export class PremiereProTools {
 
         // Effects and Transitions
         case 'apply_effect':
-          return await this.applyEffect(args.clipId, args.effectName, args.parameters);
+          return await this.applyEffect(args.clipId, args.effectName, args.parameters, args.expectedMatchName);
         case 'crop_clip':
           return await this.cropClip(args.clipId, {
             left: args.left,
@@ -4995,10 +4996,11 @@ ${this.buildSequenceResolver(sequenceId)}
   //   4. For each entry in `parameters`, attempts to set the matching property by displayName
   //      (exact match first, then case-insensitive whitespace-stripped match)
   //   5. Returns dump + per-param result so debugging is one round-trip
-  private async applyEffect(clipId: string, effectName: string, parameters?: Record<string, any>): Promise<any> {
+  private async applyEffect(clipId: string, effectName: string, parameters?: Record<string, any>, expectedMatchName?: string): Promise<any> {
     const paramJson = JSON.stringify(parameters || {});
     const clipIdJson = JSON.stringify(clipId);
     const effectNameJson = JSON.stringify(effectName);
+    const expectedMatchNameJson = JSON.stringify(expectedMatchName || null);
     const script = `
       try {
         app.enableQE();
@@ -5149,6 +5151,43 @@ ${this.buildSequenceResolver(sequenceId)}
         }
         var newCompIdx = candidateIndices[0];
         var newComp = clip.components[newCompIdx];
+        var newCompMatchName = "";
+        try { newCompMatchName = String(newComp.matchName || ""); } catch (eMn) {}
+
+        // Identity guard: getVideoEffectByName resolves by DISPLAY name only, so a
+        // stock name like "Gaussian Blur" can silently land a third-party plugin
+        // (e.g. AE.Impact_Blur_FX). If the caller told us the matchName they meant
+        // and it does not match, refuse — and roll the add back when it is safe
+        // (removeEffects strips ALL user effects at once, so it is only clean when
+        // our add was the sole non-intrinsic, non-Lumetri effect on the clip).
+        var expectedMatchName = ${expectedMatchNameJson};
+        if (expectedMatchName) {
+          function identityIntrinsic(m) { return m === "AE.ADBE Opacity" || m === "AE.ADBE Motion" || m.indexOf("Lumetri") !== -1; }
+          function identityNormalize(s) { return String(s).toLowerCase().replace(/[\\s_-]+/g, ''); }
+          if (identityNormalize(newCompMatchName) !== identityNormalize(expectedMatchName)) {
+            var userEffectsBefore = 0;
+            for (var ueb = 0; ueb < beforeComponents.length; ueb++) {
+              if (!identityIntrinsic(beforeComponents[ueb].matchName)) userEffectsBefore++;
+            }
+            var rolledBack = false;
+            if (userEffectsBefore === 0) {
+              try { qeClip.removeEffects(); } catch (eRb) {}
+              try { rolledBack = fingerprintsEqual(beforeComponents, snapshotComponents(__findClip(${clipIdJson}).clip)); } catch (eRbV) {}
+            }
+            return JSON.stringify({
+              success: false,
+              error: "Requested effect '" + ${effectNameJson} + "' resolved to matchName '" + newCompMatchName + "', not the expected '" + expectedMatchName + "'. A plugin or legacy variant likely shadows this display name on this system.",
+              clipId: ${clipIdJson},
+              effectName: ${effectNameJson},
+              expectedMatchName: expectedMatchName,
+              actualMatchName: newCompMatchName,
+              identityMismatch: true,
+              rolledBack: rolledBack,
+              rollbackNote: userEffectsBefore === 0 ? undefined : "Left in place: the clip carried other user effects and removeEffects() would strip all of them.",
+              noParametersSet: true
+            });
+          }
+        }
 
         // Dump every property name + current value
         var propsDump = [];
@@ -5259,6 +5298,7 @@ ${this.buildSequenceResolver(sequenceId)}
           effectName: ${effectNameJson},
           addedComponent: {
             displayName: String(newComp.displayName),
+            matchName: newCompMatchName,
             componentIndex: newCompIdx,
             identificationStrategy: "unique ordered component fingerprint insertion",
             propertyCount: propsDump.length,
