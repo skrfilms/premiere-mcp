@@ -39,7 +39,7 @@ export const PROFILES: Record<string, string[]> = {
 
   // Non-mutating introspection only. Safe to point an untrusted agent at.
   'read-only': [
-    'get_*', 'list_*', 'read_*', 'find_*', 'search_*', 'inspect_*',
+    'get_*', 'list_*', 'read_*', 'find_*', 'search_*', 'inspect_*', 'reflect_*',
     'is_*', 'check_*', 'detect_*',
     // non-mutating media analysis that doesn't fit the verb-prefix globs
     'probe_media', 'capture_program_output', 'lint_timeline', 'diff_sequences',
