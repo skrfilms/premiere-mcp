@@ -68,6 +68,14 @@ result on disk before reporting success:
   current cut) and with `lint_timeline` (find defects, then attribute them to a
   change). Clips are matched within a track by name with a half-frame tolerance;
   the comparison is a pure, independently tested function.
+- Extended `get_capabilities` with an opt-in local-backend self-probe
+  (`probeLocalTools: true`): spawn-probes ffmpeg, ffprobe and the Whisper CLI, and
+  reports the render-truth capture taps, so an agent or human learns which
+  dependency-backed tools will actually work on *this* machine before calling
+  them. Each dependency reports its resolved command, env override, what it
+  unlocks, and — when absent — per-OS install guidance instead of a mystery
+  failure at call time. Off by default so plain capability discovery stays fast
+  and makes no Premiere request.
 - Added a recovery boundary — `create_recovery_checkpoint`,
   `list_recovery_checkpoints`, `restore_recovery_checkpoint` — that snapshots a
   sequence before risky edits. The automatic checkpoint taken before
