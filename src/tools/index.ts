@@ -3285,11 +3285,14 @@ ${this.buildSequenceResolver(sequenceId)}
         var project = app.project;
         var newPath = ${JSON.stringify(location)} + "/" + ${JSON.stringify(name)} + ".prproj";
         project.saveAs(newPath);
-        
+        var savedFile = new File(newPath);
+        if (!savedFile.exists) return JSON.stringify({ success: false, verified: false, error: "saveAs() ran but no file exists at " + newPath + ". The location may be unwritable.", newPath: newPath });
         return JSON.stringify({
           success: true,
+          verified: true,
           message: "Project saved as: " + newPath,
-          newPath: newPath
+          newPath: newPath,
+          fileSize: savedFile.length
         });
       } catch (e) {
         return JSON.stringify({
@@ -3944,11 +3947,13 @@ ${this.buildSequenceResolver(sequenceId)}
         if (!item) return JSON.stringify({ success: false, error: "Project item not found" });
         var oldName = item.name;
         item.name = ${safeName};
+        if (String(item.name) !== ${safeName}) return JSON.stringify({ success: false, verified: false, error: "Premiere did not rename the item (reads back as '" + String(item.name) + "').", oldName: oldName, requested: ${safeName} });
         return JSON.stringify({
           success: true,
+          verified: true,
           projectItemId: ${JSON.stringify(projectItemId)},
           oldName: oldName,
-          newName: ${safeName}
+          newName: String(item.name)
         });
       } catch (e) {
         return JSON.stringify({ success: false, error: e.toString() });
@@ -4403,12 +4408,19 @@ ${this.buildSequenceResolver(sequenceId)}
         var sequence = __findSequence(${JSON.stringify(sequenceId)});
         if (!sequence) return JSON.stringify({ success: false, error: "Sequence not found" });
         var sequenceName = sequence.name;
+        var beforeCount = app.project.sequences.numSequences;
         app.project.deleteSequence(sequence);
+        var stillThere = __findSequence(${JSON.stringify(sequenceId)});
+        var afterCount = app.project.sequences.numSequences;
+        if (stillThere || afterCount >= beforeCount) return JSON.stringify({ success: false, verified: false, error: "Premiere did not delete the sequence '" + sequenceName + "' (still present after deleteSequence).", beforeCount: beforeCount, afterCount: afterCount });
         return JSON.stringify({
           success: true,
+          verified: true,
           message: "Sequence deleted successfully",
           deletedSequenceId: ${JSON.stringify(sequenceId)},
-          deletedSequenceName: sequenceName
+          deletedSequenceName: sequenceName,
+          beforeCount: beforeCount,
+          afterCount: afterCount
         });
       } catch (e) {
         return JSON.stringify({ success: false, error: e.toString() });
@@ -4493,15 +4505,21 @@ ${this.buildSequenceResolver(sequenceId)}
         var clip = info.clip;
         var clipName = clip.name;
         var isRipple = ${JSON.stringify(deleteMode)} === "ripple";
+        var beforeCount = info.track.clips.numItems;
         clip.remove(isRipple, true);
+        var afterCount = info.track.clips.numItems;
+        if (afterCount >= beforeCount) return JSON.stringify({ success: false, verified: false, error: "Premiere did not remove '" + clipName + "' (track clip count unchanged).", beforeCount: beforeCount, afterCount: afterCount });
         return JSON.stringify({
           success: true,
+          verified: true,
           message: "Clip removed from timeline",
           clipId: ${JSON.stringify(clipId)},
           clipName: clipName,
           sequenceId: info.sequenceId,
           sequenceName: info.sequenceName,
-          deleteMode: ${JSON.stringify(deleteMode)}
+          deleteMode: ${JSON.stringify(deleteMode)},
+          beforeCount: beforeCount,
+          afterCount: afterCount
         });
       } catch (e) {
         return JSON.stringify({
@@ -4523,12 +4541,15 @@ ${this.buildSequenceResolver(sequenceId)}
         var oldTime = clip.start.seconds;
         var shiftAmount = ${newTime} - oldTime;
         clip.move(shiftAmount);
+        var actualTime = clip.start.seconds;
+        if (Math.abs(actualTime - ${newTime}) > 0.02) return JSON.stringify({ success: false, verified: false, error: "Premiere did not move the clip to " + ${newTime} + "s (reads back at " + actualTime + "s). Another clip may occupy the target position.", oldTime: oldTime, requested: ${newTime}, actual: actualTime });
         return JSON.stringify({
           success: true,
+          verified: true,
           message: "Clip moved successfully",
           clipId: ${JSON.stringify(clipId)},
           oldTime: oldTime,
-          newTime: ${newTime},
+          newTime: actualTime,
           trackIndex: info.trackIndex
         });
       } catch (e) {
@@ -4871,8 +4892,14 @@ ${this.buildSequenceResolver(sequenceId)}
         var qeSeq = __qeSequenceFor(info.sequence);
         if (!qeSeq) return JSON.stringify({ success: false, error: "Could not address sequence '" + info.sequenceName + "' through the QE API." });
         var qeTrack = info.trackType === 'video' ? qeSeq.getVideoTrackAt(info.trackIndex) : qeSeq.getAudioTrackAt(info.trackIndex);
+        var beforeCount = info.track.clips.numItems;
         qeTrack.razor(tc);
-        return JSON.stringify({ success: true, message: "Clip split at " + tc, splitTime: ${splitTime}, timecode: tc });
+        var afterCount = info.track.clips.numItems;
+        // A razor that lands on a clip splits it, so the track's clip count rises by
+        // one. If it did not, the cut fell in a gap or off the clip -- report that
+        // honestly rather than claiming a split that did not happen.
+        if (afterCount <= beforeCount) return JSON.stringify({ success: false, verified: false, error: "Razor at " + tc + " did not split any clip (track clip count unchanged). The split time may fall in a gap or outside the clip.", beforeCount: beforeCount, afterCount: afterCount });
+        return JSON.stringify({ success: true, verified: true, message: "Clip split at " + tc, splitTime: ${splitTime}, timecode: tc, beforeCount: beforeCount, afterCount: afterCount });
       } catch (e) {
         return JSON.stringify({ success: false, error: "QE DOM error: " + e.toString() });
       }
@@ -4932,6 +4959,14 @@ ${this.buildSequenceResolver(sequenceId)}
         var skippedVideoTracks = [];
         var skippedAudioTracks = [];
 
+        function __razorTotalClips() {
+          var n = 0;
+          for (var rv = 0; rv < activeSequence.videoTracks.numTracks; rv++) n += activeSequence.videoTracks[rv].clips.numItems;
+          for (var ra = 0; ra < activeSequence.audioTracks.numTracks; ra++) n += activeSequence.audioTracks[ra].clips.numItems;
+          return n;
+        }
+        var __razorBeforeTotal = __razorTotalClips();
+
         for (var i = 0; i < finalVideo.length; i++) {
           var videoIndex = finalVideo[i];
           if (videoIndex < 0 || videoIndex >= activeSequence.videoTracks.numTracks) {
@@ -4962,13 +4997,19 @@ ${this.buildSequenceResolver(sequenceId)}
           cutAudioTracks.push(audioIndex);
         }
 
+        var __razorAfterTotal = __razorTotalClips();
+        var __razorCutsMade = __razorAfterTotal - __razorBeforeTotal;
         return JSON.stringify({
           success: true,
-          message: "Timeline razored at " + tc,
+          verified: __razorCutsMade > 0,
+          message: __razorCutsMade > 0 ? "Timeline razored at " + tc : "Razor at " + tc + " landed where no clip crossed it; nothing was cut.",
           sequenceId: activeSequence.sequenceID,
           sequenceName: activeSequence.name,
           time: ${normalizedTime},
           timecode: tc,
+          cutsMade: __razorCutsMade,
+          beforeCount: __razorBeforeTotal,
+          afterCount: __razorAfterTotal,
           cutVideoTracks: cutVideoTracks,
           cutAudioTracks: cutAudioTracks,
           skippedVideoTracks: skippedVideoTracks,
@@ -7455,7 +7496,15 @@ ${this.buildSequenceResolver(sequenceId)}
         try {
           levelProp.addKey(${kf.time});
           levelProp.setValueAtKey(${kf.time}, ${linearValue}, true);
-          addedKeyframes.push({ time: ${kf.time}, level: ${kf.level}, linearValue: ${linearValue} });
+          // Verify the key actually landed and holds the value we asked for; addKey/setValueAtKey
+          // return void and can silently no-op, so a push without readback would be a fake success.
+          var __kExists = false; try { __kExists = levelProp.keyExistsAtTime(${kf.time}); } catch (eK) {}
+          var __kVal = null; try { __kVal = levelProp.getValueAtKey(${kf.time}); } catch (eV) {}
+          if (__kExists && __kVal !== null && Math.abs(Number(__kVal) - ${linearValue}) <= Math.max(0.0005, ${linearValue} * 0.02)) {
+            addedKeyframes.push({ time: ${kf.time}, level: ${kf.level}, linearValue: ${linearValue} });
+          } else {
+            failedKeyframes.push({ time: ${kf.time}, level: ${kf.level}, error: "keyframe did not verify (exists=" + __kExists + ", readback=" + __kVal + ")" });
+          }
         } catch (e2) {
           failedKeyframes.push({ time: ${kf.time}, level: ${kf.level}, error: e2.toString() });
         }
@@ -7521,8 +7570,11 @@ ${this.buildSequenceResolver(sequenceId)}
         var failedKeyframes = [];
         ${keyframeCode}
         return JSON.stringify({
-          success: true,
-          message: "Audio keyframes added (locale-aware Volume detection, calibrated dB scale)",
+          success: (addedKeyframes.length > 0 && failedKeyframes.length === 0),
+          verified: (addedKeyframes.length > 0 && failedKeyframes.length === 0),
+          message: failedKeyframes.length
+            ? ("Audio keyframes: " + addedKeyframes.length + " verified, " + failedKeyframes.length + " failed to apply")
+            : "Audio keyframes added and verified (locale-aware Volume detection, calibrated dB scale)",
           clipId: ${JSON.stringify(clipId)},
           volumeComponent: String(volumeComp.displayName),
           levelProperty: String(levelProp.displayName),
@@ -7547,8 +7599,11 @@ ${this.buildSequenceResolver(sequenceId)}
         var track = sequence.audioTracks[${trackIndex}];
         if (!track) return JSON.stringify({ success: false, error: "Audio track not found" });
         track.setMute(${muted ? 1 : 0});
+        var nowMuted = null; try { nowMuted = Boolean(track.isMuted()); } catch (eMute) {}
+        if (nowMuted !== null && nowMuted !== ${muted}) return JSON.stringify({ success: false, verified: false, error: "Premiere did not change the track mute state (still reads " + (nowMuted ? "muted" : "unmuted") + ")." });
         return JSON.stringify({
           success: true,
+          verified: nowMuted !== null,
           message: "Track mute status changed",
           sequenceId: ${JSON.stringify(sequenceId)},
           trackIndex: ${trackIndex},
@@ -8753,22 +8808,36 @@ ${this.buildSequenceResolver(sequenceId)}
       try {
 ${this.buildSequenceResolver(sequenceId)}
         var found = false;
+        var mismatch = [];
         for (var i = 0; i < sequence.markers.numMarkers; i++) {
           var marker = sequence.markers[i];
           if (marker.guid === ${JSON.stringify(markerId)}) {
             ${updates.name !== undefined ? `marker.name = ${JSON.stringify(updates.name)};` : ''}
             ${updates.comment !== undefined ? `marker.comments = ${JSON.stringify(updates.comment)};` : ''}
             ${updateColorIndex !== null ? `marker.setColorByIndex(${updateColorIndex});` : ''}
+            // Re-read each written attribute off the same marker object; a rejected assignment
+            // leaves the old value, which would otherwise be reported as a successful update.
+            ${updates.name !== undefined ? `if (String(marker.name) !== ${JSON.stringify(updates.name)}) mismatch.push("name");` : ''}
+            ${updates.comment !== undefined ? `if (String(marker.comments) !== ${JSON.stringify(updates.comment)}) mismatch.push("comment");` : ''}
+            ${updateColorIndex !== null ? `var __mc = null; try { __mc = marker.getColorByIndex(); } catch (eMc) {} if (__mc !== null && Number(__mc) !== ${updateColorIndex}) mismatch.push("color");` : ''}
             found = true;
             break;
           }
         }
 
-        return JSON.stringify({
-          success: found,
+        if (found && mismatch.length) return JSON.stringify({
+          success: false,
+          verified: false,
           sequenceId: sequence.sequenceID,
           sequenceName: sequence.name,
-          message: found ? "Marker updated successfully" : "Marker not found"
+          error: "Marker found but these attributes did not apply on readback: " + mismatch.join(", ")
+        });
+        return JSON.stringify({
+          success: found,
+          verified: found,
+          sequenceId: sequence.sequenceID,
+          sequenceName: sequence.name,
+          message: found ? "Marker updated and verified" : "Marker not found"
         });
       } catch (e) {
         return JSON.stringify({
@@ -9000,9 +9069,15 @@ ${this.buildSequenceResolver(sequenceId)}
 ${this.buildSequenceResolver(sequenceId)}
         var tracks = ${trackType === 'video' ? 'sequence.videoTracks' : 'sequence.audioTracks'};
         if (${trackIndex} >= 0 && ${trackIndex} < tracks.numTracks) {
-          tracks[${trackIndex}].setLocked(${locked ? 1 : 0});
+          var lockTarget = tracks[${trackIndex}];
+          lockTarget.setLocked(${locked ? 1 : 0});
+          // isLocked is a property on this API, not a method. Read it back rather
+          // than trusting the void setLocked() call.
+          var nowLocked = null; try { nowLocked = Boolean(lockTarget.isLocked); } catch (eLock) {}
+          if (nowLocked !== null && nowLocked !== ${locked}) return JSON.stringify({ success: false, verified: false, error: "Premiere did not change the track lock state (still reads " + (nowLocked ? "locked" : "unlocked") + ")." });
           return JSON.stringify({
             success: true,
+            verified: nowLocked !== null,
             sequenceId: sequence.sequenceID,
             sequenceName: sequence.name,
             message: "Track " + (${locked} ? "locked" : "unlocked")
@@ -9303,8 +9378,11 @@ ${this.buildSequenceResolver(sequenceId)}
         var clip = info.clip;
         var projItem = clip.projectItem;
         var insertTime = clip.end.seconds + ${offset !== undefined ? offset : 0};
+        var beforeCount = info.track.clips.numItems;
         info.track.overwriteClip(projItem, insertTime);
-        return JSON.stringify({ success: true, message: "Clip duplicated at " + insertTime + "s" });
+        var afterCount = info.track.clips.numItems;
+        if (afterCount <= beforeCount) return JSON.stringify({ success: false, verified: false, error: "overwriteClip() ran but no clip was added at " + insertTime + "s (track count unchanged).", beforeCount: beforeCount, afterCount: afterCount });
+        return JSON.stringify({ success: true, verified: true, message: "Clip duplicated at " + insertTime + "s", beforeCount: beforeCount, afterCount: afterCount });
       } catch (e) {
         return JSON.stringify({ success: false, error: e.toString() });
       }
@@ -9333,7 +9411,10 @@ ${this.buildSequenceResolver(sequenceId)}
         var qeClip = __findQeClipByDomClip(qeTrack, info.clip);
         if (!qeClip || !qeClip.setReverse) return JSON.stringify({ success: false, error: "QE setReverse API unavailable" });
         try { qeClip.setReverse(true); } catch (reverseError) { return JSON.stringify({ success: false, error: "Reverse via QE DOM not available: " + reverseError.toString() }); }
-        return JSON.stringify({ success: true, clipId: ${JSON.stringify(clipId)}, reversed: true, changed: true, maintainAudioPitch: ${maintainAudioPitch !== false} });
+        // No QE/DOM property reliably reports playback reversal on 26.x, so success
+        // here means setReverse() was accepted without throwing -- not an independent
+        // confirmation. Reported honestly as verified:false rather than overstated.
+        return JSON.stringify({ success: true, verified: false, clipId: ${JSON.stringify(clipId)}, reversed: true, changed: true, maintainAudioPitch: ${maintainAudioPitch !== false}, note: "setReverse() accepted; no readback API to confirm the clip now plays reversed." });
       } catch (e) {
         return JSON.stringify({ success: false, error: e.toString() });
       }
@@ -9347,8 +9428,11 @@ ${this.buildSequenceResolver(sequenceId)}
         var info = __findClip(${JSON.stringify(clipId)});
         if (!info) return JSON.stringify({ success: false, error: "Clip not found" });
         info.clip.disabled = ${!enabled};
+        var nowEnabled = !info.clip.disabled;
+        if (nowEnabled !== ${enabled}) return JSON.stringify({ success: false, verified: false, error: "Premiere did not change the clip's enabled state (still reads " + (nowEnabled ? "enabled" : "disabled") + ")." });
         return JSON.stringify({
           success: true,
+          verified: true,
           message: "Clip " + (${enabled} ? "enabled" : "disabled")
         });
       } catch (e) {
@@ -9368,7 +9452,18 @@ ${this.buildSequenceResolver(sequenceId)}
         var startTime = info.clip.start.seconds;
         info.clip.remove(false, true);
         info.track.overwriteClip(newItem, startTime);
-        return JSON.stringify({ success: true, message: "Clip replaced" });
+        // Confirm the clip now covering startTime is backed by the requested item,
+        // rather than trusting overwriteClip() (which returns void and can no-op).
+        var replaced = false;
+        for (var rci = 0; rci < info.track.clips.numItems; rci++) {
+          var rc = info.track.clips[rci];
+          if (rc.start.seconds <= startTime + 0.001 && rc.end.seconds > startTime - 0.001) {
+            if (rc.projectItem && String(rc.projectItem.nodeId) === String(newItem.nodeId)) replaced = true;
+            break;
+          }
+        }
+        if (!replaced) return JSON.stringify({ success: false, verified: false, error: "Premiere reported the replace but '" + newItem.name + "' is not the clip at " + startTime + "s." });
+        return JSON.stringify({ success: true, verified: true, message: "Clip replaced" });
       } catch (e) {
         return JSON.stringify({ success: false, error: e.toString() });
       }
@@ -9628,22 +9723,27 @@ ${this.buildSequenceResolver(sequenceId)}
           }
         } catch (e0) {}
         var want = { opacity: it.opacity !== null, scale: it.scale !== null, rotation: it.rotation !== null, position: (it.posX !== null || it.posY !== null) };
+        // done = the property was found AND the readback confirms the requested value applied.
+        // setValue() can silently no-op, so a found+set property is not enough; re-read getValue().
         var done = { opacity: false, scale: false, rotation: false, position: false };
+        var __scalarTol = 0.5, __posTol = 0.01;
         for (var i = 0; i < clip.components.numItems; i++) {
           var comp = clip.components[i];
           for (var j = 0; j < comp.properties.numItems; j++) {
             var p = comp.properties[j];
             try {
-              if (want.opacity && p.displayName === "Opacity") { p.setValue(it.opacity, true); done.opacity = true; }
-              if (want.scale && p.displayName === "Scale") { p.setValue(it.scale, true); done.scale = true; }
-              if (want.rotation && p.displayName === "Rotation") { p.setValue(it.rotation, true); done.rotation = true; }
+              if (want.opacity && p.displayName === "Opacity") { p.setValue(it.opacity, true); var __ro = p.getValue(); done.opacity = (Math.abs(Number(__ro) - it.opacity) <= __scalarTol); }
+              if (want.scale && p.displayName === "Scale") { p.setValue(it.scale, true); var __rs = p.getValue(); done.scale = (Math.abs(Number(__rs) - it.scale) <= __scalarTol); }
+              if (want.rotation && p.displayName === "Rotation") { p.setValue(it.rotation, true); var __rr = p.getValue(); done.rotation = (Math.abs(Number(__rr) - it.rotation) <= __scalarTol); }
               if (want.position && p.displayName === "Position") {
                 var __cur = [0.5, 0.5];
                 try { __cur = p.getValue(); } catch (ep) {}
                 var __nx = it.posX !== null ? (it.posX / __seqW) : __cur[0];
                 var __ny = it.posY !== null ? (it.posY / __seqH) : __cur[1];
                 p.setValue([__nx, __ny], true);
-                done.position = true;
+                var __rp = [0.5, 0.5];
+                try { __rp = p.getValue(); } catch (ep2) {}
+                done.position = (Math.abs(Number(__rp[0]) - __nx) <= __posTol && Math.abs(Number(__rp[1]) - __ny) <= __posTol);
               }
             } catch (e2) {}
           }
@@ -9655,8 +9755,9 @@ ${this.buildSequenceResolver(sequenceId)}
         if (want.position && !done.position) missing.push("position");
         return JSON.stringify({
           success: (missing.length === 0),
+          verified: (missing.length === 0),
           applied: done,
-          message: missing.length ? ("properties not applied: " + missing.join(", ")) : "Clip properties updated"
+          message: missing.length ? ("properties did not apply (readback mismatch or missing): " + missing.join(", ")) : "Clip properties updated"
         });
       } catch (e) {
         return JSON.stringify({ success: false, error: e.toString() });
@@ -9699,22 +9800,26 @@ ${this.buildSequenceResolver(sequenceId)}
             // Track which requested properties we actually FOUND and SET, so a silently-failed
             // setValue (or a Motion property that isn't present) surfaces instead of a false success.
             var want = { opacity: it.opacity !== null, scale: it.scale !== null, rotation: it.rotation !== null, position: (it.posX !== null || it.posY !== null) };
+            // done = found AND readback confirms it applied (setValue can silently no-op).
             var done = { opacity: false, scale: false, rotation: false, position: false };
+            var __scalarTol = 0.5, __posTol = 0.01;
             for (var i = 0; i < clip.components.numItems; i++) {
               var comp = clip.components[i];
               for (var j = 0; j < comp.properties.numItems; j++) {
                 var p = comp.properties[j];
                 try {
-                  if (want.opacity && p.displayName === "Opacity") { p.setValue(it.opacity, true); done.opacity = true; }
-                  if (want.scale && p.displayName === "Scale") { p.setValue(it.scale, true); done.scale = true; }
-                  if (want.rotation && p.displayName === "Rotation") { p.setValue(it.rotation, true); done.rotation = true; }
+                  if (want.opacity && p.displayName === "Opacity") { p.setValue(it.opacity, true); var __ro = p.getValue(); done.opacity = (Math.abs(Number(__ro) - it.opacity) <= __scalarTol); }
+                  if (want.scale && p.displayName === "Scale") { p.setValue(it.scale, true); var __rs = p.getValue(); done.scale = (Math.abs(Number(__rs) - it.scale) <= __scalarTol); }
+                  if (want.rotation && p.displayName === "Rotation") { p.setValue(it.rotation, true); var __rr = p.getValue(); done.rotation = (Math.abs(Number(__rr) - it.rotation) <= __scalarTol); }
                   if (want.position && p.displayName === "Position") {
                     var __cur = [0.5, 0.5];
                     try { __cur = p.getValue(); } catch (ep) {}
                     var __nx = it.posX !== null ? (it.posX / __seqW) : __cur[0];
                     var __ny = it.posY !== null ? (it.posY / __seqH) : __cur[1];
                     p.setValue([__nx, __ny], true);
-                    done.position = true;
+                    var __rp = [0.5, 0.5];
+                    try { __rp = p.getValue(); } catch (ep2) {}
+                    done.position = (Math.abs(Number(__rp[0]) - __nx) <= __posTol && Math.abs(Number(__rp[1]) - __ny) <= __posTol);
                   }
                 } catch (e2) {}
               }
@@ -9726,7 +9831,8 @@ ${this.buildSequenceResolver(sequenceId)}
             if (want.position && !done.position) missing.push("position");
             r.applied = done;
             r.success = (missing.length === 0);
-            if (missing.length) r.error = "properties not applied: " + missing.join(", ");
+            r.verified = (missing.length === 0);
+            if (missing.length) r.error = "properties did not apply (readback mismatch or missing): " + missing.join(", ");
           } catch (e) {
             r.error = e.toString();
           }
@@ -9832,10 +9938,14 @@ ${this.buildSequenceResolver(sequenceId)}
         if (!sequence) return JSON.stringify({ success: false, error: "Sequence not found by id: " + ${JSON.stringify(sequenceId)} });
         var ticks = __secondsToTicks(${time});
         sequence.setPlayerPosition(ticks);
+        var nowSeconds = null; try { nowSeconds = sequence.getPlayerPosition().seconds; } catch (ePlay) {}
+        if (nowSeconds !== null && Math.abs(nowSeconds - ${time}) > 0.04) return JSON.stringify({ success: false, verified: false, error: "Premiere did not move the playhead to ${time}s (reads back at " + nowSeconds + "s).", requested: ${time}, actual: nowSeconds });
         return JSON.stringify({
           success: true,
+          verified: nowSeconds !== null,
           message: "Playhead position set",
-          time: ${time}
+          time: ${time},
+          actualTime: nowSeconds
         });
       } catch (e) {
         return JSON.stringify({ success: false, error: e.toString() });
@@ -9967,8 +10077,13 @@ ${this.buildSequenceResolver(sequenceId)}
         param.setTimeVarying(true);
         param.addKey(${time});
         param.setValueAtKey(${time}, ${value}, true);
+        var keyThere = null; try { keyThere = param.keyExistsAtTime(${time}); } catch (eKey) {}
+        if (keyThere === false) return JSON.stringify({ success: false, verified: false, error: "Premiere did not add a keyframe at ${time}s (no key present after addKey)." });
+        var keyVal = null; try { keyVal = param.getValueAtKey(${time}); } catch (eVal) {}
+        if (keyVal !== null && typeof keyVal === "number" && Math.abs(Number(keyVal) - ${value}) > 0.01) return JSON.stringify({ success: false, verified: false, error: "Keyframe was created but holds " + keyVal + " instead of the requested ${value}.", actual: keyVal, requested: ${value} });
         return JSON.stringify({
           success: true,
+          verified: keyThere === true,
           message: "Keyframe added",
           componentName: ${JSON.stringify(componentName)},
           paramName: ${JSON.stringify(paramName)},
@@ -10002,10 +10117,15 @@ ${this.buildSequenceResolver(sequenceId)}
           }
         }
         if (!param) return JSON.stringify({ success: false, error: "Parameter not found" });
+        var hadKey = null; try { hadKey = param.keyExistsAtTime(${time}); } catch (ePre) {}
         param.removeKey(${time});
+        var stillThere = null; try { stillThere = param.keyExistsAtTime(${time}); } catch (ePost) {}
+        if (stillThere === true) return JSON.stringify({ success: false, verified: false, error: "Premiere did not remove the keyframe at ${time}s (still present)." });
         return JSON.stringify({
           success: true,
-          message: "Keyframe removed",
+          verified: stillThere === false,
+          message: hadKey === false ? "No keyframe existed at ${time}s; nothing to remove." : "Keyframe removed",
+          hadKey: hadKey,
           time: ${time}
         });
       } catch (e) {
@@ -10201,8 +10321,15 @@ ${this.buildSequenceResolver(sequenceId)}
         if (!sequence) return JSON.stringify({ success: false, error: "Sequence not found by id: " + ${JSON.stringify(sequenceId)} });
         sequence.setWorkAreaInPoint(__secondsToTicks(${inPoint}));
         sequence.setWorkAreaOutPoint(__secondsToTicks(${outPoint}));
+        var inNow = null, outNow = null;
+        try { inNow = sequence.getWorkAreaInPointAsTime().seconds; } catch (eIn) {}
+        try { outNow = sequence.getWorkAreaOutPointAsTime().seconds; } catch (eOut) {}
+        if ((inNow !== null && Math.abs(inNow - ${inPoint}) > 0.04) || (outNow !== null && Math.abs(outNow - ${outPoint}) > 0.04)) {
+          return JSON.stringify({ success: false, verified: false, error: "Premiere did not set the work area as requested (reads back in " + inNow + "s / out " + outNow + "s).", requested: { inPoint: ${inPoint}, outPoint: ${outPoint} }, actual: { inPoint: inNow, outPoint: outNow } });
+        }
         return JSON.stringify({
           success: true,
+          verified: inNow !== null && outNow !== null,
           message: "Work area set",
           inPoint: ${inPoint},
           outPoint: ${outPoint}
@@ -10378,8 +10505,11 @@ ${this.buildSequenceResolver(sequenceId)}
         var seq = __findSequence(${JSON.stringify(sequenceId)});
         if (!seq) return JSON.stringify({ success: false, error: "Sequence not found" });
         app.project.openSequence(seq.sequenceID);
+        var active = app.project.activeSequence;
+        if (!active || String(active.sequenceID) !== String(seq.sequenceID)) return JSON.stringify({ success: false, verified: false, error: "Premiere did not make '" + seq.name + "' the active sequence.", requestedId: seq.sequenceID, activeId: active ? active.sequenceID : null });
         return JSON.stringify({
           success: true,
+          verified: true,
           message: "Active sequence set",
           sequenceId: seq.sequenceID,
           name: seq.name
@@ -10609,11 +10739,15 @@ ${this.buildSequenceResolver(sequenceId)}
         if (!item) return JSON.stringify({ success: false, error: "Project item not found" });
         var startTicks = __secondsToTicks(${startTime});
         var endTicks = __secondsToTicks(${endTime});
-        item.createSubClip(${JSON.stringify(name)}, startTicks, endTicks, ${hardBounds}, ${audio}, ${video});
+        var sub = item.createSubClip(${JSON.stringify(name)}, startTicks, endTicks, ${hardBounds}, ${audio}, ${video});
+        if (!sub) return JSON.stringify({ success: false, verified: false, error: "createSubClip() returned no project item; the subclip was not created." });
         return JSON.stringify({
           success: true,
+          verified: true,
           message: "Subclip created",
           name: ${JSON.stringify(name)},
+          subclipName: String(sub.name),
+          subclipNodeId: sub.nodeId,
           startTime: ${startTime},
           endTime: ${endTime}
         });
@@ -10681,8 +10815,11 @@ ${this.buildSequenceResolver(sequenceId)}
         var item = __findProjectItem(${JSON.stringify(projectItemId)});
         if (!item) return JSON.stringify({ success: false, error: "Project item not found" });
         item.setColorLabel(${colorIndex});
+        var nowColor = null; try { nowColor = item.getColorLabel(); } catch (eColor) {}
+        if (nowColor !== null && Number(nowColor) !== ${colorIndex}) return JSON.stringify({ success: false, verified: false, error: "Premiere did not set the color label (reads back as " + nowColor + ", requested ${colorIndex}).", actual: nowColor });
         return JSON.stringify({
           success: true,
+          verified: nowColor !== null,
           message: "Color label set",
           projectItemId: ${JSON.stringify(projectItemId)},
           colorIndex: ${colorIndex}
@@ -10743,12 +10880,19 @@ ${this.buildSequenceResolver(sequenceId)}
         var schema = "http://ns.adobe.com/premierePrivateProjectMetaData/1.0/";
         var fullKey = schema + ${JSON.stringify(key)};
         item.setProjectMetadata(${JSON.stringify(value)}, [fullKey]);
+        // Read the XMP blob back and look for the value. XMP escapes special
+        // characters, so absence is not proof of failure -- report it as
+        // unverified rather than failing on a possible false negative.
+        var blob = null; try { blob = String(item.getProjectMetadata()); } catch (eMeta) {}
+        var found = blob !== null && blob.indexOf(${JSON.stringify(value)}) !== -1;
         return JSON.stringify({
           success: true,
+          verified: found,
           message: "Metadata set",
           projectItemId: ${JSON.stringify(projectItemId)},
           key: ${JSON.stringify(key)},
-          value: ${JSON.stringify(value)}
+          value: ${JSON.stringify(value)},
+          note: found ? undefined : "setProjectMetadata() accepted; the value was not found verbatim in the XMP readback (it may be escaped), so application is unconfirmed."
         });
       } catch (e) {
         return JSON.stringify({ success: false, error: e.toString() });
@@ -10792,12 +10936,19 @@ ${this.buildSequenceResolver(sequenceId)}
         ${setFrameRate ? 'interp.frameRate = ' + frameRate + ';' : ''}
         ${setPar ? 'interp.pixelAspectRatio = ' + pixelAspectRatio + ';' : ''}
         item.setFootageInterpretation(interp);
+        // Re-fetch a fresh interpretation: the local 'interp' object echoes the values
+        // we just assigned whether or not Premiere accepted them. Only a fresh read
+        // proves the change took.
+        var check = item.getFootageInterpretation();
+        ${setFrameRate ? `if (Math.abs(Number(check.frameRate) - ${frameRate}) > 0.001) return JSON.stringify({ success: false, verified: false, error: "Premiere did not apply the frame rate (reads back as " + check.frameRate + ", requested ${frameRate}).", actual: check.frameRate });` : ''}
+        ${setPar ? `if (Math.abs(Number(check.pixelAspectRatio) - ${pixelAspectRatio}) > 0.001) return JSON.stringify({ success: false, verified: false, error: "Premiere did not apply the pixel aspect ratio (reads back as " + check.pixelAspectRatio + ", requested ${pixelAspectRatio}).", actual: check.pixelAspectRatio });` : ''}
         return JSON.stringify({
           success: true,
+          verified: true,
           message: "Footage interpretation updated",
           projectItemId: ${JSON.stringify(projectItemId)},
-          frameRate: interp.frameRate,
-          pixelAspectRatio: interp.pixelAspectRatio
+          frameRate: check.frameRate,
+          pixelAspectRatio: check.pixelAspectRatio
         });
       } catch (e) {
         return JSON.stringify({ success: false, error: e.toString() });
@@ -10847,11 +10998,15 @@ ${this.buildSequenceResolver(sequenceId)}
         var seq = __findSequence(${JSON.stringify(sequenceId)});
         if (!seq) return JSON.stringify({ success: false, error: "Sequence not found" });
         seq.exportAsFinalCutProXML(${JSON.stringify(outputPath)});
+        var xmlFile = new File(${JSON.stringify(outputPath)});
+        if (!xmlFile.exists) return JSON.stringify({ success: false, verified: false, error: "exportAsFinalCutProXML() ran but no file exists at " + ${JSON.stringify(outputPath)} + ".", outputPath: ${JSON.stringify(outputPath)} });
         return JSON.stringify({
           success: true,
+          verified: true,
           message: "Exported as Final Cut Pro XML",
           sequenceId: ${JSON.stringify(sequenceId)},
-          outputPath: ${JSON.stringify(outputPath)}
+          outputPath: ${JSON.stringify(outputPath)},
+          fileSize: xmlFile.length
         });
       } catch (e) {
         return JSON.stringify({ success: false, error: e.toString() });
@@ -10887,10 +11042,19 @@ ${this.buildSequenceResolver(sequenceId)}
         if (!seq) return JSON.stringify({ success: false, error: "Sequence not found" });
         ${setIn ? 'seq.setInPoint(__secondsToTicks(' + inPoint + '));' : ''}
         ${setOut ? 'seq.setOutPoint(__secondsToTicks(' + outPoint + '));' : ''}
+        var inReadback = null, outReadback = null;
+        try { inReadback = seq.getInPointAsTime().seconds; } catch (eIn) {}
+        try { outReadback = seq.getOutPointAsTime().seconds; } catch (eOut) {}
+        var ioTol = 0.04;
+        ${setIn ? 'if (inReadback === null || Math.abs(inReadback - ' + inPoint + ') > ioTol) return JSON.stringify({ success: false, verified: false, error: "setInPoint() ran but the sequence in point reads back as " + inReadback + " s, not the requested ' + inPoint + ' s.", sequenceId: ' + JSON.stringify(sequenceId) + ', inPoint: inReadback });' : ''}
+        ${setOut ? 'if (outReadback === null || Math.abs(outReadback - ' + outPoint + ') > ioTol) return JSON.stringify({ success: false, verified: false, error: "setOutPoint() ran but the sequence out point reads back as " + outReadback + " s, not the requested ' + outPoint + ' s.", sequenceId: ' + JSON.stringify(sequenceId) + ', outPoint: outReadback });' : ''}
         return JSON.stringify({
           success: true,
+          verified: true,
           message: "Sequence in/out points set",
-          sequenceId: ${JSON.stringify(sequenceId)}
+          sequenceId: ${JSON.stringify(sequenceId)},
+          inPoint: inReadback,
+          outPoint: outReadback
         });
       } catch (e) {
         return JSON.stringify({ success: false, error: e.toString() });
@@ -10931,11 +11095,15 @@ ${this.buildSequenceResolver(sequenceId)}
         var seq = __findSequence(${JSON.stringify(sequenceId)});
         if (!seq) return JSON.stringify({ success: false, error: "Sequence not found" });
         app.project.exportAAF(seq, ${JSON.stringify(outputPath)}, ${mixDown}, ${explode}, ${rate}, ${bits}, 0, 0, 1, 0);
+        var aafFile = new File(${JSON.stringify(outputPath)});
+        if (!aafFile.exists) return JSON.stringify({ success: false, verified: false, error: "exportAAF() ran but no file exists at " + ${JSON.stringify(outputPath)} + ".", outputPath: ${JSON.stringify(outputPath)} });
         return JSON.stringify({
           success: true,
+          verified: true,
           message: "Exported as AAF",
           sequenceId: ${JSON.stringify(sequenceId)},
-          outputPath: ${JSON.stringify(outputPath)}
+          outputPath: ${JSON.stringify(outputPath)},
+          fileSize: aafFile.length
         });
       } catch (e) {
         return JSON.stringify({ success: false, error: e.toString() });
@@ -10967,10 +11135,17 @@ ${this.buildSequenceResolver(sequenceId)}
         var item = __findProjectItem(${JSON.stringify(projectItemId)});
         if (!item) return JSON.stringify({ success: false, error: "Project item not found" });
         item.refreshMedia();
+        // refreshMedia() re-reads the media from disk; it is an idempotent reload with
+        // no diffable state, so success means the call was accepted, not that anything
+        // observably changed. Reported as verified:false to avoid overstating it.
+        var offlineNow = null; try { offlineNow = item.isOffline(); } catch (eOff) {}
         return JSON.stringify({
           success: true,
-          message: "Media refreshed",
-          projectItemId: ${JSON.stringify(projectItemId)}
+          verified: false,
+          message: "Media refresh requested",
+          projectItemId: ${JSON.stringify(projectItemId)},
+          isOffline: offlineNow,
+          note: "refreshMedia() accepted; a reload has no readback to confirm, so this is not independently verified."
         });
       } catch (e) {
         return JSON.stringify({ success: false, error: e.toString() });
