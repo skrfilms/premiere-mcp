@@ -152,6 +152,34 @@ describe("generated ExtendScript is syntactically valid", () => {
     });
   });
 
+  describe("delete_project_item actually deletes and verifies", () => {
+    /**
+     * Proven against a live 26.3.2 host: the old handler called
+     * deleteBin() on a footage clip (ProjectItemType 1). deleteBin() only
+     * removes bins, so on a clip it returns without throwing and deletes
+     * nothing — yet the handler reported {deleted:true}. Reproduced live:
+     * deleteBin() on the clip left it in the project (oldDeleteBinNoOp:true),
+     * while moveBin()+deleteBin() through a temp bin removed it (deleted:true,
+     * confirmed by a post-delete re-scan).
+     */
+    it("routes clips through a temp bin and re-scans before claiming success", async () => {
+      const script = await capture("delete_project_item");
+      // the fixed path
+      expect(script).toContain("deleteProjectItemRobust");
+      expect(script).toContain("moveBin");
+      expect(script).toContain("itemStillPresent");
+      // success is gated on the item being gone, and the honest failure exists
+      expect(script).toContain("verified: true");
+      expect(script).toContain("Premiere did not remove");
+    });
+
+    it("delete_multiple_project_items fails closed when nothing was deleted", async () => {
+      const script = await capture("delete_multiple_project_items");
+      expect(script).toContain("deleteProjectItemRobust");
+      expect(script).toContain("No items were deleted");
+    });
+  });
+
   describe("qeSequenceFor falls back only to the right sequence", () => {
     /**
      * qe.project.getSequenceAt() does not expose every sequence: one made by

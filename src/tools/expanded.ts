@@ -782,6 +782,56 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
       });
       return items;
     }
+    function itemStillPresent(nodeId) {
+      var present = false;
+      if (!app.project || !app.project.rootItem) return false;
+      walkItems(app.project.rootItem, function(item) {
+        if (!present && item.nodeId === nodeId) present = true;
+      });
+      return present;
+    }
+    // Robustly delete ANY project item and verify it is actually gone.
+    // deleteBin() only removes bins; called on a footage clip it silently
+    // no-ops (returns without throwing), which is the classic fake-success
+    // trap. Clips/files are therefore routed through a throwaway bin that we
+    // then delete wholesale. Success is gated on a post-delete re-scan.
+    function deleteProjectItemRobust(item) {
+      var nodeId = item.nodeId;
+      var name = item.name;
+      var isBin = false;
+      try { isBin = (item.type === 2 /* ProjectItemType.BIN */); } catch (e) {}
+      var method = null;
+      if (isBin) {
+        var binDel = tryCall(item, ["deleteBin"], []);
+        if (!binDel.called) return { deleted: false, verified: false, method: null, error: binDel.error, item: name };
+        method = binDel.method;
+      } else {
+        var root = app.project.rootItem;
+        var tmp = null;
+        var mkBin = tryCall(root, ["createBin"], ["__mcp_delete_tmp__"]);
+        if (mkBin.called && mkBin.result && mkBin.result.nodeId) {
+          tmp = mkBin.result;
+        } else {
+          walkItems(root, function(b) { if (!tmp && b.name === "__mcp_delete_tmp__" && b.type === 2) tmp = b; });
+        }
+        if (!tmp) {
+          var fb = tryCall(item, ["deleteItem", "remove", "deleteBin"], []);
+          if (!fb.called) return { deleted: false, verified: false, method: null, error: "Could not create a temp bin and no direct delete method worked: " + fb.error, item: name };
+          method = fb.method + " (no-temp-bin fallback)";
+        } else {
+          var moved = tryCall(item, ["moveBin"], [tmp]);
+          if (!moved.called) {
+            tryCall(tmp, ["deleteBin"], []);
+            return { deleted: false, verified: false, method: null, error: "Could not move item into temp bin for deletion: " + moved.error, item: name };
+          }
+          var tmpDel = tryCall(tmp, ["deleteBin"], []);
+          if (!tmpDel.called) return { deleted: false, verified: false, method: null, error: "Temp bin delete failed: " + tmpDel.error, item: name };
+          method = "moveBin+deleteBin";
+        }
+      }
+      var stillThere = itemStillPresent(nodeId);
+      return { deleted: !stillThere, verified: true, method: method, item: name, error: stillThere ? "Premiere did not remove '" + name + "' (still present after delete attempt via " + method + ")" : null };
+    }
     function projectItemInfo(item) {
       if (!item) return null;
       var data = { nodeId: item.nodeId, name: item.name, type: item.type, treePath: item.treePath };
@@ -1950,10 +2000,9 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
         case "delete_project_item":
           var deleteItem = findItem(args.binId || args.bin_id || args.projectItemId || args.itemId || args.item_id || args.name);
           if (!deleteItem) return fail("Project item not found");
-          var deleteName = deleteItem.name;
-          var deleteResult = tryCall(deleteItem, ["deleteBin", "deleteItem", "remove"], []);
-          if (!deleteResult.called) return fail(deleteResult.error, { item: deleteName });
-          return ok({ deleted: true, item: deleteName, method: deleteResult.method });
+          var deleteRes = deleteProjectItemRobust(deleteItem);
+          if (!deleteRes.deleted) return fail(deleteRes.error || "Delete failed", { item: deleteRes.item, verified: deleteRes.verified === true, method: deleteRes.method });
+          return ok({ deleted: true, verified: true, item: deleteRes.item, method: deleteRes.method });
 
         case "delete_multiple_project_items":
           var deleteIds = args.projectItemIds || args.itemIds || args.ids || [];
@@ -1964,10 +2013,12 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
               deleteResults.push({ id: deleteIds[di], ok: false, error: "Project item not found" });
               continue;
             }
-            var oneDelete = tryCall(itemToDelete, ["deleteBin", "deleteItem", "remove"], []);
-            deleteResults.push({ id: deleteIds[di], name: itemToDelete.name, ok: oneDelete.called, method: oneDelete.method || null, error: oneDelete.error || null });
+            var oneDelete = deleteProjectItemRobust(itemToDelete);
+            deleteResults.push({ id: deleteIds[di], name: oneDelete.item, ok: oneDelete.deleted, verified: oneDelete.verified === true, method: oneDelete.method || null, error: oneDelete.error || null });
           }
-          return ok({ results: deleteResults, deleted: deleteResults.filter(function(result) { return result.ok; }).length });
+          var deletedCount = deleteResults.filter(function(result) { return result.ok; }).length;
+          if (deletedCount === 0 && deleteIds.length > 0) return fail("No items were deleted", { results: deleteResults, deleted: 0 });
+          return ok({ results: deleteResults, deleted: deletedCount, requested: deleteIds.length, allDeleted: deletedCount === deleteIds.length });
 
         case "rename_bin":
           var renameBin = findItem(args.binId || args.bin_id || args.itemId || args.name);
