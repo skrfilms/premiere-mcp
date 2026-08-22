@@ -180,6 +180,31 @@ describe("generated ExtendScript is syntactically valid", () => {
     });
   });
 
+  describe("setComponentProperty verifies the value actually applied", () => {
+    /**
+     * The helper read `after = prop.getValue()` but returned {ok:true}
+     * unconditionally, so every set_clip_* tool routing through it (scale,
+     * position, rotation, opacity, blend mode, effect property) reported
+     * success even on a silent no-op. Verified live on 26.3.2 that Scale/
+     * Position/Rotation/Opacity read back exactly as requested, so a tolerant
+     * compare is a real gate, not a source of false failures.
+     */
+    it("gates ok on a tolerant compare of the readback to the request", async () => {
+      const script = await capture("set_clip_scale");
+      expect(script).toContain("valuesMatch");
+      expect(script).toContain("did not apply the requested value");
+      expect(script).toContain("verified: true");
+    });
+  });
+
+  describe("setSelection verifies each clip's selection flipped", () => {
+    it("re-reads isSelected() and fails closed when nothing changed", async () => {
+      const script = await capture("select_all_clips");
+      expect(script).toContain("clip.isSelected()");
+      expect(script).toContain("Selection state did not change");
+    });
+  });
+
   describe("qeSequenceFor falls back only to the right sequence", () => {
     /**
      * qe.project.getSequenceAt() does not expose every sequence: one made by

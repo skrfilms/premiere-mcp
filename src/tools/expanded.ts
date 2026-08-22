@@ -925,6 +925,7 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
       var seq = targetSequence();
       if (!seq) return fail("No active sequence");
       var changed = [];
+      var failed = [];
       function apply(collection, type) {
         for (var t = 0; t < collection.numTracks; t++) {
           var track = collection[t];
@@ -936,14 +937,33 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
             var matched = false;
             try { matched = Boolean(matchFn(clip, type, t, c)); } catch (matchError) { matched = false; }
             if (matched) {
-              try { clip.setSelected(selected ? 1 : 0, 1); changed.push(clipInfo(clip, type, t, c)); } catch (e) {}
+              try {
+                clip.setSelected(selected ? 1 : 0, 1);
+                // Verify-after-write: confirm the clip's selection state actually
+                // flipped to what was requested before counting it as changed.
+                var nowSel = null;
+                try { nowSel = clip.isSelected(); } catch (eIs) {}
+                var info = clipInfo(clip, type, t, c);
+                if (nowSel === null || Boolean(nowSel) === Boolean(selected)) {
+                  info.verified = (nowSel !== null);
+                  changed.push(info);
+                } else {
+                  info.requestedSelected = Boolean(selected);
+                  failed.push(info);
+                }
+              } catch (e) {
+                failed.push({ nodeId: clip.nodeId, name: clip.name, trackType: type, trackIndex: t, clipIndex: c, error: e.toString() });
+              }
             }
           }
         }
       }
       apply(seq.videoTracks, "video");
       apply(seq.audioTracks, "audio");
-      return ok({ changed: changed, count: changed.length });
+      if (changed.length === 0 && failed.length > 0) {
+        return fail("Selection state did not change on any of the " + failed.length + " matched clip(s).", { failed: failed, count: 0 });
+      }
+      return ok({ changed: changed, count: changed.length, failed: failed, failedCount: failed.length });
     }
     function commandByName(commandName) {
       if (!app.findMenuCommandId || !app.executeCommand) {
@@ -1080,6 +1100,23 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
       }
       return props;
     }
+    // Tolerant equality for effect-property readback. Handles numbers (drift),
+    // array-valued properties (Position, Anchor Point, color triplets) and the
+    // string/enum case. Used to prove a setValue() actually took, rather than
+    // trusting that it did not throw (Premiere setters silently no-op on many
+    // out-of-range or wrong-type inputs).
+    function valuesMatch(a, b) {
+      var TOL = 0.01;
+      if (a === null || a === undefined) return false;
+      if (typeof a === "number" && typeof b === "number") return Math.abs(a - b) <= TOL;
+      if (a && b && typeof a.length === "number" && typeof b.length === "number" && typeof a !== "string" && typeof b !== "string") {
+        if (a.length !== b.length) return false;
+        for (var i = 0; i < a.length; i++) { if (Math.abs(Number(a[i]) - Number(b[i])) > TOL) return false; }
+        return true;
+      }
+      if (typeof b === "number") { var an = Number(a); if (!isNaN(an)) return Math.abs(an - b) <= TOL; }
+      return String(a) === String(b);
+    }
     function setComponentProperty(component, propertyName, value) {
       if (!component || !component.properties) return { ok: false, error: "Component has no properties" };
       var wanted = normalizeName(propertyName);
@@ -1092,7 +1129,16 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
         try {
           prop.setValue(value, true);
           try { after = prop.getValue(); } catch (eAfter) {}
-          return { ok: true, property: String(prop.displayName), before: before, after: after };
+          // Verify-after-write: only claim success when the property actually
+          // reads back as the requested value.
+          if (after === null || after === undefined) {
+            // setValue did not throw but the value is not readable to confirm.
+            return { ok: true, verified: false, property: String(prop.displayName), before: before, after: after, requested: value, note: "setValue did not throw, but the property value could not be read back to confirm it applied." };
+          }
+          if (!valuesMatch(after, value)) {
+            return { ok: false, verified: false, property: String(prop.displayName), before: before, after: after, requested: value, error: "Premiere did not apply the requested value to '" + String(prop.displayName) + "' (reads back as " + String(after) + ", requested " + String(value) + ")." };
+          }
+          return { ok: true, verified: true, property: String(prop.displayName), before: before, after: after };
         } catch (eSet) {
           return { ok: false, property: String(prop.displayName), error: eSet.toString() };
         }
