@@ -8611,15 +8611,23 @@ ${this.buildSequenceResolver(sequenceId)}
         if (!qeSeq) return JSON.stringify({ success: false, error: "Could not address sequence '" + info.sequenceName + "' through the QE API." });
         var qeTrack = info.trackType === 'video' ? qeSeq.getVideoTrackAt(info.trackIndex) : qeSeq.getAudioTrackAt(info.trackIndex);
         var qeClip = __findQeClipByDomClip(qeTrack, info.clip);
-        try { qeClip.setSpeed(${speed}, ${maintainAudio}); } catch(e2) {
-          var currentPercent = Number(oldSpeed);
-          if (currentPercent <= 10) currentPercent = currentPercent * 100;
-          if (Math.abs(currentPercent - Number(${speed})) < 0.01) {
-            return JSON.stringify({ success: true, oldSpeed: oldSpeed, newSpeed: ${speed}, changed: false, method: "already at requested speed" });
-          }
-          return JSON.stringify({ success: false, error: "Speed change via QE DOM not available: " + e2.toString() });
+        if (!qeClip) return JSON.stringify({ success: false, error: "Could not resolve the QE clip for this item." });
+        // QE setSpeed's signature is (rate, durationTimecodeString, reverse,
+        // maintainAudioPitch, ripple). Passing a boolean where the duration
+        // string belongs throws "Illegal Parameter type" — that was the bug
+        // (the old call was setSpeed(rate, maintainAudio)). rate is a ratio
+        // (0.5 = 50%, 2.0 = 200%), matching this tool's schema. Verified live
+        // on 26.3.2: this call retimes the clip and getSpeed() reflects it.
+        try { qeClip.setSpeed(${speed}, "00:00:00:00", false, ${maintainAudio ? true : false}, false); } catch(e2) {
+          return JSON.stringify({ success: false, error: "Speed change via QE DOM failed: " + e2.toString(), oldSpeed: oldSpeed, requestedSpeed: ${speed} });
         }
-        return JSON.stringify({ success: true, oldSpeed: oldSpeed, newSpeed: ${speed} });
+        // Verify-after-write: read the speed back and only report success when
+        // the clip is actually at (approximately) the requested rate.
+        var newSpeed = info.clip.getSpeed();
+        if (Math.abs(Number(newSpeed) - Number(${speed})) > 0.02) {
+          return JSON.stringify({ success: false, verified: false, error: "Premiere did not apply the requested speed (clip is at " + newSpeed + "x, requested " + ${speed} + "x).", oldSpeed: oldSpeed, requestedSpeed: ${speed}, actualSpeed: newSpeed });
+        }
+        return JSON.stringify({ success: true, verified: true, oldSpeed: oldSpeed, newSpeed: newSpeed, requestedSpeed: ${speed} });
       } catch (e) {
         return JSON.stringify({ success: false, error: e.toString() });
       }
