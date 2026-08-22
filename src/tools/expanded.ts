@@ -887,7 +887,10 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
         outPoint: valueOfTime(clip.outPoint),
         duration: valueOfTime(clip.duration)
       };
-      try { item.enabled = clip.isEnabled(); } catch (e) {}
+      // TrackItem has no isEnabled() on 26.x -- enable state is the 'disabled'
+      // boolean property (verified live). The old isEnabled() call always threw,
+      // so 'enabled' was never populated.
+      try { item.enabled = !clip.disabled; } catch (e) {}
       try { item.selected = clip.isSelected(); } catch (e) {}
       try { item.mediaType = clip.mediaType; } catch (e) {}
       return item;
@@ -1059,12 +1062,24 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
     }
     function moveItemToBin(item, bin) {
       if (!item || !bin) return { ok: false, error: "Missing item or bin" };
+      // moveBin()/moveToBin() return void and no-op silently when the move is
+      // rejected, so a non-throwing call is not proof. Confirm the item's parent
+      // is actually the destination bin afterward before reporting success.
+      function nowInBin() {
+        var parent = findParentItem(item);
+        return parent && (parent === bin || String(parent.nodeId) === String(bin.nodeId));
+      }
       var moved = tryCall(item, ["moveBin", "moveToBin"], [bin]);
-      if (moved.called) return { ok: true, method: moved.method };
+      if (moved.called) {
+        if (nowInBin()) return { ok: true, method: moved.method, verified: true };
+        // fall through to the moveChild path before giving up
+      }
       var parent = findParentItem(item);
       if (parent && parent.moveChild) {
-        try { parent.moveChild(item, bin); return { ok: true, method: "parent.moveChild" }; } catch (moveError) { return { ok: false, error: moveError.toString() }; }
+        try { parent.moveChild(item, bin); } catch (moveError) { if (!moved.called) return { ok: false, error: moveError.toString() }; }
+        if (nowInBin()) return { ok: true, method: "parent.moveChild", verified: true };
       }
+      if (moved.called) return { ok: false, error: "Premiere reported the move but '" + item.name + "' is not in bin '" + bin.name + "'.", verified: false };
       return { ok: false, error: moved.error };
     }
     function allClips(seq) {
@@ -1990,7 +2005,10 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           var end = Number(args.endTime || args.end || 0);
           return setSelection(function(clip) { return valueOfTime(clip.start) < end && valueOfTime(clip.end) > start; }, true, Boolean(args.add_to_selection || args.addToSelection));
         case "select_disabled_clips":
-          return setSelection(function(clip) { try { return !clip.isEnabled(); } catch (e) { return false; } }, true, Boolean(args.add_to_selection || args.addToSelection));
+          // TrackItem.isEnabled() does not exist on 26.x (ReferenceError), so the
+          // old predicate always threw and selected nothing. Disabled state is the
+          // 'disabled' boolean property (verified live).
+          return setSelection(function(clip) { try { return clip.disabled === true; } catch (e) { return false; } }, true, Boolean(args.add_to_selection || args.addToSelection));
         case "set_clip_selection":
           return setSelection(function(clip) { return clip.nodeId === (args.clipId || args.node_id || args.nodeId); }, Boolean(args.selected !== false), true);
 
@@ -2012,8 +2030,11 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           var targetCollection = String(args.track_type || args.trackType || "video") === "audio" ? targetTrackSeq.audioTracks : targetTrackSeq.videoTracks;
           var targetTrack = targetCollection[Number(args.track_index || args.trackIndex || 0)];
           if (!targetTrack || !targetTrack.setTargeted) return fail("Track targeting API unavailable");
-          targetTrack.setTargeted(Boolean(args.targeted !== false), true);
-          return ok({ targeted: Boolean(args.targeted !== false) });
+          var wantTargeted = Boolean(args.targeted !== false);
+          targetTrack.setTargeted(wantTargeted, true);
+          var gotTargeted = null; try { gotTargeted = targetTrack.isTargeted(); } catch (eTg) {}
+          if (gotTargeted !== null && Boolean(gotTargeted) !== wantTargeted) return fail("Premiere did not change the track targeting.", { requested: wantTargeted, actual: Boolean(gotTargeted) });
+          return ok({ targeted: wantTargeted, verified: gotTargeted !== null });
 
         case "rename_track":
           var seqErr = sequenceRequestError();
@@ -2021,8 +2042,12 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           var renameSeq = targetSequence();
           if (!renameSeq) return fail("No active sequence");
           var renameTracks = String(args.track_type || args.trackType || "video") === "audio" ? renameSeq.audioTracks : renameSeq.videoTracks;
-          renameTracks[Number(args.track_index || args.trackIndex || 0)].name = String(args.name || args.newName);
-          return ok({ renamed: true, name: String(args.name || args.newName) });
+          var trackToRename = renameTracks[Number(args.track_index || args.trackIndex || 0)];
+          if (!trackToRename) return fail("Track not found");
+          var wantTrackName = String(args.name || args.newName);
+          trackToRename.name = wantTrackName;
+          if (String(trackToRename.name) !== wantTrackName) return fail("Premiere did not rename the track.", { requested: wantTrackName, actual: String(trackToRename.name) });
+          return ok({ renamed: true, name: String(trackToRename.name), verified: true });
 
         case "get_track_info":
           var seqErr = sequenceRequestError();
@@ -2151,7 +2176,9 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           if (!offlineItem) return fail("Project item not found");
           var offlineResult = tryCall(offlineItem, ["setOffline", "makeOffline"], []);
           if (!offlineResult.called) return fail(offlineResult.error, { available: false });
-          return ok({ offline: true, item: offlineItem.name, method: offlineResult.method });
+          var offlineNow = null; try { offlineNow = offlineItem.isOffline(); } catch (eOff) {}
+          if (offlineNow !== null && Boolean(offlineNow) !== true) return fail("Premiere did not take '" + offlineItem.name + "' offline (still reads online).", { requested: true, actual: Boolean(offlineNow) });
+          return ok({ offline: true, verified: offlineNow !== null, item: offlineItem.name, method: offlineResult.method });
 
         case "has_proxy":
           var proxyCheckItem = findItem(args.projectItemId || args.itemId || args.item_id);
@@ -2167,7 +2194,9 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
             try { proxyItem.attachProxy("", 0); detachResult = { called: true, method: "attachProxy(empty)" }; } catch (proxyError) { detachResult = { called: false, error: proxyError.toString() }; }
           }
           if (!detachResult.called) return fail(detachResult.error, { available: false });
-          return ok({ detached: true, item: proxyItem.name, method: detachResult.method });
+          var proxyStillThere = null; try { if (proxyItem.hasProxy) proxyStillThere = proxyItem.hasProxy(); } catch (eProx) {}
+          if (proxyStillThere === true) return fail("Premiere did not detach the proxy from '" + proxyItem.name + "' (still reports a proxy).", { hasProxy: true });
+          return ok({ detached: true, verified: proxyStillThere === false, item: proxyItem.name, method: detachResult.method });
 
         case "set_override_frame_rate":
         case "set_override_pixel_aspect_ratio":
@@ -2268,8 +2297,11 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           if (!args.clipId && !args.node_id && !args.nodeId) return fail("ripple_delete requires clipId.");
           var rippleClip = findClip(args.clipId || args.node_id || args.nodeId);
           if (!rippleClip) return fail(pendingSequenceError || "Clip not found");
+          var rippleBeforeCount = rippleClip.track.clips.numItems;
           rippleClip.clip.remove(true, true);
-          return ok({ removed: true, ripple: true, clipId: args.clipId || args.node_id || args.nodeId });
+          var rippleAfterCount = rippleClip.track.clips.numItems;
+          if (rippleAfterCount >= rippleBeforeCount) return fail("Premiere did not remove the clip (track clip count unchanged).", { beforeCount: rippleBeforeCount, afterCount: rippleAfterCount });
+          return ok({ removed: true, ripple: true, verified: true, clipId: args.clipId || args.node_id || args.nodeId, beforeCount: rippleBeforeCount, afterCount: rippleAfterCount });
 
         case "roll_edit":
         case "slide_edit":
@@ -2381,7 +2413,15 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
             if (Math.abs(currentPercent - requestedSpeed) < 0.01) return ok({ speed: requestedSpeed, maintainAudio: Boolean(args.maintainAudio !== false), changed: false, method: "already at requested speed" });
             return fail("Speed change via QE DOM not available: " + speedSetError.toString(), { currentSpeed: currentSpeed, requestedSpeed: requestedSpeed });
           }
-          return ok({ speed: requestedSpeed, maintainAudio: Boolean(args.maintainAudio !== false), changed: true });
+          // QE .speed reads back either as a ratio (0.5) or a percent (50); normalize
+          // before comparing to the requested percent so the gate is real, not cosmetic.
+          var speedReadRaw = null; try { speedReadRaw = Number(speedQeClip.speed); } catch (eSpd) {}
+          if (speedReadRaw !== null) {
+            var speedReadPercent = speedReadRaw <= 10 ? speedReadRaw * 100 : speedReadRaw;
+            if (Math.abs(speedReadPercent - requestedSpeed) > 0.5) return fail("Premiere did not apply the requested speed (reads back as " + speedReadPercent + "%, requested " + requestedSpeed + "%).", { actualPercent: speedReadPercent, requestedSpeed: requestedSpeed });
+            return ok({ speed: requestedSpeed, actualPercent: speedReadPercent, maintainAudio: Boolean(args.maintainAudio !== false), changed: true, verified: true });
+          }
+          return ok({ speed: requestedSpeed, maintainAudio: Boolean(args.maintainAudio !== false), changed: true, verified: false, note: "setSpeed did not throw but QE .speed was not readable to confirm." });
 
         case "set_frame_blend":
         case "set_time_interpolation":
@@ -2404,8 +2444,26 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           var overwriteSeq = targetSequence();
           var overwriteItem = findItem(args.projectItemId || args.itemId || args.item_id);
           if (!overwriteSeq || !overwriteItem) return fail("Need sequence and project item");
-          overwriteSeq.overwriteClip(overwriteItem, secondsToTicks(args.time || args.start || 0), Number(args.videoTrackIndex || args.video_track_index || args.trackIndex || 0), Number(args.audioTrackIndex || args.audio_track_index || 0));
-          return ok({ overwritten: true, item: overwriteItem.name, time: Number(args.time || args.start || 0) });
+          var owVideoIdx = Number(args.videoTrackIndex || args.video_track_index || args.trackIndex || 0);
+          // Overwrite replaces whatever occupied the target span, so the clip count
+          // can rise, stay flat (pure replace), or fall — a count diff is not a
+          // reliable gate. Instead confirm the requested item now owns the clip that
+          // covers the target time on the target track.
+          var owTargetTime = Number(args.time || args.start || 0);
+          var owTrack = owVideoIdx < overwriteSeq.videoTracks.numTracks ? overwriteSeq.videoTracks[owVideoIdx] : null;
+          overwriteSeq.overwriteClip(overwriteItem, secondsToTicks(owTargetTime), owVideoIdx, Number(args.audioTrackIndex || args.audio_track_index || 0));
+          var owPlaced = false;
+          if (owTrack) {
+            for (var owc = 0; owc < owTrack.clips.numItems; owc++) {
+              var owClip = owTrack.clips[owc];
+              if (valueOfTime(owClip.start) <= owTargetTime + 0.001 && valueOfTime(owClip.end) > owTargetTime - 0.001) {
+                if (owClip.projectItem && String(owClip.projectItem.nodeId) === String(overwriteItem.nodeId)) owPlaced = true;
+                break;
+              }
+            }
+          }
+          if (owTrack && !owPlaced) return fail("Premiere reported overwriteClip() but '" + overwriteItem.name + "' is not the clip covering " + owTargetTime + "s on the target track.", { verified: false });
+          return ok({ overwritten: true, verified: owTrack ? true : false, item: overwriteItem.name, time: owTargetTime });
 
         case "create_sequence_from_clips":
           if (!app.project || !app.project.createNewSequenceFromClips) return fail("app.project.createNewSequenceFromClips is unavailable");
@@ -2460,7 +2518,9 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
             try { zeroSeq.zeroPoint = zeroTicks; zeroResult = { called: true, method: "zeroPoint" }; } catch (zeroError) { zeroResult = { called: false, error: zeroError.toString() }; }
           }
           if (!zeroResult.called) return fail(zeroResult.error, { available: false });
-          return ok({ zeroPointSeconds: Number(args.time || args.seconds || 0), method: zeroResult.method });
+          var zeroReadback = null; try { zeroReadback = ticksToSeconds(zeroSeq.zeroPoint); } catch (eZero) {}
+          if (zeroReadback !== null && Math.abs(zeroReadback - Number(args.time || args.seconds || 0)) > 0.01) return fail("Premiere did not move the zero point (reads back as " + zeroReadback + "s, requested " + Number(args.time || args.seconds || 0) + "s).", { actual: zeroReadback, requested: Number(args.time || args.seconds || 0) });
+          return ok({ zeroPointSeconds: Number(args.time || args.seconds || 0), verified: zeroReadback !== null, method: zeroResult.method });
 
         case "scene_edit_detection":
           var seqErr = sequenceRequestError();
@@ -2643,9 +2703,18 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           if (seqErr) return fail(seqErr);
           var allTargetSeq = targetSequence();
           if (!allTargetSeq) return fail("No active sequence");
-          for (var atv = 0; atv < allTargetSeq.videoTracks.numTracks; atv++) try { allTargetSeq.videoTracks[atv].setTargeted(Boolean(args.targeted !== false), true); } catch (e) {}
-          for (var ata = 0; ata < allTargetSeq.audioTracks.numTracks; ata++) try { allTargetSeq.audioTracks[ata].setTargeted(Boolean(args.targeted !== false), true); } catch (e) {}
-          return ok({ targeted: Boolean(args.targeted !== false), videoTracks: allTargetSeq.videoTracks.numTracks, audioTracks: allTargetSeq.audioTracks.numTracks });
+          var wantAllTargeted = Boolean(args.targeted !== false);
+          var atMatched = 0, atMismatched = 0;
+          for (var atv = 0; atv < allTargetSeq.videoTracks.numTracks; atv++) {
+            try { allTargetSeq.videoTracks[atv].setTargeted(wantAllTargeted, true); } catch (e) {}
+            try { if (Boolean(allTargetSeq.videoTracks[atv].isTargeted()) === wantAllTargeted) atMatched++; else atMismatched++; } catch (e) {}
+          }
+          for (var ata = 0; ata < allTargetSeq.audioTracks.numTracks; ata++) {
+            try { allTargetSeq.audioTracks[ata].setTargeted(wantAllTargeted, true); } catch (e) {}
+            try { if (Boolean(allTargetSeq.audioTracks[ata].isTargeted()) === wantAllTargeted) atMatched++; else atMismatched++; } catch (e) {}
+          }
+          if (atMatched === 0 && atMismatched > 0) return fail("Premiere did not change targeting on any track.", { requested: wantAllTargeted, mismatched: atMismatched });
+          return ok({ targeted: wantAllTargeted, verified: atMismatched === 0, matched: atMatched, mismatched: atMismatched, videoTracks: allTargetSeq.videoTracks.numTracks, audioTracks: allTargetSeq.audioTracks.numTracks });
 
         case "razor_all_tracks":
           app.enableQE();
@@ -2659,16 +2728,30 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           var razorTc = pad(Math.floor(razorFrames / (razorFps * 3600))) + ":" + pad(Math.floor((razorFrames % (razorFps * 3600)) / (razorFps * 60))) + ":" + pad(Math.floor((razorFrames % (razorFps * 60)) / razorFps)) + ":" + pad(Math.round(razorFrames % razorFps));
           var qeRazorSeq = qeSequenceFor(razorSeq);
           if (!qeRazorSeq) return fail("Could not address sequence '" + razorSeq.name + "' through the QE API.");
+          function razorTotalClips() {
+            var n = 0;
+            for (var rvi = 0; rvi < razorSeq.videoTracks.numTracks; rvi++) n += razorSeq.videoTracks[rvi].clips.numItems;
+            for (var rai = 0; rai < razorSeq.audioTracks.numTracks; rai++) n += razorSeq.audioTracks[rai].clips.numItems;
+            return n;
+          }
+          var razorBeforeTotal = razorTotalClips();
           for (var rv = 0; rv < razorSeq.videoTracks.numTracks; rv++) qeRazorSeq.getVideoTrackAt(rv).razor(razorTc);
           for (var ra = 0; ra < razorSeq.audioTracks.numTracks; ra++) qeRazorSeq.getAudioTrackAt(ra).razor(razorTc);
-          return ok({ razorTimecode: razorTc, seconds: Number(args.time || args.seconds || 0) });
+          var razorAfterTotal = razorTotalClips();
+          // A razor at a point crossed by clips splits them, so the total clip count
+          // rises. If nothing was under the playhead the count is legitimately flat —
+          // report that honestly rather than claiming a cut that did not happen.
+          return ok({ razorTimecode: razorTc, seconds: Number(args.time || args.seconds || 0), beforeCount: razorBeforeTotal, afterCount: razorAfterTotal, cutsMade: razorAfterTotal - razorBeforeTotal, verified: razorAfterTotal > razorBeforeTotal, note: razorAfterTotal > razorBeforeTotal ? undefined : "No clips crossed the razor point; nothing was cut." });
 
         case "set_clip_start_time":
           if (!args.clipId && !args.node_id && !args.nodeId) return fail("set_clip_start_time requires clipId.");
           var startClip = findClip(args.clipId || args.node_id || args.nodeId);
           if (!startClip) return fail(pendingSequenceError || "Clip not found");
-          startClip.clip.start = secondsToTime(args.time || args.start || 0);
-          return ok({ clipId: startClip.clip.nodeId, start: valueOfTime(startClip.clip.start) });
+          var wantStart = Number(args.time || args.start || 0);
+          startClip.clip.start = secondsToTime(wantStart);
+          var gotStart = valueOfTime(startClip.clip.start);
+          if (Math.abs(gotStart - wantStart) > 0.02) return fail("Premiere did not move the clip start (reads back as " + gotStart + "s, requested " + wantStart + "s). Another clip may occupy the target position.", { actual: gotStart, requested: wantStart });
+          return ok({ clipId: startClip.clip.nodeId, start: gotStart, verified: true });
 
         case "import_image_sequence":
           if (!app.project || !app.project.importFiles) return fail("app.project.importFiles is unavailable");
@@ -2728,8 +2811,14 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           if (!renameSeqBatch) return fail("No active sequence");
           var renameClips = allClips(renameSeqBatch);
           var renamePrefix = String(args.prefix || args.namePrefix || "Clip");
-          for (var br = 0; br < renameClips.length; br++) renameClips[br].clip.name = renamePrefix + " " + (br + 1);
-          return ok({ renamed: renameClips.length, prefix: renamePrefix });
+          var renamedOk = 0, renamedFailed = 0;
+          for (var br = 0; br < renameClips.length; br++) {
+            var wantClipName = renamePrefix + " " + (br + 1);
+            try { renameClips[br].clip.name = wantClipName; } catch (e) {}
+            if (String(renameClips[br].clip.name) === wantClipName) renamedOk++; else renamedFailed++;
+          }
+          if (renamedOk === 0 && renameClips.length > 0) return fail("Premiere did not rename any clip.", { attempted: renameClips.length, prefix: renamePrefix });
+          return ok({ renamed: renamedOk, failed: renamedFailed, attempted: renameClips.length, prefix: renamePrefix, verified: renamedFailed === 0 });
 
         case "batch_enable_disable":
           var seqErr = sequenceRequestError();
@@ -2738,8 +2827,17 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           if (!enableSeqBatch) return fail("No active sequence");
           var enableClips = allClips(enableSeqBatch);
           var enableValue = Boolean(args.enabled !== false);
-          for (var be = 0; be < enableClips.length; be++) try { enableClips[be].clip.setEnabled(enableValue); } catch (e) {}
-          return ok({ changed: enableClips.length, enabled: enableValue });
+          // TrackItem has no setEnabled() on 26.x -- enable state is the 'disabled'
+          // boolean (verified live). setEnabled() threw for every clip and the caught
+          // no-op was reported as success. Set 'disabled' and confirm the readback.
+          var enabledOk = 0, enabledFailed = 0;
+          for (var be = 0; be < enableClips.length; be++) {
+            try { enableClips[be].clip.disabled = !enableValue; } catch (e) {}
+            var stillEnabled = null; try { stillEnabled = !enableClips[be].clip.disabled; } catch (e) {}
+            if (stillEnabled !== null && Boolean(stillEnabled) === enableValue) enabledOk++; else enabledFailed++;
+          }
+          if (enabledOk === 0 && enableClips.length > 0) return fail("Premiere did not change the enabled state of any clip.", { attempted: enableClips.length, enabled: enableValue });
+          return ok({ changed: enabledOk, failed: enabledFailed, attempted: enableClips.length, enabled: enableValue, verified: enabledFailed === 0 });
 
         case "clear_sequence_in_out":
           var seqErr = sequenceRequestError();
@@ -3204,8 +3302,10 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
         case "rename_clip":
           var renameClip = findClip(args.clipId || args.node_id || args.nodeId);
           if (!renameClip) return fail(pendingSequenceError || "Clip not found");
-          renameClip.clip.name = String(args.new_name || args.newName || args.name);
-          return ok({ renamed: true, name: renameClip.clip.name });
+          var wantRenameName = String(args.new_name || args.newName || args.name);
+          renameClip.clip.name = wantRenameName;
+          if (String(renameClip.clip.name) !== wantRenameName) return fail("Premiere did not rename the clip (reads back as '" + String(renameClip.clip.name) + "').", { requested: wantRenameName, actual: String(renameClip.clip.name) });
+          return ok({ renamed: true, name: String(renameClip.clip.name), verified: true });
 
         case "remove_selected_clips":
         case "lift_selection":
@@ -3219,6 +3319,13 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           var selectedCount = selectedItems && selectedItems.numItems !== undefined ? selectedItems.numItems : (selectedItems ? selectedItems.length || 0 : 0);
           if (!selectedCount) return fail("No selected clips");
           var rippleSelected = toolName === "extract_selection";
+          function selectionTotalClips() {
+            var n = 0;
+            for (var stv = 0; stv < selectionSeq.videoTracks.numTracks; stv++) n += selectionSeq.videoTracks[stv].clips.numItems;
+            for (var sta = 0; sta < selectionSeq.audioTracks.numTracks; sta++) n += selectionSeq.audioTracks[sta].clips.numItems;
+            return n;
+          }
+          var selBeforeTotal = selectionTotalClips();
           var removedSelected = 0;
           var selectedErrors = [];
           for (var si = selectedCount - 1; si >= 0; si--) {
@@ -3236,7 +3343,11 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
             }
           }
           if (!removedSelected) return fail("No selected clips were removed", { selectedCount: selectedCount, errors: selectedErrors });
-          return ok({ removed: removedSelected, selectedCount: selectedCount, ripple: rippleSelected, errors: selectedErrors });
+          var selAfterTotal = selectionTotalClips();
+          // .remove() returns void and can no-op silently, so gate on the timeline
+          // actually losing clips rather than on the loop counter alone.
+          if (selAfterTotal >= selBeforeTotal) return fail("remove() ran but the timeline clip count did not drop.", { selectedCount: selectedCount, beforeCount: selBeforeTotal, afterCount: selAfterTotal, errors: selectedErrors });
+          return ok({ removed: removedSelected, selectedCount: selectedCount, ripple: rippleSelected, beforeCount: selBeforeTotal, afterCount: selAfterTotal, verified: true, errors: selectedErrors });
 
         case "link_selection":
         case "unlink_selection":

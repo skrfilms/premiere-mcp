@@ -205,6 +205,77 @@ describe("generated ExtendScript is syntactically valid", () => {
     });
   });
 
+  describe("Batch B: expanded.ts mutators verify their readback", () => {
+    /**
+     * TrackItem has neither isEnabled() nor setEnabled() on 26.x -- both threw a
+     * ReferenceError, so select_disabled_clips selected nothing, batch_enable_disable
+     * silently no-op'd, and clipInfo.enabled was never populated. Enable state is the
+     * `disabled` boolean property (verified live). Every mutator below now re-reads
+     * the state it just wrote and fails closed when it did not change.
+     */
+    it("select_disabled_clips reads clip.disabled, not the nonexistent isEnabled()", async () => {
+      const script = await capture("select_disabled_clips");
+      expect(script).toContain("clip.disabled === true");
+      expect(script).not.toContain("!clip.isEnabled()");
+    });
+
+    it("batch_enable_disable sets clip.disabled and confirms the readback", async () => {
+      const script = await capture("batch_enable_disable");
+      expect(script).toContain(".disabled = !enableValue");
+      expect(script).toContain("did not change the enabled state of any clip");
+      expect(script).not.toContain(".setEnabled(");
+    });
+
+    it("clipInfo.enabled derives from clip.disabled rather than isEnabled()", async () => {
+      const script = await capture("get_full_clip_info");
+      expect(script).toContain("item.enabled = !clip.disabled");
+    });
+
+    it("set_target_track / rename_track verify then fail closed", async () => {
+      const setTarget = await capture("set_target_track");
+      expect(setTarget).toContain("targetTrack.isTargeted()");
+      expect(setTarget).toContain("did not change the track targeting");
+      const renameTrack = await capture("rename_track");
+      expect(renameTrack).toContain("did not rename the track");
+    });
+
+    it("set_offline / detach_proxy confirm the state actually flipped", async () => {
+      const offline = await capture("set_offline");
+      expect(offline).toContain("offlineItem.isOffline()");
+      expect(offline).toContain("did not take");
+      const detach = await capture("detach_proxy");
+      expect(detach).toContain("proxyItem.hasProxy()");
+      expect(detach).toContain("did not detach the proxy");
+    });
+
+    it("ripple_delete / remove_selected_clips gate on a dropped clip count", async () => {
+      const ripple = await capture("ripple_delete");
+      expect(ripple).toContain("did not remove the clip");
+      const removeSel = await capture("remove_selected_clips");
+      expect(removeSel).toContain("timeline clip count did not drop");
+    });
+
+    it("set_clip_speed_qe / set_clip_start_time / set_zero_point verify the value", async () => {
+      const speed = await capture("set_clip_speed_qe");
+      expect(speed).toContain("did not apply the requested speed");
+      const startTime = await capture("set_clip_start_time");
+      expect(startTime).toContain("did not move the clip start");
+      const zero = await capture("set_zero_point");
+      expect(zero).toContain("did not move the zero point");
+    });
+
+    it("razor_all_tracks / batch_rename_clips / rename_clip / overwrite_clip verify", async () => {
+      const razor = await capture("razor_all_tracks");
+      expect(razor).toContain("cutsMade");
+      const batchRename = await capture("batch_rename_clips");
+      expect(batchRename).toContain("did not rename any clip");
+      const renameClip = await capture("rename_clip");
+      expect(renameClip).toContain("did not rename the clip");
+      const overwrite = await capture("overwrite_clip");
+      expect(overwrite).toContain("is not the clip covering");
+    });
+  });
+
   describe("qeSequenceFor falls back only to the right sequence", () => {
     /**
      * qe.project.getSequenceAt() does not expose every sequence: one made by
