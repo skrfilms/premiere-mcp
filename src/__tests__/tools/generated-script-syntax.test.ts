@@ -276,6 +276,112 @@ describe("generated ExtendScript is syntactically valid", () => {
     });
   });
 
+  describe("Batch C: index.ts mutators verify their readback", () => {
+    /**
+     * Same fake-success class as Batch B, on the TypeScript-defined index.ts handlers:
+     * a mutating call followed by success:true with no state re-read. Each captured
+     * script below now re-reads what it wrote (readback compare, count diff, or
+     * File.exists) and fails closed on a silent no-op. Driven through the local
+     * schema-seeded capture path, since these tools each carry their own zod schema.
+     */
+    const captureLocal = async (name: string): Promise<string> => {
+      const probe = new PremiereProTools({
+        executeScript: async () => ({ success: true }),
+      } as never);
+      const tool = probe.getAvailableTools().find((t) => t.name === name);
+      if (!tool) return "";
+      let script = "";
+      const tools = new PremiereProTools({
+        executeScript: async (s: string) => { script = s; return { success: true }; },
+      } as never);
+      try {
+        await tools.executeTool(name, seedArgs(tool as never));
+      } catch {
+        // schema rejection / early return before emit -> empty capture, asserted below
+      }
+      return script;
+    };
+
+    it("set_clip_properties re-reads getValue() rather than trusting setValue()", async () => {
+      const script = await captureLocal("set_clip_properties");
+      expect(script).toContain("readback mismatch or missing");
+      expect(script).toContain("done.opacity = (Math.abs");
+    });
+
+    it("set_clip_properties_batch verifies each clip's readback", async () => {
+      const script = await captureLocal("set_clip_properties_batch");
+      expect(script).toContain("readback mismatch or missing");
+      expect(script).toContain("r.verified");
+    });
+
+    it("add_audio_keyframes confirms each key landed via keyExistsAtTime/getValueAtKey", async () => {
+      const script = await captureLocal("add_audio_keyframes");
+      expect(script).toContain("keyExistsAtTime");
+      expect(script).toContain("getValueAtKey");
+      expect(script).toContain("did not verify");
+    });
+
+    it("update_marker re-reads the written attributes and fails closed on mismatch", async () => {
+      const script = await captureLocal("update_marker");
+      expect(script).toContain("did not apply on readback");
+    });
+
+    it("export_as_fcp_xml / export_aaf gate on File.exists", async () => {
+      const fcp = await captureLocal("export_as_fcp_xml");
+      expect(fcp).toContain("xmlFile.exists");
+      expect(fcp).toContain("no file exists at");
+      const aaf = await captureLocal("export_aaf");
+      expect(aaf).toContain("aafFile.exists");
+      expect(aaf).toContain("no file exists at");
+    });
+
+    it("set_sequence_in_out_points verifies via getInPointAsTime/getOutPointAsTime", async () => {
+      const script = await captureLocal("set_sequence_in_out_points");
+      expect(script).toContain("getInPointAsTime");
+      expect(script).toContain("getOutPointAsTime");
+    });
+
+    it("enable_disable_clip / duplicate_clip / replace_clip verify or fail closed", async () => {
+      const enable = await captureLocal("enable_disable_clip");
+      expect(enable).toContain("nowEnabled");
+      const dup = await captureLocal("duplicate_clip");
+      expect(dup).toContain("afterCount");
+      const replace = await captureLocal("replace_clip");
+      expect(replace).toContain("nodeId");
+    });
+
+    it("mute_track / lock_track / set_color_label gate on the readback", async () => {
+      const mute = await captureLocal("mute_track");
+      expect(mute).toContain("isMuted()");
+      expect(mute).toContain("did not change the track mute state");
+      const lock = await captureLocal("lock_track");
+      expect(lock).toContain("isLocked");
+      const color = await captureLocal("set_color_label");
+      expect(color).toContain("getColorLabel");
+    });
+
+    it("set_playhead_position / add_keyframe / remove_keyframe verify", async () => {
+      const playhead = await captureLocal("set_playhead_position");
+      expect(playhead).toContain("getPlayerPosition");
+      const addKf = await captureLocal("add_keyframe");
+      expect(addKf).toContain("keyExistsAtTime");
+      const rmKf = await captureLocal("remove_keyframe");
+      expect(rmKf).toContain("keyExistsAtTime");
+    });
+
+    it("reverse_clip / refresh_media honestly report verified:false", async () => {
+      const rev = await captureLocal("reverse_clip");
+      expect(rev).toContain("verified: false");
+      const refresh = await captureLocal("refresh_media");
+      expect(refresh).toContain("verified: false");
+    });
+
+    it("save_project_as gates on the written file existing", async () => {
+      const save = await captureLocal("save_project_as");
+      expect(save).toContain(".exists");
+    });
+  });
+
   describe("qeSequenceFor falls back only to the right sequence", () => {
     /**
      * qe.project.getSequenceAt() does not expose every sequence: one made by
