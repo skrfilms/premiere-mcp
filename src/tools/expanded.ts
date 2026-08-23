@@ -2404,24 +2404,30 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           if (!speedQeTrack) return fail("QE track not found at index " + speedClip.trackIndex);
           var speedQeClip = __findQeClipByDomClip(speedQeTrack, speedClip.clip);
           if (!speedQeClip || !speedQeClip.setSpeed) return fail("QE clip setSpeed API unavailable");
-          var requestedSpeed = Number(args.speed || args.percent || 100);
+          // Accept either a ratio (<=10, e.g. 0.5 = 50%) or a percent (e.g. 50); QE
+          // setSpeed wants a RATIO. Live-verified on 26.3.2 (2026-08-23): the signature
+          // is setSpeed(rate, durationTimecodeString, reverse, maintainAudioPitch, ripple)
+          // -- 5 args; fewer throw "Not Enough Parameters", and a bool where the duration
+          // string belongs throws "Illegal Parameter type". Verify via the DOM clip's
+          // getSpeed() (QE exposes no reliable speed getter), matching speed_change.
+          var speedInput = Number(args.speed || args.percent || 100);
+          var speedRatio = speedInput <= 10 ? speedInput : (speedInput / 100);
+          var requestedPercent = speedRatio * 100;
+          var speedOldRatio = null; try { speedOldRatio = Number(speedClip.clip.getSpeed()); } catch (eGsOld) {}
           try {
-            speedQeClip.setSpeed(requestedSpeed, Boolean(args.maintainAudio !== false));
+            speedQeClip.setSpeed(speedRatio, "00:00:00:00", Boolean(args.reverse), Boolean(args.maintainAudio !== false), false);
           } catch (speedSetError) {
-            var currentSpeed = Number(speedQeClip.speed);
-            var currentPercent = currentSpeed <= 10 ? currentSpeed * 100 : currentSpeed;
-            if (Math.abs(currentPercent - requestedSpeed) < 0.01) return ok({ speed: requestedSpeed, maintainAudio: Boolean(args.maintainAudio !== false), changed: false, method: "already at requested speed" });
-            return fail("Speed change via QE DOM not available: " + speedSetError.toString(), { currentSpeed: currentSpeed, requestedSpeed: requestedSpeed });
+            return fail("Speed change via QE DOM failed: " + speedSetError.toString(), { requestedPercent: requestedPercent, requestedRatio: speedRatio, oldSpeed: speedOldRatio });
           }
-          // QE .speed reads back either as a ratio (0.5) or a percent (50); normalize
-          // before comparing to the requested percent so the gate is real, not cosmetic.
-          var speedReadRaw = null; try { speedReadRaw = Number(speedQeClip.speed); } catch (eSpd) {}
-          if (speedReadRaw !== null) {
-            var speedReadPercent = speedReadRaw <= 10 ? speedReadRaw * 100 : speedReadRaw;
-            if (Math.abs(speedReadPercent - requestedSpeed) > 0.5) return fail("Premiere did not apply the requested speed (reads back as " + speedReadPercent + "%, requested " + requestedSpeed + "%).", { actualPercent: speedReadPercent, requestedSpeed: requestedSpeed });
-            return ok({ speed: requestedSpeed, actualPercent: speedReadPercent, maintainAudio: Boolean(args.maintainAudio !== false), changed: true, verified: true });
+          // Verify-after-write via the DOM getSpeed() readback.
+          var speedNewRatio = null; try { speedNewRatio = Number(speedClip.clip.getSpeed()); } catch (eGsNew) {}
+          if (speedNewRatio === null || isNaN(speedNewRatio)) {
+            return ok({ speed: requestedPercent, requestedRatio: speedRatio, maintainAudio: Boolean(args.maintainAudio !== false), changed: true, verified: false, note: "setSpeed did not throw but DOM getSpeed() was not readable to confirm." });
           }
-          return ok({ speed: requestedSpeed, maintainAudio: Boolean(args.maintainAudio !== false), changed: true, verified: false, note: "setSpeed did not throw but QE .speed was not readable to confirm." });
+          if (Math.abs(speedNewRatio - speedRatio) > 0.02) {
+            return fail("Premiere did not apply the requested speed (clip is at " + (speedNewRatio * 100) + "%, requested " + requestedPercent + "%).", { actualPercent: speedNewRatio * 100, requestedPercent: requestedPercent, oldSpeed: speedOldRatio });
+          }
+          return ok({ speed: requestedPercent, actualPercent: speedNewRatio * 100, requestedRatio: speedRatio, oldSpeed: speedOldRatio, maintainAudio: Boolean(args.maintainAudio !== false), reverse: Boolean(args.reverse), changed: true, verified: true });
 
         case "set_frame_blend":
         case "set_time_interpolation":
