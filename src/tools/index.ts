@@ -3559,9 +3559,23 @@ ${this.buildSequenceResolver(sequenceId)}
         }
 
         var newBin = parentBin.createBin(${JSON.stringify(name)});
+        // createBin() returns void/undefined on refusal; confirm the bin now exists under
+        // the parent before claiming success, instead of reading .nodeId off nothing.
+        if (!newBin) {
+          var __rescan = null;
+          try {
+            for (var ri = 0; ri < parentBin.children.numItems; ri++) {
+              var __c = parentBin.children[ri];
+              if (__c && __isBin(__c) && String(__c.name) === ${JSON.stringify(name)}) { __rescan = __c; break; }
+            }
+          } catch (eRs) {}
+          if (!__rescan) return JSON.stringify({ success: false, verified: false, error: "createBin() returned nothing and no bin named '" + ${JSON.stringify(name)} + "' exists under the parent.", binName: ${JSON.stringify(name)} });
+          newBin = __rescan;
+        }
 
         return JSON.stringify({
           success: true,
+          verified: true,
           binName: ${JSON.stringify(name)},
           binId: newBin.nodeId,
           parentBinId: parentBin.nodeId,
@@ -3782,13 +3796,24 @@ ${this.buildSequenceResolver(sequenceId)}
           }
         }
 
+        // Fail closed when the clone produced nothing identifiable: reading back all-null
+        // ids as success:true is a fake success (the duplicate silently did not happen).
+        if (!newSeqObj && !newItem) {
+          return JSON.stringify({ success: false, verified: false, error: "clone() ran but neither the new sequence nor its project item could be resolved; nothing was duplicated.", originalSequenceId: ${JSON.stringify(sequenceId)} });
+        }
+        // Verify the rename actually landed on the project item, rather than trusting the assignment.
+        var renameVerified = false;
+        if (newItem) { try { renameVerified = (String(newItem.name) === ${safeName}); } catch (eRv) {} }
+
         return JSON.stringify({
           success: true,
+          verified: true,
           originalSequenceId: ${JSON.stringify(sequenceId)},
           newSequenceId: newSeqObj ? newSeqObj.sequenceID : null,
           newName: ${safeName},
           newProjectItemId: newItem ? newItem.nodeId : null,
           renamedAtProjectItem: renamedAtItem,
+          renameVerified: renameVerified,
           clearedClips: clearedClips
         });
       } catch (e) {
@@ -5495,6 +5520,13 @@ ${this.buildSequenceResolver(sequenceId)}
             } else {
               clamped = valueAfter !== requestedVal;
             }
+            // A clamped value is a legitimate outcome (Crop clamps to its domain), but a PURE
+            // no-op -- the value neither moved from before nor matches the request -- is a silent
+            // failure and must not be reported ok. Only guard the numeric case (clamping applies there).
+            var noOp = false;
+            if (typeof valueAfter === "number" && typeof requestedVal === "number" && typeof valueBefore === "number") {
+              noOp = (Math.abs(valueAfter - valueBefore) < 0.0001) && (Math.abs(valueAfter - requestedVal) > 0.0001);
+            }
             paramResults.push({
               requestedName: pName,
               matchedDisplayName: String(matched.prop.displayName),
@@ -5503,7 +5535,8 @@ ${this.buildSequenceResolver(sequenceId)}
               valueBefore: valueBefore,
               valueAfter: valueAfter,
               clamped: clamped,
-              ok: true
+              ok: !noOp,
+              error: noOp ? "setValue did not change the value (silent no-op)" : undefined
             });
           } catch (eSet) {
             paramResults.push({ requestedName: pName, ok: false, error: "setValue threw: " + eSet.toString() });
