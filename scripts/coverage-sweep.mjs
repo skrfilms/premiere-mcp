@@ -161,8 +161,9 @@ line(`destructive tier: ${ALLOW_DESTRUCTIVE ? 'ENABLED' : 'disabled (pass --dest
 /** Live facts, refreshed after every fixture rebuild so ids stay valid. */
 async function readContext() {
   return bridge.executeScript(`(function(){
-    var out = { sequenceId:null, sequenceName:null, secondSequenceId:null, itemId:null, binId:null,
-                mediaPath:null, trackCount:0, clipCount:0, markerName:null, effectName:null };
+    var out = { sequenceId:null, sequenceName:null, secondSequenceId:null, itemId:null, itemId2:null,
+                binId:null, mediaPath:null, trackCount:0, clipCount:0, markerName:null, effectName:null,
+                clipId:null, clipId2:null, audioClipId:null };
     try {
       var seq = app.project.activeSequence;
       if (seq) {
@@ -171,9 +172,27 @@ async function readContext() {
         if (seq.videoTracks.numTracks > 0) out.clipCount = seq.videoTracks[0].clips.numItems;
         if (out.clipCount > 0) {
           var c = seq.videoTracks[0].clips[0];
+          // TWO DIFFERENT IDS, and conflating them cost 45 tools a fair test in the first run:
+          //   TrackItem.nodeId   -> identifies the clip ON THE TIMELINE  (clipId)
+          //   ProjectItem.nodeId -> identifies the master item IN THE BIN (projectItemId)
+          // Passing the project-item id where a clip id was wanted produced "Clip not found"
+          // for a third of the catalogue, which read as 45 broken tools rather than one
+          // broken harness.
+          out.clipId = String(c.nodeId);
           out.itemId = String(c.projectItem.nodeId);
           try { out.mediaPath = String(c.projectItem.getMediaPath()); } catch (e1) {}
           if (c.components.numItems > 0) out.effectName = String(c.components[c.components.numItems-1].displayName);
+          // A second clip so copy/compare tools get two distinct, valid targets.
+          if (out.clipCount > 1) {
+            var c2 = seq.videoTracks[0].clips[1];
+            out.clipId2 = String(c2.nodeId);
+            out.itemId2 = String(c2.projectItem.nodeId);
+          }
+          // Select it, so the selection-driven tools have something to act on.
+          try { seq.setSelection([c]); } catch (eSel) {}
+        }
+        if (seq.audioTracks.numTracks > 0 && seq.audioTracks[0].clips.numItems > 0) {
+          out.audioClipId = String(seq.audioTracks[0].clips[0].nodeId);
         }
         if (seq.markers.numMarkers > 0) out.markerName = String(seq.markers.getFirstMarker().name);
       }
@@ -204,7 +223,14 @@ function argsFor(tool) {
   for (const k of keys) {
     if (/^(sequenceId|seqId|sourceSequenceId)$/i.test(k)) a[k] = ctx.sequenceId ?? undefined;
     else if (/^(targetSequenceId|destSequenceId|otherSequenceId|sequenceBId)$/i.test(k)) a[k] = ctx.secondSequenceId ?? undefined;
-    else if (/(projectItemId|itemId|clipId|nodeId)$/i.test(k)) a[k] = ctx.itemId ?? undefined;
+    else if (/^(clipId|trackItemId)$/i.test(k)) a[k] = ctx.clipId ?? undefined;
+    else if (/^(sourceClipId|clipAId|fromClipId)$/i.test(k)) a[k] = ctx.clipId ?? undefined;
+    else if (/^(targetClipId|clipBId|toClipId|secondClipId)$/i.test(k)) a[k] = ctx.clipId2 ?? ctx.clipId ?? undefined;
+    else if (/^audioClipId$/i.test(k)) a[k] = ctx.audioClipId ?? undefined;
+    else if (/^(sourceProjectItemId|oldItemId)$/i.test(k)) a[k] = ctx.itemId ?? undefined;
+    else if (/^(targetProjectItemId|newItemId|newProjectItemId)$/i.test(k)) a[k] = ctx.itemId2 ?? ctx.itemId ?? undefined;
+    else if (/(projectItemId|itemId|nodeId)$/i.test(k)) a[k] = ctx.itemId ?? undefined;
+    else if (/clipIds$/i.test(k)) a[k] = ctx.clipId ? [ctx.clipId] : undefined;
     else if (/^binId$/i.test(k)) a[k] = ctx.binId ?? undefined;
     else if (/srtPath|captionPath/i.test(k)) a[k] = SRT;
     else if (/(output|dest|target|save)(File)?Path$/i.test(k)) a[k] = join(TMP_OUT, `sweep_${Date.now()}.png`);
@@ -223,7 +249,19 @@ function argsFor(tool) {
     else if (/presetName|lumetriPreset/i.test(k)) a[k] = 'SL BLUE STEEL';
     else if (/markerName/i.test(k)) a[k] = ctx.markerName ?? 'fixture_comment';
     else if (/^name$/i.test(k)) a[k] = 'sweep_probe';
-    else if (/^(propertyName|paramName)$/i.test(k)) a[k] = 'Blurriness';
+    // Real values that exist on the fixture clip. 'Blurriness' only exists if Gaussian Blur was
+    // applied, so it produced "Property not found" rather than testing anything; Opacity is on
+    // every clip and is a plain scalar, which also avoids the multi-value Position trap.
+    else if (/^(componentName|effectComponent)$/i.test(k)) a[k] = 'Opacity';
+    else if (/^(propertyName|paramName)$/i.test(k)) a[k] = 'Opacity';
+    else if (/^(enabled|enable|visible|locked|muted|reverse|recursive|selected|targeted|suppressUI|includeAudio|maintainAudioPitch)$/i.test(k)) a[k] = true;
+    else if (/^(value|amount|level|gain|opacityValue)$/i.test(k)) a[k] = 50;
+    else if (/^(scale|scaleValue)$/i.test(k)) a[k] = 100;
+    else if (/^(rotation|degrees|angle)$/i.test(k)) a[k] = 15;
+    else if (/^(volumeDb|db|decibels)$/i.test(k)) a[k] = -6;
+    else if (/^(text|comment|label|note)$/i.test(k)) a[k] = 'sweep probe';
+    else if (/^(newName|renameTo)$/i.test(k)) a[k] = 'sweep_renamed';
+    else if (/^(colorLabel|color)$/i.test(k)) a[k] = 'Blue';
   }
   for (const k of Object.keys(a)) if (a[k] === undefined) delete a[k];
   return { args: a, keys };
@@ -311,8 +349,11 @@ for (let i = 0; i < catalogue.length; i++) {
     destructiveCount++;
     if (destructiveCount % RESET_EVERY === 0) {
       resetFixture(`after ${RESET_EVERY} destructive calls`);
-      ctx = await readContext();
     }
+    // Re-read after EVERY mutating call. Ids are not stable across edits, and a stale id is
+    // indistinguishable in the results from a tool that cannot find its target — six tools
+    // reported "Project item not found" in the first run for exactly this reason.
+    ctx = await readContext();
   }
   flush();
 }
