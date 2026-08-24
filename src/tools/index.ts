@@ -375,7 +375,7 @@ export class PremiereProTools {
         name: 'list_sequence_tracks',
         description: 'Lists all video and audio tracks in a specific sequence with their properties and clips.',
         inputSchema: z.object({
-          sequenceId: z.string().min(1).describe('The sequence ID (GUID) to list tracks for, as returned in the "id" field by list_sequences or get_active_sequence')
+          sequenceId: z.string().min(1).optional().describe('The sequence ID (GUID) to list tracks for, as returned in the "id" field by list_sequences or get_active_sequence. Defaults to the active sequence.')
         })
       },
       {
@@ -2084,7 +2084,7 @@ export class PremiereProTools {
         name: 'add_marker',
         description: 'Adds a marker to the specified sequence for navigation or notes. The sequence does not have to be the active one.',
         inputSchema: z.object({
-          sequenceId: z.string().min(1).describe('The sequence ID (GUID) to add the marker to, as returned in the "id" field by list_sequences or get_active_sequence'),
+          sequenceId: z.string().min(1).optional().describe('The sequence ID (GUID) to add the marker to, as returned in the "id" field by list_sequences or get_active_sequence. Defaults to the active sequence.'),
           time: z.number().describe('The time in seconds where the marker should be placed'),
           name: z.string().describe('The name/label for the marker'),
           comment: z.string().optional().describe('Optional comment or description for the marker'),
@@ -2096,7 +2096,7 @@ export class PremiereProTools {
         name: 'delete_marker',
         description: 'Deletes a marker from the specified sequence. The sequence does not have to be the active one.',
         inputSchema: z.object({
-          sequenceId: z.string().min(1).describe('The sequence ID (GUID) as returned in the "id" field by list_sequences or get_active_sequence'),
+          sequenceId: z.string().min(1).optional().describe('The sequence ID (GUID) as returned in the "id" field by list_sequences or get_active_sequence. Defaults to the active sequence.'),
           markerId: z.string().min(1).describe('The ID of the marker to delete')
         })
       },
@@ -2104,7 +2104,7 @@ export class PremiereProTools {
         name: 'update_marker',
         description: 'Updates an existing marker\'s properties in the specified sequence. The sequence does not have to be the active one.',
         inputSchema: z.object({
-          sequenceId: z.string().min(1).describe('The sequence ID (GUID) as returned in the "id" field by list_sequences or get_active_sequence'),
+          sequenceId: z.string().min(1).optional().describe('The sequence ID (GUID) as returned in the "id" field by list_sequences or get_active_sequence. Defaults to the active sequence.'),
           markerId: z.string().min(1).describe('The ID of the marker to update'),
           name: z.string().optional().describe('New name for the marker'),
           comment: z.string().optional().describe('New comment'),
@@ -2115,7 +2115,7 @@ export class PremiereProTools {
         name: 'list_markers',
         description: 'Lists all markers in the specified sequence. The sequence does not have to be the active one.',
         inputSchema: z.object({
-          sequenceId: z.string().min(1).describe('The sequence ID (GUID) as returned in the "id" field by list_sequences or get_active_sequence')
+          sequenceId: z.string().min(1).optional().describe('The sequence ID (GUID) as returned in the "id" field by list_sequences or get_active_sequence. Defaults to the active sequence.')
         })
       },
 
@@ -2133,7 +2133,7 @@ export class PremiereProTools {
         name: 'delete_track',
         description: 'Deletes a video or audio track from the specified sequence. The sequence does not have to be the active one, but it does have to be open in Premiere: there is no DOM track-deletion API, so this falls through to the QE DOM, which only reaches sequences Premiere has open. A sequence QE cannot address is reported by name rather than deleted from the wrong timeline. Caption track deletion is accepted by the schema but returns an explicit unsupported result because Premiere Pro exposes no caption-track delete/read API to scripting.',
         inputSchema: z.object({
-          sequenceId: z.string().min(1).describe('The sequence ID (GUID) as returned in the "id" field by list_sequences or get_active_sequence'),
+          sequenceId: z.string().min(1).optional().describe('The sequence ID (GUID) as returned in the "id" field by list_sequences or get_active_sequence. Defaults to the active sequence.'),
           trackType: z.enum(['video', 'audio', 'caption']).describe('Type of track'),
           trackIndex: z.number().describe('The index of the track to delete')
         })
@@ -2142,7 +2142,7 @@ export class PremiereProTools {
         name: 'lock_track',
         description: 'Locks or unlocks a track to prevent/allow editing. The sequence does not have to be the active one.',
         inputSchema: z.object({
-          sequenceId: z.string().min(1).describe('The sequence ID (GUID) as returned in the "id" field by list_sequences or get_active_sequence'),
+          sequenceId: z.string().min(1).optional().describe('The sequence ID (GUID) as returned in the "id" field by list_sequences or get_active_sequence. Defaults to the active sequence.'),
           trackType: z.enum(['video', 'audio']).describe('Type of track'),
           trackIndex: z.number().describe('The index of the track'),
           locked: z.boolean().describe('Whether to lock (true) or unlock (false)')
@@ -2152,7 +2152,7 @@ export class PremiereProTools {
         name: 'toggle_track_visibility',
         description: 'Shows or hides a video track by toggling its output (the eye icon) in the specified sequence. The sequence does not have to be the active one. This is track OUTPUT, not track targeting -- use set_target_track for the V1/A1 patch buttons.',
         inputSchema: z.object({
-          sequenceId: z.string().min(1).describe('The sequence ID (GUID) as returned in the "id" field by list_sequences or get_active_sequence'),
+          sequenceId: z.string().min(1).optional().describe('The sequence ID (GUID) as returned in the "id" field by list_sequences or get_active_sequence. Defaults to the active sequence.'),
           trackIndex: z.number().describe('The index of the video track'),
           visible: z.boolean().describe('Whether to show (true) or hide (false)')
         })
