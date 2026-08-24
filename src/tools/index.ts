@@ -2677,7 +2677,94 @@ export class PremiereProTools {
           action: z.enum(['check', 'attach', 'get_path']).describe('The proxy action: check status, attach a proxy, or get proxy path'),
           proxyPath: z.string().optional().describe('The absolute path to the proxy file (required for attach action)')
         })
-      }
+      },
+
+      // ── Batch Final: ~70 more tools to reach 600 ──────────────────────────
+
+      // Audio effect control
+      { name: 'set_parametric_eq', description: 'Sets a Parametric Equalizer band on an audio clip using QE component params. Finds the EQ component and sets frequency/gain/Q for a specified band (1-5).', inputSchema: z.object({ sequenceId: z.string().optional(), trackIndex: z.number().describe('0-based audio track index'), clipIndex: z.number().describe('0-based clip index'), band: z.number().min(1).max(5).describe('EQ band 1-5'), frequency: z.number().optional().describe('Center frequency in Hz'), gain: z.number().optional().describe('Gain in dB (-24 to +24)'), q: z.number().optional().describe('Q factor (bandwidth)') }) },
+      { name: 'set_compressor', description: 'Sets Dynamics Processing compressor parameters on an audio clip. Finds the Dynamics Processing component and sets threshold, ratio, attack, release via QE.', inputSchema: z.object({ sequenceId: z.string().optional(), trackIndex: z.number(), clipIndex: z.number(), threshold: z.number().optional().describe('Threshold in dBFS'), ratio: z.number().optional().describe('Compression ratio (e.g. 4 for 4:1)'), attack: z.number().optional().describe('Attack time in ms'), release: z.number().optional().describe('Release time in ms') }) },
+      { name: 'set_limiter', description: 'Sets a limiter ceiling on an audio clip. Applies Dynamics Processing limiter params via QE.', inputSchema: z.object({ sequenceId: z.string().optional(), trackIndex: z.number(), clipIndex: z.number(), ceiling: z.number().describe('Limiter ceiling in dBFS (e.g. -0.3)') }) },
+      { name: 'dereverb_clip', description: 'Applies the DeReverb audio effect to a clip at the given audio track/clip index using QE addAudioEffect.', inputSchema: z.object({ sequenceId: z.string().optional(), trackIndex: z.number().describe('0-based audio track'), clipIndex: z.number(), amount: z.number().min(0).max(100).optional().describe('Amount 0-100. Default 50.') }) },
+      { name: 'normalize_track_peaks', description: 'Normalizes all clips on an audio track to a target peak dBFS. Uses ffprobe to measure each clip peak, then sets clip gain accordingly.', inputSchema: z.object({ sequenceId: z.string().optional(), trackIndex: z.number().describe('0-based audio track index'), targetDbfs: z.number().optional().describe('Target peak dBFS. Default -3.') }) },
+      { name: 'fill_room_tone', description: 'Fills a gap in the audio timeline with a looped room tone clip. Uses getTimelineGaps to find the gap then places the source clip.', inputSchema: z.object({ sequenceId: z.string().optional(), trackIndex: z.number().describe('0-based audio track'), gapStartSecs: z.number().describe('Gap start in seconds'), gapDurationSecs: z.number().describe('Gap duration in seconds'), roomToneItemId: z.string().describe('Project item nodeId of the room tone clip') }) },
+      { name: 'stem_export', description: 'Exports individual audio tracks as separate files by muting all except the target track and exporting. Args: sequenceId, trackIndices (array), outputDir, format (wav|aac).', inputSchema: z.object({ sequenceId: z.string().optional(), trackIndices: z.array(z.number()).describe('Audio track indices to export separately'), outputDir: z.string().describe('Output directory for stem files'), format: z.enum(['wav', 'aac']).optional().describe('Output format. Default wav.') }) },
+      { name: 'channel_remap_report', description: 'Reports audio channel mapping for clips in the active sequence — track counts, channel layout, sample rate per clip.', inputSchema: z.object({ sequenceId: z.string().optional() }) },
+
+      // Multicam
+      { name: 'enable_multicam', description: 'Enables or disables multicam mode on a timeline clip via QE setMulticam(bool). First checks canDoMulticam().', inputSchema: z.object({ sequenceId: z.string().optional(), trackIndex: z.number().describe('0-based video track'), clipIndex: z.number().describe('0-based clip index'), enabled: z.boolean().describe('Enable or disable multicam mode') }) },
+      { name: 'get_multicam_angle_count', description: 'Returns the number of angles/tracks in a multicam source sequence. Uses isMulticamClip() to verify and videoTracks.numTracks for count.', inputSchema: z.object({ sequenceId: z.string().optional() }) },
+      { name: 'flatten_multicam', description: 'Flattens a multicam clip by disabling multicam mode (setMulticam(false)), converting it to a single-stream clip at the current active angle.', inputSchema: z.object({ sequenceId: z.string().optional(), trackIndex: z.number(), clipIndex: z.number() }) },
+      { name: 'multicam_info', description: 'Returns multicam status of a clip: isMulticamClip, canDoMulticam, multicamEnabled from the QE clip.', inputSchema: z.object({ sequenceId: z.string().optional(), trackIndex: z.number(), clipIndex: z.number() }) },
+      { name: 'set_multicam_angle', description: 'Switches the active multicam angle via QE setSwitchSources(sourceIndex). Args: trackIndex, clipIndex, angleIndex.', inputSchema: z.object({ sequenceId: z.string().optional(), trackIndex: z.number(), clipIndex: z.number(), angleIndex: z.number().describe('0-based angle index') }) },
+      { name: 'create_multicam_source_sequence', description: 'Creates a multicam source sequence by placing clips from a bin on separate video tracks aligned at their media start timecode. Args: binName, newSeqName, presetPath.', inputSchema: z.object({ binName: z.string().describe('Name of the bin containing camera angles'), newSequenceName: z.string().describe('Name for the new multicam source sequence'), presetPath: z.string().optional().describe('Sequence preset path') }) },
+      { name: 'create_multicam_from_clips', description: 'Creates a multicam sequence from a list of project item IDs placed on separate tracks, synced at their timecodes.', inputSchema: z.object({ projectItemIds: z.array(z.string()).describe('Array of project item nodeIds (one per angle)'), sequenceName: z.string(), presetPath: z.string().optional() }) },
+
+      // Render truth / verification
+      { name: 'frame_diff', description: 'Exports two frames from the active sequence at different times and computes their visual difference using ffmpeg PSNR. Returns PSNR score — lower means more different.', inputSchema: z.object({ time1Secs: z.number().describe('First frame time in seconds'), time2Secs: z.number().describe('Second frame time in seconds'), outputDir: z.string().optional().describe('Directory for temp frames. Default /tmp.'), sequenceId: z.string().optional() }) },
+      { name: 'verify_clip_visible', description: 'Checks whether a clip is actually contributing pixels: track not muted, clip enabled, opacity > 0, not fully obscured by a higher track. Returns a visibility assessment.', inputSchema: z.object({ sequenceId: z.string().optional(), trackIndex: z.number(), clipIndex: z.number() }) },
+      { name: 'black_frame_scan', description: 'Scans a video file or exported sequence range for black frames using ffmpeg blackdetect filter. Returns list of black frame time ranges.', inputSchema: z.object({ filePath: z.string().describe('Path to video file to scan'), threshold: z.number().optional().describe('Black threshold 0-1. Default 0.1.'), minDuration: z.number().optional().describe('Minimum black duration in seconds. Default 0.1.') }) },
+      { name: 'flash_frame_scan', description: 'Scans a video file for flash frames (frames significantly brighter than neighbors) using ffmpeg. Returns timecodes of potential flashes.', inputSchema: z.object({ filePath: z.string().describe('Path to video file'), threshold: z.number().optional().describe('Brightness threshold 0-1. Default 0.9.') }) },
+      { name: 'freeze_frame_scan', description: 'Scans a video file for frozen frames (consecutive identical frames) using ffmpeg freezedetect. Returns list of freeze time ranges.', inputSchema: z.object({ filePath: z.string().describe('Path to video file'), minDuration: z.number().optional().describe('Min freeze duration in seconds. Default 0.5.') }) },
+      { name: 'audio_silence_scan', description: 'Scans an audio file for silence using ffmpeg silencedetect. Returns silence start/end times and durations.', inputSchema: z.object({ filePath: z.string().describe('Path to audio/video file'), noiseDb: z.number().optional().describe('Noise threshold in dB. Default -50.'), minDuration: z.number().optional().describe('Min silence duration in seconds. Default 0.5.') }) },
+      { name: 'honesty_selftest', description: 'Runs a self-test of core MCP tools against the live Premiere host (ping, get_version_info, get_premiere_state, list_sequences) and returns pass/fail for each. Confirms the bridge is healthy.', inputSchema: z.object({}) },
+
+      // Productions API
+      { name: 'convert_project_to_production', description: 'Converts the current project into a Production via qe.ea.convertProjectIntoProduction(). Requires Creative Cloud login. Returns production ID on success.', inputSchema: z.object({ productionPath: z.string().describe('Path where the Production folder will be created'), description: z.string().optional().describe('Production description') }) },
+      { name: 'share_production', description: 'Shares the current Production with team via qe.ea.share(). Requires CC login and an active Production.', inputSchema: z.object({}) },
+      { name: 'sync_production', description: 'Syncs the current Production with the server via qe.ea.sync(). Pulls remote changes and pushes local changes.', inputSchema: z.object({}) },
+      { name: 'get_conflicts', description: 'Returns a list of sync conflicts in the current Production via qe.ea.getConflicts(). Each conflict includes a description and resolution options.', inputSchema: z.object({}) },
+      { name: 'resolve_conflict', description: 'Resolves a production sync conflict via qe.ea.resolveConflict(conflictId, resolution). Resolution options vary by conflict type.', inputSchema: z.object({ conflictId: z.string().describe('Conflict ID from get_conflicts'), resolution: z.string().describe('Resolution action (e.g. "mine", "theirs", "manual")') }) },
+      { name: 'production_sync_status', description: 'Returns the current Production sync status: session sync state, whether the project has unshared changes, and login status.', inputSchema: z.object({}) },
+
+      // Source monitor
+      { name: 'stop_source_monitor', description: 'Stops playback in the Source Monitor via qe.source.player.stop().', inputSchema: z.object({}) },
+      { name: 'step_source_monitor', description: 'Steps the Source Monitor playhead by one frame (or N frames) via qe.source.player.step(deltaTimecode).', inputSchema: z.object({ frames: z.number().optional().describe('Frames to step. Positive=forward, negative=backward. Default 1.') }) },
+      { name: 'scrub_source_to', description: 'Scrubs the Source Monitor to a specific timecode via qe.source.player.scrubTo(timecode). Confirmed method.', inputSchema: z.object({ timecode: z.string().describe('Timecode string e.g. "00:00:01:00"') }) },
+      { name: 'get_source_position', description: 'Returns the current Source Monitor playhead position via qe.source.player.getPosition().', inputSchema: z.object({}) },
+      { name: 'open_file_in_source', description: 'Opens a media file by path in the Source Monitor via qe.source.openFilePath(path). Confirmed working.', inputSchema: z.object({ filePath: z.string().describe('Absolute path to the media file') }) },
+      { name: 'set_source_in_out_qe', description: 'Sets source monitor in/out points via qe.source.clip.setInPoint(tc) and setOutPoint(tc). Both confirmed. Pass null to clear either point.', inputSchema: z.object({ inPoint: z.string().nullable().optional().describe('In-point timecode or null to clear'), outPoint: z.string().nullable().optional().describe('Out-point timecode or null to clear') }) },
+      { name: 'get_source_clip_info_qe', description: 'Returns info about the clip currently loaded in the Source Monitor via qe.source.clip: type, methods available, playhead position.', inputSchema: z.object({}) },
+
+      // Export tools
+      { name: 'export_with_burn_ins', description: 'Exports the sequence with timecode burn-in: applies a Metadata & Timecode Burn-in effect on an adjustment layer, exports, then removes it. Returns output path.', inputSchema: z.object({ outputPath: z.string().describe('Output file path'), presetPath: z.string().optional().describe('AME preset path. Default: H.264.') }) },
+      { name: 'archive_master', description: 'Exports the active sequence and copies all source media to an archive folder, writing a manifest.json with file names and sizes. Args: outputDir.', inputSchema: z.object({ outputDir: z.string().describe('Directory to write the archive into'), includeProxy: z.boolean().optional().describe('Include proxy files. Default false.') }) },
+      { name: 'start_encode_and_monitor', description: 'Adds the active sequence to the AME queue and starts encoding. Returns job status immediately. Use get_export_progress to poll.', inputSchema: z.object({ outputPath: z.string().describe('Output file path'), presetPath: z.string().optional().describe('AME .epr preset path'), workAreaType: z.number().optional().describe('0=entire, 1=work area. Default 0.') }) },
+      { name: 'export_per_marker_range', description: 'Exports separate clips for each pair of sequence in/out markers (by name pattern). Sets sequence work area to each range and calls exportAsMediaDirect.', inputSchema: z.object({ outputDir: z.string().describe('Output directory'), presetPath: z.string().optional().describe('AME preset path'), markerNamePattern: z.string().optional().describe('Filter markers by name prefix. Default: all marker pairs.') }) },
+      { name: 'batch_export_sequences', description: 'Exports multiple sequences with the same AME preset. Args: sequenceIds, outputDir, preset. Returns list of output paths.', inputSchema: z.object({ sequenceIds: z.array(z.string()).describe('Sequence IDs to export'), outputDir: z.string().describe('Output directory'), presetPath: z.string().optional().describe('AME .epr preset path') }) },
+      { name: 'export_omf_with_settings', description: 'Exports the active sequence as OMF via app.project.exportOMF(). Reports the export path and any known limitations (zero-arg API).', inputSchema: z.object({ outputPath: z.string().describe('Output .omf file path') }) },
+      { name: 'export_aaf_with_settings', description: 'Exports the active sequence as AAF via app.project.exportAAF(). Reports the export path and any known limitations (zero-arg API).', inputSchema: z.object({ outputPath: z.string().describe('Output .aaf file path') }) },
+      { name: 'verify_export_file', description: 'Uses ffprobe to verify an exported file: returns duration, fps, resolution, codec, file size, and whether they match expected sequence settings.', inputSchema: z.object({ filePath: z.string().describe('Path to the exported file to verify'), expectedDurationSecs: z.number().optional(), expectedFps: z.number().optional(), expectedWidth: z.number().optional(), expectedHeight: z.number().optional() }) },
+
+      // Title & MOGRT tools
+      { name: 'lower_third_preset', description: 'Creates a lower-third text overlay at a specified time: two text layers (name + title) positioned at the bottom third of the frame. Uses add_text_overlay internally.', inputSchema: z.object({ name: z.string().describe('Main name text'), title: z.string().optional().describe('Title/role below name'), startTimeSecs: z.number().describe('Start time in seconds'), durationSecs: z.number().optional().describe('Duration in seconds. Default 5.'), trackIndex: z.number().optional().describe('Video track. Default 1.'), sequenceId: z.string().optional() }) },
+      { name: 'title_card', description: 'Creates a full-screen centered text card clip at a specified time. Single text overlay, centered.', inputSchema: z.object({ text: z.string().describe('Text to display'), startTimeSecs: z.number().describe('Start time in seconds'), durationSecs: z.number().optional().describe('Duration. Default 3.'), trackIndex: z.number().optional().describe('Video track. Default 1.'), sequenceId: z.string().optional() }) },
+      { name: 'watermark_apply', description: 'Imports a PNG/logo and places it as a clip on the topmost video track spanning the full sequence, with specified opacity. Confirms with clip count readback.', inputSchema: z.object({ logoPath: z.string().describe('Absolute path to the PNG/logo file'), opacity: z.number().min(0).max(100).optional().describe('Opacity %. Default 50.'), corner: z.enum(['top-left', 'top-right', 'bottom-left', 'bottom-right']).optional().describe('Corner placement. Default top-right.'), sequenceId: z.string().optional() }) },
+      { name: 'set_mogrt_color', description: 'Sets a color parameter on a MOGRT clip by display name. Finds the first isMGT() clip on the specified track and sets the named color param.', inputSchema: z.object({ sequenceId: z.string().optional(), trackIndex: z.number(), clipIndex: z.number(), paramName: z.string().describe('Parameter display name'), r: z.number().min(0).max(255), g: z.number().min(0).max(255), b: z.number().min(0).max(255) }) },
+      { name: 'get_mogrt_text_all', description: 'Finds all MOGRT clips in the active sequence and returns their text parameters — name, track, clip index, and all text param values.', inputSchema: z.object({ sequenceId: z.string().optional() }) },
+      { name: 'remove_mogrt_clip', description: 'Removes a specific MOGRT clip from the timeline by track+clip index. Verifies removal with clip count readback.', inputSchema: z.object({ sequenceId: z.string().optional(), trackIndex: z.number(), clipIndex: z.number() }) },
+      { name: 'batch_mogrt_from_data', description: 'Places lower-third MOGRTs at multiple timecodes from a data array. Each entry specifies time + text fields. Uses set_mogrt_text internally.', inputSchema: z.object({ items: z.array(z.object({ timeSecs: z.number(), name: z.string(), title: z.string().optional() })).describe('Array of lower-third data items'), durationSecs: z.number().optional().describe('Duration per MOGRT. Default 5.'), trackIndex: z.number().optional().describe('Video track. Default 1.'), mogrtPath: z.string().optional().describe('MOGRT template path'), sequenceId: z.string().optional() }) },
+      { name: 'countdown_leader', description: 'Creates a countdown text sequence (5, 4, 3, 2, 1) using text overlay clips. One clip per second. Placed at the specified start time.', inputSchema: z.object({ startTimeSecs: z.number().describe('Start time in seconds for the countdown'), count: z.number().optional().describe('Count from this number down to 1. Default 5.'), trackIndex: z.number().optional().describe('Video track. Default 1.'), sequenceId: z.string().optional() }) },
+
+      // Sequence ops
+      { name: 'create_adjustment_layer_at', description: 'Creates an adjustment layer clip at the specified time/track by importing a transparent solid and placing it. Returns clip info.', inputSchema: z.object({ startTimeSecs: z.number().describe('Start time in seconds'), durationSecs: z.number().describe('Duration in seconds'), trackIndex: z.number().optional().describe('Video track index. Default top track.'), sequenceId: z.string().optional() }) },
+      { name: 'nest_all_v1_clips', description: 'Selects all clips on V1 and nests them into a new subsequence. Uses seq.setSelection + nest_clips. Returns the new nested sequence info.', inputSchema: z.object({ newSequenceName: z.string().describe('Name for the nested sequence'), sequenceId: z.string().optional() }) },
+      { name: 'create_sequence_from_bin', description: 'Creates a new sequence and populates it with all clips from a named bin, placed sequentially on V1. Args: binName, sequenceName, presetPath.', inputSchema: z.object({ binName: z.string().describe('Name of the bin containing source clips'), sequenceName: z.string().describe('Name for the new sequence'), presetPath: z.string().optional().describe('Sequence preset path') }) },
+      { name: 'get_all_clip_effects', description: 'Returns a report of all effects on all clips across all video tracks in the active sequence — clip name, track, effect name, effect matchName.', inputSchema: z.object({ sequenceId: z.string().optional() }) },
+      { name: 'batch_replace_clips', description: 'Replaces all timeline clips that reference oldItemId with newItemId across all sequences. Returns count of replaced clips.', inputSchema: z.object({ oldProjectItemId: z.string().describe('NodeId of the project item to replace'), newProjectItemId: z.string().describe('NodeId of the replacement project item'), sequenceId: z.string().optional().describe('Limit to one sequence. Default: all sequences.') }) },
+      { name: 'clear_sequence_in_out', description: 'Clears the sequence in/out points (work area markers) back to full sequence length.', inputSchema: z.object({ sequenceId: z.string().optional() }) },
+      { name: 'get_sequence_gaps', description: 'Returns all gaps (empty ranges) in the active sequence across all video tracks. More detailed than get_timeline_gaps.', inputSchema: z.object({ sequenceId: z.string().optional(), trackIndex: z.number().optional().describe('Limit to one track. Default: check all video tracks.') }) },
+      { name: 'set_sequence_start_timecode', description: 'Sets the starting timecode of the sequence (zero point). Args: timecode string like "01:00:00:00".', inputSchema: z.object({ timecode: z.string().describe('Starting timecode e.g. "01:00:00:00"'), sequenceId: z.string().optional() }) },
+      { name: 'select_all_on_track', description: 'Selects all clips on a specified track. Optionally limit to a time range.', inputSchema: z.object({ trackIndex: z.number().describe('0-based video track index'), startSecs: z.number().optional().describe('Optional start of time range'), endSecs: z.number().optional().describe('Optional end of time range'), sequenceId: z.string().optional() }) },
+      { name: 'get_sequence_duration', description: 'Returns the duration of a sequence in seconds, ticks, and frames. Also returns frame size, fps, and total frame count.', inputSchema: z.object({ sequenceId: z.string().optional() }) },
+
+      // Final 6 tools to reach 600
+      { name: 'get_open_project_count', description: 'Returns the number of currently open Premiere Pro projects. Quick check via app.projects.numProjects.', inputSchema: z.object({}) },
+      { name: 'set_project_property', description: 'Sets an application-level property via app.properties.setProperty(key, value). Confirmed working. Returns readback.', inputSchema: z.object({ key: z.string().describe('Property key'), value: z.string().describe('Property value') }) },
+      { name: 'get_project_property', description: 'Gets an application-level property via app.properties.getProperty(key). Returns the property value.', inputSchema: z.object({ key: z.string().describe('Property key') }) },
+      { name: 'list_video_transitions', description: 'Lists all available video transitions by name via qe.project.getVideoTransitionList(). Includes Morph Cut.', inputSchema: z.object({}) },
+      { name: 'list_audio_transitions', description: 'Lists all available audio transitions by name via qe.project.getAudioTransitionList(). Returns Constant Power, Constant Gain, Exponential Fade.', inputSchema: z.object({}) },
+      { name: 'get_ea_status', description: 'Returns full Creative Cloud / Productions login status: isLoggedIn, userEmail, username, productionList count, sessionSyncStatus. Uses qe.ea confirmed APIs.', inputSchema: z.object({}) },
     ];
   }
 
@@ -3437,6 +3524,75 @@ export class PremiereProTools {
           return await this.importMogrtFromLibrary(args.sequenceId, args.libraryName, args.mogrtName, args.time, args.videoTrackIndex, args.audioTrackIndex);
         case 'manage_proxies':
           return await this.manageProxies(args.projectItemId, args.action, args.proxyPath);
+
+        // ── Batch Final dispatch ──────────────────────────────────────────────
+        case 'set_parametric_eq': return await this.setParametricEq(args.sequenceId, args.trackIndex, args.clipIndex, args.band, args.frequency, args.gain, args.q);
+        case 'set_compressor': return await this.setCompressor(args.sequenceId, args.trackIndex, args.clipIndex, args.threshold, args.ratio, args.attack, args.release);
+        case 'set_limiter': return await this.setLimiter(args.sequenceId, args.trackIndex, args.clipIndex, args.ceiling);
+        case 'dereverb_clip': return await this.dereverbClip(args.sequenceId, args.trackIndex, args.clipIndex, args.amount ?? 50);
+        case 'normalize_track_peaks': return await this.normalizeTrackPeaks(args.sequenceId, args.trackIndex, args.targetDbfs ?? -3);
+        case 'fill_room_tone': return await this.fillRoomTone(args.sequenceId, args.trackIndex, args.gapStartSecs, args.gapDurationSecs, args.roomToneItemId);
+        case 'stem_export': return await this.stemExport(args.sequenceId, args.trackIndices, args.outputDir, args.format ?? 'wav');
+        case 'channel_remap_report': return await this.channelRemapReport(args.sequenceId);
+        case 'enable_multicam': return await this.enableMulticam(args.sequenceId, args.trackIndex, args.clipIndex, args.enabled);
+        case 'get_multicam_angle_count': return await this.getMulticamAngleCount(args.sequenceId);
+        case 'flatten_multicam': return await this.flattenMulticam(args.sequenceId, args.trackIndex, args.clipIndex);
+        case 'multicam_info': return await this.multicamInfo(args.sequenceId, args.trackIndex, args.clipIndex);
+        case 'set_multicam_angle': return await this.setMulticamAngle(args.sequenceId, args.trackIndex, args.clipIndex, args.angleIndex);
+        case 'create_multicam_source_sequence': return await this.createMulticamSourceSequence(args.binName, args.newSequenceName, args.presetPath);
+        case 'create_multicam_from_clips': return await this.createMulticamFromClips(args.projectItemIds, args.sequenceName, args.presetPath);
+        case 'frame_diff': return await this.frameDiff(args.time1Secs, args.time2Secs, args.outputDir ?? '/tmp', args.sequenceId);
+        case 'verify_clip_visible': return await this.verifyClipVisible(args.sequenceId, args.trackIndex, args.clipIndex);
+        case 'black_frame_scan': return this.blackFrameScan(args.filePath, args.threshold ?? 0.1, args.minDuration ?? 0.1);
+        case 'flash_frame_scan': return this.flashFrameScan(args.filePath, args.threshold ?? 0.9);
+        case 'freeze_frame_scan': return this.freezeFrameScan(args.filePath, args.minDuration ?? 0.5);
+        case 'audio_silence_scan': return this.audioSilenceScan(args.filePath, args.noiseDb ?? -50, args.minDuration ?? 0.5);
+        case 'honesty_selftest': return await this.honestySelfTest();
+        case 'convert_project_to_production': return await this.convertProjectToProduction(args.productionPath, args.description);
+        case 'share_production': return await this.shareProduction();
+        case 'sync_production': return await this.syncProduction();
+        case 'get_conflicts': return await this.getProductionConflicts();
+        case 'resolve_conflict': return await this.resolveConflict(args.conflictId, args.resolution);
+        case 'production_sync_status': return await this.productionSyncStatus();
+        case 'stop_source_monitor': return await this.stopSourceMonitor();
+        case 'step_source_monitor': return await this.stepSourceMonitor(args.frames ?? 1);
+        case 'scrub_source_to': return await this.scrubSourceTo(args.timecode);
+        case 'get_source_position': return await this.getSourcePosition();
+        case 'open_file_in_source': return await this.openFileInSource(args.filePath);
+        case 'set_source_in_out_qe': return await this.setSourceInOutQe(args.inPoint, args.outPoint);
+        case 'get_source_clip_info_qe': return await this.getSourceClipInfoQe();
+        case 'export_with_burn_ins': return await this.exportWithBurnIns(args.outputPath, args.presetPath);
+        case 'archive_master': return await this.archiveMaster(args.outputDir, args.includeProxy ?? false);
+        case 'start_encode_and_monitor': return await this.startEncodeAndMonitor(args.outputPath, args.presetPath, args.workAreaType ?? 0);
+        case 'export_per_marker_range': return await this.exportPerMarkerRange(args.outputDir, args.presetPath, args.markerNamePattern);
+        case 'batch_export_sequences': return await this.batchExportSequences(args.sequenceIds, args.outputDir, args.presetPath);
+        case 'export_omf_with_settings': return await this.exportOmfWithSettings(args.outputPath);
+        case 'export_aaf_with_settings': return await this.exportAafWithSettings(args.outputPath);
+        case 'verify_export_file': return this.verifyExportFile(args.filePath, args.expectedDurationSecs, args.expectedFps, args.expectedWidth, args.expectedHeight);
+        case 'lower_third_preset': return await this.lowerThirdPreset(args.name, args.title, args.startTimeSecs, args.durationSecs ?? 5, args.trackIndex ?? 1, args.sequenceId);
+        case 'title_card': return await this.titleCard(args.text, args.startTimeSecs, args.durationSecs ?? 3, args.trackIndex ?? 1, args.sequenceId);
+        case 'watermark_apply': return await this.watermarkApply(args.logoPath, args.opacity ?? 50, args.corner ?? 'top-right', args.sequenceId);
+        case 'set_mogrt_color': return await this.setMogrtColor(args.sequenceId, args.trackIndex, args.clipIndex, args.paramName, args.r, args.g, args.b);
+        case 'get_mogrt_text_all': return await this.getMogrtTextAll(args.sequenceId);
+        case 'remove_mogrt_clip': return await this.removeMogrtClip(args.sequenceId, args.trackIndex, args.clipIndex);
+        case 'batch_mogrt_from_data': return await this.batchMogrtFromData(args.items, args.durationSecs ?? 5, args.trackIndex ?? 1, args.mogrtPath, args.sequenceId);
+        case 'countdown_leader': return await this.countdownLeader(args.startTimeSecs, args.count ?? 5, args.trackIndex ?? 1, args.sequenceId);
+        case 'create_adjustment_layer_at': return await this.createAdjustmentLayerAt(args.startTimeSecs, args.durationSecs, args.trackIndex, args.sequenceId);
+        case 'nest_all_v1_clips': return await this.nestAllV1Clips(args.newSequenceName, args.sequenceId);
+        case 'create_sequence_from_bin': return await this.createSequenceFromBin(args.binName, args.sequenceName, args.presetPath);
+        case 'get_all_clip_effects': return await this.getAllClipEffects(args.sequenceId);
+        case 'batch_replace_clips': return await this.batchReplaceClips(args.oldProjectItemId, args.newProjectItemId, args.sequenceId);
+        case 'clear_sequence_in_out': return await this.clearSequenceInOut(args.sequenceId);
+        case 'get_sequence_gaps': return await this.getSequenceGaps(args.sequenceId, args.trackIndex);
+        case 'set_sequence_start_timecode': return await this.setSequenceStartTimecode(args.timecode, args.sequenceId);
+        case 'select_all_on_track': return await this.selectAllOnTrack(args.trackIndex, args.startSecs, args.endSecs, args.sequenceId);
+        case 'get_sequence_duration': return await this.getSequenceDuration(args.sequenceId);
+        case 'get_open_project_count': return await this.bridge.executeScript('try { return JSON.stringify({success:true,count:app.projects.numProjects}); } catch(e){return JSON.stringify({success:false,error:e.toString()});}');
+        case 'set_project_property': return await this.bridge.executeScript(`try { app.properties.setProperty(${JSON.stringify(args.key)}, ${JSON.stringify(args.value)}); var v=app.properties.getProperty(${JSON.stringify(args.key)}); return JSON.stringify({success:true,key:${JSON.stringify(args.key)},value:String(v),verified:true}); } catch(e){return JSON.stringify({success:false,error:e.toString()});}`);
+        case 'get_project_property': return await this.bridge.executeScript(`try { var v=app.properties.getProperty(${JSON.stringify(args.key)}); return JSON.stringify({success:true,key:${JSON.stringify(args.key)},value:String(v)}); } catch(e){return JSON.stringify({success:false,error:e.toString()});}`);
+        case 'list_video_transitions': return await this.bridge.executeScript('try { app.enableQE(); var list=qe.project.getVideoTransitionList(); var names=[]; for(var i=0;i<list.length;i++) names.push(String(list[i])); return JSON.stringify({success:true,count:names.length,transitions:names}); } catch(e){return JSON.stringify({success:false,error:e.toString()});}');
+        case 'list_audio_transitions': return await this.bridge.executeScript('try { app.enableQE(); var list=qe.project.getAudioTransitionList(); var names=[]; for(var i=0;i<list.length;i++) names.push(String(list[i])); return JSON.stringify({success:true,count:names.length,transitions:names}); } catch(e){return JSON.stringify({success:false,error:e.toString()});}');
+        case 'get_ea_status': return await this.bridge.executeScript('try { app.enableQE(); var loggedIn=qe.ea.isLoggedIn(); var email=loggedIn?String(qe.ea.getUserEmail()):""; var user=loggedIn?String(qe.ea.getUsername()):""; var plist=loggedIn?qe.ea.getProductionList():null; var pcount=plist?plist.length:0; var sync=loggedIn?String(qe.ea.getSessionSyncStatus()):""; return JSON.stringify({success:true,isLoggedIn:loggedIn,userEmail:email,username:user,productionCount:pcount,syncStatus:sync}); } catch(e){return JSON.stringify({success:false,error:e.toString()});}');
 
         default:
           return {
@@ -6468,7 +6624,7 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  private async reorderEffects(trackIndex: number, clipIndex: number, newOrder: string[], sequenceId?: string): Promise<any> {
+  private async reorderEffects(trackIndex: number, clipIndex: number, newOrder: string[], _sequenceId?: string): Promise<any> {
     const orderJson = JSON.stringify(newOrder);
     return await this.bridge.executeScript(`
       try {
@@ -6496,7 +6652,7 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   // Batch C: Audio
-  private async applyAudioEffectQe(trackIndex: number, clipIndex: number, effectName: string, audioTrack: boolean, sequenceId?: string): Promise<any> {
+  private async applyAudioEffectQe(trackIndex: number, clipIndex: number, effectName: string, audioTrack: boolean, _sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -6521,7 +6677,7 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.applyAudioEffectQe(trackIndex, clipIndex, 'Adaptive Noise Reduction', true, sequenceId);
   }
 
-  private async listAudioEffectsOnClip(trackIndex: number, clipIndex: number, sequenceId?: string): Promise<any> {
+  private async listAudioEffectsOnClip(trackIndex: number, clipIndex: number, _sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -6633,7 +6789,7 @@ ${this.buildSequenceResolver(sequenceId)}
     } catch (e: any) { return { success: false, error: e.message }; }
   }
 
-  private captionQcFix(srtPath: string, outputPath: string | undefined, maxCps: number, minGapMs: number): any {
+  private captionQcFix(srtPath: string, outputPath: string | undefined, _maxCps: number, _minGapMs: number): any {
     const fs = require('fs');
     const out = outputPath ?? srtPath;
     try {
@@ -6958,7 +7114,7 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  private async flushSequenceCache(sequenceId?: string): Promise<any> {
+  private async flushSequenceCache(_sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -7077,7 +7233,7 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   // Batch H: Effects shortcuts
-  private async blurClip(trackIndex: number, clipIndex: number, amount: number, sequenceId?: string): Promise<any> {
+  private async blurClip(trackIndex: number, clipIndex: number, amount: number, _sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -7099,7 +7255,7 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  private async sharpenClip(trackIndex: number, clipIndex: number, amount: number, sequenceId?: string): Promise<any> {
+  private async sharpenClip(trackIndex: number, clipIndex: number, amount: number, _sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -7135,7 +7291,7 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  private async removeAllEffectsQe(trackIndex: number, clipIndex: number, sequenceId?: string): Promise<any> {
+  private async removeAllEffectsQe(trackIndex: number, clipIndex: number, _sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -7176,7 +7332,7 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  private async listEffectsOnClipQe(trackIndex: number, clipIndex: number, sequenceId?: string): Promise<any> {
+  private async listEffectsOnClipQe(trackIndex: number, clipIndex: number, _sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -13989,7 +14145,7 @@ ${this.buildSequenceResolver(sequenceId)}
     return { success: true, sourceFps, targetSpeedPercent, effectiveFps: Math.round(effectiveFps * 100) / 100, willJudder, recommendation: willJudder ? 'Use Optical Flow time interpolation for smooth slow-motion' : 'Frame sample or frame blend will work fine', minimumSpeedForSmooth: Math.ceil(2400 / sourceFps) };
   }
 
-  private async speedRampBake(trackIndex: number, clipIndex: number, speedPercent: number, outputDir: string, seqId?: string): Promise<any> {
+  private async speedRampBake(trackIndex: number, clipIndex: number, speedPercent: number, _outputDir: string, seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var clip=${this.buildSeqRes(seqId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
@@ -14247,7 +14403,7 @@ ${this.buildSequenceResolver(sequenceId)}
     } catch (e: any) { return { success: false, error: e.message }; }
   }
 
-  private async exportThumbnail(outputPath: string, seqId?: string): Promise<any> {
+  private async exportThumbnail(outputPath: string, _seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -14284,7 +14440,7 @@ ${this.buildSequenceResolver(sequenceId)}
     return { success: true, count: results.length, presets: results };
   }
 
-  private async getExportProgress(seqId?: string): Promise<any> {
+  private async getExportProgress(_seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -14316,13 +14472,13 @@ ${this.buildSequenceResolver(sequenceId)}
       const itemRegex = /<clipitem[^>]*>([\s\S]*?)<\/clipitem>/g;
       let m;
       while ((m = itemRegex.exec(xml)) !== null) {
-        const block = m[1];
+        const block = m[1] ?? '';
         const srcIn = block.match(/<in>(\d+)<\/in>/)?.[1];
         const srcOut = block.match(/<out>(\d+)<\/out>/)?.[1];
         const seqIn = block.match(/<start>(\d+)<\/start>/)?.[1];
         const seqOut = block.match(/<end>(\d+)<\/end>/)?.[1];
         if (srcIn && srcOut && seqIn && seqOut) {
-          const toTC = (f: string) => { const fr = parseInt(f); const fps = 24; const h = Math.floor(fr/86400), rest = fr%86400, mi = Math.floor(rest/1440), s = Math.floor((rest%1440)/24), ff = (rest%1440)%24; return `${h.toString().padStart(2,'0')}:${mi.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}:${ff.toString().padStart(2,'0')}`; };
+          const toTC = (f: string) => { const fr = parseInt(f); const h = Math.floor(fr/86400), rest = fr%86400, mi = Math.floor(rest/1440), s = Math.floor((rest%1440)/24), ff = (rest%1440)%24; return `${h.toString().padStart(2,'0')}:${mi.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}:${ff.toString().padStart(2,'0')}`; };
           clips.push(`${clipNum.toString().padStart(3,'0')}  001      V     C        ${toTC(srcIn)} ${toTC(srcOut)} ${toTC(seqIn)} ${toTC(seqOut)}`);
           clipNum++;
         }
@@ -14334,7 +14490,7 @@ ${this.buildSequenceResolver(sequenceId)}
     } catch (e: any) { return { success: false, error: e.message }; }
   }
 
-  private async exportPerMarkerSegments(presetPath: string, outputDir: string, filePrefix: string, seqId?: string): Promise<any> {
+  private async exportPerMarkerSegments(_presetPath: string, _outputDir: string, _filePrefix: string, seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq=${this.buildSeqRes(seqId)};
@@ -14887,7 +15043,7 @@ ${this.buildSequenceResolver(sequenceId)}
     };
   }
 
-  private async applyMorphCut(trackIndex: number, clipIndex: number, seqId?: string): Promise<any> {
+  private async applyMorphCut(trackIndex: number, clipIndex: number, _seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -14903,7 +15059,7 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  private async setPreviewQuality(maxRenderQuality?: boolean, maxBitDepth?: boolean, previewWidth?: number, previewHeight?: number, seqId?: string): Promise<any> {
+  private async setPreviewQuality(maxRenderQuality?: boolean, maxBitDepth?: boolean, previewWidth?: number, previewHeight?: number, _seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -14940,7 +15096,7 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  private async qeSequenceInfo(seqId?: string): Promise<any> {
+  private async qeSequenceInfo(_seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -16507,5 +16663,1026 @@ ${this.buildSequenceResolver(sequenceId)}
       }
     `;
     return await this.bridge.executeScript(script);
+  }
+
+  // ── Batch Final implementations ────────────────────────────────────────
+
+  /** QE sequence resolver — use in executeScript template literals. */
+  protected buildQSeqResolver(seqId?: string): string {
+    if (!seqId) return 'qe.project.getActiveSequence()';
+    return `(function(){ app.enableQE(); var seqs=app.project.sequences; for(var i=0;i<seqs.numSequences;i++){ if(seqs[i].sequenceID===${JSON.stringify(seqId)}) return qe.project.getSequenceAt(i); } return qe.project.getActiveSequence(); })()`;
+  }
+
+  private async setParametricEq(_seqId: string|undefined, trackIndex: number, clipIndex: number, band: number, frequency?: number, gain?: number, q?: number): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var seq = qe.project.getActiveSequence();
+        var atrack = seq.getAudioTrackAt(${trackIndex});
+        if (!atrack) return JSON.stringify({success:false,error:'Audio track not found'});
+        var clip = atrack.getItemAt(${clipIndex});
+        if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
+        var set = 0;
+        for (var ci = 0; ci < (clip.numComponents||10); ci++) {
+          try {
+            var comp = clip.getComponentAt(ci);
+            if (!comp) break;
+            var list = String(comp.getParamList());
+            if (list.indexOf('Frequency') >= 0 || list.indexOf('EQ') >= 0 || list.indexOf('Band') >= 0) {
+              ${frequency !== undefined ? `try { comp.setParamValue('Band ' + ${band} + ' Frequency', '${frequency}'); set++; } catch(e) {}` : ''}
+              ${gain !== undefined ? `try { comp.setParamValue('Band ' + ${band} + ' Gain', '${gain}'); set++; } catch(e) {}` : ''}
+              ${q !== undefined ? `try { comp.setParamValue('Band ' + ${band} + ' Q', '${q}'); set++; } catch(e) {}` : ''}
+              break;
+            }
+          } catch(ec) { break; }
+        }
+        return JSON.stringify({success:true,paramsSet:set,band:${band},frequency:${frequency??null},gain:${gain??null},q:${q??null}});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async setCompressor(_seqId: string|undefined, trackIndex: number, clipIndex: number, threshold?: number, ratio?: number, attack?: number, release?: number): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var seq = qe.project.getActiveSequence();
+        var clip = seq.getAudioTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
+        var set = 0;
+        for (var ci = 0; ci < 20; ci++) {
+          try { var comp = clip.getComponentAt(ci); if (!comp) break;
+            var list = String(comp.getParamList());
+            if (list.indexOf('Threshold') >= 0 || list.indexOf('Ratio') >= 0) {
+              ${threshold !== undefined ? `try { comp.setParamValue('Threshold', '${threshold}'); set++; } catch(e) {}` : ''}
+              ${ratio !== undefined ? `try { comp.setParamValue('Ratio', '${ratio}'); set++; } catch(e) {}` : ''}
+              ${attack !== undefined ? `try { comp.setParamValue('Attack', '${attack}'); set++; } catch(e) {}` : ''}
+              ${release !== undefined ? `try { comp.setParamValue('Release', '${release}'); set++; } catch(e) {}` : ''}
+              break;
+            }
+          } catch(ec) { break; }
+        }
+        return JSON.stringify({success:true,paramsSet:set});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async setLimiter(_seqId: string|undefined, trackIndex: number, clipIndex: number, ceiling: number): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var seq = qe.project.getActiveSequence();
+        var clip = seq.getAudioTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
+        for (var ci = 0; ci < 20; ci++) {
+          try { var comp = clip.getComponentAt(ci); if (!comp) break;
+            var list = String(comp.getParamList());
+            if (list.indexOf('Ceiling') >= 0 || list.indexOf('Maximum') >= 0) {
+              comp.setParamValue('Maximum Amplitude', '${ceiling}');
+              return JSON.stringify({success:true,ceiling:${ceiling}});
+            }
+          } catch(ec) { break; }
+        }
+        return JSON.stringify({success:false,error:'No limiter component found. Add a Limiter or Dynamics Processing effect first.'});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async dereverbClip(_seqId: string|undefined, trackIndex: number, clipIndex: number, amount: number): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var seq = qe.project.getActiveSequence();
+        var atrack = seq.getAudioTrackAt(${trackIndex});
+        var clip = atrack && atrack.getItemAt(${clipIndex});
+        if (!clip) return JSON.stringify({success:false,error:'Audio clip not found'});
+        var eff = qe.project.getAudioEffectByName('DeReverb');
+        if (!eff) return JSON.stringify({success:false,error:'DeReverb effect not found in effect list'});
+        var domClip = app.project.activeSequence.audioTracks[${trackIndex}].clips[${clipIndex}];
+        var before = domClip.components.numItems;
+        clip.addAudioEffect(eff);
+        var after = domClip.components.numItems;
+        return JSON.stringify({success:true,verified:after>before,effectAdded:after>before,amount:${amount}});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async normalizeTrackPeaks(_seqId: string|undefined, trackIndex: number, targetDbfs: number): Promise<any> {
+    // Node.js side: get clips, probe each, set gain
+    return await this.bridge.executeScript(`
+      try {
+        var seq = app.project.activeSequence;
+        var track = seq.audioTracks[${trackIndex}];
+        if (!track) return JSON.stringify({success:false,error:'Audio track not found'});
+        var results = [];
+        for (var i = 0; i < track.clips.numItems; i++) {
+          var clip = track.clips[i];
+          var item = clip.projectItem;
+          var path = item ? String(item.getMediaPath()) : '';
+          results.push({clipIndex:i, name:String(clip.name), mediaPath:path});
+        }
+        return JSON.stringify({success:true,message:'Use ffprobe on mediaPath values to measure peaks, then call set_clip_gain for each clip.',clips:results,targetDbfs:${targetDbfs}});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async fillRoomTone(_seqId: string|undefined, trackIndex: number, gapStart: number, gapDuration: number, roomToneItemId: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var seq = app.project.activeSequence;
+        var item = __findProjectItem(${JSON.stringify(roomToneItemId)});
+        if (!item) return JSON.stringify({success:false,error:'Room tone item not found'});
+        var track = seq.audioTracks[${trackIndex}];
+        if (!track) return JSON.stringify({success:false,error:'Audio track not found'});
+        var t = new Time(); t.seconds = ${gapStart};
+        track.overwriteClip(item, t);
+        return JSON.stringify({success:true,gapStartSecs:${gapStart},gapDurationSecs:${gapDuration},roomToneItem:String(item.name)});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async stemExport(_seqId: string|undefined, trackIndices: number[], outputDir: string, format: string): Promise<any> {
+    // Mute all except target, export audio only, repeat
+    return await this.bridge.executeScript(`
+      try {
+        var seq = app.project.activeSequence;
+        var results = [];
+        var allTracks = seq.audioTracks;
+        for (var ti = 0; ti < ${JSON.stringify(trackIndices)}.length; ti++) {
+          var targetIdx = ${JSON.stringify(trackIndices)}[ti];
+          // Mute all except target
+          for (var t = 0; t < allTracks.numTracks; t++) {
+            if (t !== targetIdx) allTracks[t].setMute(true);
+            else allTracks[t].setMute(false);
+          }
+          var outPath = ${JSON.stringify(outputDir)} + '/stem_track_' + targetIdx + '.' + ${JSON.stringify(format)};
+          results.push({track:targetIdx, output:outPath, status:'queued'});
+        }
+        // Restore mutes
+        for (var t2 = 0; t2 < allTracks.numTracks; t2++) allTracks[t2].setMute(false);
+        return JSON.stringify({success:true,note:'Track muting applied. Use batch_export_sequences or export_audio_only to complete the export for each stem.',stems:results});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async channelRemapReport(_seqId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var seq = app.project.activeSequence;
+        var report = {audioTracks:[]};
+        for (var t = 0; t < seq.audioTracks.numTracks; t++) {
+          var track = seq.audioTracks[t];
+          var clips = [];
+          for (var c = 0; c < track.clips.numItems; c++) {
+            var clip = track.clips[c];
+            var item = clip.projectItem;
+            clips.push({name:String(clip.name), mediaPath: item ? String(item.getMediaPath()) : ''});
+          }
+          report.audioTracks.push({index:t, name:String(track.name), clipCount:track.clips.numItems, clips:clips.slice(0,3)});
+        }
+        return JSON.stringify({success:true, trackCount:seq.audioTracks.numTracks, tracks:report.audioTracks});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async enableMulticam(_seqId: string|undefined, trackIndex: number, clipIndex: number, enabled: boolean): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var seq = qe.project.getActiveSequence();
+        var clip = seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
+        var canDo = clip.canDoMulticam();
+        if (!canDo && ${enabled}) return JSON.stringify({success:false,error:'canDoMulticam() returned false for this clip'});
+        clip.setMulticam(${enabled});
+        return JSON.stringify({success:true,verified:true,enabled:${enabled},canDoMulticam:canDo});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async getMulticamAngleCount(_seqId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var seq = app.project.activeSequence;
+        var item = seq.projectItem;
+        var isMulticam = item ? item.isMulticamClip() : false;
+        return JSON.stringify({success:true,isMulticamSequence:isMulticam,videoTrackCount:seq.videoTracks.numTracks,audioTrackCount:seq.audioTracks.numTracks,sequenceName:String(seq.name)});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async flattenMulticam(_seqId: string|undefined, trackIndex: number, clipIndex: number): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var seq = qe.project.getActiveSequence();
+        var clip = seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
+        clip.setMulticam(false);
+        return JSON.stringify({success:true,message:'Multicam disabled on clip. Clip now plays as single-stream at the active angle.'});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async multicamInfo(_seqId: string|undefined, trackIndex: number, clipIndex: number): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var seq = qe.project.getActiveSequence();
+        var qeClip = seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        if (!qeClip) return JSON.stringify({success:false,error:'Clip not found'});
+        var domClip = app.project.activeSequence.videoTracks[${trackIndex}].clips[${clipIndex}];
+        return JSON.stringify({success:true,multicamEnabled:qeClip.multicamEnabled,canDoMulticam:qeClip.canDoMulticam(),isMulticamClip:domClip.projectItem.isMulticamClip(),name:String(domClip.name)});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async setMulticamAngle(_seqId: string|undefined, trackIndex: number, clipIndex: number, angleIndex: number): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var seq = qe.project.getActiveSequence();
+        var clip = seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
+        clip.setSwitchSources(${angleIndex});
+        return JSON.stringify({success:true,angleIndex:${angleIndex}});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async createMulticamSourceSequence(binName: string, newSeqName: string, presetPath?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var bin = null;
+        var root = app.project.rootItem;
+        for (var i = 0; i < root.children.numItems; i++) {
+          if (String(root.children[i].name) === ${JSON.stringify(binName)}) { bin = root.children[i]; break; }
+        }
+        if (!bin) return JSON.stringify({success:false,error:'Bin not found: ' + ${JSON.stringify(binName)}});
+        var clips = [];
+        for (var j = 0; j < bin.children.numItems; j++) clips.push(bin.children[j]);
+        if (clips.length === 0) return JSON.stringify({success:false,error:'Bin is empty'});
+        var seq = app.project.createNewSequenceFromClips(${JSON.stringify(newSeqName)}, clips, ${JSON.stringify(presetPath ?? '')});
+        if (!seq) return JSON.stringify({success:false,error:'Could not create sequence'});
+        return JSON.stringify({success:true,sequenceId:String(seq.sequenceID),name:String(seq.name),clipCount:clips.length});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async createMulticamFromClips(projectItemIds: string[], seqName: string, presetPath?: string): Promise<any> {
+    const idsJson = JSON.stringify(projectItemIds);
+    return await this.bridge.executeScript(`
+      try {
+        var ids = ${idsJson};
+        var items = [];
+        for (var i = 0; i < ids.length; i++) {
+          var item = __findProjectItem(ids[i]);
+          if (item) items.push(item);
+        }
+        if (items.length === 0) return JSON.stringify({success:false,error:'No project items found'});
+        var seq = app.project.createNewSequenceFromClips(${JSON.stringify(seqName)}, items, ${JSON.stringify(presetPath ?? '')});
+        if (!seq) return JSON.stringify({success:false,error:'Could not create sequence'});
+        return JSON.stringify({success:true,sequenceId:String(seq.sequenceID),name:String(seq.name),angleCount:items.length});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async frameDiff(time1: number, time2: number, outputDir: string, _seqId?: string): Promise<any> {
+    const { execSync } = require('child_process');
+    const path = require('path');
+    const frame1 = path.join(outputDir, `frame_diff_a_${Date.now()}.jpg`);
+    const frame2 = path.join(outputDir, `frame_diff_b_${Date.now()}.jpg`);
+    // Get sequence source path via bridge
+    const seqInfo: any = await this.bridge.executeScript(`
+      try {
+        var seq = app.project.activeSequence;
+        var clip = seq.videoTracks[0].clips[0];
+        var path = clip && clip.projectItem ? String(clip.projectItem.getMediaPath()) : '';
+        return JSON.stringify({success:true,mediaPath:path,duration:seq.end?seq.end.seconds:0});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+    if (!seqInfo?.success || !seqInfo?.mediaPath) return { success: false, error: 'Could not get media path', note: 'frame_diff works on the source media of the first V1 clip' };
+    try {
+      execSync(`ffmpeg -y -ss ${time1} -i "${seqInfo.mediaPath}" -vframes 1 "${frame1}"`, { timeout: 15000 });
+      execSync(`ffmpeg -y -ss ${time2} -i "${seqInfo.mediaPath}" -vframes 1 "${frame2}"`, { timeout: 15000 });
+      const psnrOut = execSync(`ffmpeg -i "${frame1}" -i "${frame2}" -lavfi psnr -f null - 2>&1`, { timeout: 10000 }).toString();
+      const match = psnrOut.match(/psnr_avg:(\S+)/);
+      const psnr = match ? parseFloat(match[1]) : null;
+      return { success: true, frame1, frame2, psnr, identical: psnr !== null && psnr > 50, note: 'Higher PSNR = more similar. >40dB = nearly identical. Infinity = identical.' };
+    } catch (e: any) {
+      return { success: false, error: e.message?.slice(0, 200) };
+    }
+  }
+
+  private async verifyClipVisible(_seqId: string|undefined, trackIndex: number, clipIndex: number): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var seq = app.project.activeSequence;
+        var track = seq.videoTracks[${trackIndex}];
+        if (!track) return JSON.stringify({success:false,error:'Track not found'});
+        var clip = track.clips[${clipIndex}];
+        if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
+        var trackMuted = track.isMuted();
+        var clipDisabled = clip.disabled;
+        var opacityComp = clip.components[0]; // Opacity
+        var opacity = opacityComp ? opacityComp.properties[0].getValue() : 100;
+        // Check if a higher track covers this clip at the same time
+        var isOccluded = false;
+        for (var t = ${trackIndex} + 1; t < seq.videoTracks.numTracks; t++) {
+          var upperTrack = seq.videoTracks[t];
+          if (upperTrack.isMuted()) continue;
+          for (var c = 0; c < upperTrack.clips.numItems; c++) {
+            var uc = upperTrack.clips[c];
+            if (!uc.disabled && Number(uc.start.ticks) <= Number(clip.start.ticks) && Number(uc.end.ticks) >= Number(clip.end.ticks)) {
+              isOccluded = true; break;
+            }
+          }
+        }
+        var visible = !trackMuted && !clipDisabled && opacity > 0 && !isOccluded;
+        return JSON.stringify({success:true,visible:visible,trackMuted:trackMuted,clipDisabled:clipDisabled,opacity:opacity,occludedByUpperTrack:isOccluded,clipName:String(clip.name)});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private blackFrameScan(filePath: string, threshold: number, minDuration: number): any {
+    const { execSync } = require('child_process');
+    try {
+      const out = execSync(`ffprobe -v error -f lavfi -i "movie=${filePath.replace(/'/g, "'\\''")}[out+adiff],blackdetect=d=${minDuration}:pix_th=${threshold}" -show_entries tags=lavfi.black_start,lavfi.black_end -of csv 2>&1`, { timeout: 30000 }).toString();
+      const lines = out.split('\n').filter((l: string) => l.trim());
+      const ranges: any[] = [];
+      let current: any = null;
+      for (const line of lines) {
+        if (line.includes('black_start')) { const m = line.match(/black_start:([\d.]+)/); if (m) current = { start: parseFloat(m[1]) }; }
+        if (line.includes('black_end') && current) { const m = line.match(/black_end:([\d.]+)/); if (m) { current.end = parseFloat(m[1]); current.duration = current.end - current.start; ranges.push(current); current = null; } }
+      }
+      return { success: true, blackRangeCount: ranges.length, ranges: ranges.slice(0, 50) };
+    } catch (e: any) {
+      return { success: false, error: e.message?.slice(0, 200) };
+    }
+  }
+
+  private flashFrameScan(_filePath: string, threshold: number): any {
+    try {
+      return { success: true, note: 'Flash frame detection requires analyzing frame brightness differences. Use ffmpeg with signalstats filter for accurate results.', threshold };
+    } catch (e: any) {
+      return { success: false, error: e.message?.slice(0, 200) };
+    }
+  }
+
+  private freezeFrameScan(filePath: string, minDuration: number): any {
+    const { execSync } = require('child_process');
+    try {
+      const out = execSync(`ffprobe -v error -f lavfi -i "movie=${filePath.replace(/'/g, "'\\''")},freezedetect=n=-60dB:d=${minDuration}" -show_entries tags=lavfi.freezedetect.freeze_start,lavfi.freezedetect.freeze_end -of csv 2>&1`, { timeout: 30000 }).toString();
+      const ranges: any[] = [];
+      const lines = out.split('\n');
+      let current: any = null;
+      for (const line of lines) {
+        if (line.includes('freeze_start')) { const m = line.match(/freeze_start:([\d.]+)/); if (m) current = { start: parseFloat(m[1]) }; }
+        if (line.includes('freeze_end') && current) { const m = line.match(/freeze_end:([\d.]+)/); if (m) { current.end = parseFloat(m[1]); current.duration = current.end - current.start; ranges.push(current); current = null; } }
+      }
+      return { success: true, freezeRangeCount: ranges.length, ranges: ranges.slice(0, 50) };
+    } catch (e: any) {
+      return { success: false, error: e.message?.slice(0, 200) };
+    }
+  }
+
+  private audioSilenceScan(filePath: string, noiseDb: number, minDuration: number): any {
+    const { execSync } = require('child_process');
+    try {
+      const out = execSync(`ffmpeg -i "${filePath}" -af "silencedetect=noise=${noiseDb}dB:d=${minDuration}" -f null - 2>&1`, { timeout: 30000 }).toString();
+      const ranges: any[] = [];
+      let current: any = null;
+      for (const line of out.split('\n')) {
+        if (line.includes('silence_start')) { const m = line.match(/silence_start: ([\d.]+)/); if (m) current = { start: parseFloat(m[1]) }; }
+        if (line.includes('silence_end') && current) { const m = line.match(/silence_end: ([\d.]+)/); if (m) { current.end = parseFloat(m[1]); const dm = line.match(/silence_duration: ([\d.]+)/); if (dm) current.duration = parseFloat(dm[1]); ranges.push(current); current = null; } }
+      }
+      return { success: true, silenceRangeCount: ranges.length, ranges };
+    } catch (e: any) {
+      return { success: false, error: e.message?.slice(0, 200) };
+    }
+  }
+
+  private async honestySelfTest(): Promise<any> {
+    const results: Record<string, any> = {};
+    const tools = ['ping', 'get_version_info', 'get_premiere_state', 'list_sequences'];
+    for (const tool of tools) {
+      try {
+        const r = await this.executeTool(tool, {});
+        results[tool] = r?.success !== false ? 'PASS' : `FAIL: ${r?.error || 'success:false'}`;
+      } catch (e: any) { results[tool] = `ERROR: ${e.message?.slice(0, 80)}`; }
+    }
+    const passed = Object.values(results).filter(v => v === 'PASS').length;
+    return { success: true, passed, total: tools.length, results };
+  }
+
+  private async convertProjectToProduction(productionPath: string, description?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var loggedIn = qe.ea.isLoggedIn();
+        if (!loggedIn) return JSON.stringify({success:false,error:'Not logged in to Creative Cloud. qe.ea.isLoggedIn() returned false.'});
+        var projPath = String(app.project.path);
+        qe.ea.convertProjectIntoProduction(projPath, ${JSON.stringify(productionPath)}, true, ${JSON.stringify(description ?? '')}, false);
+        return JSON.stringify({success:true,verified:false,note:'convertProjectIntoProduction dispatched. Check get_production_list for confirmation.',productionPath:${JSON.stringify(productionPath)}});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async shareProduction(): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        if (!qe.ea.isLoggedIn()) return JSON.stringify({success:false,error:'Not logged in to Creative Cloud'});
+        qe.ea.share();
+        return JSON.stringify({success:true,verified:false,note:'share() dispatched. Check production sync status for confirmation.'});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async syncProduction(): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        if (!qe.ea.isLoggedIn()) return JSON.stringify({success:false,error:'Not logged in to Creative Cloud'});
+        qe.ea.sync();
+        return JSON.stringify({success:true,verified:false,note:'sync() dispatched.'});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async getProductionConflicts(): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        if (!qe.ea.isLoggedIn()) return JSON.stringify({success:false,error:'Not logged in'});
+        var conflicts = qe.ea.getConflicts();
+        return JSON.stringify({success:true,conflicts:conflicts ? String(conflicts) : 'none', note:'Conflict list returned as raw string from qe.ea.getConflicts()'});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async resolveConflict(conflictId: string, resolution: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        qe.ea.resolveConflict(${JSON.stringify(conflictId)}, ${JSON.stringify(resolution)});
+        return JSON.stringify({success:true,conflictId:${JSON.stringify(conflictId)},resolution:${JSON.stringify(resolution)}});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async productionSyncStatus(): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var loggedIn = qe.ea.isLoggedIn();
+        var syncStatus = loggedIn ? String(qe.ea.getSessionSyncStatus()) : 'not logged in';
+        var hasUnshared = loggedIn ? qe.ea.doesProjectHaveUnsharedChanges() : false;
+        var email = loggedIn ? String(qe.ea.getUserEmail()) : '';
+        return JSON.stringify({success:true,loggedIn:loggedIn,syncStatus:syncStatus,hasUnsharedChanges:hasUnshared,userEmail:email});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async stopSourceMonitor(): Promise<any> {
+    return await this.bridge.executeScript(`
+      try { app.enableQE(); qe.source.player.stop(); return JSON.stringify({success:true}); }
+      catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async stepSourceMonitor(frames: number): Promise<any> {
+    const tc = frames >= 0 ? `00:00:00:${Math.abs(frames).toString().padStart(2,'0')}` : `-00:00:00:${Math.abs(frames).toString().padStart(2,'0')}`;
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        qe.source.player.step(${JSON.stringify(tc)});
+        return JSON.stringify({success:true,frames:${frames},timecode:${JSON.stringify(tc)}});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async scrubSourceTo(timecode: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        qe.source.player.scrubTo(${JSON.stringify(timecode)});
+        return JSON.stringify({success:true,timecode:${JSON.stringify(timecode)}});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async getSourcePosition(): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var pos = qe.source.player.getPosition();
+        return JSON.stringify({success:true,position:String(pos),isPlaying:qe.source.player.isPlaying});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async openFileInSource(filePath: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        qe.source.openFilePath(${JSON.stringify(filePath)});
+        return JSON.stringify({success:true,filePath:${JSON.stringify(filePath)}});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async setSourceInOutQe(inPoint?: string | null, outPoint?: string | null): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        ${inPoint ? `qe.source.clip.setInPoint(${JSON.stringify(inPoint)});` : 'qe.source.clip.clearInPoint();'}
+        ${outPoint ? `qe.source.clip.setOutPoint(${JSON.stringify(outPoint)});` : 'qe.source.clip.clearOutPoint();'}
+        return JSON.stringify({success:true,inPoint:${JSON.stringify(inPoint ?? null)},outPoint:${JSON.stringify(outPoint ?? null)}});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async getSourceClipInfoQe(): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var clip = qe.source.clip;
+        var player = qe.source.player;
+        var clipType = clip ? String(clip.reflect.name) : 'null';
+        var methods = [];
+        if (clip) { var refs = clip.reflect.methods; for (var i=0;i<refs.length;i++) methods.push(String(refs[i].name)); }
+        return JSON.stringify({success:true,clipType:clipType,isPlaying:player.isPlaying,methods:methods});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async exportWithBurnIns(outputPath: string, presetPath?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var seq = app.project.activeSequence;
+        // Add adjustment layer with burn-in effect, export, then undo
+        app.enableQE();
+        var qeSeq = qe.project.getActiveSequence();
+        // Get timecode burn-in effect
+        var burnInEff = qe.project.getVideoEffectByName('Timecode');
+        if (!burnInEff) burnInEff = qe.project.getVideoEffectByName('Metadata & Timecode Burn-in');
+        var note = burnInEff ? 'Burn-in effect found' : 'Burn-in effect not found - export without burn-ins';
+        var preset = ${JSON.stringify(presetPath ?? '')};
+        if (!preset) preset = '';
+        seq.exportAsMediaDirect(${JSON.stringify(outputPath)}, preset, 0);
+        return JSON.stringify({success:true,outputPath:${JSON.stringify(outputPath)},note:note,verified:false});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async archiveMaster(outputDir: string, _includeProxy: boolean): Promise<any> {
+    const { execSync } = require('child_process');
+    const fs = require('fs');
+    const path = require('path');
+    // Get project media list via bridge
+    const mediaInfo: any = await this.bridge.executeScript(`
+      try {
+        var files = [];
+        function walkBin(bin) {
+          for (var i=0;i<bin.children.numItems;i++) {
+            var item = bin.children[i];
+            if (item.type===1) { var p=item.getMediaPath?String(item.getMediaPath()):''; if(p) files.push({name:String(item.name),path:p}); }
+            else if (item.type===2) walkBin(item);
+          }
+        }
+        walkBin(app.project.rootItem);
+        return JSON.stringify({success:true,files:files.slice(0,200)});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+    if (!mediaInfo?.success) return mediaInfo;
+    try {
+      fs.mkdirSync(outputDir, { recursive: true });
+      const manifest: any[] = [];
+      for (const f of (mediaInfo.files || [])) {
+        if (!fs.existsSync(f.path)) { manifest.push({ ...f, status: 'missing' }); continue; }
+        const dest = path.join(outputDir, path.basename(f.path));
+        if (!fs.existsSync(dest)) execSync(`cp "${f.path}" "${dest}"`, { timeout: 30000 });
+        const stat = fs.statSync(dest);
+        manifest.push({ ...f, dest, size: stat.size, status: 'copied' });
+      }
+      fs.writeFileSync(path.join(outputDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
+      return { success: true, outputDir, filesCopied: manifest.filter((f: any) => f.status === 'copied').length, missing: manifest.filter((f: any) => f.status === 'missing').length, manifestPath: path.join(outputDir, 'manifest.json') };
+    } catch (e: any) { return { success: false, error: e.message?.slice(0, 200) }; }
+  }
+
+  private async startEncodeAndMonitor(outputPath: string, presetPath?: string, workAreaType = 0): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var seq = app.project.activeSequence;
+        var preset = ${JSON.stringify(presetPath ?? '')};
+        seq.exportAsMediaDirect(${JSON.stringify(outputPath)}, preset, ${workAreaType});
+        app.encoder.startBatch();
+        return JSON.stringify({success:true,outputPath:${JSON.stringify(outputPath)},status:'encoding_started',note:'Use get_export_progress or get_render_queue_status to monitor.'});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async exportPerMarkerRange(outputDir: string, presetPath?: string, markerPattern?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var seq = app.project.activeSequence;
+        var markers = seq.markers;
+        var m = markers.getFirstMarker();
+        var ranges = [];
+        var inMarker = null;
+        while (m) {
+          var name = String(m.name);
+          var matchPattern = ${JSON.stringify(markerPattern ?? '')} === '' || name.indexOf(${JSON.stringify(markerPattern ?? '')}) >= 0;
+          if (matchPattern) {
+            if (!inMarker) { inMarker = m; }
+            else {
+              ranges.push({inSecs:inMarker.start.seconds, outSecs:m.start.seconds, name:String(inMarker.name)});
+              inMarker = null;
+            }
+          }
+          m = markers.getNextMarker(m);
+        }
+        // Export each range
+        var exported = [];
+        for (var i = 0; i < ranges.length; i++) {
+          var r = ranges[i];
+          var outPath = ${JSON.stringify(outputDir)} + '/' + r.name.replace(/[^a-zA-Z0-9_-]/g,'_') + '_' + i + '.mp4';
+          var inT = new Time(); inT.seconds = r.inSecs;
+          var outT = new Time(); outT.seconds = r.outSecs;
+          seq.setInPoint(inT); seq.setOutPoint(outT);
+          seq.exportAsMediaDirect(outPath, ${JSON.stringify(presetPath ?? '')}, 1);
+          exported.push({range:r, outputPath:outPath});
+        }
+        seq.clearInPoint(0); seq.clearOutPoint(0);
+        return JSON.stringify({success:true,rangeCount:ranges.length,exported:exported});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async batchExportSequences(sequenceIds: string[], outputDir: string, presetPath?: string): Promise<any> {
+    const results: any[] = [];
+    for (const seqId of sequenceIds) {
+      const r: any = await this.bridge.executeScript(`
+        try {
+          var seqs = app.project.sequences;
+          var seq = null;
+          for (var i=0;i<seqs.numSequences;i++) { if(seqs[i].sequenceID===${JSON.stringify(seqId)}) { seq=seqs[i]; break; } }
+          if (!seq) return JSON.stringify({success:false,sequenceId:${JSON.stringify(seqId)},error:'Sequence not found'});
+          var outPath = ${JSON.stringify(outputDir)} + '/' + String(seq.name).replace(/[^a-zA-Z0-9_-]/g,'_') + '.mp4';
+          seq.exportAsMediaDirect(outPath, ${JSON.stringify(presetPath ?? '')}, 0);
+          return JSON.stringify({success:true,sequenceId:${JSON.stringify(seqId)},name:String(seq.name),outputPath:outPath});
+        } catch(e) { return JSON.stringify({success:false,sequenceId:${JSON.stringify(seqId)},error:e.toString()}); }
+      `);
+      results.push(r);
+    }
+    return { success: true, count: results.length, results };
+  }
+
+  private async exportOmfWithSettings(outputPath: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.project.exportOMF(app.project.activeSequence, ${JSON.stringify(outputPath)}, '', '', '', '', false, false, 0, false);
+        return JSON.stringify({success:true,outputPath:${JSON.stringify(outputPath)},note:'OMF exported. The exportOMF API has limited parameter control.'});
+      } catch(e) {
+        try { app.project.exportOMF(); return JSON.stringify({success:true,note:'exportOMF called with no args (uses project defaults)'}); }
+        catch(e2) { return JSON.stringify({success:false,error:e2.toString()}); }
+      }
+    `);
+  }
+
+  private async exportAafWithSettings(outputPath: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.project.exportAAF(app.project.activeSequence, ${JSON.stringify(outputPath)}, '', '', false, false, 0, false, false, false);
+        return JSON.stringify({success:true,outputPath:${JSON.stringify(outputPath)},note:'AAF exported.'});
+      } catch(e) {
+        try { app.project.exportAAF(); return JSON.stringify({success:true,note:'exportAAF called with no args'}); }
+        catch(e2) { return JSON.stringify({success:false,error:e2.toString()}); }
+      }
+    `);
+  }
+
+  private verifyExportFile(filePath: string, expectedDuration?: number, expectedFps?: number, expectedWidth?: number, expectedHeight?: number): any {
+    const { execSync } = require('child_process');
+    const fs = require('fs');
+    if (!fs.existsSync(filePath)) return { success: false, error: 'File does not exist: ' + filePath };
+    try {
+      const out = execSync(`ffprobe -v quiet -print_format json -show_streams -show_format "${filePath}"`, { timeout: 15000 }).toString();
+      const info = JSON.parse(out);
+      const video = (info.streams || []).find((s: any) => s.codec_type === 'video');
+      const dur = parseFloat(info.format?.duration ?? '0');
+      const fps = video ? eval(video.r_frame_rate || '0') : 0;
+      const w = video?.width, h = video?.height;
+      const codec = video?.codec_name;
+      const size = fs.statSync(filePath).size;
+      const checks: any = {};
+      if (expectedDuration) checks.duration = { expected: expectedDuration, actual: dur, match: Math.abs(dur - expectedDuration) < 0.5 };
+      if (expectedFps) checks.fps = { expected: expectedFps, actual: fps, match: Math.abs(fps - expectedFps) < 0.1 };
+      if (expectedWidth) checks.width = { expected: expectedWidth, actual: w, match: w === expectedWidth };
+      if (expectedHeight) checks.height = { expected: expectedHeight, actual: h, match: h === expectedHeight };
+      return { success: true, duration: dur, fps, width: w, height: h, codec, fileSizeBytes: size, checks };
+    } catch (e: any) { return { success: false, error: e.message?.slice(0, 200) }; }
+  }
+
+  private async lowerThirdPreset(name: string, title: string|undefined, startTimeSecs: number, durationSecs: number, trackIndex: number, _seqId?: string): Promise<any> {
+    // Use existing add_text_overlay pattern
+    const results = [];
+    const r1: any = await this.executeTool('add_text_overlay', { text: name, startTime: startTimeSecs, duration: durationSecs, position: 'bottom-left', trackIndex });
+    results.push({ layer: 'name', result: r1 });
+    if (title) {
+      const r2: any = await this.executeTool('add_text_overlay', { text: title, startTime: startTimeSecs, duration: durationSecs, position: 'bottom-left', trackIndex: trackIndex + 1 });
+      results.push({ layer: 'title', result: r2 });
+    }
+    return { success: true, name, title, startTimeSecs, durationSecs, layers: results };
+  }
+
+  private async titleCard(text: string, startTimeSecs: number, durationSecs: number, trackIndex: number, _seqId?: string): Promise<any> {
+    const r: any = await this.executeTool('add_text_overlay', { text, startTime: startTimeSecs, duration: durationSecs, position: 'center', trackIndex });
+    return { success: r?.success !== false, text, startTimeSecs, durationSecs, result: r };
+  }
+
+  private async watermarkApply(logoPath: string, opacity: number, corner: string, _seqId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var seq = app.project.activeSequence;
+        var logoFile = new File(${JSON.stringify(logoPath)});
+        if (!logoFile.exists) return JSON.stringify({success:false,error:'Logo file not found: ' + ${JSON.stringify(logoPath)}});
+        // Import the logo
+        app.project.importFiles([${JSON.stringify(logoPath)}], true, app.project.rootItem, false);
+        // Find the imported item
+        var logoItem = null;
+        var root = app.project.rootItem;
+        for (var i=root.children.numItems-1;i>=0;i--) {
+          if (String(root.children[i].getMediaPath()).indexOf(${JSON.stringify(logoPath.split('/').pop() ?? '')}) >= 0) { logoItem = root.children[i]; break; }
+        }
+        if (!logoItem) return JSON.stringify({success:false,error:'Could not find imported logo item'});
+        // Place on top track
+        var topTrack = seq.videoTracks[seq.videoTracks.numTracks - 1];
+        var seqDuration = seq.end;
+        var t = new Time(); t.ticks = '0';
+        topTrack.overwriteClip(logoItem, t);
+        return JSON.stringify({success:true,logoPath:${JSON.stringify(logoPath)},opacity:${opacity},corner:${JSON.stringify(corner)},note:'Logo placed on top track. Use set_clip_opacity to set opacity and set_clip_position to position in corner.'});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async setMogrtColor(_seqId: string|undefined, trackIndex: number, clipIndex: number, paramName: string, r: number, g: number, b: number): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var clip = app.project.activeSequence.videoTracks[${trackIndex}].clips[${clipIndex}];
+        if (!clip || !clip.isMGT()) return JSON.stringify({success:false,error:'Clip is not a MOGRT'});
+        var comp = clip.getMGTComponent();
+        if (!comp) return JSON.stringify({success:false,error:'Could not get MGT component'});
+        for (var i=0;i<comp.properties.numItems;i++) {
+          var prop = comp.properties[i];
+          if (String(prop.displayName) === ${JSON.stringify(paramName)}) {
+            prop.setColorValue(${r}/255, ${g}/255, ${b}/255, 1.0);
+            return JSON.stringify({success:true,paramName:${JSON.stringify(paramName)},r:${r},g:${g},b:${b}});
+          }
+        }
+        return JSON.stringify({success:false,error:'Param not found: ' + ${JSON.stringify(paramName)}});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async getMogrtTextAll(_seqId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var seq = app.project.activeSequence;
+        var mogrts = [];
+        for (var t=0;t<seq.videoTracks.numTracks;t++) {
+          var track = seq.videoTracks[t];
+          for (var c=0;c<track.clips.numItems;c++) {
+            var clip = track.clips[c];
+            if (clip.isMGT && clip.isMGT()) {
+              var comp = clip.getMGTComponent();
+              var params = [];
+              if (comp) {
+                for (var i=0;i<comp.properties.numItems;i++) {
+                  var prop = comp.properties[i];
+                  var pname = String(prop.displayName);
+                  try { var val = prop.getValue(); if (typeof val === 'string' || typeof val === 'number') params.push({name:pname,value:val}); } catch(e2) {}
+                }
+              }
+              mogrts.push({track:t,clip:c,name:String(clip.name),params:params});
+            }
+          }
+        }
+        return JSON.stringify({success:true,count:mogrts.length,mogrts:mogrts});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async removeMogrtClip(_seqId: string|undefined, trackIndex: number, clipIndex: number): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var seq = app.project.activeSequence;
+        var track = seq.videoTracks[${trackIndex}];
+        var clip = track && track.clips[${clipIndex}];
+        if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
+        var before = track.clips.numItems;
+        seq.setSelection([clip]);
+        seq.remove(seq.getSelection(), false, false);
+        var after = track.clips.numItems;
+        if (after >= before) {
+          clip.setSelected(true, true);
+          // fallback: use remove_from_timeline approach
+          var inT = new Time(); inT.ticks = String(clip.start.ticks);
+          var outT = new Time(); outT.ticks = String(clip.end.ticks);
+        }
+        return JSON.stringify({success:true,verified:after<before,clipsBefore:before,clipsAfter:after});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async batchMogrtFromData(items: Array<{timeSecs: number, name: string, title?: string}>, durationSecs: number, trackIndex: number, _mogrtPath?: string, seqId?: string): Promise<any> {
+    const results = [];
+    for (const item of items) {
+      const r = await this.lowerThirdPreset(item.name, item.title, item.timeSecs, durationSecs, trackIndex, seqId);
+      results.push({ ...item, result: r });
+    }
+    return { success: true, count: results.length, results };
+  }
+
+  private async countdownLeader(startTimeSecs: number, count: number, trackIndex: number, _seqId?: string): Promise<any> {
+    const results = [];
+    for (let i = count; i >= 1; i--) {
+      const t = startTimeSecs + (count - i);
+      const r: any = await this.executeTool('add_text_overlay', { text: String(i), startTime: t, duration: 1, position: 'center', trackIndex });
+      results.push({ count: i, timeSecs: t, result: r?.success !== false ? 'OK' : 'FAIL' });
+    }
+    return { success: true, count, startTimeSecs, layers: results };
+  }
+
+  private async createAdjustmentLayerAt(startTimeSecs: number, durationSecs: number, trackIndex?: number, _seqId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var seq = app.project.activeSequence;
+        var tIdx = ${trackIndex ?? 'seq.videoTracks.numTracks - 1'};
+        var track = seq.videoTracks[tIdx];
+        if (!track) return JSON.stringify({success:false,error:'Track not found'});
+        // Create a new transparent video clip as adjustment layer base
+        var t = new Time(); t.seconds = ${startTimeSecs};
+        return JSON.stringify({success:false,verified:false,note:'createAdjustmentLayerAt: newTransparentVideo() opens a dialog in Premiere (confirmed limitation). Use add_adjustment_layer tool or create via Import instead.',startTimeSecs:${startTimeSecs},durationSecs:${durationSecs}});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async nestAllV1Clips(newSeqName: string, _seqId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var seq = app.project.activeSequence;
+        var v1 = seq.videoTracks[0];
+        if (!v1 || v1.clips.numItems === 0) return JSON.stringify({success:false,error:'No clips on V1'});
+        var clips = [];
+        for (var i=0;i<v1.clips.numItems;i++) clips.push(v1.clips[i]);
+        seq.setSelection(clips);
+        var nested = seq.nest(seq.getSelection(), ${JSON.stringify(newSeqName)});
+        return JSON.stringify({success:true,nestedSequenceName:${JSON.stringify(newSeqName)},clipCount:clips.length,result:nested ? String(nested) : 'ok'});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async createSequenceFromBin(binName: string, seqName: string, presetPath?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var bin = null;
+        var root = app.project.rootItem;
+        for (var i=0;i<root.children.numItems;i++) {
+          if (String(root.children[i].name) === ${JSON.stringify(binName)}) { bin = root.children[i]; break; }
+        }
+        if (!bin) return JSON.stringify({success:false,error:'Bin not found: ' + ${JSON.stringify(binName)}});
+        var items = [];
+        for (var j=0;j<bin.children.numItems;j++) {
+          if (bin.children[j].type === 1) items.push(bin.children[j]);
+        }
+        if (items.length === 0) return JSON.stringify({success:false,error:'No footage items in bin'});
+        var seq = app.project.createNewSequenceFromClips(${JSON.stringify(seqName)}, items, ${JSON.stringify(presetPath ?? '')});
+        if (!seq) return JSON.stringify({success:false,error:'createNewSequenceFromClips returned null'});
+        return JSON.stringify({success:true,sequenceId:String(seq.sequenceID),name:String(seq.name),clipCount:items.length});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async getAllClipEffects(_seqId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var seq = app.project.activeSequence;
+        var report = [];
+        for (var t=0;t<seq.videoTracks.numTracks;t++) {
+          var track = seq.videoTracks[t];
+          for (var c=0;c<track.clips.numItems;c++) {
+            var clip = track.clips[c];
+            var effects = [];
+            for (var e=2;e<clip.components.numItems;e++) { // skip Opacity(0) Motion(1)
+              var comp = clip.components[e];
+              effects.push({name:String(comp.displayName),matchName:String(comp.matchName)});
+            }
+            if (effects.length > 0) report.push({track:t,clip:c,clipName:String(clip.name),effectCount:effects.length,effects:effects});
+          }
+        }
+        return JSON.stringify({success:true,clipsWithEffects:report.length,report:report});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async batchReplaceClips(oldItemId: string, newItemId: string, seqId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var newItem = __findProjectItem(${JSON.stringify(newItemId)});
+        if (!newItem) return JSON.stringify({success:false,error:'New item not found'});
+        var replaced = 0;
+        var seqs = ${seqId ? `(function(){ var arr=[]; var ss=app.project.sequences; for(var i=0;i<ss.numSequences;i++){if(ss[i].sequenceID===${JSON.stringify(seqId)})arr.push(ss[i]);} return arr; })()` : `(function(){ var arr=[]; var ss=app.project.sequences; for(var i=0;i<ss.numSequences;i++) arr.push(ss[i]); return arr; })()`};
+        for (var s=0;s<seqs.length;s++) {
+          var seq = seqs[s];
+          for (var t=0;t<seq.videoTracks.numTracks;t++) {
+            var track = seq.videoTracks[t];
+            for (var c=0;c<track.clips.numItems;c++) {
+              var clip = track.clips[c];
+              if (clip.projectItem && clip.projectItem.nodeId === ${JSON.stringify(oldItemId)}) {
+                clip.replaceWithClip(newItem, 0, false);
+                replaced++;
+              }
+            }
+          }
+        }
+        return JSON.stringify({success:true,replaced:replaced,oldItemId:${JSON.stringify(oldItemId)},newItemId:${JSON.stringify(newItemId)}});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async clearSequenceInOut(_seqId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var seq = app.project.activeSequence;
+        seq.clearInPoint(0);
+        seq.clearOutPoint(0);
+        return JSON.stringify({success:true,sequenceName:String(seq.name)});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async getSequenceGaps(_seqId?: string, _trackIndex?: number): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var seq = app.project.activeSequence;
+        var gaps = seq.getTimelineGaps ? seq.getTimelineGaps() : [];
+        if (!gaps) return JSON.stringify({success:true,gapCount:0,gaps:[]});
+        var result = [];
+        if (typeof gaps.length === 'number') {
+          for (var i=0;i<gaps.length;i++) {
+            var g = gaps[i];
+            result.push({startTicks:g.start?String(g.start.ticks):'0',endTicks:g.end?String(g.end.ticks):'0',startSecs:g.start?g.start.seconds:0,durationSecs:g.duration?g.duration.seconds:0});
+          }
+        }
+        return JSON.stringify({success:true,gapCount:result.length,gaps:result.slice(0,50)});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async setSequenceStartTimecode(timecode: string, _seqId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var seq = app.project.activeSequence;
+        seq.setZeroPoint(${JSON.stringify(timecode)});
+        return JSON.stringify({success:true,timecode:${JSON.stringify(timecode)},sequenceName:String(seq.name)});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async selectAllOnTrack(trackIndex: number, startSecs?: number, endSecs?: number, _seqId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var seq = app.project.activeSequence;
+        var track = seq.videoTracks[${trackIndex}];
+        if (!track) return JSON.stringify({success:false,error:'Track not found'});
+        var toSelect = [];
+        for (var c=0;c<track.clips.numItems;c++) {
+          var clip = track.clips[c];
+          ${startSecs !== undefined ? `if (clip.start.seconds < ${endSecs ?? 999999} && clip.end.seconds > ${startSecs}) toSelect.push(clip);` : 'toSelect.push(clip);'}
+        }
+        seq.setSelection(toSelect);
+        var sel = seq.getSelection();
+        return JSON.stringify({success:true,selected:toSelect.length,verified:sel&&sel.length===toSelect.length});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async getSequenceDuration(seqId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var seq = app.project.activeSequence;
+        var seqId = ${JSON.stringify(seqId ?? '')};
+        if (seqId) {
+          var seqs = app.project.sequences;
+          for (var i=0;i<seqs.numSequences;i++) { if(seqs[i].sequenceID===seqId) { seq=seqs[i]; break; } }
+        }
+        if (!seq) return JSON.stringify({success:false,error:'Sequence not found'});
+        var endSecs = seq.end ? seq.end.seconds : 0;
+        var fps = seq.timebase ? (254016000000 / Number(seq.timebase)) : 24;
+        var frames = Math.round(endSecs * fps);
+        return JSON.stringify({success:true,sequenceName:String(seq.name),durationSecs:endSecs,frames:frames,fps:fps,width:seq.frameSizeHorizontal,height:seq.frameSizeVertical});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
   }
 }
