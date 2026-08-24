@@ -416,6 +416,30 @@
     MCPPremiereBridge.prototype.executeCommand = function(command, done) {
         var self = this;
         this.updateCommandStatus(command.id, 'executing');
+
+        // CEP JavaScript execution — runs in the panel JS context, not ExtendScript.
+        // Exposes window.cep, csInterface, and all browser-level APIs.
+        if (command.type === 'cep_js') {
+            try {
+                var csInterface = this.csInterface;
+                var bridge = this;
+                var cepResult = (new Function('csInterface', 'window', 'bridge', command.script))(csInterface, window, bridge);
+                // If a Promise, wait for it; otherwise wrap synchronous result
+                if (cepResult && typeof cepResult.then === 'function') {
+                    cepResult.then(function(val) {
+                        done({ success: true, result: val, timestamp: new Date().toISOString() });
+                    }).catch(function(err) {
+                        done({ success: false, error: String(err && err.message ? err.message : err) });
+                    });
+                } else {
+                    done({ success: true, result: cepResult !== undefined ? cepResult : null, timestamp: new Date().toISOString() });
+                }
+            } catch(e) {
+                done({ success: false, error: e.message || String(e) });
+            }
+            return;
+        }
+
         if (!this.validateScript(command.script)) {
             done({ success: false, error: 'Script validation failed' });
             return;
@@ -845,3 +869,4 @@
         window.bridge = new MCPPremiereBridge();
     });
 })();
+
