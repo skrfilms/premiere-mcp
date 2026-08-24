@@ -437,6 +437,19 @@ function __findProjectItem(nodeId) {
   }
   return walk(app.project.rootItem);
 }
+/*
+ * String.prototype.padStart does not exist in this engine (measured on 26.3.2: typeof is
+ * undefined), so frames_to_timecode threw "String().padStart is not a function" on every call.
+ * Neither do padEnd, repeat, find, findIndex, some, every, reduce, lastIndexOf, bind, or
+ * Object.assign — while map, filter, indexOf and Array.isArray DO exist. No single rule predicts
+ * that set, so it is probed rather than assumed; see es3-absent-methods.test.ts.
+ */
+function __padLeft(value, width, padChar) {
+  var out = String(value);
+  var ch = (padChar === undefined || padChar === null) ? '0' : String(padChar);
+  while (out.length < width) out = ch + out;
+  return out;
+}
 function __ticksToSeconds(ticks) {
   return parseInt(ticks, 10) / 254016000000;
 }

@@ -268,7 +268,8 @@ const NAMED_NUMBERS = {
   inPoint: 0, inSeconds: 0, outPoint: 2, outSeconds: 2,
   opacity: 50, value: 50, amount: 50, level: 50, gain: 50, scale: 100,
   rotation: 15, degrees: 15, angle: 15, volumeDb: -6, db: -6, decibels: -6,
-  count: 3, limit: 3, maxResults: 3, frames: 2, fps: 24, width: 1280, height: 720,
+  count: 3, limit: 3, maxResults: 3, frames: 48, fps: 24, frameRate: 24, sampleRate: 48000,
+  width: 1280, height: 720, bitrate: 8, quality: 80,
 };
 const NAMED_STRINGS = {
   trackType: 'video', panelName: 'Timeline', effectName: 'Gaussian Blur',

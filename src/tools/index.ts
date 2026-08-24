@@ -8001,7 +8001,8 @@ ${this.buildSequenceResolver(sequenceId)}
         var h = Math.floor(f/3600/fps), remaining = f - h*3600*fps;
         var m = Math.floor(remaining/60/fps); remaining = remaining - m*60*fps;
         var s = Math.floor(remaining/fps); var fr = Math.round(remaining - s*fps);
-        var tc = String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+':'+String(s).padStart(2,'0')+':'+String(fr).padStart(2,'0');
+        // padStart does not exist in this engine; __padLeft is the prelude's ES3 equivalent.
+        var tc = __padLeft(h,2)+':'+__padLeft(m,2)+':'+__padLeft(s,2)+':'+__padLeft(fr,2);
         return JSON.stringify({success:true,frames:f,timecode:tc,seconds:Math.round(f/fps*1000)/1000,fps:fps});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
