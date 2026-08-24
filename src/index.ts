@@ -6,6 +6,7 @@ import { z, type ZodTypeAny } from 'zod';
 import { PremiereProTools } from './tools/index.js';
 import { annotationsFor } from './tools/annotations.js';
 import { startupAdvisory } from './tools/catalogue-cost.js';
+import { attachImageForResult } from './tools/image-content.js';
 import { PremiereProResources } from './resources/index.js';
 import { PremiereProPrompts } from './prompts/index.js';
 import { PremiereProBridge } from './bridge/index.js';
@@ -88,14 +89,42 @@ class MCPPremiereProServer {
       
       try {
         const result = await this.tools.executeTool(name, args || {});
+
+        // When a tool wrote an image (capture_program_output, export_frame,
+        // generate_scope, capture_frame, contact sheets), attach the pixels as an MCP
+        // image content block so the model can actually SEE it. Returning only a path
+        // meant our render-truth loop was closed only if the caller happened to have a
+        // filesystem tool — a verification claim we could not deliver on.
+        //
+        // Additive: the text and structuredContent blocks are untouched. And when a frame
+        // was written but cannot be attached (missing, empty, or over the size cap), the
+        // reason is reported on the result rather than the image quietly not appearing.
+        const image = attachImageForResult(result);
+        const enriched = image.reason
+          ? { ...(result as Record<string, unknown>), inlineImage: { attached: false, reason: image.reason } }
+          : image.attachment
+            ? {
+                ...(result as Record<string, unknown>),
+                inlineImage: {
+                  attached: true,
+                  sourcePath: image.attachment.sourcePath,
+                  bytes: image.attachment.bytes,
+                  mimeType: image.attachment.block.mimeType,
+                },
+              }
+            : (result as Record<string, unknown>);
+
+        const content: CallToolResult['content'] = [
+          {
+            type: 'text' as const,
+            text: JSON.stringify(enriched, null, 2)
+          }
+        ];
+        if (image.attachment) content.push(image.attachment.block);
+
         const toolResult: CallToolResult = {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify(result, null, 2)
-            }
-          ],
-          structuredContent: result as Record<string, unknown>,
+          content,
+          structuredContent: enriched,
           isError: result.success === false
         };
         return server.projectCallToolResult(toolResult, undefined);
