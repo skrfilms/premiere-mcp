@@ -135,7 +135,13 @@ check_client_config() {
     return
   fi
   local result
-  result="$(CFG="$path" ROOT="$root_key" DIST="$DIST_ENTRY" node -e '
+  # Also compares the client's PREMIERE_TEMP_DIR against the directory this doctor
+  # (and therefore the CEP panel) is checking. A client pointed at a DIFFERENT temp
+  # dir is a known silent-bridge-failure mode: the server writes commands somewhere
+  # the panel never polls, so every tool call times out with a healthy-looking panel
+  # and nothing in the logs says why. Only reported when the client sets the value
+  # explicitly and it disagrees — an unset value correctly inherits the same default.
+  result="$(CFG="$path" ROOT="$root_key" DIST="$DIST_ENTRY" TEMP="$TEMP_DIR" node -e '
     const fs=require("fs");
     try {
       const d=JSON.parse(fs.readFileSync(process.env.CFG,"utf8"));
@@ -143,7 +149,9 @@ check_client_config() {
       const s=root && root["premiere-pro"];
       if(!s){console.log("no-entry");process.exit(0);}
       const arg0=Array.isArray(s.args)?(s.args[s.args.length-1]||""):"";
+      const temp=s.env && s.env.PREMIERE_TEMP_DIR;
       if(arg0 && arg0.indexOf("index.js")===-1){console.log("bad-path:"+arg0);}
+      else if(temp && temp!==process.env.TEMP){console.log("bad-temp:"+temp);}
       else{console.log("ok");}
     } catch(e){console.log("invalid-json:"+e.message);}
   ' 2>/dev/null || echo "error")"
@@ -151,6 +159,7 @@ check_client_config() {
     ok)          pass "$label has a premiere-pro entry"; CLIENT_FOUND=1 ;;
     no-entry)    info "$label present but has no premiere-pro entry" ;;
     bad-path:*)  warn "$label premiere-pro entry points at ${result#bad-path:} (expected a path to dist/index.js)"; CLIENT_FOUND=1 ;;
+    bad-temp:*)  warn "$label sets PREMIERE_TEMP_DIR=${result#bad-temp:} but this doctor and the CEP panel use $TEMP_DIR. The server would write commands where the panel never looks, so every tool call would time out. Make both the same."; CLIENT_FOUND=1 ;;
     invalid-json:*) fail "$label is not valid JSON (${result#invalid-json:})" ;;
     *)           warn "$label could not be checked" ;;
   esac

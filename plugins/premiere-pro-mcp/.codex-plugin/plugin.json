@@ -1,27 +1,36 @@
 {
   "name": "premiere-pro-mcp",
-  "version": "1.1.6",
+  "version": "1.2.0",
   "description": "Inspect, edit, verify, and export local Adobe Premiere Pro projects through the MCP Bridge.",
   "author": {
-    "name": "Het Patel",
-    "url": "https://github.com/hetpatel-11"
+    "name": "Skry",
+    "url": "https://github.com/skrfilms"
   },
-  "homepage": "https://github.com/hetpatel-11/Adobe_Premiere_Pro_MCP",
-  "repository": "https://github.com/hetpatel-11/Adobe_Premiere_Pro_MCP",
+  "homepage": "https://github.com/skrfilms/premiere-mcp",
+  "repository": "https://github.com/skrfilms/premiere-mcp",
   "license": "MIT",
-  "keywords": ["premiere-pro", "video-editing", "mcp", "timeline", "export"],
+  "keywords": [
+    "premiere-pro",
+    "video-editing",
+    "mcp",
+    "timeline",
+    "export"
+  ],
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "MCP Bridge for Adobe Premiere Pro",
     "shortDescription": "Operate local Premiere projects through MCP",
     "longDescription": "Install the local Premiere MCP server, verify the CEP bridge, and perform evidence-based editing workflows from Codex.",
-    "developerName": "Het Patel",
+    "developerName": "Skry",
     "category": "Creativity",
-    "capabilities": ["Interactive", "Write"],
-    "websiteURL": "https://github.com/hetpatel-11/Adobe_Premiere_Pro_MCP",
-    "privacyPolicyURL": "https://github.com/hetpatel-11/Adobe_Premiere_Pro_MCP/blob/main/PRIVACY.md",
-    "termsOfServiceURL": "https://github.com/hetpatel-11/Adobe_Premiere_Pro_MCP/blob/main/TERMS.md",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/skrfilms/premiere-mcp",
+    "privacyPolicyURL": "https://github.com/skrfilms/premiere-mcp/blob/main/PRIVACY.md",
+    "termsOfServiceURL": "https://github.com/skrfilms/premiere-mcp/blob/main/TERMS.md",
     "defaultPrompt": [
       "Verify my local Premiere connection without making changes.",
       "Inspect my active Premiere sequence and summarize its tracks.",

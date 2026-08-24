@@ -651,11 +651,33 @@ export class PremiereProResources {
     return await this.bridge.executeScript(script);
   }
 
+  /**
+   * The operating manual, as a plain string.
+   *
+   * Public because it is served two ways on purpose. As the
+   * `premiere://config/get_instructions` resource it is *opt-in* — the client has to
+   * know to attach it, and most callers never do, so the guidance that keeps an agent
+   * out of trouble was reaching almost nobody. It is now ALSO returned in the
+   * `initialize` response via `ServerOptions.instructions`, which is unconditional:
+   * every client gets it before the first tool call. Two competing Adobe MCP servers
+   * deliver their instructions this way and it is the better channel; the resource
+   * stays so a client can re-attach it mid-session without reconnecting.
+   *
+   * Pure and host-independent — no bridge request.
+   */
+  getInstructionsText(): string {
+    return this.getInstructions();
+  }
+
   private getInstructions(): string {
     return [
       '# Premiere Pro MCP — Operating Instructions',
       '',
-      'You are controlling Adobe Premiere Pro (26.3.x) through a verified MCP server with 600 tools.',
+      'You are controlling Adobe Premiere Pro (26.3.x) through a verified MCP server.',
+      'Call get_capabilities for the exact tool/resource/prompt counts of THIS build and the active tool',
+      'profile -- this text deliberately states no tool count, because a hardcoded one drifts out of date',
+      'the moment the catalogue changes and a stale number is a lie the agent cannot detect.',
+      'Use find_tool to search the catalogue by keyword instead of guessing a tool name.',
       'This server uses fail-closed verification: every mutating tool either confirms its effect with a',
       'readback/fingerprint/pixel check or explicitly returns verified:false. Never assume success from',
       'a tool call — always read the verified field in the response.',
@@ -677,6 +699,24 @@ export class PremiereProResources {
       '6. Sequence IDs never change. Clip nodeIds persist across sessions. Prefer IDs over names.',
       '7. QE-based tools (speed, frame blend, time interpolation, effect add/remove) are fragile across',
       '   Premiere builds. They verify via readback — trust verified:true, not just success:true.',
+      '8. Prefer ONE composite/batch call over N single calls. Every call is a separate bridge round',
+      '   trip (~250ms floor), and a composite applies its whole plan in one pass with per-step readback.',
+      '9. Cut through every layer with razor_timeline_at_time rather than splitting clip by clip — a',
+      '   per-clip loop drifts out of alignment across tracks.',
+      '',
+      '## Composite tools — reach for these before hand-assembling',
+      'For a branded or ad-style assembly, do NOT place clips one at a time. These build a whole',
+      'timeline in a single round trip and read every placement back:',
+      '  assemble_product_spot — promo timeline from real media. Pass an explicit clipPlan for',
+      '    LLM-directed pacing (per-clip duration, transition, motion, trims, effects) instead of',
+      '    accepting the template defaults; template mode is only a fallback when you have no plan.',
+      '  build_brand_spot_from_mogrt_and_assets — the same, plus a MOGRT title layer.',
+      '  build_motion_graphics_demo — a self-contained motion-graphics demo sequence.',
+      '  add_to_timeline_batch — many placements in one call. The general-purpose version of the above.',
+      '  batch_add_transitions / batch_apply_effect / set_clip_properties_batch — batch the pass, not the clip.',
+      '  assemble_review_reel — gap-free reel from a list of sequences (daily review).',
+      '  batch_execute — several ExtendScript reads/writes in ONE round trip when no batch tool fits.',
+      'Use find_tool to search for a composite before writing a loop of primitives.',
       '',
       '## Effect lookup — use these exact names with apply_video_effect / apply_audio_effect',
       'Video effects are retrieved by display name via QE. Confirmed on 26.3.2:',
@@ -710,14 +750,16 @@ export class PremiereProResources {
       '## Export workflow',
       'Quick path: export_sequence(sequenceId, outputPath, presetPath)',
       'Social: export_social_preset(sequenceId, platform, outputPath) — platforms: youtube, instagram, tiktok, twitter',
-      'Custom: create_custom_export_preset → export_with_custom_preset',
+      'Custom: create_custom_export_preset writes a .epr and returns its path -- pass that path as the',
+      '  presetPath of export_sequence. There is no single-call custom-preset export tool.',
       'Verify output: verify_export(outputPath) — ffprobe checks duration/fps/codec match sequence',
       'Preset files: list_export_presets() for installed .epr paths',
       '',
       '## What this server CANNOT do (the honest wall)',
       'These editor functions have no scripting surface — use the alternatives instead:',
       '- Free-draw shape masks on effects (bezier/ellipse geometry in Effect Controls): no DOM/QE API.',
-      '  Alternative: track_matte_setup (assign any clip as a luma/alpha matte) or lumetri_hsl_secondary_set',
+      '  Alternative: apply_video_effect with "Track Matte Key" (then set_effect_property to pick the matte',
+      '  layer and luma/alpha mode), or lumetri_hsl_secondary_set',
       '  (color-keyed isolation). Mask parameters like Feather/Opacity/Inverted ARE scriptable via the',
       '  prproj XML path, but require save+close+reopen cycle.',
       '- Essential Sound auto-analysis: panel logic not exposed. Alternative: apply effects directly',
