@@ -158,6 +158,89 @@ chip that hides the NDI/Syphon/Spout acronyms behind the Doctor.
 
 ## 5. Roadmap (phased, each independently shippable)
 
+### Tier 0 PRIME — Adobe ships its own MCP server. Read `docs/ADOBE-NATIVE-MCP.md` first.
+
+Verified first-hand from the app bundle on 2026-08-24 (not from docs — Adobe has published
+nothing): **Premiere Pro 2026 contains a first-party MCP server.** `Preferences ▸ Agents`,
+endpoint `http://localhost:3000/premiere/mcp`, token auth, a Rust `dvamcp::MCPServer`, prompts +
+resources + resource templates, the full MCP content model, input **and** output schema
+validation, and ~30 tools. Off by default.
+
+This outranks everything else in this document because it changes what we are building.
+
+1. **The bridge is on a clock we do not control.** A first-party server with Adobe's transport,
+   auth and validation will out-reliable a third-party CEP file-IPC bridge eventually. Stop
+   treating the transport as the moat. Do not start the WebSocket work (Tier 0 #5) on the
+   assumption that our transport has a long future — it is now a maintenance question, not a
+   strategic one.
+2. **Do not compete on primitives.** Their ~30 tools are project/bin/sequence/track/clip CRUD,
+   effect parameters, markers, labels, transcript, search. They will win those and should.
+3. **Compete above the primitives, which is where we already are.** Nothing in their surface
+   touches export/encode, render-truth, Lumetri, audio (loudness/ducking/normalisation),
+   captions, proxies, MOGRT, keyframe interpolation (`bake_keyframe_ease` specifically), the
+   QE-only capabilities (Morph Cut, effect-stack reorder, speed), scene edit detection, Project
+   Manager, EDL/AAF/OMF/FCP XML, multicam, stabilisation, timeline linting, or recovery
+   checkpoints.
+4. **Verification is worth MORE now, not less.** Schema validation in and out is *argument*
+   checking. Nothing in their symbol table suggests a readback, fingerprint or pixel check, and
+   QE remains the only route to several capabilities where silent no-ops are normal.
+5. **Evaluate `RegisterUXPMCPHandler` seriously — it may be the distribution answer.** A
+   third-party UXP plugin can register tools *into* Adobe's server, inheriting their transport,
+   auth, schema validation and timeouts, and letting us drop the most fragile thing we own.
+   "Register into it" plausibly beats "compete with it".
+6. **Steal two ideas immediately, both cheap:** `getToolTypings` (a TypeScript `.d.ts` describing
+   every registered tool — a strictly better answer to the discovery problem than prose tool
+   descriptions), and their instruction to fetch typings *before* calling a tool.
+7. **Open question worth one experiment, needs owner go-ahead** (it opens a network listener):
+   does *enabling* their server register `MCPScriptingExtensibilityAPIObject` into the
+   ExtendScript context? Probed with it disabled: `typeof MCP` is `undefined`, nothing on `app`,
+   nothing in `$.global`. If enabling exposes it, our existing bridge could call Adobe's native
+   tools with no new transport at all. Repro in `ADOBE-NATIVE-MCP.md` §4.
+
+### Tier 0 — CLOSED overnight 2026-08-24
+
+Recorded so the list below is not re-worked. Evidence in `docs/RUN-LOG-2026-08-24.md`.
+
+- **Dead-engine detection (was Tier 0a #1, "the most important thing in this document") — DONE.**
+  `scripts/engine-sentinel.mjs` distinguishes HEALTHY / ENGINE_DEAD / PANEL_DEAD / BUSY,
+  dependency-free so it works when the TypeScript build is broken. Classifies on whether the
+  panel *consumed* the command, which is the "never ran" vs "may have run" distinction.
+- **Auto-recovery — DONE and measured at ~32s** (`scripts/lib/host-recovery.mjs`). Engine death
+  is no longer fatal to an unattended run.
+- **Modal resilience (Tier 0 #2) — mostly DONE, and better than planned.** We can now *clear* a
+  modal unattended, not merely detect one: Premiere exposes zero windows to the accessibility
+  API, but System Events **keystrokes** reach the frontmost app, and Escape dismisses Link Media.
+  Still owed: the typed `-32006 MODAL_REQUIRED` error code.
+- **Clip Mismatch Warning blocking fixture construction (Tier 0 #2c) — DONE by removing the
+  cause.** `scripts/reset-scratch.mjs` generates format-identical media with ffmpeg, so the
+  mismatch dialog cannot arise. No preference hunt was needed.
+- **`sequenceId` inconsistency — DONE.** Optional on 28 more tools; `__findSequence` falls back to
+  the active sequence.
+- **The 638-tool default — DONE.** Default profile is now `core` (97 tools). See the run log for
+  the measurement; `all` cost ~51% of a 200k context and could not run in VS Code at all.
+
+### Tier 0 — ADDED overnight 2026-08-24
+
+1. **A stale "cannot do" list is a lie in the same class as a fake success.** `api_surface_report`
+   was publishing a hardcoded `total_tools: 600` against a 638-tool build, and still listed the
+   system clipboard as impossible after we cracked it. Counts are now computed and the wall
+   entries carry their evidence, with a `cracked_since` field. **Owed: a test that fails when a
+   `confirmed_wall` entry names a capability a passing live test exercises.**
+2. **Half-applied edits must be reported as such.** Three trim tools returned `success: true,
+   verified: false` with an *empty* reason. Worse, when `inPoint` moved but the clip did not
+   ripple, the project was left in a state the caller never asked for and the tool still claimed
+   success. Fixed for `ripple_trim_in`/`out` and `extend_edit`; **audit the rest of the catalogue
+   for `verified:` computed as a bare inequality with no accompanying explanation.**
+3. **Verification cannot distinguish "changed it" from "was already correct".** `clear_work_area`
+   passed its own check because its target already equalled the current state. Every
+   verify-after-write must capture `before` and report `changed` separately from `onTarget`.
+4. **`NEEDS_ARGS` is the coverage ceiling, and it is our harness's fault, not the tools'.** In the
+   overnight sweep it was the single largest bucket. Argument synthesis by parameter-name pattern
+   is the limiting factor on live coverage — invest there next, not in more gates.
+5. **Real bugs found and not yet fixed:** `rename_timeline_clip` fails with a host-side
+   evalScript error; `version_up_sequence` throws "Illegal Parameter type";
+   `audio_crossfade_at_cut` returns "Invalid parameter".
+
 **Tier 0 — hardening owed from the 2026-08-24 live-testing session.** Everything here was
 found by actually running the catalogue against a live host, or by reading eight competing
 bridges' source. Ordered by severity, not effort.

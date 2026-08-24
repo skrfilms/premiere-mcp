@@ -5448,7 +5448,16 @@ ${this.buildSequenceResolver(sequenceId)}
       var __inAfter = Number(clip.inPoint.ticks);
       if (__inAfter === __inBefore) return JSON.stringify({success:false,verified:false,error:'Assigning clip.inPoint did not change it (property may be read-only on this build). No ripple performed.',requestedTicks:String(newIn.ticks)});
       var afterStart = String(clip.start.ticks);
-      return JSON.stringify({success:true,verified:afterStart !== beforeStart,beforeStart:beforeStart,afterStart:afterStart,playheadTicks:String(playhead.ticks)});
+      // Three outcomes, and they must not be collapsed. Previously this returned
+      // success:true with verified:false and NO reason, which tells a caller nothing:
+      //   - frameDelta 0: nothing was asked for, so nothing changing is correct.
+      //   - start moved: the ripple landed.
+      //   - inPoint moved but start did not: the edit is HALF-APPLIED. The source in-point
+      //     changed while the clip did not move on the timeline, which is worse than a
+      //     failure because the project is now in a state the caller did not ask for.
+      if (frameDelta === 0) return JSON.stringify({success:true,verified:true,changed:false,note:'Playhead is already at the clip start; nothing to trim.',beforeStart:beforeStart,afterStart:afterStart});
+      if (afterStart === beforeStart) return JSON.stringify({success:false,verified:true,changed:true,halfApplied:true,error:'The source in-point moved but the clip did not ripple on the timeline, so this edit is half-applied: clip.inPoint is now '+String(clip.inPoint.ticks)+' ticks while clip.start is unchanged at '+beforeStart+'. Undo before retrying.',beforeStart:beforeStart,afterStart:afterStart,inPointTicks:String(clip.inPoint.ticks)});
+      return JSON.stringify({success:true,verified:true,changed:true,beforeStart:beforeStart,afterStart:afterStart,playheadTicks:String(playhead.ticks)});
     `);
   }
 
@@ -5470,7 +5479,8 @@ ${this.buildSequenceResolver(sequenceId)}
       var __outAfter = Number(clip.outPoint.ticks);
       if (__outAfter === __outBefore) return JSON.stringify({success:false,verified:false,error:'Assigning clip.outPoint did not change it (property may be read-only on this build). No ripple performed.',requestedTicks:String(newOut.ticks)});
       var afterEnd = String(clip.end.ticks);
-      return JSON.stringify({success:true,verified:afterEnd !== beforeEnd,beforeEnd:beforeEnd,afterEnd:afterEnd,playheadTicks:String(playhead.ticks)});
+      if (afterEnd === beforeEnd) return JSON.stringify({success:false,verified:true,changed:true,halfApplied:true,error:'The source out-point moved but the clip end did not change on the timeline, so this edit is half-applied: clip.outPoint is now '+String(clip.outPoint.ticks)+' ticks while clip.end is unchanged at '+beforeEnd+'. Undo before retrying.',beforeEnd:beforeEnd,afterEnd:afterEnd,outPointTicks:String(clip.outPoint.ticks)});
+      return JSON.stringify({success:true,verified:true,changed:true,beforeEnd:beforeEnd,afterEnd:afterEnd,playheadTicks:String(playhead.ticks)});
     `);
   }
 
@@ -5490,7 +5500,8 @@ ${this.buildSequenceResolver(sequenceId)}
       var t = new Time(); t.ticks = String(ph);
       if (extendIn) { clip.inPoint = t; } else { clip.outPoint = t; }
       var afterTick = extendIn ? String(clip.start.ticks) : String(clip.end.ticks);
-      return JSON.stringify({success:true,verified:afterTick !== beforeTick,extendedEdge:extendIn?'in':'out',before:beforeTick,after:afterTick});
+      if (afterTick === beforeTick) return JSON.stringify({success:false,verified:true,changed:false,error:'The '+(extendIn?'in':'out')+' edge did not move. The playhead may already be at that edge, or the clip has no room to extend in that direction (check the adjacent clip and available source handles).',extendedEdge:extendIn?'in':'out',before:beforeTick,after:afterTick});
+      return JSON.stringify({success:true,verified:true,changed:true,extendedEdge:extendIn?'in':'out',before:beforeTick,after:afterTick});
     `);
   }
 
