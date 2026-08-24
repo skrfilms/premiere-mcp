@@ -238,6 +238,22 @@ export async function ensureHealthy(culprit, state) {
     if (second.state === 'HEALTHY') return { ok: true, verdict: second };
   }
 
+  // ESCAPE FIRST, KILL SECOND. Most apparent engine deaths are a native modal holding the
+  // scripting host, not a dead engine — measured directly: app.project.createNewSequence opens
+  // the New Sequence dialog, which produced a 45s timeout, a panel that stopped polling, and a
+  // verdict indistinguishable from a real death. Two Escapes cleared it and the engine was
+  // healthy again in ~6 seconds, against ~32 seconds for a full relaunch, with no state lost.
+  // So a restart is the fallback, not the first move.
+  pressEscape(2);
+  await sleep(2500);
+  const afterEscape = probeEngine(15_000);
+  if (afterEscape.state === 'HEALTHY') {
+    state.modalsCleared = state.modalsCleared || [];
+    state.modalsCleared.push({ culprit, verdictBefore: verdict.state });
+    process.stdout.write(`\n[recovery] "${culprit}" left a modal up; Escape cleared it (no restart needed)\n`);
+    return { ok: true, verdict: afterEscape, clearedModal: true };
+  }
+
   state.recoveries = state.recoveries || [];
   if (state.recoveries.length >= (state.maxRecoveries ?? 5)) {
     return { ok: false, verdict, gaveUp: true,
