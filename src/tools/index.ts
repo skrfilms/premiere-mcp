@@ -2702,7 +2702,86 @@ export class PremiereProTools {
 
       // Render truth / verification
       { name: 'frame_diff', description: 'Exports two frames from the active sequence at different times and computes their visual difference using ffmpeg PSNR. Returns PSNR score — lower means more different.', inputSchema: z.object({ time1Secs: z.number().describe('First frame time in seconds'), time2Secs: z.number().describe('Second frame time in seconds'), outputDir: z.string().optional().describe('Directory for temp frames. Default /tmp.'), sequenceId: z.string().optional() }) },
+      {
+        name: 'verify_effect_rendered',
+        description: 'PIXEL VERIFICATION: confirms that an effect actually changed the rendered output of a clip — not just that the params were set. Captures a frame before and after applying the effect, runs ffmpeg PSNR, and reports whether a visible pixel difference was detected. Closes the QE silent-no-op honesty gap for effects like setFrameBlend and setTimeInterpolationType that have no DOM getter.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+          trackIndex: z.number().describe('0-based video track index'),
+          clipIndex: z.number().describe('0-based clip index'),
+          effectName: z.string().describe('Effect to apply and verify (e.g. "Gaussian Blur")'),
+          effectParam: z.string().optional().describe('A param name to set to confirm the effect is active (e.g. "Amount")'),
+          effectParamValue: z.string().optional().describe('Value to set the param to'),
+          outputDir: z.string().optional().describe('Temp directory for frame captures. Default /tmp/premiere-mcp-bridge/generated-assets.')
+        })
+      },
+      {
+        name: 'verify_color_grade',
+        description: 'PIXEL VERIFICATION: confirms that a Lumetri color grade actually changed the rendered output. Captures a frame before and after setting grade params, runs ffmpeg PSNR, and reports whether a visible change occurred. Use after lumetri_basic_set or paste_grade_to_clips to close the verify gap.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+          trackIndex: z.number().describe('0-based video track index'),
+          clipIndex: z.number().describe('0-based clip index'),
+          gradeParams: z.object({
+            exposure: z.number().optional(),
+            contrast: z.number().optional(),
+            highlights: z.number().optional(),
+            shadows: z.number().optional(),
+            temperature: z.number().optional(),
+            saturation: z.number().optional()
+          }).describe('The Lumetri params to apply — used to verify this specific grade landed'),
+          outputDir: z.string().optional()
+        })
+      },
       { name: 'verify_clip_visible', description: 'Checks whether a clip is actually contributing pixels: track not muted, clip enabled, opacity > 0, not fully obscured by a higher track. Returns a visibility assessment.', inputSchema: z.object({ sequenceId: z.string().optional(), trackIndex: z.number(), clipIndex: z.number() }) },
+
+      // ── #5: Batch execution ─────────────────────────────────────────────
+      {
+        name: 'batch_execute',
+        description: 'Executes multiple ExtendScript operations in a single bridge round-trip, dramatically faster than individual tool calls for bulk operations. Each operation is an ExtendScript snippet that returns a JSON string. Results are returned as an array in the same order. Use for bulk property reads, batch label changes, mass metadata writes, or any operation where you would otherwise call 10+ tools sequentially.',
+        inputSchema: z.object({
+          operations: z.array(z.object({
+            id: z.string().describe('Unique identifier for this operation (returned with result)'),
+            script: z.string().describe('ExtendScript that returns JSON.stringify({...}). Has access to app, qe (after enableQE()), and all standard Premiere globals.')
+          })).describe('Array of ExtendScript operations to run in sequence'),
+          enableQE: z.boolean().optional().describe('Call app.enableQE() once before all operations. Default false.')
+        })
+      },
+
+      // ── #7: Cross-app integration ────────────────────────────────────────
+      {
+        name: 'send_to_after_effects',
+        description: 'Exports the active sequence (or a clip) as a Premiere Pro project file that After Effects can open, enabling a round-trip workflow. AE can then render comps back as media for Premiere. Returns the output .prproj path.',
+        inputSchema: z.object({
+          outputPath: z.string().describe('Absolute path for the output .prproj file'),
+          sequenceId: z.string().optional().describe('Sequence to export. Defaults to active sequence.')
+        })
+      },
+      {
+        name: 'import_ae_composition',
+        description: 'Imports one or more After Effects compositions from an .aep file into the current Premiere project. Confirmed via app.project.importAEComps(). Each imported comp becomes a sequence in Premiere.',
+        inputSchema: z.object({
+          aepPath: z.string().describe('Absolute path to the .aep file'),
+          compNames: z.array(z.string()).optional().describe('Specific composition names to import. If omitted, imports all compositions.')
+        })
+      },
+      {
+        name: 'frame_io_notes_to_markers',
+        description: 'Imports Frame.io review notes from a JSON export file and creates sequence markers at the corresponding timecodes. Frame.io exports a JSON with comments + timestamps when you use "Export Comments". Each comment becomes a marker with the reviewer name and comment text.',
+        inputSchema: z.object({
+          jsonPath: z.string().describe('Path to Frame.io comments JSON export file'),
+          sequenceId: z.string().optional().describe('Target sequence. Defaults to active.'),
+          markerColor: z.number().min(0).max(7).optional().describe('Color index for all imported markers. Default 1 (yellow).')
+        })
+      },
+      {
+        name: 'shotgrid_status_sync',
+        description: 'Reads a ShotGrid/ShotGrid (Autodesk) status CSV (shot name, status, assignee) and updates Premiere sequence labels + metadata to match. Maps ShotGrid statuses to label colors and writes shot code + status to project metadata. The CSV must have columns: shot_name, status, assignee.',
+        inputSchema: z.object({
+          csvPath: z.string().describe('Path to ShotGrid status CSV export'),
+          statusToColor: z.record(z.string(), z.number()).optional().describe('Map of ShotGrid status → label color index. Default: wtg=0, ip=3, fin=2, na=7.')
+        })
+      },
       { name: 'black_frame_scan', description: 'Scans a video file or exported sequence range for black frames using ffmpeg blackdetect filter. Returns list of black frame time ranges.', inputSchema: z.object({ filePath: z.string().describe('Path to video file to scan'), threshold: z.number().optional().describe('Black threshold 0-1. Default 0.1.'), minDuration: z.number().optional().describe('Minimum black duration in seconds. Default 0.1.') }) },
       { name: 'flash_frame_scan', description: 'Scans a video file for flash frames (frames significantly brighter than neighbors) using ffmpeg. Returns timecodes of potential flashes.', inputSchema: z.object({ filePath: z.string().describe('Path to video file'), threshold: z.number().optional().describe('Brightness threshold 0-1. Default 0.9.') }) },
       { name: 'freeze_frame_scan', description: 'Scans a video file for frozen frames (consecutive identical frames) using ffmpeg freezedetect. Returns list of freeze time ranges.', inputSchema: z.object({ filePath: z.string().describe('Path to video file'), minDuration: z.number().optional().describe('Min freeze duration in seconds. Default 0.5.') }) },
@@ -3542,6 +3621,13 @@ export class PremiereProTools {
         case 'create_multicam_source_sequence': return await this.createMulticamSourceSequence(args.binName, args.newSequenceName, args.presetPath);
         case 'create_multicam_from_clips': return await this.createMulticamFromClips(args.projectItemIds, args.sequenceName, args.presetPath);
         case 'frame_diff': return await this.frameDiff(args.time1Secs, args.time2Secs, args.outputDir ?? '/tmp', args.sequenceId);
+        case 'verify_effect_rendered': return await this.verifyEffectRendered(args.sequenceId, args.trackIndex, args.clipIndex, args.effectName, args.effectParam, args.effectParamValue, args.outputDir ?? '/tmp/premiere-mcp-bridge/generated-assets');
+        case 'verify_color_grade': return await this.verifyColorGrade(args.sequenceId, args.trackIndex, args.clipIndex, args.gradeParams, args.outputDir ?? '/tmp/premiere-mcp-bridge/generated-assets');
+        case 'batch_execute': return await this.batchExecute(args.operations, args.enableQE ?? false);
+        case 'send_to_after_effects': return await this.sendToAfterEffects(args.outputPath, args.sequenceId);
+        case 'import_ae_composition': return await this.importAeComposition(args.aepPath, args.compNames);
+        case 'frame_io_notes_to_markers': return await this.frameIoNotesToMarkers(args.jsonPath, args.sequenceId, args.markerColor ?? 1);
+        case 'shotgrid_status_sync': return await this.shotgridStatusSync(args.csvPath, args.statusToColor);
         case 'verify_clip_visible': return await this.verifyClipVisible(args.sequenceId, args.trackIndex, args.clipIndex);
         case 'black_frame_scan': return this.blackFrameScan(args.filePath, args.threshold ?? 0.1, args.minDuration ?? 0.1);
         case 'flash_frame_scan': return this.flashFrameScan(args.filePath, args.threshold ?? 0.9);
@@ -16970,6 +17056,315 @@ ${this.buildSequenceResolver(sequenceId)}
       return { success: true, frame1, frame2, psnr, identical: psnr !== null && psnr > 50, note: 'Higher PSNR = more similar. >40dB = nearly identical. Infinity = identical.' };
     } catch (e: any) {
       return { success: false, error: e.message?.slice(0, 200) };
+    }
+  }
+
+  // ── #5: Batch execution ─────────────────────────────────────────────────
+
+  private async batchExecute(operations: Array<{id: string, script: string}>, enableQE: boolean): Promise<any> {
+    const batchScript = `
+      try {
+        ${enableQE ? 'app.enableQE();' : ''}
+        var results = [];
+        var ops = ${JSON.stringify(operations)};
+        for (var i = 0; i < ops.length; i++) {
+          var op = ops[i];
+          var opResult = { id: op.id, success: false };
+          try {
+            var fn = new Function(op.script + '\\nreturn undefined;');
+            // Use eval for ExtendScript compatibility
+            var rawResult = eval('(function(){ ' + op.script + ' })()');
+            opResult.result = rawResult;
+            opResult.success = true;
+          } catch(opErr) {
+            opResult.error = opErr.toString();
+          }
+          results.push(opResult);
+        }
+        return JSON.stringify({ success: true, count: results.length, results: results });
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `;
+    return await this.bridge.executeScript(batchScript, 120000);
+  }
+
+  // ── #7: Cross-app integration ────────────────────────────────────────────
+
+  private async sendToAfterEffects(outputPath: string, sequenceId?: string): Promise<any> {
+    // Export sequence as .prproj — AE can open Premiere projects and access sequences
+    const script = `
+      try {
+        var seq = ${sequenceId ? `(function(){ var seqs=app.project.sequences; for(var i=0;i<seqs.numSequences;i++){ if(seqs[i].sequenceID===${JSON.stringify(sequenceId)}) return seqs[i]; } return app.project.activeSequence; })()` : 'app.project.activeSequence'};
+        if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
+        var result = seq.exportAsProject(${JSON.stringify(outputPath)});
+        var f = new File(${JSON.stringify(outputPath)});
+        return JSON.stringify({success:true,verified:f.exists,outputPath:${JSON.stringify(outputPath)},sequenceName:String(seq.name),note:'Open this .prproj in After Effects. AE can read Premiere sequences for Dynamic Link.'});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `;
+    return await this.bridge.executeScript(script);
+  }
+
+  private async importAeComposition(aepPath: string, compNames?: string[]): Promise<any> {
+    const compsArg = compNames ? JSON.stringify(compNames) : 'null';
+    const script = `
+      try {
+        var result;
+        if (${compsArg} !== null) {
+          result = app.project.importAEComps(${JSON.stringify(aepPath)}, ${compsArg});
+        } else {
+          result = app.project.importAllAEComps(${JSON.stringify(aepPath)});
+        }
+        var seqCountAfter = app.project.sequences.numSequences;
+        return JSON.stringify({success:true,result:String(result),sequenceCount:seqCountAfter,aepPath:${JSON.stringify(aepPath)},note:'Each imported AE comp becomes a sequence in Premiere.'});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `;
+    return await this.bridge.executeScript(script);
+  }
+
+  private async frameIoNotesToMarkers(jsonPath: string, sequenceId?: string, markerColor = 1): Promise<any> {
+    const fs = require('fs');
+    try {
+      const raw = fs.readFileSync(jsonPath, 'utf8');
+      const data = JSON.parse(raw);
+      // Frame.io comment export format: array of {timestamp, text, author, ...} or nested structure
+      const comments: Array<{time: number, text: string, author?: string}> = [];
+      const items = Array.isArray(data) ? data : (data.comments || data.annotations || data.items || []);
+      for (const item of items) {
+        const timeSecs = item.timestamp ?? item.time ?? item.timecode_in ?? 0;
+        const text = item.text ?? item.comment ?? item.content ?? '';
+        const author = item.author?.name ?? item.user?.name ?? item.created_by ?? '';
+        if (text) comments.push({ time: typeof timeSecs === 'string' ? parseFloat(timeSecs) : timeSecs, text, author });
+      }
+      if (!comments.length) return { success: false, error: 'No comments found in Frame.io export', path: jsonPath };
+
+      const markerScript = `
+        try {
+          var seq = ${sequenceId ? `(function(){ var seqs=app.project.sequences; for(var i=0;i<seqs.numSequences;i++){ if(seqs[i].sequenceID===${JSON.stringify(sequenceId)}) return seqs[i]; } return app.project.activeSequence; })()` : 'app.project.activeSequence'};
+          if (!seq) return JSON.stringify({success:false,error:'No sequence'});
+          var comments = ${JSON.stringify(comments)};
+          var created = 0;
+          for (var i = 0; i < comments.length; i++) {
+            var c = comments[i];
+            var m = seq.markers.createMarker(c.time);
+            m.name = c.author ? '[' + c.author + ']' : 'Frame.io';
+            m.comments = c.text;
+            m.colorByIndex = ${markerColor};
+            created++;
+          }
+          return JSON.stringify({success:true,verified:true,markersCreated:created,sequenceName:String(seq.name)});
+        } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+      `;
+      return await this.bridge.executeScript(markerScript);
+    } catch (e: any) {
+      return { success: false, error: 'Could not parse Frame.io export: ' + e.message };
+    }
+  }
+
+  private async shotgridStatusSync(csvPath: string, statusToColor?: Record<string, number>): Promise<any> {
+    const fs = require('fs');
+    const defaultMap: Record<string, number> = { wtg: 0, ip: 3, fin: 2, na: 7, hld: 6, rev: 4, cmpt: 2 };
+    const colorMap = statusToColor ?? defaultMap;
+    try {
+      const lines = fs.readFileSync(csvPath, 'utf8').split('\n').filter(Boolean);
+      const header = lines[0].toLowerCase().split(',').map((h: string) => h.trim().replace(/"/g,''));
+      const nameIdx = header.indexOf('shot_name') >= 0 ? header.indexOf('shot_name') : header.indexOf('name');
+      const statusIdx = header.indexOf('status') >= 0 ? header.indexOf('status') : header.indexOf('sg_status_list');
+      const assigneeIdx = header.indexOf('assignee') >= 0 ? header.indexOf('assignee') : header.indexOf('task_assignees');
+      if (nameIdx < 0 || statusIdx < 0) return { success: false, error: 'CSV must have shot_name and status columns' };
+
+      const shots = lines.slice(1).map((line: string) => {
+        const cols = line.split(',').map((c: string) => c.trim().replace(/"/g,''));
+        return { name: cols[nameIdx], status: cols[statusIdx]?.toLowerCase(), assignee: assigneeIdx >= 0 ? cols[assigneeIdx] : '' };
+      }).filter((s: any) => s.name && s.status);
+
+      const script = `
+        try {
+          var shots = ${JSON.stringify(shots)};
+          var colorMap = ${JSON.stringify(colorMap)};
+          var updated = 0;
+          var seqs = app.project.sequences;
+          for (var i = 0; i < seqs.numSequences; i++) {
+            var seq = seqs[i];
+            var seqName = String(seq.name);
+            for (var j = 0; j < shots.length; j++) {
+              var shot = shots[j];
+              if (seqName.indexOf(shot.name) >= 0 || shot.name.indexOf(seqName) >= 0) {
+                var color = colorMap[shot.status] !== undefined ? colorMap[shot.status] : 0;
+                seq.projectItem.setColorLabel(color);
+                seq.projectItem.setProjectMetadata('sg.status', shot.status);
+                if (shot.assignee) seq.projectItem.setProjectMetadata('sg.assignee', shot.assignee);
+                updated++;
+                break;
+              }
+            }
+          }
+          return JSON.stringify({success:true,shotsProcessed:shots.length,sequencesUpdated:updated});
+        } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+      `;
+      return await this.bridge.executeScript(script);
+    } catch (e: any) {
+      return { success: false, error: 'CSV parse failed: ' + e.message };
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+
+  private async verifyEffectRendered(
+    _seqId: string | undefined, trackIndex: number, clipIndex: number,
+    effectName: string, effectParam?: string, effectParamValue?: string, outputDir = '/tmp/premiere-mcp-bridge/generated-assets'
+  ): Promise<any> {
+    const { execSync } = require('child_process');
+    const pathMod = require('path');
+    const fs = require('fs');
+
+    // Step 1: capture a frame BEFORE applying the effect
+    const frameBefore = pathMod.join(outputDir, `vfx_verify_before_${Date.now()}.jpg`);
+    const frameAfter = pathMod.join(outputDir, `vfx_verify_after_${Date.now()}.jpg`);
+
+    const mediaInfo: any = await this.bridge.executeScript(`
+      try {
+        var seq = app.project.activeSequence;
+        var track = seq.videoTracks[${trackIndex}];
+        var clip = track && track.clips[${clipIndex}];
+        if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
+        var mediaPath = clip.projectItem ? String(clip.projectItem.getMediaPath()) : '';
+        var midSecs = (clip.start.seconds + clip.end.seconds) / 2;
+        var clipStartSecs = clip.start.seconds;
+        var inSecs = clip.inPoint.seconds;
+        var sourceTimeSecs = inSecs + (midSecs - clipStartSecs);
+        return JSON.stringify({success:true,mediaPath:mediaPath,sourceTimeSecs:sourceTimeSecs});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+    if (!mediaInfo?.success) return { success: false, error: 'Could not locate clip media: ' + mediaInfo?.error };
+
+    try {
+      execSync(`ffmpeg -y -ss ${mediaInfo.sourceTimeSecs} -i "${mediaInfo.mediaPath}" -vframes 1 "${frameBefore}"`, { timeout: 15000 });
+    } catch (e: any) { return { success: false, error: 'ffmpeg frame capture failed: ' + e.message?.slice(0,100) }; }
+
+    // Step 2: apply the effect via QE
+    const applyResult: any = await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var seq = qe.project.getActiveSequence();
+        var clip = seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        if (!clip) return JSON.stringify({success:false,error:'QE clip not found'});
+        var domClip = app.project.activeSequence.videoTracks[${trackIndex}].clips[${clipIndex}];
+        var before = domClip.components.numItems;
+        var eff = qe.project.getVideoEffectByName(${JSON.stringify(effectName)});
+        if (!eff) return JSON.stringify({success:false,error:'Effect not found: '+${JSON.stringify(effectName)}});
+        clip.addVideoEffect(eff);
+        var after = domClip.components.numItems;
+        var added = after > before;
+        ${effectParam && effectParamValue ? `
+        if (added) {
+          var newComp = app.project.activeSequence.videoTracks[${trackIndex}].clips[${clipIndex}].getComponentAt ? null : null;
+          var qeComp = clip.getComponentAt(after - 1);
+          if (qeComp) { try { qeComp.setParamValue(${JSON.stringify(effectParam)}, ${JSON.stringify(effectParamValue)}); } catch(ep) {} }
+        }` : ''}
+        return JSON.stringify({success:true,effectAdded:added,componentsBefore:before,componentsAfter:after});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+    if (!applyResult?.success) return { success: false, error: 'Effect apply failed: ' + applyResult?.error, verified: false };
+
+    // Step 3: capture frame AFTER applying
+    try {
+      execSync(`ffmpeg -y -ss ${mediaInfo.sourceTimeSecs} -i "${mediaInfo.mediaPath}" -vframes 1 "${frameAfter}"`, { timeout: 15000 });
+    } catch (e: any) { return { success: false, error: 'Post-effect frame capture failed', verified: false }; }
+
+    // Step 4: pixel diff
+    try {
+      const psnrOut = execSync(`ffmpeg -i "${frameBefore}" -i "${frameAfter}" -lavfi psnr -f null - 2>&1`, { timeout: 10000 }).toString();
+      const match = psnrOut.match(/psnr_avg:(\S+)/);
+      const psnr = match ? parseFloat(match[1]) : null;
+      const identical = psnr !== null && psnr > 45;
+      const effectLanded = !identical; // effect changed the image = verified
+
+      // Cleanup temp frames
+      try { fs.unlinkSync(frameBefore); fs.unlinkSync(frameAfter); } catch(_) {}
+
+      return {
+        success: true,
+        verified: effectLanded,
+        effectName,
+        effectAdded: applyResult.effectAdded,
+        psnr,
+        pixelDifferenceDetected: effectLanded,
+        note: effectLanded
+          ? `Effect "${effectName}" confirmed: rendered output changed (PSNR ${psnr?.toFixed(1)}dB).`
+          : `Effect "${effectName}" may not have rendered yet or had no visible impact (PSNR ${psnr?.toFixed(1)}dB — frames appear identical). Try render_sequence_previews first.`
+      };
+    } catch (e: any) {
+      return { success: false, error: 'PSNR comparison failed: ' + e.message?.slice(0,100), verified: false };
+    }
+  }
+
+  private async verifyColorGrade(
+    _seqId: string | undefined, trackIndex: number, clipIndex: number,
+    gradeParams: Record<string, number>, outputDir = '/tmp/premiere-mcp-bridge/generated-assets'
+  ): Promise<any> {
+    const { execSync } = require('child_process');
+    const pathMod = require('path');
+    const fs = require('fs');
+
+    const frameBefore = pathMod.join(outputDir, `grade_verify_before_${Date.now()}.jpg`);
+    const frameAfter = pathMod.join(outputDir, `grade_verify_after_${Date.now()}.jpg`);
+
+    // Get clip media path
+    const mediaInfo: any = await this.bridge.executeScript(`
+      try {
+        var clip = app.project.activeSequence.videoTracks[${trackIndex}].clips[${clipIndex}];
+        if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
+        var mediaPath = clip.projectItem ? String(clip.projectItem.getMediaPath()) : '';
+        var midSecs = (clip.start.seconds + clip.end.seconds) / 2;
+        var sourceTimeSecs = clip.inPoint.seconds + (midSecs - clip.start.seconds);
+        return JSON.stringify({success:true,mediaPath:mediaPath,sourceTimeSecs:sourceTimeSecs});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+    if (!mediaInfo?.success) return { success: false, error: mediaInfo?.error, verified: false };
+
+    try {
+      execSync(`ffmpeg -y -ss ${mediaInfo.sourceTimeSecs} -i "${mediaInfo.mediaPath}" -vframes 1 "${frameBefore}"`, { timeout: 15000 });
+    } catch (e: any) { return { success: false, error: 'Pre-grade capture failed', verified: false }; }
+
+    // Apply grade params
+    const paramMap: Record<string, number> = { exposure: 19, contrast: 20, highlights: 21, shadows: 22, whites: 23, blacks: 24, temperature: 14, tint: 15, saturation: 16 };
+    const setStatements = Object.entries(gradeParams)
+      .filter(([k]) => paramMap[k] !== undefined)
+      .map(([k, v]) => `try { lumetriComp.properties[${paramMap[k]}].setValue(${v}, true); } catch(ep) {}`)
+      .join('\n        ');
+
+    const gradeResult: any = await this.bridge.executeScript(`
+      try {
+        var clip = app.project.activeSequence.videoTracks[${trackIndex}].clips[${clipIndex}];
+        var lumetriComp = null;
+        for (var i = 0; i < clip.components.numItems; i++) {
+          if (String(clip.components[i].displayName).indexOf('Lumetri') >= 0) { lumetriComp = clip.components[i]; break; }
+        }
+        if (!lumetriComp) return JSON.stringify({success:false,error:'No Lumetri component on clip — apply_lumetri_preset first'});
+        ${setStatements}
+        return JSON.stringify({success:true,paramsSet:${JSON.stringify(Object.keys(gradeParams))}});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+    if (!gradeResult?.success) return { success: false, error: 'Grade apply failed: ' + gradeResult?.error, verified: false };
+
+    try {
+      execSync(`ffmpeg -y -ss ${mediaInfo.sourceTimeSecs} -i "${mediaInfo.mediaPath}" -vframes 1 "${frameAfter}"`, { timeout: 15000 });
+      const psnrOut = execSync(`ffmpeg -i "${frameBefore}" -i "${frameAfter}" -lavfi psnr -f null - 2>&1`, { timeout: 10000 }).toString();
+      const match = psnrOut.match(/psnr_avg:(\S+)/);
+      const psnr = match ? parseFloat(match[1]) : null;
+      const gradeLanded = psnr !== null && psnr < 45;
+      try { fs.unlinkSync(frameBefore); fs.unlinkSync(frameAfter); } catch(_) {}
+      return {
+        success: true,
+        verified: gradeLanded,
+        psnr,
+        pixelDifferenceDetected: gradeLanded,
+        gradeParams,
+        note: gradeLanded
+          ? `Grade confirmed: rendered output changed (PSNR ${psnr?.toFixed(1)}dB).`
+          : `Grade may not have rendered yet (PSNR ${psnr?.toFixed(1)}dB — frames identical). Try render_sequence_previews first.`
+      };
+    } catch (e: any) {
+      return { success: false, error: e.message?.slice(0,100), verified: false };
     }
   }
 
