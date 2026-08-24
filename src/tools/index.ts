@@ -1763,7 +1763,7 @@ export class PremiereProTools {
         name: 'duplicate_sequence',
         description: 'Creates a copy of an existing sequence with a new name. Set clearContents=true to get an EMPTY copy that inherits the source sequence\'s exact settings (frame rate, resolution, track layout) — the reliable way to auto-create a correctly-specced blank target, since create_sequence ignores frame rate.',
         inputSchema: z.object({
-          sequenceId: z.string().describe('The ID of the sequence to duplicate'),
+          sequenceId: z.string().optional().describe('The ID of the sequence to duplicate. Defaults to the active sequence.'),
           newName: z.string().describe('The name for the new sequence copy'),
           clearContents: z.boolean().optional().describe('When true, remove all clips from the copy so it is empty but keeps the source\'s frame rate/resolution/track layout. Default false (full copy).')
         })
@@ -1807,7 +1807,7 @@ export class PremiereProTools {
         name: 'add_to_timeline',
         description: 'Adds a media clip from the project panel to a sequence timeline at a specific track and time.',
         inputSchema: z.object({
-          sequenceId: z.string().describe('The ID of the sequence (timeline) to add the clip to'),
+          sequenceId: z.string().optional().describe('The ID of the sequence (timeline) to add the clip to. Defaults to the active sequence.'),
           projectItemId: z.string().describe('The ID of the project item (clip) to add'),
           trackIndex: z.number().describe('The index of the video or audio track (0-based)'),
           time: z.number().describe('The time in seconds where the clip should be placed on the timeline'),
@@ -1821,7 +1821,7 @@ export class PremiereProTools {
         name: 'add_to_timeline_batch',
         description: 'Places MANY clips onto one sequence in a single round-trip — the fast path for rebuilding a whole edit (e.g. a Descript/EDL stringout). Equivalent to calling add_to_timeline (overwrite) once per clip, but ~50x faster because it loops inside one ExtendScript pass instead of one file round-trip per clip. Each clip supports per-clip linkAudio and sourceInPoint/sourceOutPoint (Source-monitor in/out). Returns a per-clip result array so one bad clip does not sink the batch, plus an aggregate status: top-level success is true ONLY when every clip placed; status is "success" | "partial" | "failure" with placed/failed/total counts.',
         inputSchema: z.object({
-          sequenceId: z.string().describe('The ID of the sequence (timeline) to add clips to'),
+          sequenceId: z.string().optional().describe('The ID of the sequence (timeline) to add clips to. Defaults to the active sequence.'),
           mode: z.enum(['absolute', 'append']).optional().describe('Placement mode. "absolute" (default) uses each clip\'s time. "append" ignores time and lays clips end-to-end with NO gaps: each clip on a given track starts exactly where the previous one ends (seeded from that track\'s existing content), chained off the placed clip\'s real frame-aligned end so float-second rounding cannot open a 1-frame gap. Use append to rebuild a continuous stringout.'),
           clips: z.array(z.object({
             projectItemId: z.string().describe('The ID of the project item (clip / multicam) to add'),
@@ -2000,7 +2000,7 @@ export class PremiereProTools {
         name: 'mute_track',
         description: 'Mutes or unmutes an entire audio track.',
         inputSchema: z.object({
-          sequenceId: z.string().describe('The ID of the sequence'),
+          sequenceId: z.string().optional().describe('The ID of the sequence. Defaults to the active sequence.'),
           trackIndex: z.number().describe('The index of the audio track'),
           muted: z.boolean().describe('Whether to mute (true) or unmute (false) the track')
         })
@@ -2015,7 +2015,7 @@ export class PremiereProTools {
           text2: z.string().optional().describe('Text for the second AE text component (e.g., subtitle of a lower third)'),
           text3: z.string().optional().describe('Text for the third AE text component (if present)'),
           text4: z.string().optional().describe('Text for the fourth AE text component (if present)'),
-          sequenceId: z.string().describe('The sequence to add the text to'),
+          sequenceId: z.string().optional().describe('The sequence to add the text to. Defaults to the active sequence.'),
           trackIndex: z.number().describe('The video track to place the text on (0-indexed; create the track first via add_track if needed)'),
           startTime: z.number().describe('The time in seconds when the text should appear'),
           duration: z.number().describe('How long the text should remain on screen in seconds (best-effort; the MOGRT\'s natural duration may take precedence)'),
@@ -2056,7 +2056,7 @@ export class PremiereProTools {
         name: 'export_sequence',
         description: 'Renders and exports a sequence to a video file. This is for creating the final video.',
         inputSchema: z.object({
-          sequenceId: z.string().describe('The ID of the sequence to export'),
+          sequenceId: z.string().optional().describe('The ID of the sequence to export. Defaults to the active sequence.'),
           outputPath: z.string().describe('The absolute path where the final video file will be saved'),
           presetPath: z.string().optional().describe('Absolute path to an export preset file (.epr). Required unless presetName uniquely resolves through get_encoder_presets.'),
           presetName: z.string().optional().describe('Exact user preset display name or filename stem. Must resolve to exactly one discovered .epr preset.'),
@@ -2072,7 +2072,7 @@ export class PremiereProTools {
         name: 'export_frame',
         description: 'Exports a single frame from a sequence as an image file. Supported formats (all verified against Premiere\'s QE exporters): png, jpg/jpeg, tiff/tif, dpx, tga/targa.',
         inputSchema: z.object({
-          sequenceId: z.string().describe('The ID of the sequence'),
+          sequenceId: z.string().optional().describe('The ID of the sequence. Defaults to the active sequence.'),
           time: z.number().describe('The time in seconds to export the frame from'),
           outputPath: z.string().describe('The absolute path where the image file will be saved'),
           format: z.enum(['png', 'jpg', 'jpeg', 'tiff', 'tif', 'dpx', 'tga', 'targa']).optional().describe('The image format (default png)')
@@ -2124,7 +2124,7 @@ export class PremiereProTools {
         name: 'add_track',
         description: 'Adds a new video or audio track to the sequence.',
         inputSchema: z.object({
-          sequenceId: z.string().describe('The ID of the sequence'),
+          sequenceId: z.string().optional().describe('The ID of the sequence. Defaults to the active sequence.'),
           trackType: z.enum(['video', 'audio']).describe('Type of track to add'),
           position: z.enum(['above', 'below']).optional().describe('Where to add the track relative to existing tracks')
         })
@@ -2179,7 +2179,7 @@ export class PremiereProTools {
         name: 'apply_audio_effect_to_all_clips',
         description: 'Bulk: applies a single audio effect to ALL audio clips of a sequence in one ExtendScript call. Returns per-clip results. Saves N MCP roundtrips when calibrating or applying same chain.',
         inputSchema: z.object({
-          sequenceId: z.string().describe('Target sequence ID (must be the active sequence in Premiere)'),
+          sequenceId: z.string().optional().describe('Target sequence ID (must be the active sequence in Premiere). Defaults to the active sequence.'),
           effectName: z.string().describe('Audio effect display name (e.g., "Limitador forzado", "Compresor multibanda")'),
           parameters: z.record(z.string(), z.any()).optional().describe('Effect parameters by displayName (exact or normalized)')
         })
@@ -2225,14 +2225,14 @@ export class PremiereProTools {
         name: 'get_sequence_settings',
         description: 'Gets the settings for a sequence (resolution, framerate, etc.).',
         inputSchema: z.object({
-          sequenceId: z.string().describe('The ID of the sequence')
+          sequenceId: z.string().optional().describe('The ID of the sequence. Defaults to the active sequence.')
         })
       },
       {
         name: 'set_sequence_settings',
         description: 'Updates sequence settings. Applies width, height, frameRate and pixelAspectRatio, reads the values back afterwards, and reports any field Premiere accepted but did not actually change. Frame size CAN be changed after creation, contrary to an earlier note in this codebase.',
         inputSchema: z.object({
-          sequenceId: z.string().describe('The ID of the sequence'),
+          sequenceId: z.string().optional().describe('The ID of the sequence. Defaults to the active sequence.'),
           settings: z.object({
             width: z.number().optional().describe('Frame width in pixels'),
             height: z.number().optional().describe('Frame height in pixels'),
@@ -2293,7 +2293,7 @@ export class PremiereProTools {
         name: 'add_to_render_queue',
         description: 'Adds a sequence to the Adobe Media Encoder render queue.',
         inputSchema: z.object({
-          sequenceId: z.string().describe('The ID of the sequence to render'),
+          sequenceId: z.string().optional().describe('The ID of the sequence to render. Defaults to the active sequence.'),
           outputPath: z.string().describe('Output file path'),
           presetPath: z.string().optional().describe('Export preset file path'),
           presetName: z.string().optional().describe('Exact user preset display name or filename stem. Must resolve to exactly one discovered .epr preset.'),
@@ -2336,14 +2336,14 @@ export class PremiereProTools {
         name: 'get_playhead_position',
         description: 'Gets the current playhead (CTI) position in the specified sequence.',
         inputSchema: z.object({
-          sequenceId: z.string().describe('The ID of the sequence')
+          sequenceId: z.string().optional().describe('The ID of the sequence. Defaults to the active sequence.')
         })
       },
       {
         name: 'set_playhead_position',
         description: 'Sets the playhead (CTI) position in the specified sequence.',
         inputSchema: z.object({
-          sequenceId: z.string().describe('The ID of the sequence'),
+          sequenceId: z.string().optional().describe('The ID of the sequence. Defaults to the active sequence.'),
           time: z.number().describe('The time in seconds to move the playhead to')
         })
       },
@@ -2351,7 +2351,7 @@ export class PremiereProTools {
         name: 'get_selected_clips',
         description: 'Gets all currently selected clips in the specified sequence.',
         inputSchema: z.object({
-          sequenceId: z.string().describe('The ID of the sequence')
+          sequenceId: z.string().optional().describe('The ID of the sequence. Defaults to the active sequence.')
         })
       },
 
@@ -2431,7 +2431,7 @@ export class PremiereProTools {
         name: 'set_work_area',
         description: 'Sets the work area in/out points for a sequence.',
         inputSchema: z.object({
-          sequenceId: z.string().describe('The ID of the sequence'),
+          sequenceId: z.string().optional().describe('The ID of the sequence. Defaults to the active sequence.'),
           inPoint: z.number().describe('The in point in seconds'),
           outPoint: z.number().describe('The out point in seconds')
         })
@@ -2440,7 +2440,7 @@ export class PremiereProTools {
         name: 'get_work_area',
         description: 'Gets the work area in/out points for a sequence.',
         inputSchema: z.object({
-          sequenceId: z.string().describe('The ID of the sequence')
+          sequenceId: z.string().optional().describe('The ID of the sequence. Defaults to the active sequence.')
         })
       },
 
@@ -2449,7 +2449,7 @@ export class PremiereProTools {
         name: 'batch_add_transitions',
         description: 'Adds a transition to all clip boundaries on a track. Useful for quickly adding cross dissolves or other transitions between every clip.',
         inputSchema: z.object({
-          sequenceId: z.string().describe('The ID of the sequence'),
+          sequenceId: z.string().optional().describe('The ID of the sequence. Defaults to the active sequence.'),
           trackIndex: z.number().describe('The video track index (0-based)'),
           transitionName: z.string().describe('The name of the transition (e.g., "Cross Dissolve")'),
           duration: z.number().describe('The duration of each transition in seconds')
@@ -2493,7 +2493,7 @@ export class PremiereProTools {
         name: 'get_clip_at_position',
         description: 'Gets the clip at a specific time position on a track.',
         inputSchema: z.object({
-          sequenceId: z.string().describe('The ID of the sequence'),
+          sequenceId: z.string().optional().describe('The ID of the sequence. Defaults to the active sequence.'),
           trackType: z.enum(['video', 'audio']).describe('The type of track'),
           trackIndex: z.number().describe('The track index (0-based)'),
           time: z.number().describe('The time position in seconds')
@@ -2505,7 +2505,7 @@ export class PremiereProTools {
         name: 'auto_reframe_sequence',
         description: 'Automatically reframes a sequence to a new aspect ratio using AI-powered motion tracking.',
         inputSchema: z.object({
-          sequenceId: z.string().describe('The ID of the sequence to reframe'),
+          sequenceId: z.string().optional().describe('The ID of the sequence to reframe. Defaults to the active sequence.'),
           numerator: z.number().describe('Aspect ratio numerator (e.g., 9 for 9:16)'),
           denominator: z.number().describe('Aspect ratio denominator (e.g., 16 for 9:16)'),
           motionPreset: z.enum(['slower', 'default', 'faster']).optional().describe('Motion tracking speed preset'),
@@ -2518,7 +2518,7 @@ export class PremiereProTools {
         name: 'detect_scene_edits',
         description: 'Detects scene changes in selected clips and optionally adds cuts or markers.',
         inputSchema: z.object({
-          sequenceId: z.string().describe('The ID of the sequence'),
+          sequenceId: z.string().optional().describe('The ID of the sequence. Defaults to the active sequence.'),
           action: z.enum(['ApplyCuts', 'CreateMarkers']).optional().describe('Action to take at detected edit points'),
           applyCutsToLinkedAudio: z.boolean().optional().describe('Whether to apply cuts to linked audio'),
           sensitivity: z.string().optional().describe('Detection sensitivity (e.g., "Low", "Medium", "High")'),
@@ -2546,7 +2546,7 @@ export class PremiereProTools {
         name: 'create_caption_track',
         description: 'Creates a caption track on a sequence from an imported caption/subtitle file (e.g. an .srt imported via import_media). Pass the SRT project item ID directly.',
         inputSchema: z.object({
-          sequenceId: z.string().describe('The ID of the sequence'),
+          sequenceId: z.string().optional().describe('The ID of the sequence. Defaults to the active sequence.'),
           projectItemId: z.string().describe('The ID of the caption file project item (e.g. an imported .srt)'),
           startTime: z.number().optional().describe('Offset in seconds from the start of the sequence. Defaults to 0.'),
           captionFormat: z.string().optional().describe('Optional caption format. Omit for subtitles (default, correct for .srt). Accepts: "subtitle", "608", "708", "teletext", "open ebu", "op42", "op47".')
@@ -2831,7 +2831,7 @@ export class PremiereProTools {
         name: 'export_as_fcp_xml',
         description: 'Exports a sequence as Final Cut Pro XML.',
         inputSchema: z.object({
-          sequenceId: z.string().describe('The ID of the sequence to export'),
+          sequenceId: z.string().optional().describe('The ID of the sequence to export. Defaults to the active sequence.'),
           outputPath: z.string().describe('The absolute file path for the exported XML file')
         })
       },
@@ -2844,7 +2844,7 @@ export class PremiereProTools {
         name: 'set_sequence_in_out_points',
         description: 'Sets the in and/or out points on a sequence timeline.',
         inputSchema: z.object({
-          sequenceId: z.string().describe('The ID of the sequence'),
+          sequenceId: z.string().optional().describe('The ID of the sequence. Defaults to the active sequence.'),
           inPoint: z.number().optional().describe('The in point in seconds'),
           outPoint: z.number().optional().describe('The out point in seconds')
         })
@@ -2853,14 +2853,14 @@ export class PremiereProTools {
         name: 'get_sequence_in_out_points',
         description: 'Gets the in and out points of a sequence timeline.',
         inputSchema: z.object({
-          sequenceId: z.string().describe('The ID of the sequence')
+          sequenceId: z.string().optional().describe('The ID of the sequence. Defaults to the active sequence.')
         })
       },
       {
         name: 'export_aaf',
         description: 'Exports a sequence as an AAF file for interchange with other editing/audio applications.',
         inputSchema: z.object({
-          sequenceId: z.string().describe('The ID of the sequence to export'),
+          sequenceId: z.string().optional().describe('The ID of the sequence to export. Defaults to the active sequence.'),
           outputPath: z.string().describe('The absolute file path for the exported AAF file'),
           mixDownVideo: z.boolean().optional().describe('Whether to mix down video (default: true)'),
           explodeToMono: z.boolean().optional().describe('Whether to explode audio to mono (default: false)'),
@@ -2892,7 +2892,7 @@ export class PremiereProTools {
         name: 'create_subsequence',
         description: 'Creates a subsequence from the in/out points of a sequence.',
         inputSchema: z.object({
-          sequenceId: z.string().describe('The ID of the source sequence'),
+          sequenceId: z.string().optional().describe('The ID of the source sequence. Defaults to the active sequence.'),
           ignoreTrackTargeting: z.boolean().optional().describe('Whether to ignore track targeting (default: false)')
         })
       },
@@ -2900,7 +2900,7 @@ export class PremiereProTools {
         name: 'import_mogrt',
         description: 'Imports a Motion Graphics Template (.mogrt) file into a sequence.',
         inputSchema: z.object({
-          sequenceId: z.string().describe('The ID of the sequence'),
+          sequenceId: z.string().optional().describe('The ID of the sequence. Defaults to the active sequence.'),
           mogrtPath: z.string().describe('The absolute path to the .mogrt file'),
           time: z.number().describe('The time in seconds where the MOGRT should be placed'),
           videoTrackIndex: z.number().optional().describe('The video track index (default: 0)'),
@@ -2911,7 +2911,7 @@ export class PremiereProTools {
         name: 'import_mogrt_from_library',
         description: 'Imports a Motion Graphics Template from a Creative Cloud Library.',
         inputSchema: z.object({
-          sequenceId: z.string().describe('The ID of the sequence'),
+          sequenceId: z.string().optional().describe('The ID of the sequence. Defaults to the active sequence.'),
           libraryName: z.string().describe('The name of the Creative Cloud Library'),
           mogrtName: z.string().describe('The name of the MOGRT in the library'),
           time: z.number().describe('The time in seconds where the MOGRT should be placed'),
@@ -5347,10 +5347,8 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(`
       var seq = ${this.buildSequenceResolver2(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
-      var t = new Time(); t.ticks = '0';
-      seq.setPlayerPosition(t.ticks);
-      var pos = seq.getPlayerPosition();
-      return JSON.stringify({success:true,verified:true,ticks:String(pos.ticks),secs:pos.seconds,sequenceName:String(seq.name)});
+      var r = __setPlayheadVerified(seq, 0);
+      return JSON.stringify({success:r.moved,verified:r.verified,error:r.error,ticks:String(r.actualTicks),secs:r.actualSeconds,sequenceName:String(seq.name)});
     `);
   }
 
@@ -5358,10 +5356,13 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(`
       var seq = ${this.buildSequenceResolver2(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
-      var endTicks = seq.end ? String(seq.end.ticks) : String(seq.getOutPoint ? seq.getOutPoint().ticks : '0');
-      seq.setPlayerPosition(endTicks);
-      var pos = seq.getPlayerPosition();
-      return JSON.stringify({success:true,verified:true,ticks:String(pos.ticks),secs:pos.seconds,sequenceName:String(seq.name)});
+      // Sequence.end is a TICKS string, not a Time object — reading .ticks off it gave
+      // undefined, which setPlayerPosition swallowed while this tool still claimed verified
+      // success. Measured on 26.3.2; see __seqEndTicks in the prelude.
+      var endTicks = __seqEndTicks(seq);
+      if (endTicks === null) return JSON.stringify({success:false,verified:false,error:'Could not read the sequence end time, so the playhead was not moved.'});
+      var r = __setPlayheadVerified(seq, endTicks);
+      return JSON.stringify({success:r.moved,verified:r.verified,error:r.error,ticks:String(r.actualTicks),secs:r.actualSeconds,requestedTicks:String(endTicks),sequenceName:String(seq.name)});
     `);
   }
 
@@ -5369,9 +5370,11 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(`
       var seq = ${this.buildSequenceResolver2(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
-      var ip = seq.getInPoint();
-      seq.setPlayerPosition(String(ip.ticks));
-      return JSON.stringify({success:true,ticks:String(ip.ticks),secs:ip.seconds});
+      // getInPoint() returns a SECONDS string here, not a Time — .ticks was undefined.
+      var ticks = __seqInTicks(seq);
+      if (ticks === null) return JSON.stringify({success:false,verified:false,error:'The sequence has no readable in point, so the playhead was not moved.'});
+      var r = __setPlayheadVerified(seq, ticks);
+      return JSON.stringify({success:r.moved,verified:r.verified,error:r.error,ticks:String(r.actualTicks),secs:r.actualSeconds,inPointSeconds:__seqInSeconds(seq)});
     `);
   }
 
@@ -5379,9 +5382,11 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(`
       var seq = ${this.buildSequenceResolver2(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
-      var op = seq.getOutPoint();
-      seq.setPlayerPosition(String(op.ticks));
-      return JSON.stringify({success:true,ticks:String(op.ticks),secs:op.seconds});
+      // getOutPoint() returns a SECONDS string here, not a Time — .ticks was undefined.
+      var ticks = __seqOutTicks(seq);
+      if (ticks === null) return JSON.stringify({success:false,verified:false,error:'The sequence has no readable out point, so the playhead was not moved.'});
+      var r = __setPlayheadVerified(seq, ticks);
+      return JSON.stringify({success:r.moved,verified:r.verified,error:r.error,ticks:String(r.actualTicks),secs:r.actualSeconds,outPointSeconds:__seqOutSeconds(seq)});
     `);
   }
 
@@ -5389,12 +5394,20 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(`
       var seq = ${this.buildSequenceResolver2(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
-      var before = seq.getPlayerPosition();
+      var beforeTicks = __timeFieldToNumber(seq.getPlayerPosition());
+      if (beforeTicks === null) return JSON.stringify({success:false,verified:false,error:'Could not read the current playhead position, so no move was attempted.'});
       var ticksPerFrame = Number(seq.timebase) || 10584000000;
-      var newTicks = Math.max(0, Number(before.ticks) + ${frames} * ticksPerFrame);
-      seq.setPlayerPosition(String(Math.round(newTicks)));
-      var after = seq.getPlayerPosition();
-      return JSON.stringify({success:true,verified:true,framesMoved:${frames},before:{ticks:String(before.ticks),secs:before.seconds},after:{ticks:String(after.ticks),secs:after.seconds}});
+      var target = Math.max(0, beforeTicks + ${frames} * ticksPerFrame);
+      // Half a frame: landing on the requested frame is success, sub-frame drift is not a failure.
+      var r = __setPlayheadVerified(seq, target, ticksPerFrame / 2);
+      var framesActuallyMoved = (r.actualTicks !== null && typeof r.actualTicks !== 'undefined')
+        ? Math.round((r.actualTicks - beforeTicks) / ticksPerFrame) : null;
+      return JSON.stringify({
+        success: r.moved, verified: r.verified, error: r.error,
+        framesRequested: ${frames}, framesMoved: framesActuallyMoved,
+        before: { ticks: String(beforeTicks), secs: beforeTicks / 254016000000 },
+        after: { ticks: String(r.actualTicks), secs: r.actualSeconds }
+      });
     `);
   }
 
@@ -6359,18 +6372,30 @@ ${this.buildSequenceResolver(sequenceId)}
         if (!reel) return JSON.stringify({success:false,error:'Could not create reel sequence'});
         // Overwrite each source into the reel
         var cursor = new Time(); cursor.ticks = '0';
+        var placed = 0, skipped = [];
         for (var i=0;i<sources.length;i++) {
           var src = sources[i];
-          var dur = src.end ? src.end.ticks : '0';
-          // Nest the source sequence into reel at cursor
+          // src.end is a TICKS string, not a Time. Reading .ticks gave undefined, so the cursor
+          // advanced by NaN and every later source was written to the same spot — while the tool
+          // still reported success. Measured on 26.3.2.
+          var durTicks = __seqEndTicks(src);
           var srcItem = src.projectItem;
-          if (srcItem) {
-            reel.videoTracks[0].overwriteClip(srcItem, cursor);
-            var durTicks = Number(dur);
-            cursor.ticks = String(Math.round(Number(cursor.ticks) + durTicks));
-          }
+          if (!srcItem) { skipped.push(String(src.name) + ' (no projectItem)'); continue; }
+          if (durTicks === null || isNaN(durTicks)) { skipped.push(String(src.name) + ' (unreadable duration)'); continue; }
+          try { reel.videoTracks[0].overwriteClip(srcItem, cursor); } catch (eOv) { skipped.push(String(src.name) + ' (' + eOv.toString() + ')'); continue; }
+          cursor.ticks = String(Math.round(Number(cursor.ticks) + durTicks));
+          placed++;
         }
-        return JSON.stringify({success:true,reelSequenceId:String(reel.sequenceID),reelName:String(reel.name),sourceCount:sources.length,totalDurationTicks:String(cursor.ticks)});
+        var landed = reel.videoTracks[0].clips.numItems;
+        return JSON.stringify({
+          success: placed > 0 && landed >= placed,
+          verified: true,
+          reelSequenceId:String(reel.sequenceID), reelName:String(reel.name),
+          sourceCount:sources.length, placed: placed, clipsOnV1: landed,
+          skipped: skipped,
+          totalDurationTicks:String(cursor.ticks),
+          error: placed === 0 ? 'No source sequence could be placed into the reel.' : (skipped.length ? 'Some sources were skipped; see skipped[].' : null)
+        });
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
@@ -6513,7 +6538,9 @@ ${this.buildSequenceResolver(sequenceId)}
         // Sequence stats
         var totalClips = 0;
         for (var ti2=0;ti2<vt.numTracks;ti2++) totalClips += vt[ti2].clips.numItems;
-        var durationSecs = seq.end ? seq.end.seconds : 0;
+        // seq.end is a TICKS string; .seconds on it was undefined and shipped as null.
+        var durationSecs = __seqEndSeconds(seq);
+        if (durationSecs === null) durationSecs = 0;
         return JSON.stringify({
           success:true,
           qcPass: issues.length === 0,
@@ -7441,7 +7468,9 @@ ${this.buildSequenceResolver(sequenceId)}
         for (var i=0; i<seqs.numSequences; i++) {
           var seq = seqs[i];
           for (var t=0; t<seq.videoTracks.numTracks; t++) totalClips += seq.videoTracks[t].clips.numItems;
-          try { durationSecs += seq.end ? seq.end.seconds : 0; } catch(e) {}
+          // seq.end is TICKS, not a Time: .seconds was undefined, so this sum became NaN and
+          // serialised as null — the project overview silently reported no duration at all.
+          try { var d = __seqEndSeconds(seq); if (d !== null) durationSecs += d; } catch(e) {}
         }
         function countBins(bin) { var c=0; for(var i=0;i<bin.children.numItems;i++){ var ch=bin.children[i]; if(ch.type===2) c+=1+countBins(ch); } return c; }
         var binCount = countBins(app.project.rootItem);
@@ -15255,10 +15284,32 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(`
       try {
         var seq=${this.buildSeqRes(seqId)};
-        var endTicks=seq.end?String(seq.end.ticks):'91445760000000000';
-        seq.setWorkInPoint?seq.setWorkInPoint('0'):null;
-        seq.setWorkOutPoint?seq.setWorkOutPoint(endTicks):null;
-        return JSON.stringify({success:true,note:'Work area reset to full sequence'});
+        if(!seq) return JSON.stringify({success:false,error:'Sequence not found'});
+        // seq.end is a TICKS string; .ticks on it was undefined, so setWorkOutPoint received the
+        // literal "undefined" and the work area was never reset — while this reported success.
+        var endTicks=__seqEndTicks(seq);
+        if(endTicks===null) return JSON.stringify({success:false,verified:false,error:'Could not read the sequence end time, so the work area was left unchanged.'});
+        // The DOM setters are setWorkArea*; setWorkInPoint/setWorkOutPoint are QE-only names and
+        // are undefined on the Sequence object (measured on 26.3.2). This tool called the QE
+        // names against the DOM object, so it never touched the work area.
+        if(!seq.setWorkAreaInPoint||!seq.setWorkAreaOutPoint) return JSON.stringify({success:false,verified:false,error:'This build does not expose setWorkAreaInPoint/setWorkAreaOutPoint on Sequence.'});
+        var before=__readWorkArea(seq);
+        seq.setWorkAreaInPoint('0');
+        seq.setWorkAreaOutPoint(String(endTicks));
+        var after=__readWorkArea(seq);
+        if(after.outTicks===null) return JSON.stringify({success:false,verified:false,error:'Work area could not be read back, so the reset is unproven.'});
+        var onTarget = Math.abs(after.outTicks-endTicks) <= 10584000000 && Math.abs(after.inTicks) <= 10584000000;
+        var changed = before.outTicks===null || after.outTicks!==before.outTicks || after.inTicks!==before.inTicks;
+        // A no-op and a real change read back identically when the target already equals the
+        // current value. Saying "verified" without that distinction is how a tool that does
+        // nothing passes its own check, so report which of the two actually happened.
+        return JSON.stringify({
+          success:onTarget, verified:true, changed:changed, alreadyFullSequence: onTarget && !changed,
+          workInTicks:String(after.inTicks), workOutTicks:String(after.outTicks),
+          sequenceEndTicks:String(endTicks), workAreaEnabled:__workAreaEnabled(seq),
+          error: onTarget ? null : 'The work area did not move. Measured on 26.3.2: setWorkAreaInPoint/setWorkAreaOutPoint are accepted but inert (QE setWorkInOutPoints likewise), so the work area cannot be set by script on this build. Use sequence in/out points instead — set_sequence_in_out_points is verified working.',
+          note: onTarget && !changed ? 'Work area already spanned the whole sequence; nothing was changed.' : 'Work area reset to full sequence'
+        });
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
     `);
   }
@@ -16910,8 +16961,21 @@ ${this.buildSequenceResolver(sequenceId)}
         var inNow = null, outNow = null;
         try { inNow = sequence.getWorkAreaInPointAsTime().seconds; } catch (eIn) {}
         try { outNow = sequence.getWorkAreaOutPointAsTime().seconds; } catch (eOut) {}
+        if (inNow === null && outNow === null) {
+          return JSON.stringify({ success: false, verified: false, error: "The work area could not be read back, so setting it is unproven. Not reporting success.", requested: { inPoint: ${inPoint}, outPoint: ${outPoint} } });
+        }
         if ((inNow !== null && Math.abs(inNow - ${inPoint}) > 0.04) || (outNow !== null && Math.abs(outNow - ${outPoint}) > 0.04)) {
-          return JSON.stringify({ success: false, verified: false, error: "Premiere did not set the work area as requested (reads back in " + inNow + "s / out " + outNow + "s).", requested: { inPoint: ${inPoint}, outPoint: ${outPoint} }, actual: { inPoint: inNow, outPoint: outNow } });
+          // Measured on 26.3.2: these setters are present and throw nothing, but the readback
+          // never moves, with or without setWorkAreaEnabled(true), and the QE route
+          // (setWorkInOutPoints) is inert too. Premiere 2026 deprecated the work-area bar in
+          // favour of sequence in/out points. Name that instead of just reporting a mismatch,
+          // so the caller knows to stop retrying and what to use instead.
+          return JSON.stringify({
+            success: false, verified: false,
+            error: "The work area did not move (reads back in " + inNow + "s / out " + outNow + "s). setWorkAreaInPoint/setWorkAreaOutPoint are accepted but inert on this build (26.3.2), as is QE setWorkInOutPoints, so the work area cannot be set by script here. Retrying will not help. Use set_sequence_in_out_points instead — it is verified working — and export with workAreaType set to the in/out range.",
+            workAreaEnabled: __workAreaEnabled(sequence),
+            requested: { inPoint: ${inPoint}, outPoint: ${outPoint} }, actual: { inPoint: inNow, outPoint: outNow }
+          });
         }
         return JSON.stringify({
           success: true,
@@ -17619,7 +17683,7 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   // Set Sequence In/Out Points Implementation
-  private async setSequenceInOutPoints(sequenceId: string, inPoint?: number, outPoint?: number): Promise<any> {
+  private async setSequenceInOutPoints(sequenceId: string | undefined, inPoint?: number, outPoint?: number): Promise<any> {
     const setIn = inPoint !== undefined;
     const setOut = outPoint !== undefined;
     const script = `
@@ -18182,7 +18246,8 @@ ${this.buildSequenceResolver(sequenceId)}
         var seq = app.project.activeSequence;
         var clip = seq.videoTracks[0].clips[0];
         var path = clip && clip.projectItem ? String(clip.projectItem.getMediaPath()) : '';
-        return JSON.stringify({success:true,mediaPath:path,duration:seq.end?seq.end.seconds:0});
+        var __d = __seqEndSeconds(seq);
+        return JSON.stringify({success:true,mediaPath:path,duration:__d===null?0:__d});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
     if (!seqInfo?.success || !seqInfo?.mediaPath) return { success: false, error: 'Could not get media path', note: 'frame_diff works on the source media of the first V1 clip' };
@@ -19207,7 +19272,10 @@ ${this.buildSequenceResolver(sequenceId)}
           for (var i=0;i<seqs.numSequences;i++) { if(seqs[i].sequenceID===seqId) { seq=seqs[i]; break; } }
         }
         if (!seq) return JSON.stringify({success:false,error:'Sequence not found'});
-        var endSecs = seq.end ? seq.end.seconds : 0;
+        // seq.end is TICKS, not a Time. .seconds was undefined, which made frames NaN and
+        // reported a sequence with no duration at all.
+        var endSecs = __seqEndSeconds(seq);
+        if (endSecs === null) return JSON.stringify({success:false,error:'Could not read the sequence end time.'});
         var fps = seq.timebase ? (254016000000 / Number(seq.timebase)) : 24;
         var frames = Math.round(endSecs * fps);
         return JSON.stringify({success:true,sequenceName:String(seq.name),durationSecs:endSecs,frames:frames,fps:fps,width:seq.frameSizeHorizontal,height:seq.frameSizeVertical});
