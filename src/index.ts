@@ -4,6 +4,8 @@ import { serveStdio, type StdioServerHandle } from '@modelcontextprotocol/server
 import { Server, ProtocolError, ProtocolErrorCode, type CallToolResult } from '@modelcontextprotocol/server';
 import { z, type ZodTypeAny } from 'zod';
 import { PremiereProTools } from './tools/index.js';
+import { annotationsFor } from './tools/annotations.js';
+import { startupAdvisory } from './tools/catalogue-cost.js';
 import { PremiereProResources } from './resources/index.js';
 import { PremiereProPrompts } from './prompts/index.js';
 import { PremiereProBridge } from './bridge/index.js';
@@ -40,7 +42,14 @@ class MCPPremiereProServer {
           tools: {},
           resources: {},
           prompts: {}
-        }
+        },
+        // Served on `initialize`, so every client receives the operating manual before
+        // its first tool call. The same text remains available as the
+        // premiere://config/get_instructions resource, but a resource is opt-in and
+        // most callers never attach it — which meant the verification contract, the
+        // honest list of what Premiere's scripting API cannot do, and the bridge setup
+        // steps were reaching almost nobody.
+        instructions: this.resources.getInstructionsText()
       }
     );
 
@@ -59,10 +68,16 @@ class MCPPremiereProServer {
   private setupHandlers(server: Server): void {
     // List available tools
     server.setRequestHandler('tools/list', async () => {
+      // Behavioural hints per the MCP spec. Clients use these to decide what to
+      // auto-approve versus confirm with a human; emitting none (as this server used
+      // to) makes get_project_info look exactly as risky as delete_sequence. They are
+      // hints describing EXPECTED behaviour, never an authorization boundary —
+      // enforcement stays in the handlers and in the tool profile.
       const tools = this.tools.getAvailableTools().map((tool) => ({
         name: tool.name,
         description: tool.description,
-        inputSchema: this.inputSchemaToJsonSchema(tool.inputSchema as ZodTypeAny)
+        inputSchema: this.inputSchemaToJsonSchema(tool.inputSchema as ZodTypeAny),
+        annotations: annotationsFor(tool.name)
       }));
       return { tools };
     });
@@ -179,6 +194,18 @@ class MCPPremiereProServer {
       });
       
       this.logger.info('MCP Adobe Premiere Pro Server started successfully');
+
+      // Tell the operator what the active profile actually costs. A catalogue this
+      // large degrades tool selection on clients that load every definition up front,
+      // and Copilot refuses outright past 128 tools. Silence here would be the same
+      // failure as reporting an unverified edit as done. stderr, so it reaches a human
+      // without touching the protocol stream.
+      try {
+        const advisory = startupAdvisory(this.tools.measureCatalogueCost());
+        if (advisory) process.stderr.write(`${advisory}\n`);
+      } catch {
+        // An advisory must never be the reason a server fails to start.
+      }
     } catch (error) {
       this.logger.error('Failed to start server:', error);
       throw error;
