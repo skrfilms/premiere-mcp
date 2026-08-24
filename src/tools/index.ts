@@ -5378,7 +5378,7 @@ ${this.buildSequenceResolver(sequenceId)}
       if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
       // getInPoint() returns a SECONDS string here, not a Time — .ticks was undefined.
       var ticks = __seqInTicks(seq);
-      if (ticks === null) return JSON.stringify({success:false,verified:false,error:'The sequence has no readable in point, so the playhead was not moved.'});
+      if (ticks === null) return JSON.stringify({success:false,verified:true,error:'This sequence has no in point set (Premiere reports a negative value when the range is unset), so there is nowhere to move to. Set one with set_sequence_in_out_points.',inPointSeconds:__seqInSeconds(seq)});
       var r = __setPlayheadVerified(seq, ticks);
       return JSON.stringify({success:r.moved,verified:r.verified,error:r.error,ticks:String(r.actualTicks),secs:r.actualSeconds,inPointSeconds:__seqInSeconds(seq)});
     `);
@@ -5390,7 +5390,7 @@ ${this.buildSequenceResolver(sequenceId)}
       if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
       // getOutPoint() returns a SECONDS string here, not a Time — .ticks was undefined.
       var ticks = __seqOutTicks(seq);
-      if (ticks === null) return JSON.stringify({success:false,verified:false,error:'The sequence has no readable out point, so the playhead was not moved.'});
+      if (ticks === null) return JSON.stringify({success:false,verified:true,error:'This sequence has no out point set (Premiere reports a negative value when the range is unset), so there is nowhere to move to. Set one with set_sequence_in_out_points.',outPointSeconds:__seqOutSeconds(seq)});
       var r = __setPlayheadVerified(seq, ticks);
       return JSON.stringify({success:r.moved,verified:r.verified,error:r.error,ticks:String(r.actualTicks),secs:r.actualSeconds,outPointSeconds:__seqOutSeconds(seq)});
     `);
@@ -14084,8 +14084,36 @@ ${this.buildSequenceResolver(sequenceId)}
         var beforeCount = info.track.clips.numItems;
         info.track.overwriteClip(projItem, insertTime);
         var afterCount = info.track.clips.numItems;
-        if (afterCount <= beforeCount) return JSON.stringify({ success: false, verified: false, error: "overwriteClip() ran but no clip was added at " + insertTime + "s (track count unchanged).", beforeCount: beforeCount, afterCount: afterCount });
-        return JSON.stringify({ success: true, verified: true, message: "Clip duplicated at " + insertTime + "s", beforeCount: beforeCount, afterCount: afterCount });
+        // Verify by LOOKING FOR THE CLIP, not by counting.
+        //
+        // overwriteClip OVERWRITES: dropped onto occupied time it replaces what is there, so the
+        // track count legitimately stays the same and the old check reported a false negative for
+        // a duplicate that had in fact landed. Counting only works when the destination is empty,
+        // which is exactly the case a caller cannot guarantee.
+        var landed = null, tolerance = 0.04;
+        for (var di = 0; di < info.track.clips.numItems; di++) {
+          var cand = info.track.clips[di];
+          if (Math.abs(cand.start.seconds - insertTime) > tolerance) continue;
+          var sameSource = false;
+          try { sameSource = String(cand.projectItem.nodeId) === String(projItem.nodeId); } catch (eSrc) {}
+          if (sameSource) { landed = cand; break; }
+        }
+        if (!landed) return JSON.stringify({
+          success: false, verified: true,
+          error: "overwriteClip() ran but no clip referencing this source is present at " + insertTime + "s, so the duplicate did not land.",
+          beforeCount: beforeCount, afterCount: afterCount, insertSeconds: insertTime
+        });
+        return JSON.stringify({
+          success: true, verified: true,
+          message: "Clip duplicated at " + insertTime + "s",
+          beforeCount: beforeCount, afterCount: afterCount,
+          // Same count with a clip present means an existing clip was overwritten rather than a
+          // new one appended. The caller should know which happened.
+          replacedExisting: afterCount === beforeCount,
+          insertSeconds: insertTime,
+          duplicateStartSeconds: landed.start.seconds,
+          duplicateEndSeconds: landed.end.seconds
+        });
       } catch (e) {
         return JSON.stringify({ success: false, error: e.toString() });
       }
@@ -16328,12 +16356,18 @@ ${this.buildSequenceResolver(sequenceId)}
   private async getProxiesEnabled(): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var enabled = app.getEnableProxies();
+        // getEnableProxies() returns a NUMBER (1/0), not a boolean. Strict equality to true was
+        // therefore ALWAYS false, so this tool could only ever report "OFF" — including when
+        // proxy playback was on. Measured on 26.3.2: reads back as 1 when enabled.
+        var raw = app.getEnableProxies();
+        var enabled = !!raw;
         return JSON.stringify({
           success: true,
-          proxiesEnabled: enabled === true,
-          note: enabled === true
-            ? 'Proxy playback is ON: attached proxies are being used.'
+          verified: true,
+          proxiesEnabled: enabled,
+          rawValue: String(raw),
+          note: enabled
+            ? 'Proxy playback is ON: attached proxies are being used where a clip has one. A clip with no attached proxy still plays at full resolution — check has_proxy per clip.'
             : 'Proxy playback is OFF. Any attached proxies are being IGNORED and clips play at full resolution. This is the usual cause of slow playback after generating proxies — enable it with set_proxies_enabled.'
         });
       } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
@@ -16343,13 +16377,20 @@ ${this.buildSequenceResolver(sequenceId)}
   private async setProxiesEnabled(enabled: boolean): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var before = app.getEnableProxies();
+        // getEnableProxies() returns a NUMBER (1/0), not a boolean, so the old strict
+        // inequality against true could never hold and this tool reported failure on a write
+        // that had actually worked — measured on 26.3.2, reading back as 1 after
+        // setEnableProxies(true). Compare truthiness, and report the raw value so the shape is
+        // visible rather than hidden by the coercion.
+        var rawBefore = app.getEnableProxies();
         app.setEnableProxies(${enabled});
-        var after = app.getEnableProxies();
+        var rawAfter = app.getEnableProxies();
+        var before = !!rawBefore, after = !!rawAfter;
         if (after !== ${enabled}) {
-          return JSON.stringify({ success: false, verified: false, error: 'setEnableProxies(${enabled}) ran but the flag reads back as ' + after + '.', before: before, after: after });
+          return JSON.stringify({ success: false, verified: true, error: 'setEnableProxies(${enabled}) ran but the global proxy flag reads back as ' + after + '.', before: before, after: after, rawAfter: String(rawAfter) });
         }
-        return JSON.stringify({ success: true, verified: true, proxiesEnabled: after, changed: before !== after });
+        return JSON.stringify({ success: true, verified: true, proxiesEnabled: after, changed: before !== after, rawValue: String(rawAfter),
+          note: 'This is the GLOBAL Toggle Proxies switch, not a per-clip attachment. A clip still needs an attached proxy for it to have any effect — check has_proxy.' });
       } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
     `);
   }
