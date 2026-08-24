@@ -6,7 +6,12 @@
  */
 
 import { z } from 'zod';
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
+// Synchronous fs/path/os bindings for the Node-side (non-ExtendScript) tools.
+// Kept separate from the `promises as fs` import above, which is the async API.
+import * as fsSync from 'node:fs';
+import * as pathSync from 'node:path';
+import * as osSync from 'node:os';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import { homedir, platform, tmpdir } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, parse } from 'node:path';
@@ -4825,14 +4830,13 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   private listRecentProjects(limit: number, excludeAutosave: boolean): any {
-    const { execSync } = require('child_process');
     try {
       const raw = execSync('mdfind -name ".prproj"', { encoding: 'utf8', timeout: 5000 });
       const files = raw.trim().split('\n')
         .filter((f: string) => f && (!excludeAutosave || !f.includes('Auto-Save')));
-      const fs = require('fs');
+      const fs = fsSync;
       const withTimes = files
-        .map((f: string) => { try { return { path: f, name: require('path').basename(f), mtime: fs.statSync(f).mtimeMs }; } catch { return null; } })
+        .map((f: string) => { try { return { path: f, name: pathSync.basename(f), mtime: fs.statSync(f).mtimeMs }; } catch { return null; } })
         .filter(Boolean)
         .sort((a: any, b: any) => b.mtime - a.mtime)
         .slice(0, limit)
@@ -5645,7 +5649,6 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   private loudnessReport(filePath: string): any {
-    const { execSync } = require('child_process');
     try {
       const result = execSync(
         `ffmpeg -i ${JSON.stringify(filePath)} -filter_complex ebur128=peak=true -f null /dev/null 2>&1 | tail -20`,
@@ -5657,9 +5660,9 @@ ${this.buildSequenceResolver(sequenceId)}
       return {
         success: true,
         filePath,
-        integratedLufs: lufsMatch ? parseFloat(lufsMatch[1]) : null,
-        truePeakDbfs: peakMatch ? parseFloat(peakMatch[1]) : null,
-        lra: lraMatch ? parseFloat(lraMatch[1]) : null,
+        integratedLufs: lufsMatch?.[1] ? parseFloat(lufsMatch[1]) : null,
+        truePeakDbfs: peakMatch?.[1] ? parseFloat(peakMatch[1]) : null,
+        lra: lraMatch?.[1] ? parseFloat(lraMatch[1]) : null,
         rawOutput: result.slice(-500)
       };
     } catch (e: any) {
@@ -5679,7 +5682,6 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
     if (!pathResult.success || !pathResult.path) return { success: false, error: 'Could not get media path' };
     // Analyze peak
-    const { execSync } = require('child_process');
     try {
       execSync(
         `ffprobe -v error -of json -show_streams ${JSON.stringify(pathResult.path)} 2>&1`,
@@ -5692,7 +5694,7 @@ ${this.buildSequenceResolver(sequenceId)}
       );
       const maxVol = vol.match(/max_volume:\s*([-\d.]+)/);
       if (!maxVol) return { success: false, error: 'Could not detect peak volume' };
-      const currentPeakDb = parseFloat(maxVol[1]);
+      const currentPeakDb = parseFloat(maxVol[1] ?? 'NaN');
       const gainNeeded = targetDbfs - currentPeakDb;
       return await this.setClipGain(sequenceId, ati, ci, gainNeeded);
     } catch (e: any) {
@@ -5798,8 +5800,7 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   private verifyExport(filePath: string, expectedDurationSecs?: number, expectedFps?: number, expectedWidth?: number, expectedHeight?: number): any {
-    const { execSync } = require('child_process');
-    const fs = require('fs');
+    const fs = fsSync;
     try {
       if (!fs.existsSync(filePath)) return { success: false, error: 'File not found: ' + filePath };
       const probe = execSync(
@@ -5847,14 +5848,14 @@ ${this.buildSequenceResolver(sequenceId)}
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
     if (!result.success) return result;
-    const fs = require('fs');
+    const fs = fsSync;
     const lines = ['time,name,comment,type,color', ...result.rows.map((r: any) => `${r.time},${JSON.stringify(r.name)},${JSON.stringify(r.comment)},${r.type},${r.color}`)];
     fs.writeFileSync(outputPath, lines.join('\n'));
-    return { success: true, outputPath, markerCount: result.count, verified: require('fs').existsSync(outputPath) };
+    return { success: true, outputPath, markerCount: result.count, verified: fsSync.existsSync(outputPath) };
   }
 
   private async markersFromCsv(csvPath: string, sequenceId?: string): Promise<any> {
-    const fs = require('fs');
+    const fs = fsSync;
     if (!fs.existsSync(csvPath)) return { success: false, error: 'CSV file not found: ' + csvPath };
     const lines = fs.readFileSync(csvPath, 'utf8').split('\n').filter((l: string) => l.trim() && !l.startsWith('time'));
     const markers: Array<{time: number, name: string, comment: string, type: string}> = lines.map((line: string) => {
@@ -6035,7 +6036,7 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   private async notesToMarkers(notesPath: string, sequenceId?: string, markerType = 'Comment', colorIndex?: number): Promise<any> {
-    const fs = require('fs');
+    const fs = fsSync;
     if (!fs.existsSync(notesPath)) return { success: false, error: 'Notes file not found: ' + notesPath };
     const lines = fs.readFileSync(notesPath, 'utf8').split('\n').filter((l: string) => l.trim());
     let created = 0;
@@ -6043,13 +6044,13 @@ ${this.buildSequenceResolver(sequenceId)}
       // Format: "HH:MM:SS:FF Note" or "SS.ms Note" or "MM:SS Note"
       const match = line.match(/^(\d+:\d+:\d+:\d+|\d+:\d+:\d+|\d+:\d+|\d+\.?\d*)\s+(.*)/);
       if (!match) continue;
-      const tcStr = match[1]; const note = match[2].trim();
+      const tcStr = match[1] ?? ''; const note = (match[2] ?? '').trim();
       // Parse TC to seconds
       let secs = 0;
-      const parts = tcStr.split(':');
-      if (parts.length === 4) secs = parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + parseInt(parts[2]) + parseInt(parts[3]) / 24;
-      else if (parts.length === 3) secs = parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + parseFloat(parts[2]);
-      else if (parts.length === 2) secs = parseInt(parts[0]) * 60 + parseFloat(parts[1]);
+      const parts = tcStr.split(':'); const P = (n: number) => parts[n] ?? '0';
+      if (parts.length === 4) secs = parseInt(P(0)) * 3600 + parseInt(P(1)) * 60 + parseInt(P(2)) + parseInt(P(3)) / 24;
+      else if (parts.length === 3) secs = parseInt(P(0)) * 3600 + parseInt(P(1)) * 60 + parseFloat(P(2));
+      else if (parts.length === 2) secs = parseInt(P(0)) * 60 + parseFloat(P(1));
       else secs = parseFloat(tcStr);
       const r = await this.createMarker(secs, note, '', markerType, colorIndex, undefined, sequenceId);
       if (r.success) created++;
@@ -6072,7 +6073,7 @@ ${this.buildSequenceResolver(sequenceId)}
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
     if (!result.success) return result;
-    const fs = require('fs');
+    const fs = fsSync;
     let content: string;
     if (format === 'json') {
       content = JSON.stringify(result.rows, null, 2);
@@ -6171,7 +6172,7 @@ ${this.buildSequenceResolver(sequenceId)}
   private async cutListCsv(outputPath: string, sequenceId: string | undefined, trackIndex: number): Promise<any> {
     const pullsResult = await this.vfxPullList(sequenceId, 0, trackIndex);
     if (!pullsResult.success) return pullsResult;
-    const fs = require('fs');
+    const fs = fsSync;
     const header = 'index,shot_name,source_path,src_in_secs,src_out_secs,seq_in_secs,seq_out_secs,duration_secs';
     const rows = pullsResult.pulls.map((p: any) => `${p.index},${JSON.stringify(p.shotName)},${JSON.stringify(p.sourcePath)},${p.srcInSecs.toFixed(3)},${p.srcOutSecs.toFixed(3)},${p.seqInSecs.toFixed(3)},${p.seqOutSecs.toFixed(3)},${p.durationSecs.toFixed(3)}`);
     fs.writeFileSync(outputPath, [header, ...rows].join('\n'));
@@ -6567,9 +6568,8 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   private sequenceThumbnailStrip(filePath: string, count: number, outputDir?: string): any {
-    const { execSync } = require('child_process');
-    const path = require('path');
-    const fs = require('fs');
+    const path = pathSync;
+    const fs = fsSync;
     const dir = outputDir ?? '/tmp/premiere-mcp-bridge/generated-assets/';
     try {
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -6721,29 +6721,70 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   // Batch C: Audio
+  //
+  // Adding an effect Premiere has marked obsolete pops a modal "Audio Effects
+  // Replacement" dialog ("You are adding an obsolete effect. Would you like to add a
+  // newer version instead?"). A modal blocks the CEP bridge until a human clicks it, so
+  // every later tool call stalls to its timeout — the whole server appears hung. Observed
+  // live on 26.3.2 with 'Adaptive Noise Reduction', which the dialog itself names 'DeNoise'
+  // as the replacement. Obsolete names are therefore remapped before the call rather than
+  // passed through, and any name still carrying an "(Obsolete)" marker is refused outright.
+  private static readonly OBSOLETE_AUDIO_EFFECTS: Record<string, string> = {
+    'Adaptive Noise Reduction': 'DeNoise',
+  };
+
   private async applyAudioEffectQe(trackIndex: number, clipIndex: number, effectName: string, audioTrack: boolean, _sequenceId?: string): Promise<any> {
-    return await this.bridge.executeScript(`
+    const remapped = PremiereProTools.OBSOLETE_AUDIO_EFFECTS[effectName];
+    const requested = effectName;
+    const target = remapped ?? effectName;
+
+    const result: any = await this.bridge.executeScript(`
       try {
         app.enableQE();
         var seq = qe.project.getActiveSequence();
         var track = ${audioTrack} ? seq.getAudioTrackAt(${trackIndex}) : seq.getVideoTrackAt(${trackIndex});
+        if (!track) return JSON.stringify({success:false,error:'Track not found at index ${trackIndex}'});
         var clip = track.getItemAt(${clipIndex});
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
-        var eff = qe.project.getAudioEffectByName(${JSON.stringify(effectName)});
-        if (!eff) return JSON.stringify({success:false,error:'Effect not found: '+${JSON.stringify(effectName)}});
+
+        // Resolve against the live catalogue first. Asking for a name this build does not
+        // have would otherwise reach addAudioEffect with a null effect, and refusing an
+        // "(Obsolete)"-marked name here is what keeps the modal from ever appearing.
+        var wanted = ${JSON.stringify(target)};
+        var list = qe.project.getAudioEffectList();
+        var exact = null, obsoleteMatch = null;
+        for (var i = 0; i < list.length; i++) {
+          var nm = String(list[i]);
+          if (nm === wanted) { exact = nm; break; }
+          if (nm.indexOf(wanted) === 0 && nm.indexOf('Obsolete') >= 0) obsoleteMatch = nm;
+        }
+        if (!exact && obsoleteMatch) {
+          return JSON.stringify({success:false,error:'Refusing to add "'+obsoleteMatch+'": Premiere marks it obsolete and adding it opens a modal dialog that blocks the bridge. Use the modern replacement effect name instead.',obsoleteName:obsoleteMatch});
+        }
+        if (!exact) return JSON.stringify({success:false,error:'Effect not found on this build: '+wanted});
+
+        var eff = qe.project.getAudioEffectByName(exact);
+        if (!eff) return JSON.stringify({success:false,error:'getAudioEffectByName returned nothing for: '+exact});
         var domSeq = app.project.activeSequence;
         var domTrack = ${audioTrack} ? domSeq.audioTracks[${trackIndex}] : domSeq.videoTracks[${trackIndex}];
         var domClip = domTrack.clips[${clipIndex}];
         var before = domClip.components.numItems;
         clip.addAudioEffect(eff);
         var after = domClip.components.numItems;
-        return JSON.stringify({success:true,verified:after>before,effectName:${JSON.stringify(effectName)},before:before,after:after});
+        return JSON.stringify({success:true,verified:after>before,effectName:exact,before:before,after:after});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
+
+    if (result && remapped) {
+      result.requestedEffect = requested;
+      result.remappedTo = remapped;
+      result.note = `"${requested}" is obsolete on this build and opens a blocking modal; used "${remapped}" instead.`;
+    }
+    return result;
   }
 
   private async denoiseClip(trackIndex: number, clipIndex: number, sequenceId?: string): Promise<any> {
-    return await this.applyAudioEffectQe(trackIndex, clipIndex, 'Adaptive Noise Reduction', true, sequenceId);
+    return await this.applyAudioEffectQe(trackIndex, clipIndex, 'DeNoise', true, sequenceId);
   }
 
   private async listAudioEffectsOnClip(trackIndex: number, clipIndex: number, _sequenceId?: string): Promise<any> {
@@ -6768,7 +6809,6 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   private audioPeaksReport(filePath: string): any {
-    const { execSync } = require('child_process');
     try {
       const out = execSync(
         `ffprobe -v error -f lavfi -i amovie=${JSON.stringify(filePath)},astats=metadata=1:reset=1 -show_entries frame_tags=lavfi.astats.Overall.RMS_level,lavfi.astats.Overall.Peak_level -of default=noprint_wrappers=1 2>/dev/null | head -20`,
@@ -6825,7 +6865,7 @@ ${this.buildSequenceResolver(sequenceId)}
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
     if (!result.success) return result;
-    const fs = require('fs');
+    const fs = fsSync;
     const lines: string[] = [];
     for (const cue of result.cues) {
       const fmt = (s: number) => { const h=Math.floor(s/3600),m=Math.floor(s%3600/60),sec=Math.floor(s%60),ms=Math.round((s%1)*1000); return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')},${String(ms).padStart(3,'0')}`; };
@@ -6836,7 +6876,7 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   private captionQcReport(srtPath: string, maxCps: number, maxLineLength: number): any {
-    const fs = require('fs');
+    const fs = fsSync;
     try {
       const content = fs.readFileSync(srtPath, 'utf8');
       const blocks = content.trim().split(/\n\n+/);
@@ -6846,7 +6886,7 @@ ${this.buildSequenceResolver(sequenceId)}
         if (lines.length < 3) continue;
         const tcLine = lines[1];
         const text = lines.slice(2).join(' ');
-        const tc = tcLine.match(/(\d+:\d+:\d+[,.:]\d+)\s*-->\s*(\d+:\d+:\d+[,.:]\d+)/);
+        const tc = (tcLine ?? '').match(/(\d+:\d+:\d+[,.:]\d+)\s*-->\s*(\d+:\d+:\d+[,.:]\d+)/);
         if (!tc) continue;
         const toSecs = (t: string) => { const p = t.replace(',','.').split(':'); return +(p[0]||'0')*3600 + +(p[1]||'0')*60 + +(p[2]||'0'); };
         const dur = toSecs(tc[2]!) - toSecs(tc[1]!);
@@ -6859,7 +6899,7 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   private captionQcFix(srtPath: string, outputPath: string | undefined, _maxCps: number, _minGapMs: number): any {
-    const fs = require('fs');
+    const fs = fsSync;
     const out = outputPath ?? srtPath;
     try {
       const content = fs.readFileSync(srtPath, 'utf8');
@@ -6872,7 +6912,7 @@ ${this.buildSequenceResolver(sequenceId)}
       for (const block of blocks) {
         const lines = block.trim().split('\n');
         if (lines.length < 3) continue;
-        const tc = lines[1].match(/(\d+:\d+:\d+[,.:]\d+)\s*-->\s*(\d+:\d+:\d+[,.:]\d+)/);
+        const tc = (lines[1] ?? '').match(/(\d+:\d+:\d+[,.:]\d+)\s*-->\s*(\d+:\d+:\d+[,.:]\d+)/);
         if (!tc) continue;
         const start = toSecs(tc[1]!); const end = toSecs(tc[2]!);
         const text = lines.slice(2).join('\n');
@@ -6885,7 +6925,7 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   private captionsFromTranscriptJson(jsonPath: string, outputPath: string, maxCps: number, maxLineLength: number): any {
-    const fs = require('fs');
+    const fs = fsSync;
     try {
       const transcript = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
       const words: Array<{word: string, start: number, end: number}> = (transcript.words ?? transcript.segments?.flatMap((s: any) => s.words ?? []) ?? []) as Array<{word: string, start: number, end: number}>;
@@ -6921,7 +6961,7 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   private srtDiff(srtPathA: string, srtPathB: string): any {
-    const fs = require('fs');
+    const fs = fsSync;
     try {
       const parse = (p: string) => fs.readFileSync(p,'utf8').trim().split(/\n\n+/).map((b: string) => { const l=b.trim().split('\n'); return { tc: l[1]??'', text: l.slice(2).join('\n') }; });
       const a = parse(srtPathA); const b = parse(srtPathB);
@@ -6930,14 +6970,14 @@ ${this.buildSequenceResolver(sequenceId)}
       for (let i=0; i<maxLen; i++) {
         if (!a[i]) { added.push({index:i+1,...b[i]}); }
         else if (!b[i]) { removed.push({index:i+1,...a[i]}); }
-        else if (a[i].text !== b[i].text || a[i].tc !== b[i].tc) { changed.push({index:i+1,before:{tc:a[i].tc,text:a[i].text},after:{tc:b[i].tc,text:b[i].text}}); }
+        else { const ai = a[i]; const bi = b[i]; if (ai && bi && (ai.text !== bi.text || ai.tc !== bi.tc)) { changed.push({index:i+1,before:{tc:ai.tc,text:ai.text},after:{tc:bi.tc,text:bi.text}}); } }
       }
       return { success: true, added: added.length, removed: removed.length, changed: changed.length, diff: { added, removed, changed } };
     } catch (e: any) { return { success: false, error: e.message }; }
   }
 
   private async captionsToMarkers(srtPath: string, sequenceId: string | undefined, markerType: string): Promise<any> {
-    const fs = require('fs');
+    const fs = fsSync;
     try {
       const content = fs.readFileSync(srtPath, 'utf8');
       const blocks = content.trim().split(/\n\n+/).filter(Boolean);
@@ -6946,7 +6986,7 @@ ${this.buildSequenceResolver(sequenceId)}
       for (const block of blocks) {
         const lines = block.trim().split('\n');
         if (lines.length < 3) continue;
-        const tc = lines[1].match(/(\d+:\d+:\d+[,.:]\d+)/);
+        const tc = (lines[1] ?? '').match(/(\d+:\d+:\d+[,.:]\d+)/);
         if (tc) cues.push({ start: toSecs(tc[1]!), text: lines.slice(2).join(' ') });
       }
       const cuesJson = JSON.stringify(cues);
@@ -14256,7 +14296,6 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   private broadcastSafeCheck(mediaPath: string): any {
-    const { execSync } = require('child_process');
     try {
       const out = execSync(`ffprobe -v error -f lavfi -i "movie=${mediaPath},signalstats" -show_entries frame_tags=lavfi.signalstats.YMAX,lavfi.signalstats.YMIN -of csv 2>/dev/null`, { encoding: 'utf8', timeout: 30000 });
       const lines = out.trim().split('\n').filter((l: string) => l);
@@ -14271,11 +14310,14 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   private extractPalette(mediaPath: string, startSecs = 0, durationSecs = 10, colorCount = 8): any {
-    const { execSync } = require('child_process');
-    const os = require('os'), path = require('path');
+    const os = osSync, path = pathSync;
     const palettePath = path.join(os.tmpdir(), 'mcp_palette.png');
     try {
-      execSync(`ffmpeg -y -ss ${startSecs} -t ${durationSecs} -i "${mediaPath}" -vf "palettegen=max_colors=${colorCount}:stats_mode=single" "${palettePath}"`, { timeout: 30000 });
+      // stats_mode=single emits one palette PER FRAME, which the image2 muxer cannot write
+      // to a single output path ("Conversion failed!"). The default (stats_mode=full)
+      // computes one palette across the whole range, and -frames:v 1 pins the output to
+      // exactly one image.
+      execSync(`ffmpeg -y -ss ${startSecs} -t ${durationSecs} -i "${mediaPath}" -vf "palettegen=max_colors=${colorCount}" -frames:v 1 "${palettePath}"`, { timeout: 30000 });
       return { success: true, palettePath, note: 'Palette PNG written. Use image tools to extract hex values from the palette image.' };
     } catch (e: any) { return { success: false, error: e.message }; }
   }
@@ -14335,7 +14377,7 @@ ${this.buildSequenceResolver(sequenceId)}
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
     `);
     if (result && result.success) {
-      const fs = require('fs');
+      const fs = fsSync;
       try { fs.writeFileSync(outputPath, JSON.stringify(result.grade, null, 2)); return { ...result, outputPath, written: true }; }
       catch (e: any) { return { ...result, outputPath, written: false, writeError: e.message }; }
     }
@@ -14343,10 +14385,9 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   private falseColorFrame(mediaPath: string, timeSecs: number, outputPath: string): any {
-    const { execSync } = require('child_process');
     try {
       execSync(`ffmpeg -y -ss ${timeSecs} -i "${mediaPath}" -frames:v 1 -vf "scale=1280:-1,lutrgb=r=if(gt(r\\,200)\\,r\\,0):g=if(between(r\\,100\\,200)\\,255\\,0):b=if(lt(r\\,100)\\,255\\,0)" "${outputPath}"`, { timeout: 20000 });
-      const fs = require('fs');
+      const fs = fsSync;
       return { success: fs.existsSync(outputPath), outputPath };
     } catch (e: any) { return { success: false, error: e.message }; }
   }
@@ -14456,20 +14497,18 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   private exportGif(mediaPath: string, startSecs: number, durationSecs: number, fps: number, width: number, outputPath: string): any {
-    const { execSync } = require('child_process');
     const palette = outputPath.replace(/\.gif$/i, '_palette.png');
     try {
       execSync(`ffmpeg -y -ss ${startSecs} -t ${durationSecs} -i "${mediaPath}" -vf "fps=${fps},scale=${width}:-1:flags=lanczos,palettegen" "${palette}"`, { timeout: 30000 });
       execSync(`ffmpeg -y -ss ${startSecs} -t ${durationSecs} -i "${mediaPath}" -i "${palette}" -filter_complex "fps=${fps},scale=${width}:-1:flags=lanczos[x];[x][1:v]paletteuse" "${outputPath}"`, { timeout: 30000 });
-      const fs = require('fs');
+      const fs = fsSync;
       try { fs.unlinkSync(palette); } catch {}
       return { success: fs.existsSync(outputPath), outputPath, fps, width };
     } catch (e: any) { return { success: false, error: e.message }; }
   }
 
   private exportStillsBatch(mediaPath: string, outputDir: string, _seqId?: string): any {
-    const { execSync } = require('child_process');
-    const path = require('path'), fs = require('fs');
+    const path = pathSync, fs = fsSync;
     try {
       if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
       const prefix = path.join(outputDir, 'still_%04d.jpg');
@@ -14495,9 +14534,9 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   private listExportPresets(filter?: string): any {
-    const path = require('path'), fs = require('fs');
+    const path = pathSync, fs = fsSync;
     const baseDirs = [
-      path.join(require('os').homedir(), 'Library/Application Support/Adobe/Common/AMEPresets'),
+      path.join(osSync.homedir(), 'Library/Application Support/Adobe/Common/AMEPresets'),
       '/Library/Application Support/Adobe/Common/AMEPresets'
     ];
     const results: Array<{name: string, path: string}> = [];
@@ -14539,7 +14578,7 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
     if (!result || !result.success) return result;
     try {
-      const fs = require('fs');
+      const fs = fsSync;
       const xml = fs.readFileSync(xmlPath, 'utf8');
       // Simple XMEML to EDL conversion
       const seqName = result.seqName || 'SEQUENCE';
@@ -14617,7 +14656,7 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   private hoverScrubFrames(mediaPath: string, count: number, outputDir: string): any {
-    const { execSync } = require('child_process'), fs = require('fs'), path = require('path');
+    const fs = fsSync, path = pathSync;
     try {
       if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
       // Get duration first
@@ -14649,7 +14688,7 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   private async batchLogFromCsv(csvPath: string): Promise<any> {
-    const fs = require('fs');
+    const fs = fsSync;
     try {
       const lines = fs.readFileSync(csvPath, 'utf8').split('\n').filter((l: string) => l.trim() && !l.startsWith('#'));
       const rows = lines.slice(1).map((l: string) => { const parts = l.split(','); return { name: parts[0]?.trim(), inTC: parts[1]?.trim(), outTC: parts[2]?.trim(), label: parseInt(parts[3]?.trim() || '0'), comment: parts[4]?.trim() }; });
@@ -15045,7 +15084,7 @@ ${this.buildSequenceResolver(sequenceId)}
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
     `);
     if (result && result.success) {
-      const fs = require('fs');
+      const fs = fsSync;
       try { fs.writeFileSync(outputPath, JSON.stringify(result.state, null, 2)); return { ...result, outputPath, written: true }; }
       catch (e: any) { return { ...result, outputPath, written: false, writeError: e.message }; }
     }
@@ -15053,7 +15092,7 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   private async assertClipsUnchanged(snapshotPath: string, seqId?: string): Promise<any> {
-    const fs = require('fs');
+    const fs = fsSync;
     let saved: any;
     try { saved = JSON.parse(fs.readFileSync(snapshotPath, 'utf8')); } catch (e: any) { return { success: false, error: `Cannot read snapshot: ${e.message}` }; }
     const current = await this.snapshotState('/dev/null', seqId);
@@ -17026,8 +17065,7 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   private async frameDiff(time1: number, time2: number, outputDir: string, _seqId?: string): Promise<any> {
-    const { execSync } = require('child_process');
-    const path = require('path');
+    const path = pathSync;
     const frame1 = path.join(outputDir, `frame_diff_a_${Date.now()}.jpg`);
     const frame2 = path.join(outputDir, `frame_diff_b_${Date.now()}.jpg`);
     // Get sequence source path via bridge
@@ -17045,7 +17083,7 @@ ${this.buildSequenceResolver(sequenceId)}
       execSync(`ffmpeg -y -ss ${time2} -i "${seqInfo.mediaPath}" -vframes 1 "${frame2}"`, { timeout: 15000 });
       const psnrOut = execSync(`ffmpeg -i "${frame1}" -i "${frame2}" -lavfi psnr -f null - 2>&1`, { timeout: 10000 }).toString();
       const match = psnrOut.match(/psnr_avg:(\S+)/);
-      const psnr = match ? parseFloat(match[1]) : null;
+      const psnr = match?.[1] ? parseFloat(match[1]) : null;
       return { success: true, frame1, frame2, psnr, identical: psnr !== null && psnr > 50, note: 'Higher PSNR = more similar. >40dB = nearly identical. Infinity = identical.' };
     } catch (e: any) {
       return { success: false, error: e.message?.slice(0, 200) };
@@ -17116,7 +17154,7 @@ ${this.buildSequenceResolver(sequenceId)}
 
 
   private async frameIoNotesToMarkers(jsonPath: string, sequenceId?: string, markerColor = 1): Promise<any> {
-    const fs = require('fs');
+    const fs = fsSync;
     try {
       const raw = fs.readFileSync(jsonPath, 'utf8');
       const data = JSON.parse(raw);
@@ -17155,12 +17193,12 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   private async shotgridStatusSync(csvPath: string, statusToColor?: Record<string, number>): Promise<any> {
-    const fs = require('fs');
+    const fs = fsSync;
     const defaultMap: Record<string, number> = { wtg: 0, ip: 3, fin: 2, na: 7, hld: 6, rev: 4, cmpt: 2 };
     const colorMap = statusToColor ?? defaultMap;
     try {
       const lines = fs.readFileSync(csvPath, 'utf8').split('\n').filter(Boolean);
-      const header = lines[0].toLowerCase().split(',').map((h: string) => h.trim().replace(/"/g,''));
+      const header = (lines[0] ?? '').toLowerCase().split(',').map((h: string) => h.trim().replace(/"/g,''));
       const nameIdx = header.indexOf('shot_name') >= 0 ? header.indexOf('shot_name') : header.indexOf('name');
       const statusIdx = header.indexOf('status') >= 0 ? header.indexOf('status') : header.indexOf('sg_status_list');
       const assigneeIdx = header.indexOf('assignee') >= 0 ? header.indexOf('assignee') : header.indexOf('task_assignees');
@@ -17207,9 +17245,8 @@ ${this.buildSequenceResolver(sequenceId)}
     _seqId: string | undefined, trackIndex: number, clipIndex: number,
     effectName: string, effectParam?: string, effectParamValue?: string, outputDir = '/tmp/premiere-mcp-bridge/generated-assets'
   ): Promise<any> {
-    const { execSync } = require('child_process');
-    const pathMod = require('path');
-    const fs = require('fs');
+    const pathMod = pathSync;
+    const fs = fsSync;
 
     // Step 1: capture a frame BEFORE applying the effect
     const frameBefore = pathMod.join(outputDir, `vfx_verify_before_${Date.now()}.jpg`);
@@ -17269,7 +17306,7 @@ ${this.buildSequenceResolver(sequenceId)}
     try {
       const psnrOut = execSync(`ffmpeg -i "${frameBefore}" -i "${frameAfter}" -lavfi psnr -f null - 2>&1`, { timeout: 10000 }).toString();
       const match = psnrOut.match(/psnr_avg:(\S+)/);
-      const psnr = match ? parseFloat(match[1]) : null;
+      const psnr = match?.[1] ? parseFloat(match[1]) : null;
       const identical = psnr !== null && psnr > 45;
       const effectLanded = !identical; // effect changed the image = verified
 
@@ -17296,9 +17333,8 @@ ${this.buildSequenceResolver(sequenceId)}
     _seqId: string | undefined, trackIndex: number, clipIndex: number,
     gradeParams: Record<string, number>, outputDir = '/tmp/premiere-mcp-bridge/generated-assets'
   ): Promise<any> {
-    const { execSync } = require('child_process');
-    const pathMod = require('path');
-    const fs = require('fs');
+    const pathMod = pathSync;
+    const fs = fsSync;
 
     const frameBefore = pathMod.join(outputDir, `grade_verify_before_${Date.now()}.jpg`);
     const frameAfter = pathMod.join(outputDir, `grade_verify_after_${Date.now()}.jpg`);
@@ -17345,7 +17381,7 @@ ${this.buildSequenceResolver(sequenceId)}
       execSync(`ffmpeg -y -ss ${mediaInfo.sourceTimeSecs} -i "${mediaInfo.mediaPath}" -vframes 1 "${frameAfter}"`, { timeout: 15000 });
       const psnrOut = execSync(`ffmpeg -i "${frameBefore}" -i "${frameAfter}" -lavfi psnr -f null - 2>&1`, { timeout: 10000 }).toString();
       const match = psnrOut.match(/psnr_avg:(\S+)/);
-      const psnr = match ? parseFloat(match[1]) : null;
+      const psnr = match?.[1] ? parseFloat(match[1]) : null;
       const gradeLanded = psnr !== null && psnr < 45;
       try { fs.unlinkSync(frameBefore); fs.unlinkSync(frameAfter); } catch(_) {}
       return {
@@ -17394,15 +17430,14 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   private blackFrameScan(filePath: string, threshold: number, minDuration: number): any {
-    const { execSync } = require('child_process');
     try {
       const out = execSync(`ffprobe -v error -f lavfi -i "movie=${filePath.replace(/'/g, "'\\''")}[out+adiff],blackdetect=d=${minDuration}:pix_th=${threshold}" -show_entries tags=lavfi.black_start,lavfi.black_end -of csv 2>&1`, { timeout: 30000 }).toString();
       const lines = out.split('\n').filter((l: string) => l.trim());
       const ranges: any[] = [];
       let current: any = null;
       for (const line of lines) {
-        if (line.includes('black_start')) { const m = line.match(/black_start:([\d.]+)/); if (m) current = { start: parseFloat(m[1]) }; }
-        if (line.includes('black_end') && current) { const m = line.match(/black_end:([\d.]+)/); if (m) { current.end = parseFloat(m[1]); current.duration = current.end - current.start; ranges.push(current); current = null; } }
+        if (line.includes('black_start')) { const m = line.match(/black_start:([\d.]+)/); if (m?.[1]) current = { start: parseFloat(m[1]) }; }
+        if (line.includes('black_end') && current) { const m = line.match(/black_end:([\d.]+)/); if (m?.[1]) { current.end = parseFloat(m[1]); current.duration = current.end - current.start; ranges.push(current); current = null; } }
       }
       return { success: true, blackRangeCount: ranges.length, ranges: ranges.slice(0, 50) };
     } catch (e: any) {
@@ -17419,15 +17454,14 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   private freezeFrameScan(filePath: string, minDuration: number): any {
-    const { execSync } = require('child_process');
     try {
       const out = execSync(`ffprobe -v error -f lavfi -i "movie=${filePath.replace(/'/g, "'\\''")},freezedetect=n=-60dB:d=${minDuration}" -show_entries tags=lavfi.freezedetect.freeze_start,lavfi.freezedetect.freeze_end -of csv 2>&1`, { timeout: 30000 }).toString();
       const ranges: any[] = [];
       const lines = out.split('\n');
       let current: any = null;
       for (const line of lines) {
-        if (line.includes('freeze_start')) { const m = line.match(/freeze_start:([\d.]+)/); if (m) current = { start: parseFloat(m[1]) }; }
-        if (line.includes('freeze_end') && current) { const m = line.match(/freeze_end:([\d.]+)/); if (m) { current.end = parseFloat(m[1]); current.duration = current.end - current.start; ranges.push(current); current = null; } }
+        if (line.includes('freeze_start')) { const m = line.match(/freeze_start:([\d.]+)/); if (m?.[1]) current = { start: parseFloat(m[1]) }; }
+        if (line.includes('freeze_end') && current) { const m = line.match(/freeze_end:([\d.]+)/); if (m?.[1]) { current.end = parseFloat(m[1]); current.duration = current.end - current.start; ranges.push(current); current = null; } }
       }
       return { success: true, freezeRangeCount: ranges.length, ranges: ranges.slice(0, 50) };
     } catch (e: any) {
@@ -17436,14 +17470,13 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   private audioSilenceScan(filePath: string, noiseDb: number, minDuration: number): any {
-    const { execSync } = require('child_process');
     try {
       const out = execSync(`ffmpeg -i "${filePath}" -af "silencedetect=noise=${noiseDb}dB:d=${minDuration}" -f null - 2>&1`, { timeout: 30000 }).toString();
       const ranges: any[] = [];
       let current: any = null;
       for (const line of out.split('\n')) {
-        if (line.includes('silence_start')) { const m = line.match(/silence_start: ([\d.]+)/); if (m) current = { start: parseFloat(m[1]) }; }
-        if (line.includes('silence_end') && current) { const m = line.match(/silence_end: ([\d.]+)/); if (m) { current.end = parseFloat(m[1]); const dm = line.match(/silence_duration: ([\d.]+)/); if (dm) current.duration = parseFloat(dm[1]); ranges.push(current); current = null; } }
+        if (line.includes('silence_start')) { const m = line.match(/silence_start: ([\d.]+)/); if (m?.[1]) current = { start: parseFloat(m[1]) }; }
+        if (line.includes('silence_end') && current) { const m = line.match(/silence_end: ([\d.]+)/); if (m?.[1]) { current.end = parseFloat(m[1]); const dm = line.match(/silence_duration: ([\d.]+)/); if (dm?.[1]) current.duration = parseFloat(dm[1]); ranges.push(current); current = null; } }
       }
       return { success: true, silenceRangeCount: ranges.length, ranges };
     } catch (e: any) {
@@ -17626,9 +17659,8 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   private async archiveMaster(outputDir: string, _includeProxy: boolean): Promise<any> {
-    const { execSync } = require('child_process');
-    const fs = require('fs');
-    const path = require('path');
+    const fs = fsSync;
+    const path = pathSync;
     // Get project media list via bridge
     const mediaInfo: any = await this.bridge.executeScript(`
       try {
@@ -17753,8 +17785,7 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   private verifyExportFile(filePath: string, expectedDuration?: number, expectedFps?: number, expectedWidth?: number, expectedHeight?: number): any {
-    const { execSync } = require('child_process');
-    const fs = require('fs');
+    const fs = fsSync;
     if (!fs.existsSync(filePath)) return { success: false, error: 'File does not exist: ' + filePath };
     try {
       const out = execSync(`ffprobe -v quiet -print_format json -show_streams -show_format "${filePath}"`, { timeout: 15000 }).toString();

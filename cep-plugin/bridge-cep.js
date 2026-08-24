@@ -308,6 +308,34 @@
         this.loadConfig();
         this.updateUI();
         this.startCommandPolling();
+
+        // Auto-connect on panel open. Previously the panel came up polling but
+        // disconnected, so every Premiere launch needed a human to click Start Bridge
+        // before any tool call could succeed — and a tool call against a not-started
+        // panel fails as a timeout, which reads like a broken server rather than an
+        // unclicked button. Runs after loadConfig() so it uses the configured temp
+        // directory, and is guarded so a failure here still leaves a usable panel with
+        // a working manual button. Opt out by setting mcpAutoStart=false in localStorage.
+        var autoStart = true;
+        try {
+            if (typeof localStorage !== 'undefined' && localStorage.getItem('mcpAutoStart') === 'false') {
+                autoStart = false;
+            }
+        } catch (storageError) { /* localStorage unavailable: keep the default */ }
+
+        if (autoStart) {
+            var self = this;
+            setTimeout(function() {
+                try {
+                    if (!self.isConnected) {
+                        self.log('Auto-starting bridge on panel open...', 'info');
+                        self.startBridge();
+                    }
+                } catch (e) {
+                    self.log('Auto-start failed, use Start Bridge manually: ' + e.message, 'warning');
+                }
+            }, 500);
+        }
     };
 
     MCPPremiereBridge.prototype.getTempDirectory = function() {

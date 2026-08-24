@@ -6,7 +6,7 @@
  */
 
 import { Logger } from '../utils/logger.js';
-import { ChildProcess } from 'child_process';
+import { ChildProcess, execSync, spawnSync } from 'child_process';
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'fs';
 import { extname, join } from 'path';
@@ -639,13 +639,11 @@ export class PremiereProBridge implements PremiereProTransport {
 
   // Read text from the macOS system clipboard (Node.js side — no CEP panel needed).
   readClipboard(): string {
-    const { execSync } = require('child_process');
     return execSync('/usr/bin/pbpaste').toString();
   }
 
   // Write text to the macOS system clipboard (Node.js side — no CEP panel, no crashes).
   writeClipboard(text: string): void {
-    const { spawnSync } = require('child_process');
     const result = spawnSync('/usr/bin/pbcopy', [], { input: text, encoding: 'utf8' });
     if (result.error) throw result.error;
   }
