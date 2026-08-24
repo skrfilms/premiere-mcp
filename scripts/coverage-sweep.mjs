@@ -214,57 +214,147 @@ const SRT = join(REPO, '.scratch', 'fixture-captions.srt');
 const TMP_OUT = join(REPO, '.scratch', 'sweep', 'out');
 if (!existsSync(TMP_OUT)) mkdirSync(TMP_OUT, { recursive: true });
 
-/** Best-effort arguments by parameter name. Missing a required arg is NEEDS_ARGS, not failure. */
+/**
+ * Arguments for a tool, SCHEMA-DRIVEN with live-context overrides.
+ *
+ * The first version matched on parameter NAME only, and name patterns cannot cover 638 tools:
+ * NEEDS_ARGS became the largest bucket in the sweep (150 tools), which is a limit of this harness
+ * rather than a fact about the catalogue. This version asks the schema what each field IS —
+ * string, number, boolean, enum, array, object, record — supplies a real host id or path when the
+ * name is recognisable, and then CHECKS the result against the schema instead of hoping.
+ *
+ * A field whose seeded value the schema still rejects is reported, so the gap is visible rather
+ * than silently becoming "needs args".
+ */
+const kindOf = (schema) => schema?.constructor?.name ?? '';
+
+/** Unwrap Optional/Nullable/Default to the schema that actually validates. */
+function unwrap(schema) {
+  let cur = schema, guard = 0;
+  while (cur && guard++ < 8) {
+    const k = kindOf(cur);
+    if (k === 'ZodOptional' || k === 'ZodNullable' || k === 'ZodDefault') {
+      cur = typeof cur.unwrap === 'function' ? cur.unwrap() : cur._def?.innerType;
+      continue;
+    }
+    break;
+  }
+  return cur ?? schema;
+}
+
+/** A live value when the parameter name tells us what the host expects. */
+function contextValue(key) {
+  if (/^(sequenceId|seqId|sourceSequenceId)$/i.test(key)) return ctx.sequenceId;
+  if (/^(targetSequenceId|destSequenceId|otherSequenceId|sequenceBId)$/i.test(key)) return ctx.secondSequenceId ?? ctx.sequenceId;
+  if (/^(clipId|trackItemId|sourceClipId|clipAId|fromClipId)$/i.test(key)) return ctx.clipId;
+  if (/^(targetClipId|clipBId|toClipId|secondClipId)$/i.test(key)) return ctx.clipId2 ?? ctx.clipId;
+  if (/^audioClipId$/i.test(key)) return ctx.audioClipId;
+  if (/^binId$/i.test(key)) return ctx.binId;
+  if (/^(targetProjectItemId|newItemId|newProjectItemId)$/i.test(key)) return ctx.itemId2 ?? ctx.itemId;
+  if (/(projectItemId|itemId|nodeId)$/i.test(key)) return ctx.itemId;
+  if (/srtPath|captionPath/i.test(key)) return SRT;
+  if (/(output|dest|target|save)(File)?Path$/i.test(key)) return join(TMP_OUT, `sweep_${Date.now()}.png`);
+  if (/(file|media|clip|source|input|image)Path$/i.test(key)) return ctx.mediaPath;
+  if (/^presetPath$/i.test(key)) return undefined; // a real .epr/.sqpreset is not synthesisable
+  return undefined;
+}
+
+/** Plausible scalars by name, for values where any number would pass the schema but not the tool. */
+const NAMED_NUMBERS = {
+  trackIndex: 0, videoTrackIndex: 0, audioTrackIndex: 0, clipIndex: 0, index: 0,
+  seconds: 0.5, time: 0.5, timeSecs: 0.5, atSeconds: 0.5, startSeconds: 0.5, startSecs: 0.5,
+  position: 0.5, playheadSeconds: 0.5,
+  duration: 1, durationSeconds: 1, durationSecs: 1, durationSeconds2: 1,
+  inPoint: 0, inSeconds: 0, outPoint: 2, outSeconds: 2,
+  opacity: 50, value: 50, amount: 50, level: 50, gain: 50, scale: 100,
+  rotation: 15, degrees: 15, angle: 15, volumeDb: -6, db: -6, decibels: -6,
+  count: 3, limit: 3, maxResults: 3, frames: 2, fps: 24, width: 1280, height: 720,
+};
+const NAMED_STRINGS = {
+  trackType: 'video', panelName: 'Timeline', effectName: 'Gaussian Blur',
+  transitionName: 'Cross Dissolve', presetName: 'SL BLUE STEEL',
+  componentName: 'Opacity', propertyName: 'Opacity', paramName: 'Opacity',
+  name: 'sweep_probe', newName: 'sweep_renamed', renameTo: 'sweep_renamed',
+  text: 'sweep probe', comment: 'sweep probe', label: 'sweep probe',
+  colorLabel: 'Blue', color: 'Blue', format: 'H.264', position: 'end',
+};
+
+/** A value of the right SHAPE for this schema. */
+function seedValue(schema, key, depth = 0) {
+  const inner = unwrap(schema);
+  const kind = kindOf(inner);
+
+  const fromContext = contextValue(key);
+  if (fromContext !== undefined && (kind === 'ZodString' || kind === 'ZodAny' || kind === 'ZodUnknown')) return fromContext;
+
+  switch (kind) {
+    case 'ZodString': return NAMED_STRINGS[key] ?? 'sweep_probe';
+    case 'ZodNumber': return NAMED_NUMBERS[key] ?? 1;
+    case 'ZodBoolean': return true;
+    case 'ZodEnum': {
+      const opts = inner.options ?? inner._def?.values ?? [];
+      return opts.length ? opts[0] : 'sweep_probe';
+    }
+    case 'ZodLiteral': return inner.value ?? inner._def?.value;
+    case 'ZodArray': {
+      if (depth > 2) return [];
+      const el = inner.element ?? inner._def?.type;
+      const single = contextValue(key.replace(/s$/, '')) ?? (el ? seedValue(el, key.replace(/s$/, ''), depth + 1) : 'sweep_probe');
+      return [single];
+    }
+    case 'ZodObject': {
+      if (depth > 2) return {};
+      const out = {};
+      for (const [k, v] of Object.entries(inner.shape ?? {})) out[k] = seedValue(v, k, depth + 1);
+      return out;
+    }
+    case 'ZodRecord': {
+      const vt = inner.valueType ?? inner._def?.valueType;
+      return { Brightness: vt ? seedValue(vt, 'value', depth + 1) : '1' };
+    }
+    case 'ZodUnion': {
+      const opts = inner.options ?? inner._def?.options ?? [];
+      return opts.length ? seedValue(opts[0], key, depth + 1) : 'sweep_probe';
+    }
+    default:
+      return fromContext ?? NAMED_STRINGS[key] ?? 'sweep_probe';
+  }
+}
+
 function argsFor(tool) {
   const shape = tool.inputSchema?._def?.shape ?? tool.inputSchema?.shape;
-  let keys = [];
-  try { keys = Object.keys(typeof shape === 'function' ? shape() : (shape ?? {})); } catch { keys = []; }
-  const a = {};
-  for (const k of keys) {
-    if (/^(sequenceId|seqId|sourceSequenceId)$/i.test(k)) a[k] = ctx.sequenceId ?? undefined;
-    else if (/^(targetSequenceId|destSequenceId|otherSequenceId|sequenceBId)$/i.test(k)) a[k] = ctx.secondSequenceId ?? undefined;
-    else if (/^(clipId|trackItemId)$/i.test(k)) a[k] = ctx.clipId ?? undefined;
-    else if (/^(sourceClipId|clipAId|fromClipId)$/i.test(k)) a[k] = ctx.clipId ?? undefined;
-    else if (/^(targetClipId|clipBId|toClipId|secondClipId)$/i.test(k)) a[k] = ctx.clipId2 ?? ctx.clipId ?? undefined;
-    else if (/^audioClipId$/i.test(k)) a[k] = ctx.audioClipId ?? undefined;
-    else if (/^(sourceProjectItemId|oldItemId)$/i.test(k)) a[k] = ctx.itemId ?? undefined;
-    else if (/^(targetProjectItemId|newItemId|newProjectItemId)$/i.test(k)) a[k] = ctx.itemId2 ?? ctx.itemId ?? undefined;
-    else if (/(projectItemId|itemId|nodeId)$/i.test(k)) a[k] = ctx.itemId ?? undefined;
-    else if (/clipIds$/i.test(k)) a[k] = ctx.clipId ? [ctx.clipId] : undefined;
-    else if (/^binId$/i.test(k)) a[k] = ctx.binId ?? undefined;
-    else if (/srtPath|captionPath/i.test(k)) a[k] = SRT;
-    else if (/(output|dest|target|save)(File)?Path$/i.test(k)) a[k] = join(TMP_OUT, `sweep_${Date.now()}.png`);
-    else if (/(file|media|clip|source|input|image)Path$/i.test(k)) a[k] = ctx.mediaPath ?? undefined;
-    else if (/^(trackIndex|videoTrackIndex|audioTrackIndex)$/i.test(k)) a[k] = 0;
-    else if (/^clipIndex$/i.test(k)) a[k] = 0;
-    else if (/^(count|limit|maxResults)$/i.test(k)) a[k] = 3;
-    else if (/^(seconds|time|atSeconds|startSeconds|position)$/i.test(k)) a[k] = 0.5;
-    else if (/^(durationSeconds|duration)$/i.test(k)) a[k] = 1;
-    else if (/^(inPoint|inSeconds)$/i.test(k)) a[k] = 0;
-    else if (/^(outPoint|outSeconds)$/i.test(k)) a[k] = 2;
-    else if (/^trackType$/i.test(k)) a[k] = 'video';
-    else if (/panelName/i.test(k)) a[k] = 'Timeline';
-    else if (/effectName/i.test(k)) a[k] = 'Gaussian Blur';
-    else if (/transitionName/i.test(k)) a[k] = 'Cross Dissolve';
-    else if (/presetName|lumetriPreset/i.test(k)) a[k] = 'SL BLUE STEEL';
-    else if (/markerName/i.test(k)) a[k] = ctx.markerName ?? 'fixture_comment';
-    else if (/^name$/i.test(k)) a[k] = 'sweep_probe';
-    // Real values that exist on the fixture clip. 'Blurriness' only exists if Gaussian Blur was
-    // applied, so it produced "Property not found" rather than testing anything; Opacity is on
-    // every clip and is a plain scalar, which also avoids the multi-value Position trap.
-    else if (/^(componentName|effectComponent)$/i.test(k)) a[k] = 'Opacity';
-    else if (/^(propertyName|paramName)$/i.test(k)) a[k] = 'Opacity';
-    else if (/^(enabled|enable|visible|locked|muted|reverse|recursive|selected|targeted|suppressUI|includeAudio|maintainAudioPitch)$/i.test(k)) a[k] = true;
-    else if (/^(value|amount|level|gain|opacityValue)$/i.test(k)) a[k] = 50;
-    else if (/^(scale|scaleValue)$/i.test(k)) a[k] = 100;
-    else if (/^(rotation|degrees|angle)$/i.test(k)) a[k] = 15;
-    else if (/^(volumeDb|db|decibels)$/i.test(k)) a[k] = -6;
-    else if (/^(text|comment|label|note)$/i.test(k)) a[k] = 'sweep probe';
-    else if (/^(newName|renameTo)$/i.test(k)) a[k] = 'sweep_renamed';
-    else if (/^(colorLabel|color)$/i.test(k)) a[k] = 'Blue';
+  let entries = [];
+  try {
+    const resolved = typeof shape === 'function' ? shape() : (shape ?? {});
+    entries = Object.entries(resolved);
+  } catch { entries = []; }
+
+  const args = {};
+  const unfillable = [];
+  for (const [key, fieldSchema] of entries) {
+    const optional = ['ZodOptional', 'ZodDefault', 'ZodNullable'].includes(kindOf(fieldSchema));
+    let value = seedValue(fieldSchema, key);
+    // A recognised id that the host does not currently have is worse than omitting it: the tool
+    // would fail on a null id rather than on its own logic.
+    if (value === undefined || value === null) {
+      if (!optional) unfillable.push(key);
+      continue;
+    }
+    args[key] = value;
   }
-  for (const k of Object.keys(a)) if (a[k] === undefined) delete a[k];
-  return { args: a, keys };
+
+  // Ask the schema whether this is acceptable, rather than assuming. A rejection here is a
+  // harness gap and is reported as such.
+  let schemaOk = true, schemaError = null;
+  try {
+    if (typeof tool.inputSchema?.safeParse === 'function') {
+      const parsed = tool.inputSchema.safeParse(args);
+      schemaOk = parsed.success;
+      if (!parsed.success) schemaError = String(parsed.error?.issues?.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')).slice(0, 200);
+    }
+  } catch (e) { schemaOk = false; schemaError = String(e?.message || e).slice(0, 160); }
+
+  return { args, unfillable, schemaOk, schemaError };
 }
 
 const results = [];
@@ -301,7 +391,7 @@ for (let i = 0; i < catalogue.length; i++) {
     continue;
   }
 
-  const { args, keys } = argsFor(tool);
+  const { args, unfillable, schemaOk, schemaError } = argsFor(tool);
   const startedAt = Date.now();
   let record;
   try {
@@ -313,6 +403,9 @@ for (let i = 0; i < catalogue.length; i++) {
       // the harness rather than evidence about the tool.
       const isArgs = /Invalid arguments|expected|required|not found by id|Sequence not found/i.test(err);
       record = { name, outcome: isArgs ? 'NEEDS_ARGS' : 'FAIL', ms, error: err, argKeys: Object.keys(args) };
+      // Distinguish "the harness could not build valid arguments" from "the tool rejected valid
+      // arguments". Collapsing those makes a harness gap look like a tool bug and vice versa.
+      if (isArgs) { record.harnessGap = !schemaOk || unfillable.length > 0; record.unfillable = unfillable; record.schemaError = schemaError; }
     } else if (r && r.verified === false) {
       record = { name, outcome: 'UNVERIFIED', ms, note: String(r.error || r.note || '').slice(0, 300) };
     } else {
