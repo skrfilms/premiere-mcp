@@ -157,6 +157,101 @@ chip that hides the NDI/Syphon/Spout acronyms behind the Doctor.
 
 ## 5. Roadmap (phased, each independently shippable)
 
+**Tier 0 — hardening owed from the 2026-08-24 live-testing session.** Everything here was
+found by actually running the catalogue against a live host, or by reading eight competing
+bridges' source. Ordered by severity, not effort.
+
+1. **AUTH ON THE BRIDGE — security hole, do this first.** There is no authentication on the
+   file IPC. Any local process that can write to `/tmp/premiere-mcp-bridge/` can drop a
+   `command-*.json` and execute arbitrary ExtendScript inside Premiere: full project access,
+   and filesystem reach through the `cep_js` path. Of eight bridges whose source was read,
+   only two have auth (leancoderkavy: token in the WS upgrade query, `timingSafeEqual`,
+   loopback-only bind, min 16 chars; adobepy: per-session broker token in a `hello` frame).
+   We are in the majority and the majority is wrong. Minimum viable fix: a per-session token
+   written to a `0600` file that the panel must echo in every command, plus a mode bit on the
+   temp dir.
+2. **Modal-dialog resilience.** A native modal blocks the CEP bridge until a human clicks it,
+   and every queued command then stalls to its timeout — the server looks hung. Confirmed
+   dialog sources so far: the QE synthetic-media constructors
+   (`newColorMatte`/`newBlackVideo`/`newBarsAndTone`/`newTransparentVideo`/`newUniversalCountingLeader`),
+   adding an **obsolete** audio effect (`Adaptive Noise Reduction` on 26.3.2 → "Audio Effects
+   Replacement"), `Track.overwriteClip` with mismatched media → "Clip Mismatch Warning", and
+   EDL import. Owed: (a) a typed error code for this state — adobepy already models it as
+   `-32006 MODAL_REQUIRED` and we should match; (b) a maintained denylist of dialog-opening
+   calls with the modern replacement where one exists (the obsolete-effect remap is done);
+   (c) investigate whether the mismatch warning can be suppressed via a preference, since it
+   currently blocks fixture construction.
+3. **Finish live coverage.** 604 tools; **231 have ever executed against a host (~38%)**. The
+   unit suites prove generated ExtendScript parses and names no undefined identifiers — they
+   cannot prove the host accepts a call. Today's sweep found bugs no static check could:
+   every `require()` dead under ESM, `TrackItem.setInPoint` not existing, `new Set()` in ES3,
+   a `====` typo, a per-frame `palettegen`. Blockers to finish: ~82 tools need fixture
+   material that doesn't exist yet, ~95 are genuinely unsafe to sweep unattended, and the
+   fixture build itself trips the mismatch dialog (see 2c). Harness is
+   `scripts/live-smoke-sweep.mjs` (tiers READ/MUTATE/SKIP, refuses non-scratch projects,
+   aborts naming the culprit if the bridge stays busy >12s); fixture builder is
+   `scripts/build-test-fixture.mjs`; single-tool bisect is `scripts/bisect-hang.mjs`.
+4. **Diagnose `match_shot_color`.** It wedged the ExtendScript engine so hard that a graceful
+   Premiere quit could not complete — only a force-kill cleared it. Cause not yet known. It
+   is the one confirmed engine-killer in the catalogue and must be understood before the
+   mutate tier can be swept unattended.
+5. **Transport: evaluate WebSocket push.** Ours is a 250 ms file poll, which sets a latency
+   floor per call; six of eight bridges read use WS push. Do **not** naively move the
+   listener into the MCP server: CaYatur documents why (`docs/ARCHITECTURE.md`) — MCP servers
+   are launched per-session over stdio, so an in-process listener drops the plugin on every
+   session restart and concurrent sessions fight the port. A separate relay daemon is the
+   pattern that survives. Adopt alongside it: reconnect on `close` only and never on `error`
+   (avoids reconnect storms), payload caps with a typed too-large error rather than silent
+   truncation, and a `pending` Map keyed by UUID for real multiplexing. Keep file IPC as the
+   fallback — it needs no ports and no firewall prompt.
+6. **Bounded queue semantics — DONE, keep the lesson.** The panel's `commandQueue` was
+   push-only: nothing was ever removed, so `heartbeat.queueLength` reported a lifetime total
+   rather than outstanding work, and an idle healthy panel advertised a queue in the hundreds.
+   I misread that field as evidence of a wedged queue during this session. Fixed. Any future
+   heartbeat field must be checked for the same "means something other than its name" failure.
+
+**Tier 0 — strategic risks surfaced by the bridge survey**
+
+- **Adobe may obsolete this entire transport layer.** Illustrator (Beta) ships a **native
+  in-app HTTP listener** — `localhost:18412/v1/mcp`, streamable HTTP, `Authorization: Bearer
+  ilst_<64hex>`, enabled from an in-app "MCP & Tools" menu, with presets for Cursor/Claude
+  Code/Codex. Adobe's answer to "UXP cannot listen" was to skip the extension layer entirely.
+  [DOC CLAIM — the endpoint shape is from Adobe help pages; tool surface and limits are
+  unverified because the pages timed out. Resolve by pointing a client at that endpoint in
+  Illustrator Beta and reading `tools/list`.] If this reaches Premiere, our CEP bridge becomes
+  legacy. Our differentiators (verify-after-write, render-truth, honest wall) survive the
+  transport change; the bridge does not. Track it.
+- **UXP cannot listen — plugins must dial out.** `AdobeDocs/uxp-premiere-pro-samples` contains
+  zero `WebSocket` or `fetch(` hits: Adobe ships no networking sample for Premiere UXP. Any
+  UXP parity build inherits dial-out plus a relay.
+- **UXP 26.3 `lockedAccess` is synchronous.** 26.3 made wrapping `create*Action()` in
+  `lockedAccess(callback: () => void)` mandatory, so every async lookup must resolve *before*
+  entering the lock. CaYatur hit this live: `CompoundAction#addAction()` throws synchronously
+  for actions from collection-level factories (SequenceEditor, Markers) while
+  TrackItem/ComponentParam-sourced ones work. Adobe ships `@adobe/eslint-plugin-premierepro`
+  to catch it. Budget for this in the UXP hedge.
+- **Windows WS instability in a peer bridge.** adb-mcp #32: the whole Premiere process dies on
+  the first inbound command over the socket.io `websocket` transport (Win10 26100, French
+  locale, Premiere 26.3.0.93); their fix flips Windows to `["polling"]`. **ASSERTED, NOT
+  VERIFIED** — the reporter never confirmed, the maintainer could not reproduce, and locale
+  was never eliminated. Treat as a reason to make transport **configurable**, not as an
+  established root cause. Relevant if we adopt WS.
+
+**Tier 0 — what the survey says we should keep and can claim**
+
+- **App-level heartbeat: unique to us.** `grep -rn "heartbeat|ping|pong"` across every
+  competing plugin returned **zero**. No other bridge can distinguish a host wedged behind a
+  modal from a healthy idle one; they all wait out a timeout. leancoderkavy documents theirs
+  as unbuilt. This is the single clearest architectural lead we have.
+- **Panel-context code execution (`cep_js`) is rare.** Only one *working* peer has a generic
+  eval path (nepfaff, file IPC, 3★, zero validation); adobepy's is almost certainly broken
+  because `allowCodeGenerationFromStrings` is never declared in its manifest. Every
+  socket-based bridge with real usage chose a strict allowlist instead. Ours should stay
+  gated, not become a generic eval endpoint.
+- **Atomic command publish.** We write `.tmp-<uuid>.json` then `rename()` into place because
+  the panel polls for `command-*.json` and a plain write publishes a truncated file the panel
+  would fail to parse — turning a transient race into a permanent failure. Keep.
+
 **Tier 1 — the moat**
 1. Wall-1 capture abstraction + probe + **render/export tap** (zero-dep; unlocks
    true-composite scopes, VLM vision, loudness today). ✅ **SHIPPED** as
@@ -230,7 +325,23 @@ chip that hides the NDI/Syphon/Spout acronyms behind the Doctor.
 
 ## 7. Guardrails (non-negotiable)
 - Never return fake success (verify-after-write). Every tool has a Zod schema.
-- Generated ExtendScript is ES3-safe (`var` only, no arrow fns).
+- Generated ExtendScript is ES3-safe (`var` only, no arrow fns). **This means no `Set`, no
+  `Map`, no `Array.prototype.indexOf`/`forEach`, no `let`/`const`.** A `new Set()` shipped
+  undetected until the syntax suite was finally run against the grown catalogue.
+- **Node-side tool code is ESM — never `require()`.** `package.json` is `type: module`, so
+  the compiled dist has no `require`. All 58 `require()` calls were dead in production while
+  appearing to work under `node -e` (which runs as CJS and leaks `require` as a global). Use
+  the top-of-file `execSync` / `fsSync` / `pathSync` / `osSync` imports. Verify Node-side
+  tools with `node --input-type=module`, never bare `node -e`.
+- **Prefer live reflection over documentation** for API facts, and record it in
+  `docs/VERIFIED-API-SURFACE.md`. Docs said nothing useful about
+  `TrackItem` lacking `setInPoint`, and six tools shipped calling that nonexistent method.
+- **Before adding a tool family, diff the API surface against the catalogue.** The proxy miss
+  (four attachment tools, no `getEnableProxies`) was a mechanical gap that a diff catches and
+  a docs read does not. `docs/API-COVERAGE-MATRIX.md` is the artifact.
+- **Passing unit suites are not evidence a tool works.** They prove the emitted ExtendScript
+  parses and names no undefined identifiers. Only a live host call proves behaviour; report
+  coverage as "executed against a host", not "tests green".
 - Commit identity stays `Skry <121132212+skrfilms@users.noreply.github.com>`.
 - Live tool sweeps only on a scratch project, never the owner's working edits.
 - Do not rename the `.mcp.json` server key without an explicit decision.
