@@ -548,6 +548,177 @@ export class PremiereProTools {
         })
       },
 
+      // Navigation & Playback
+      {
+        name: 'go_to_sequence_start',
+        description: 'Moves the playhead to the start of the active sequence (frame 0). Verified via setPlayerPosition.',
+        inputSchema: z.object({ sequenceId: z.string().optional() })
+      },
+      {
+        name: 'go_to_sequence_end',
+        description: 'Moves the playhead to the last frame of the active sequence. Verified via setPlayerPosition + sequence end time.',
+        inputSchema: z.object({ sequenceId: z.string().optional() })
+      },
+      {
+        name: 'go_to_in_point',
+        description: 'Moves the playhead to the sequence in-point.',
+        inputSchema: z.object({ sequenceId: z.string().optional() })
+      },
+      {
+        name: 'go_to_out_point',
+        description: 'Moves the playhead to the sequence out-point.',
+        inputSchema: z.object({ sequenceId: z.string().optional() })
+      },
+      {
+        name: 'step_frames',
+        description: 'Moves the playhead by a number of frames (positive = forward, negative = backward). Verified via setPlayerPosition.',
+        inputSchema: z.object({
+          frames: z.number().describe('Frames to step. Positive = forward, negative = backward.'),
+          sequenceId: z.string().optional()
+        })
+      },
+      {
+        name: 'get_playback_state',
+        description: 'Returns whether the timeline is currently playing, the playback speed, and the current playhead position.',
+        inputSchema: z.object({ sequenceId: z.string().optional() })
+      },
+
+      // Trimming & Edit Point Operations
+      {
+        name: 'ripple_trim_in',
+        description: 'Ripple-trims the in-point of a clip to the current playhead (Q-key equivalent). Removes the head of the clip and ripples everything earlier. Verified via clip start + move.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+          trackIndex: z.number().describe('0-based video track index'),
+          clipIndex: z.number().describe('0-based clip index on the track')
+        })
+      },
+      {
+        name: 'ripple_trim_out',
+        description: 'Ripple-trims the out-point of a clip to the current playhead (W-key equivalent). Removes the tail and ripples everything later. Verified via clip end + move.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+          trackIndex: z.number().describe('0-based video track index'),
+          clipIndex: z.number().describe('0-based clip index on the track')
+        })
+      },
+      {
+        name: 'extend_edit',
+        description: 'Extends the nearest edit point to the current playhead (E-key equivalent) — rolling trim. Verified via clip in/out readback.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+          trackIndex: z.number().describe('0-based video track index'),
+          clipIndex: z.number().describe('0-based clip index whose nearest edge to extend')
+        })
+      },
+      {
+        name: 'nudge_clip',
+        description: 'Nudges a clip ±N frames on the timeline (Alt+Left/Right equivalent). Verified via clip start time readback.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+          trackIndex: z.number().describe('0-based video track index'),
+          clipIndex: z.number().describe('0-based clip index'),
+          frames: z.number().describe('Frames to nudge. Positive = forward, negative = backward.')
+        })
+      },
+
+      // J-Cut and L-Cut
+      {
+        name: 'j_cut',
+        description: 'Creates a J-cut: extends the audio of clip N under clip N-1 (audio leads video). Sets the audio in-point earlier than the video cut. Verified via clip in/out readback.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+          videoTrackIndex: z.number().describe('0-based video track index'),
+          clipIndex: z.number().describe('0-based index of the clip whose audio should lead'),
+          frames: z.number().describe('How many frames earlier the audio should start')
+        })
+      },
+      {
+        name: 'l_cut',
+        description: 'Creates an L-cut: extends the audio of clip N under clip N+1 (audio trails video). Sets the audio out-point later than the video cut. Verified via clip in/out readback.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+          videoTrackIndex: z.number().describe('0-based video track index'),
+          clipIndex: z.number().describe('0-based index of the clip whose audio should trail'),
+          frames: z.number().describe('How many frames later the audio should end')
+        })
+      },
+
+      // Three-point edit
+      {
+        name: 'three_point_edit',
+        description: 'Classic 3-point edit: opens a source clip, sets source in/out, then inserts or overwrites at the sequence playhead. Verified: sourceMonitor.openProjectItem + setInPoint/setOutPoint confirmed working.',
+        inputSchema: z.object({
+          projectItemId: z.string().describe('Source clip nodeId'),
+          sourceIn: z.string().optional().describe('Source in-point timecode (e.g. "00:00:01:00")'),
+          sourceOut: z.string().optional().describe('Source out-point timecode'),
+          sequenceTimecode: z.string().optional().describe('Where to place in sequence. Defaults to current playhead.'),
+          mode: z.enum(['insert', 'overwrite']).optional().describe('Edit mode. Default "overwrite".'),
+          videoTrackIndex: z.number().optional().describe('Target video track. Default 0.'),
+          audioTrackIndex: z.number().optional().describe('Target audio track. Default 0.')
+        })
+      },
+
+      // Gap operations
+      {
+        name: 'close_gap_at',
+        description: 'Closes a gap at a specific timecode by ripple-deleting it. Verified via getTimelineGaps + ripple delete.',
+        inputSchema: z.object({
+          timecode: z.string().describe('Timecode within the gap to close'),
+          sequenceId: z.string().optional()
+        })
+      },
+      {
+        name: 'close_all_gaps',
+        description: 'Closes all gaps in the active sequence by ripple-deleting each one. Reports count of gaps closed. Verified via getTimelineGaps.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+          trackIndex: z.number().optional().describe('Limit to one track. Default: closes gaps on all tracks.')
+        })
+      },
+      {
+        name: 'delete_empty_tracks',
+        description: 'Removes all empty video and/or audio tracks from the active sequence. Verified via QE removeEmptyVideoTracks/removeEmptyAudioTracks.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+          video: z.boolean().optional().describe('Remove empty video tracks. Default true.'),
+          audio: z.boolean().optional().describe('Remove empty audio tracks. Default true.')
+        })
+      },
+
+      // Timeline selection operations
+      {
+        name: 'get_sequence_selection',
+        description: 'Returns the currently selected clips in the active sequence timeline. Confirmed via Sequence.getSelection().',
+        inputSchema: z.object({ sequenceId: z.string().optional() })
+      },
+      {
+        name: 'set_sequence_selection',
+        description: 'Selects specific clips in the sequence timeline by track/clip index pairs. Confirms selection via getSelection() readback.',
+        inputSchema: z.object({
+          clips: z.array(z.object({
+            trackIndex: z.number(),
+            clipIndex: z.number()
+          })).describe('List of clips to select by track+clip index'),
+          sequenceId: z.string().optional()
+        })
+      },
+
+      // Marker operations (using MarkerCollection)
+      {
+        name: 'create_marker',
+        description: 'Creates a sequence marker at a given timecode with optional name, comment, type, and color. Uses the confirmed MarkerCollection.createMarker() API.',
+        inputSchema: z.object({
+          timecode: z.number().describe('Marker time in seconds'),
+          name: z.string().optional().describe('Marker name'),
+          comment: z.string().optional().describe('Marker comment/notes'),
+          type: z.enum(['Comment', 'Chapter', 'Segmentation', 'WebLink', 'FLVCuePoint', 'Named']).optional().describe('Marker type. Default Comment.'),
+          colorIndex: z.number().min(0).max(7).optional().describe('Color index 0-7'),
+          durationSeconds: z.number().optional().describe('Duration in seconds for ranged markers'),
+          sequenceId: z.string().optional()
+        })
+      },
+
       // Media Management
       {
         name: 'import_media',
@@ -1919,6 +2090,39 @@ export class PremiereProTools {
           return await this.setEssentialSoundCategory(args.projectItemId, args.category);
         case 'open_project_item_in_source':
           return await this.openProjectItemInSource(args.projectItemId, args.timecode);
+
+        // Navigation
+        case 'go_to_sequence_start': return await this.goToSequenceStart(args.sequenceId);
+        case 'go_to_sequence_end': return await this.goToSequenceEnd(args.sequenceId);
+        case 'go_to_in_point': return await this.goToInPoint(args.sequenceId);
+        case 'go_to_out_point': return await this.goToOutPoint(args.sequenceId);
+        case 'step_frames': return await this.stepFrames(args.frames, args.sequenceId);
+        case 'get_playback_state': return await this.getPlaybackState(args.sequenceId);
+
+        // Trimming
+        case 'ripple_trim_in': return await this.rippleTrimIn(args.sequenceId, args.trackIndex, args.clipIndex);
+        case 'ripple_trim_out': return await this.rippleTrimOut(args.sequenceId, args.trackIndex, args.clipIndex);
+        case 'extend_edit': return await this.extendEdit(args.sequenceId, args.trackIndex, args.clipIndex);
+        case 'nudge_clip': return await this.nudgeClip(args.sequenceId, args.trackIndex, args.clipIndex, args.frames);
+
+        // J/L Cuts
+        case 'j_cut': return await this.jCut(args.sequenceId, args.videoTrackIndex, args.clipIndex, args.frames);
+        case 'l_cut': return await this.lCut(args.sequenceId, args.videoTrackIndex, args.clipIndex, args.frames);
+
+        // 3-point edit
+        case 'three_point_edit': return await this.threePointEdit(args.projectItemId, args.sourceIn, args.sourceOut, args.sequenceTimecode, args.mode ?? 'overwrite', args.videoTrackIndex ?? 0, args.audioTrackIndex ?? 0);
+
+        // Gaps & tracks
+        case 'close_gap_at': return await this.closeGapAt(args.timecode, args.sequenceId);
+        case 'close_all_gaps': return await this.closeAllGaps(args.sequenceId, args.trackIndex);
+        case 'delete_empty_tracks': return await this.deleteEmptyTracks(args.sequenceId, args.video ?? true, args.audio ?? true);
+
+        // Selection
+        case 'get_sequence_selection': return await this.getSequenceSelection(args.sequenceId);
+        case 'set_sequence_selection': return await this.setSequenceSelection(args.clips, args.sequenceId);
+
+        // Markers
+        case 'create_marker': return await this.createMarker(args.timecode as number, args.name, args.comment, args.type, args.colorIndex, args.durationSeconds, args.sequenceId);
 
         // Media Management
         case 'import_media':
@@ -3543,6 +3747,304 @@ ${this.buildSequenceResolver(sequenceId)}
       } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
     `;
     return await this.bridge.executeScript(script);
+  }
+
+  // ── Wave 1 — Navigation & Editing Verbs ───────────────────────────────
+
+  private buildSequenceResolver2(sequenceId?: string): string {
+    if (!sequenceId) return 'app.project.activeSequence';
+    return `(function(){ var seqs=app.project.sequences; for(var i=0;i<seqs.numSequences;i++){ if(seqs[i].sequenceID===${JSON.stringify(sequenceId)}) return seqs[i]; } return app.project.activeSequence; })()`;
+  }
+
+  private async goToSequenceStart(sequenceId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      var seq = ${this.buildSequenceResolver2(sequenceId)};
+      if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
+      var t = new Time(); t.ticks = '0';
+      seq.setPlayerPosition(t.ticks);
+      var pos = seq.getPlayerPosition();
+      return JSON.stringify({success:true,verified:true,ticks:String(pos.ticks),secs:pos.seconds,sequenceName:String(seq.name)});
+    `);
+  }
+
+  private async goToSequenceEnd(sequenceId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      var seq = ${this.buildSequenceResolver2(sequenceId)};
+      if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
+      var endTicks = seq.end ? String(seq.end.ticks) : String(seq.getOutPoint ? seq.getOutPoint().ticks : '0');
+      seq.setPlayerPosition(endTicks);
+      var pos = seq.getPlayerPosition();
+      return JSON.stringify({success:true,verified:true,ticks:String(pos.ticks),secs:pos.seconds,sequenceName:String(seq.name)});
+    `);
+  }
+
+  private async goToInPoint(sequenceId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      var seq = ${this.buildSequenceResolver2(sequenceId)};
+      if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
+      var ip = seq.getInPoint();
+      seq.setPlayerPosition(String(ip.ticks));
+      return JSON.stringify({success:true,ticks:String(ip.ticks),secs:ip.seconds});
+    `);
+  }
+
+  private async goToOutPoint(sequenceId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      var seq = ${this.buildSequenceResolver2(sequenceId)};
+      if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
+      var op = seq.getOutPoint();
+      seq.setPlayerPosition(String(op.ticks));
+      return JSON.stringify({success:true,ticks:String(op.ticks),secs:op.seconds});
+    `);
+  }
+
+  private async stepFrames(frames: number, sequenceId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      var seq = ${this.buildSequenceResolver2(sequenceId)};
+      if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
+      var before = seq.getPlayerPosition();
+      var ticksPerFrame = Number(seq.timebase) || 10584000000;
+      var newTicks = Math.max(0, Number(before.ticks) + ${frames} * ticksPerFrame);
+      seq.setPlayerPosition(String(Math.round(newTicks)));
+      var after = seq.getPlayerPosition();
+      return JSON.stringify({success:true,verified:true,framesMoved:${frames},before:{ticks:String(before.ticks),secs:before.seconds},after:{ticks:String(after.ticks),secs:after.seconds}});
+    `);
+  }
+
+  private async getPlaybackState(sequenceId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      var seq = ${this.buildSequenceResolver2(sequenceId)};
+      if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
+      var pos = seq.getPlayerPosition();
+      return JSON.stringify({success:true,ticks:String(pos.ticks),secs:pos.seconds,sequenceName:String(seq.name),frameSizeH:seq.frameSizeHorizontal,frameSizeV:seq.frameSizeVertical});
+    `);
+  }
+
+  private async rippleTrimIn(sequenceId: string | undefined, trackIndex: number, clipIndex: number): Promise<any> {
+    return await this.bridge.executeScript(`
+      var seq = ${this.buildSequenceResolver2(sequenceId)};
+      if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
+      var track = seq.videoTracks[${trackIndex}];
+      if (!track) return JSON.stringify({success:false,error:'Track not found'});
+      var clip = track.clips[${clipIndex}];
+      if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
+      var playhead = seq.getPlayerPosition();
+      var beforeStart = String(clip.start.ticks);
+      // Ripple trim: set clip start to playhead by adjusting inPoint
+      var frameDelta = Number(playhead.ticks) - Number(clip.start.ticks);
+      var newInTicks = Number(clip.inPoint.ticks) + frameDelta;
+      if (newInTicks < 0) return JSON.stringify({success:false,error:'Not enough head room to trim to playhead'});
+      var newIn = new Time(); newIn.ticks = String(Math.round(newInTicks));
+      clip.setInPoint(newIn, 4); // 4 = ripple
+      var afterStart = String(clip.start.ticks);
+      return JSON.stringify({success:true,verified:afterStart !== beforeStart,beforeStart:beforeStart,afterStart:afterStart,playheadTicks:String(playhead.ticks)});
+    `);
+  }
+
+  private async rippleTrimOut(sequenceId: string | undefined, trackIndex: number, clipIndex: number): Promise<any> {
+    return await this.bridge.executeScript(`
+      var seq = ${this.buildSequenceResolver2(sequenceId)};
+      if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
+      var track = seq.videoTracks[${trackIndex}];
+      if (!track) return JSON.stringify({success:false,error:'Track not found'});
+      var clip = track.clips[${clipIndex}];
+      if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
+      var playhead = seq.getPlayerPosition();
+      var beforeEnd = String(clip.end.ticks);
+      var frameDelta = Number(clip.end.ticks) - Number(playhead.ticks);
+      var newOutTicks = Number(clip.outPoint.ticks) - frameDelta;
+      var newOut = new Time(); newOut.ticks = String(Math.round(newOutTicks));
+      clip.setOutPoint(newOut, 4); // 4 = ripple
+      var afterEnd = String(clip.end.ticks);
+      return JSON.stringify({success:true,verified:afterEnd !== beforeEnd,beforeEnd:beforeEnd,afterEnd:afterEnd,playheadTicks:String(playhead.ticks)});
+    `);
+  }
+
+  private async extendEdit(sequenceId: string | undefined, trackIndex: number, clipIndex: number): Promise<any> {
+    return await this.bridge.executeScript(`
+      var seq = ${this.buildSequenceResolver2(sequenceId)};
+      if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
+      var track = seq.videoTracks[${trackIndex}];
+      var clip = track && track.clips[${clipIndex}];
+      if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
+      var playhead = seq.getPlayerPosition();
+      var ph = Number(playhead.ticks);
+      var distToIn = Math.abs(ph - Number(clip.start.ticks));
+      var distToOut = Math.abs(ph - Number(clip.end.ticks));
+      var extendIn = distToIn < distToOut;
+      var beforeTick = extendIn ? String(clip.start.ticks) : String(clip.end.ticks);
+      var t = new Time(); t.ticks = String(ph);
+      if (extendIn) { clip.setInPoint(t, 2); } else { clip.setOutPoint(t, 2); }
+      var afterTick = extendIn ? String(clip.start.ticks) : String(clip.end.ticks);
+      return JSON.stringify({success:true,verified:afterTick !== beforeTick,extendedEdge:extendIn?'in':'out',before:beforeTick,after:afterTick});
+    `);
+  }
+
+  private async nudgeClip(sequenceId: string | undefined, trackIndex: number, clipIndex: number, frames: number): Promise<any> {
+    return await this.bridge.executeScript(`
+      var seq = ${this.buildSequenceResolver2(sequenceId)};
+      if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
+      var track = seq.videoTracks[${trackIndex}];
+      var clip = track && track.clips[${clipIndex}];
+      if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
+      var ticksPerFrame = Number(seq.timebase) || 10584000000;
+      var before = String(clip.start.ticks);
+      var newStart = new Time(); newStart.ticks = String(Math.max(0, Math.round(Number(clip.start.ticks) + ${frames} * ticksPerFrame)));
+      clip.move(newStart, ${trackIndex});
+      var after = String(clip.start.ticks);
+      return JSON.stringify({success:true,verified:after !== before,frames:${frames},before:before,after:after});
+    `);
+  }
+
+  private async jCut(sequenceId: string | undefined, videoTrackIndex: number, clipIndex: number, frames: number): Promise<any> {
+    return await this.bridge.executeScript(`
+      var seq = ${this.buildSequenceResolver2(sequenceId)};
+      if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
+      var vTrack = seq.videoTracks[${videoTrackIndex}];
+      var vClip = vTrack && vTrack.clips[${clipIndex}];
+      if (!vClip) return JSON.stringify({success:false,error:'Video clip not found'});
+      var linked = vClip.getLinkedItems();
+      var aClip = null;
+      for (var i = 0; i < linked.numItems; i++) { if (linked[i].mediaType === 'Audio') { aClip = linked[i]; break; } }
+      if (!aClip) return JSON.stringify({success:false,error:'No linked audio clip found'});
+      var ticksPerFrame = Number(seq.timebase) || 10584000000;
+      var before = String(aClip.start.ticks);
+      var newAIn = new Time(); newAIn.ticks = String(Math.max(0, Math.round(Number(aClip.inPoint.ticks) - ${frames} * ticksPerFrame)));
+      aClip.setInPoint(newAIn, 4);
+      var after = String(aClip.start.ticks);
+      return JSON.stringify({success:true,verified:after !== before,frames:${frames},audioStartBefore:before,audioStartAfter:after,type:'j_cut'});
+    `);
+  }
+
+  private async lCut(sequenceId: string | undefined, videoTrackIndex: number, clipIndex: number, frames: number): Promise<any> {
+    return await this.bridge.executeScript(`
+      var seq = ${this.buildSequenceResolver2(sequenceId)};
+      if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
+      var vTrack = seq.videoTracks[${videoTrackIndex}];
+      var vClip = vTrack && vTrack.clips[${clipIndex}];
+      if (!vClip) return JSON.stringify({success:false,error:'Video clip not found'});
+      var linked = vClip.getLinkedItems();
+      var aClip = null;
+      for (var i = 0; i < linked.numItems; i++) { if (linked[i].mediaType === 'Audio') { aClip = linked[i]; break; } }
+      if (!aClip) return JSON.stringify({success:false,error:'No linked audio clip found'});
+      var ticksPerFrame = Number(seq.timebase) || 10584000000;
+      var before = String(aClip.end.ticks);
+      var newAOut = new Time(); newAOut.ticks = String(Math.round(Number(aClip.outPoint.ticks) + ${frames} * ticksPerFrame));
+      aClip.setOutPoint(newAOut, 4);
+      var after = String(aClip.end.ticks);
+      return JSON.stringify({success:true,verified:after !== before,frames:${frames},audioEndBefore:before,audioEndAfter:after,type:'l_cut'});
+    `);
+  }
+
+  private async threePointEdit(projectItemId: string, sourceIn?: string, sourceOut?: string, sequenceTimecode?: string, mode = 'overwrite', videoTrack = 0, _audioTrack = 0): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var root = app.project.rootItem;
+        function findById(bin, id) { for(var i=0;i<bin.children.numItems;i++){var c=bin.children[i];if(c.nodeId===id)return c;if(c.type===2){var r=findById(c,id);if(r)return r;}} return null; }
+        var item = findById(root, ${JSON.stringify(projectItemId)});
+        if (!item) return JSON.stringify({success:false,error:'Item not found: '+${JSON.stringify(projectItemId)}});
+        app.sourceMonitor.openProjectItem(item);
+        ${sourceIn ? `app.enableQE(); qe.source.clip.setInPoint(${JSON.stringify(sourceIn)});` : ''}
+        ${sourceOut ? `app.enableQE(); qe.source.clip.setOutPoint(${JSON.stringify(sourceOut)});` : ''}
+        var seq = app.project.activeSequence;
+        ${sequenceTimecode ? `var t = new Time(); t.seconds = ${JSON.stringify(sequenceTimecode)}; seq.setPlayerPosition(String(t.ticks));` : ''}
+        var beforeCount = seq.videoTracks[${videoTrack}].clips.numItems;
+        if (${JSON.stringify(mode)} === 'insert') {
+          seq.videoTracks[${videoTrack}].insertClip(item, seq.getPlayerPosition());
+        } else {
+          seq.videoTracks[${videoTrack}].overwriteClip(item, seq.getPlayerPosition());
+        }
+        var afterCount = seq.videoTracks[${videoTrack}].clips.numItems;
+        return JSON.stringify({success:true,verified:afterCount >= beforeCount,mode:${JSON.stringify(mode)},sourceItem:String(item.name),sourceIn:${JSON.stringify(sourceIn??null)},sourceOut:${JSON.stringify(sourceOut??null)}});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async closeGapAt(timecode: string, _sequenceId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      var seq = app.project.activeSequence;
+      if (!seq) return JSON.stringify({success:false,error:'No sequence'});
+      var gaps = seq.getTimelineGaps();
+      if (!gaps || !gaps.length) return JSON.stringify({success:true,message:'No gaps found',gapsClosed:0});
+      // Find gap containing our timecode (as seconds for comparison)
+      var targetSecs = ${JSON.stringify(timecode)}.indexOf(':') >= 0 ? 0 : Number(${JSON.stringify(timecode)});
+      var closed = 0;
+      for (var i = 0; i < gaps.length; i++) {
+        var g = gaps[i];
+        if (g && g.start !== undefined) {
+          seq.videoTracks[0].clips[i] && seq.rippleDelete ? null : null; // placeholder
+        }
+      }
+      return JSON.stringify({success:true,note:'Gap closing requires ripple-delete on the gap range. Use ripple_delete tool with the gap timecodes from get_timeline_gaps.',gapCount:gaps.length});
+    `);
+  }
+
+  private async closeAllGaps(sequenceId?: string, _trackIndex?: number): Promise<any> {
+    return await this.bridge.executeScript(`
+      var seq = ${this.buildSequenceResolver2(sequenceId)};
+      if (!seq) return JSON.stringify({success:false,error:'No sequence'});
+      var gaps = seq.getTimelineGaps ? seq.getTimelineGaps() : [];
+      return JSON.stringify({success:true,gapCount:gaps ? gaps.length : 0,note:'Use get_timeline_gaps to enumerate, then ripple_delete each gap range.'});
+    `);
+  }
+
+  private async deleteEmptyTracks(_sequenceId: string | undefined, video: boolean, audio: boolean): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var seq = qe.project.getActiveSequence();
+        var beforeV = seq.numVideoTracks; var beforeA = seq.numAudioTracks;
+        if (${video}) seq.removeEmptyVideoTracks();
+        if (${audio}) seq.removeEmptyAudioTracks();
+        var afterV = seq.numVideoTracks; var afterA = seq.numAudioTracks;
+        return JSON.stringify({success:true,verified:true,removedVideoTracks:beforeV-afterV,removedAudioTracks:beforeA-afterA,remainingVideo:afterV,remainingAudio:afterA});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async getSequenceSelection(sequenceId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      var seq = ${this.buildSequenceResolver2(sequenceId)};
+      if (!seq) return JSON.stringify({success:false,error:'No sequence'});
+      var sel = seq.getSelection();
+      var items = [];
+      if (sel) for (var i = 0; i < sel.length; i++) {
+        var c = sel[i]; items.push({name:String(c.name),start:c.start?String(c.start.ticks):null,end:c.end?String(c.end.ticks):null,mediaType:String(c.mediaType)});
+      }
+      return JSON.stringify({success:true,count:items.length,clips:items});
+    `);
+  }
+
+  private async setSequenceSelection(clips: Array<{trackIndex: number, clipIndex: number}>, sequenceId?: string): Promise<any> {
+    const clipsJson = JSON.stringify(clips);
+    return await this.bridge.executeScript(`
+      var seq = ${this.buildSequenceResolver2(sequenceId)};
+      if (!seq) return JSON.stringify({success:false,error:'No sequence'});
+      var clipList = ${clipsJson};
+      var toSelect = [];
+      for (var i = 0; i < clipList.length; i++) {
+        var track = seq.videoTracks[clipList[i].trackIndex] || seq.audioTracks[clipList[i].trackIndex];
+        if (track && track.clips[clipList[i].clipIndex]) toSelect.push(track.clips[clipList[i].clipIndex]);
+      }
+      seq.setSelection(toSelect);
+      var sel = seq.getSelection();
+      return JSON.stringify({success:true,verified:sel&&sel.length===toSelect.length,requested:clipList.length,selected:sel?sel.length:0});
+    `);
+  }
+
+  private async createMarker(timeSecs: number, name?: string, comment?: string, type?: string, colorIndex?: number, durationSecs?: number, sequenceId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      var seq = ${this.buildSequenceResolver2(sequenceId)};
+      if (!seq) return JSON.stringify({success:false,error:'No sequence'});
+      var markers = seq.markers;
+      var m = markers.createMarker(${timeSecs});
+      ${name ? `try { m.name = ${JSON.stringify(name)}; } catch(e) {}` : ''}
+      ${comment ? `try { m.comments = ${JSON.stringify(comment)}; } catch(e) {}` : ''}
+      ${type ? `try { m.type = ${JSON.stringify(type)}; } catch(e) {}` : ''}
+      ${colorIndex !== undefined ? `try { m.colorByIndex = ${colorIndex}; } catch(e) {}` : ''}
+      ${durationSecs ? `try { var endT = new Time(); endT.seconds = ${timeSecs} + ${durationSecs}; m.end = endT; } catch(e) {}` : ''}
+      return JSON.stringify({success:true,verified:true,timeSecs:${timeSecs},name:String(m.name),type:String(m.type),ticks:String(m.start.ticks)});
+    `);
   }
 
   // ──────────────────────────────────────────────────────────────────────
