@@ -40,6 +40,8 @@ const NOT_SCRIPT_BUILDERS = new Set([
   'constructor', 'initialize', 'cleanup', 'executeScript', 'waitForResponse',
   'detectPremiereProInstallation', 'initializeCommunication', 'isConnected',
   'getTempDir', 'runDiagnostics',
+  // CEP JavaScript and Node-side clipboard helpers — not ExtendScript builders
+  'executeCepJs', 'readClipboard', 'writeClipboard',
 ]);
 
 function payloadRuns(script: string): boolean {

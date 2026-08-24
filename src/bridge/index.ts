@@ -637,6 +637,47 @@ export class PremiereProBridge implements PremiereProTransport {
     return EXTENDSCRIPT_HELPERS + '(function(){\n' + safeScript + '\n})();';
   }
 
+  // Read text from the macOS system clipboard (Node.js side — no CEP panel needed).
+  readClipboard(): string {
+    const { execSync } = require('child_process');
+    return execSync('/usr/bin/pbpaste').toString();
+  }
+
+  // Write text to the macOS system clipboard (Node.js side — no CEP panel, no crashes).
+  writeClipboard(text: string): void {
+    const { spawnSync } = require('child_process');
+    const result = spawnSync('/usr/bin/pbcopy', [], { input: text, encoding: 'utf8' });
+    if (result.error) throw result.error;
+  }
+
+  // Execute JavaScript in the CEP panel context (not ExtendScript).
+  // Has access to window.cep, CSInterface methods, browser APIs.
+  async executeCepJs(script: string, timeoutMs = 10000): Promise<any> {
+    if (!this.isInitialized) {
+      throw new Error('Bridge not initialized. Call initialize() first.');
+    }
+    const commandId = randomUUID();
+    const commandFile = join(this.tempDir, `command-${commandId}.json`);
+    const responseFile = join(this.tempDir, `response-${commandId}.json`);
+    const commandStaging = join(this.tempDir, `.tmp-${commandId}.json`);
+    try {
+      await fs.writeFile(commandStaging, JSON.stringify({
+        id: commandId,
+        type: 'cep_js',
+        script,
+        timeoutMs,
+        timestamp: new Date().toISOString()
+      }));
+      await fs.rename(commandStaging, commandFile);
+      return await this.waitForResponse(responseFile, timeoutMs, commandId);
+    } catch (error) {
+      this.logger.error(`Failed to execute CEP JS: ${error}`);
+      throw error;
+    } finally {
+      await fs.unlink(commandFile).catch(() => {});
+    }
+  }
+
   async executeScript(script: string, timeoutMs?: number, callerAuthored = false): Promise<any> {
     if (!this.isInitialized) {
       throw new Error('Bridge not initialized. Call initialize() first.');
