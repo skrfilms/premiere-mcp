@@ -86,6 +86,15 @@ function shapedGuess(schema: Schema, key: string): unknown {
       const members = (schema.options ?? []) as string[];
       return members.length ? members[0] : 'x';
     }
+    case 'ZodRecord': {
+      // z.record(keyType, valueType) had no case here, so it fell through to the string default
+      // and every record-typed parameter was rejected by its own schema. That hid
+      // create_custom_export_preset from the schema suite entirely — it only surfaced once the
+      // suites started seeing the full catalogue instead of the curated default.
+      // `valueType` is a public accessor on this zod build (verified), so no _def poking.
+      const valueSchema = (schema as { valueType?: Schema }).valueType;
+      return { seededKey: valueSchema ? seed(valueSchema, key) : 'x' };
+    }
     case 'ZodNumber':
       return NUMERIC[key] ?? 1;
     case 'ZodBoolean':
