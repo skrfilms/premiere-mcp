@@ -583,6 +583,13 @@ These were listed as "walled". Live probing on 26.3.2 confirmed scriptable paths
 | **`setLogColorManagement(bool)` + `setLUTInterpolationMethod(0|1)` confirmed** | Both writable. | `set_log_color_management`, `set_lut_interpolation` (T1) |
 | **`exportAsMediaDirect(outputPath, presetPath, workAreaType:number)` full sig** | 3 args confirmed. workAreaType: 0=entire sequence, 1=work area. | Upgrade `export_sequence` (T1) |
 | **QE sequence properties all readable** | CTI, inPoint, outPoint, workInPoint, workOutPoint, player, previewPresetPath, previewPresetCodec, editingMode (GUID), useMaxBitDepth, useMaxRenderQuality. | Already in tools |
+| **`app.sourceMonitor.openProjectItem(projectItem)` confirmed** | Pass DOM ProjectItem directly, no path needed. `getProjectItem()` returns loaded item. `getPosition()` returns Time. `play(speed:number)`. Cleaner than qe.source for DOM items. | `open_in_source`, `get_source_position`, `play_source` (T1 DOM) |
+| **`app.projects` ProjectCollection confirmed** | `app.projects.numProjects` + `app.projects[k].name/path/sequences` — enumerate ALL currently open projects. | `list_open_projects` (T1) |
+| **`app.properties` read/write** | `getProperty(key)`, `setProperty(key, value)`, `doesPropertyExist(key)`, `clearProperty(key)` — application-level properties store. | `get_app_property`, `set_app_property` (T2) |
+| **`app.openDocument(path, bool, bool, bool, bool)` confirmed** | 5 args. Opens any .prproj. Combined with `app.project.save()` and `app.project.closeDocument(bool, bool)` — complete project open/save/close lifecycle. | `open_project`, `close_project` (T1) |
+| **`app.openFCPXML(path, sequenceName)` confirmed** | Import an FCP XML file directly with a sequence name. | `open_fcp_xml` (T1) |
+| **`list_recent_projects` implementation path** | Premiere stores its recent list internally. Best practical approach: `mdfind -name .prproj` sorted by mtime, excluding Auto-Save. Returns clean list of recently modified projects. | `list_recent_projects` (T1 BR/Node) |
+| **PP2026 Object Mask XML schema** | Mask stored as `SubComponent` inside the `VideoFilterComponent` in prproj XML. NOT accessible via DOM `clip.components` or QE `getComponentAt`. Parameters (Feather, Opacity, Expansion, Inverted) are standard `VideoComponentParam` XML. Shape geometry in `ArbVideoComponentParam Name="Tracker"` as base64 binary. Schema confirmed: `save()` + read gzip XML + inject SubComponent + `closeDocument()` + `openDocument()` is the complete mask creation workflow. | `add_mask_to_effect` (T2 via prproj XML + reload) |
 
 ---
 
