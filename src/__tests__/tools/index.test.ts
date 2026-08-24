@@ -108,7 +108,7 @@ describe('PremiereProTools', () => {
       expect(toolNames).toContain('apply_lumetri_preset');
       expect(toolNames).toContain('apply_video_effect');
       expect(toolNames).toContain('get_timeline_render_status');
-      expect(availableTools).toHaveLength(637);
+      expect(availableTools).toHaveLength(638);
       expect(unimplementedExpandedToolNames).toEqual([]);
       for (const name of expandedToolNames) {
         expect(toolNames).toContain(name);
@@ -612,8 +612,8 @@ describe('PremiereProTools', () => {
       expect(result.success).toBe(true);
       // The full catalogue is exposed by default (no profile env set). The
       // catalog block now also reports the active profile for introspection.
-      expect(result.catalog.tools).toBe(637);
-      expect(result.catalog.toolsInFullCatalog).toBe(637);
+      expect(result.catalog.tools).toBe(638);
+      expect(result.catalog.toolsInFullCatalog).toBe(638);
       expect(result.catalog.resources).toBe(13);
       expect(result.catalog.prompts).toBe(10);
       expect(result.catalog.profile.source).toBe('all');
@@ -671,7 +671,13 @@ describe('PremiereProTools', () => {
       const result = await tools.executeTool('unknown_tool', {});
 
       expect(result.success).toBe(false);
-      expect(result.error).toContain('not found');
+      // The error used to dump every tool name. It now distinguishes "no such tool"
+      // from "hidden by the active profile" and returns a short ranked shortlist.
+      expect(result.error).toContain('does not exist in this build');
+      expect(result.existsButHiddenByProfile).toBe(false);
+      expect(Array.isArray(result.didYouMean)).toBe(true);
+      expect(result.hint).toContain('find_tool');
+      expect(result.availableTools).toBeUndefined();
     });
 
     it('validates tool arguments with zod', async () => {
