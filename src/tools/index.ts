@@ -3161,14 +3161,20 @@ export class PremiereProTools {
     });
   }
 
-  getAvailableTools(): MCPTool[] {
+  /** Every tool this build implements, before the active profile filters anything. */
+  getRegisteredTools(): MCPTool[] {
     const localTools = this.getLocalTools();
-    const all = [
+    return [
       ...localTools,
       ...getExpandedTools(new Set(localTools.map((tool) => tool.name)))
     ];
-    // Opt-in curation. Default (no env set) returns the full catalogue unchanged.
-    return applyProfile(all);
+  }
+
+  getAvailableTools(): MCPTool[] {
+    // Curated by default (`core`). PREMIERE_MCP_PROFILE=all returns everything.
+    // Anything the profile hides is still discoverable through find_tool, which reports
+    // it as exposed:false with the reason rather than omitting it.
+    return applyProfile(this.getRegisteredTools());
   }
 
   async executeTool(name: string, args: Record<string, any>): Promise<any> {
@@ -16315,8 +16321,25 @@ ${this.buildSequenceResolver(sequenceId)}
       qe_clip_methods: ['addVideoEffect','addAudioEffect','addTransition','canDoMulticam','getClipPanComponent','getComponentAt','getProjectItem','move','moveToTrack','remove','removeEffects','rippleDelete','roll','setAntiAliasQuality','setBorderColor','setBorderWidth','setEndPercent','setEndPosition','setFrameBlend','setMulticam','setName','setReverse','setScaleToFrameSize','setSpeed','setStartPercent','setStartPosition','setSwitchSources','setTimeInterpolationType','slide','slip'],
       qe_sequence_methods: ['addTracks','close','deletePreviewFiles','exportDirect','exportFrameJPEG','exportFramePNG','exportFrameTIFF','exportToAME','extract','flushCache','getAudioTrackAt','getEmptyBarTimes','getExportComplete','getGreenBarTimes','getRedBarTimes','getVideoTrackAt','getYellowBarTimes','isIncompleteBackgroundVideoEffects','isOpen','lockTracks','makeCurrent','muteTracks','razor','removeAudioTrack','removeEmptyAudioTracks','removeEmptyVideoTracks','removeVideoTrack','renderAll','renderAudio','renderPreview','setCTI','setInOutPoints','setInPoint','setOutPoint','setPreviewFrameSize','setPreviewPresetPath','setUseMaxBitDepth','setUseMaxRenderQuality','setVideoDisplayFormat','setVideoFrameSize','setWorkInOutPoints','syncLockTracks'],
       qe_component_methods: ['getParamList','getParamValue','setParamValue','getParamKeyframes','getParamControlValue','remove'],
-      confirmed_wall: ['Free-draw shape mask geometry','Essential Sound auto-tagging','Clipboard (system)','Render & Replace bake-to-media','Essential Graphics advanced authoring','Merged clips creation'],
-      total_tools: 600
+      // Kept current deliberately: a stale "cannot do" list is the same kind of lie as a
+      // fake success — it tells an agent to stop trying something that now works. Items
+      // are removed from this list only when a live host has proved the capability.
+      confirmed_wall: [
+        'Free-draw shape mask geometry (PP2026 Object Mask stores shape data as a SubComponent in the .prproj XML; not reachable via DOM or QE)',
+        'Essential Sound auto-tagging (the category can be written via setProjectMetadata; the automatic analysis cannot be driven)',
+        'Render & Replace bake-to-media',
+        'Essential Graphics advanced authoring',
+        'Merged clips creation (detection only: isMergedClip)',
+        'Work area in/out (26.3.2: setWorkAreaInPoint/OutPoint and QE setWorkInOutPoints are accepted but inert, even with setWorkAreaEnabled(true); use sequence in/out points)',
+        'app.findMenuCommandId / app.executeCommand are absent in the CEP ExtendScript context on 26.3.2 — no scripted menu bus',
+      ],
+      // Previously listed here and since cracked, recorded so it is not re-added:
+      // system clipboard (done Node-side via pbcopy/pbpaste, not through the host).
+      cracked_since: ['Clipboard (system)'],
+      // Computed, never hardcoded. The published number was 600 while the build
+      // registered a different count, and three different totals were in circulation.
+      total_tools: this.getRegisteredTools().length,
+      tools_exposed_by_active_profile: this.getAvailableTools().length
     };
   }
 
