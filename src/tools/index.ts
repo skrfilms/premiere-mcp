@@ -6384,9 +6384,22 @@ ${this.buildSequenceResolver(sequenceId)}
           }
         }
         if (sources.length === 0) return JSON.stringify({success:false,error:'No matching sequences found'});
-        // Create reel by duplicating first source settings
-        var reel = app.project.createNewSequence(reelName, sources[0].sequenceID);
-        if (!reel) return JSON.stringify({success:false,error:'Could not create reel sequence'});
+        // createNewSequenceFromClips is the non-interactive constructor and is verified working.
+        // createNewSequence (used here before) opens the New Sequence dialog on this build and
+        // hangs the scripting host until a human presses Escape.
+        var sourceItems = [];
+        for (var si2 = 0; si2 < sources.length; si2++) {
+          if (sources[si2].projectItem) sourceItems.push(sources[si2].projectItem);
+        }
+        if (sourceItems.length === 0) return JSON.stringify({success:false,error:'None of the source sequences expose a projectItem, so no reel could be created.'});
+        var reel = null;
+        try { reel = app.project.createNewSequenceFromClips(reelName, sourceItems, app.project.rootItem); } catch (eReel) {
+          return JSON.stringify({success:false,error:'createNewSequenceFromClips failed: ' + eReel.toString()});
+        }
+        if (!reel) return JSON.stringify({success:false,error:'Could not create reel sequence (createNewSequenceFromClips returned null)'});
+        // The clips are already laid out by the constructor; the loop below is now a verification
+        // and gap-filling pass rather than the thing that builds the reel.
+        try { app.project.openSequence(String(reel.sequenceID)); } catch (eOpenReel) {}
         // Overwrite each source into the reel
         var cursor = new Time(); cursor.ticks = '0';
         var placed = 0, skipped = [];
@@ -6431,17 +6444,37 @@ ${this.buildSequenceResolver(sequenceId)}
           var newNum = String(num+1); while(newNum.length < vMatch[2].length) newNum = '0'+newNum;
           newName = prefix + newNum;
         } else { newName = name + '_v002'; }
-        // Duplicate
-        var newSeq = seq.clone();
-        if (!newSeq) {
-          // Fallback: createNewSequence
-          newSeq = app.project.createNewSequence(newName, seq.sequenceID);
-        } else {
-          try { newSeq.name = newName; } catch(e){}
+        // clone() is the only safe duplicate here. The old fallback called
+        // app.project.createNewSequence, which OPENS THE NEW SEQUENCE DIALOG on this build and
+        // wedges the scripting host — a fallback that hangs is worse than no fallback.
+        // clone() does NOT return a usable Sequence on this build — it returned a truthy value
+        // whose sequenceID and name were both undefined, which my first fix then reported as
+        // success. Find the new sequence by diffing the project's sequence ids across the call.
+        var idsBefore = {};
+        for (var bi = 0; bi < app.project.sequences.numSequences; bi++) idsBefore[String(app.project.sequences[bi].sequenceID)] = true;
+        var cloneReturn = seq.clone();
+        var newSeq = null;
+        for (var ai = 0; ai < app.project.sequences.numSequences; ai++) {
+          var cand = app.project.sequences[ai];
+          if (!idsBefore[String(cand.sequenceID)]) { newSeq = cand; break; }
         }
-        if (!newSeq) return JSON.stringify({success:false,error:'Could not create new version'});
-        if (${setActive ?? true}) app.project.openSequence(newSeq);
-        return JSON.stringify({success:true,newSequenceId:String(newSeq.sequenceID),newName:String(newSeq.name),fromName:name});
+        if (!newSeq) return JSON.stringify({success:false,verified:true,error:'Sequence.clone() did not add a sequence to the project, so no new version was created. (The previous fallback, createNewSequence, opens a modal dialog on this build and would hang the bridge, so it was removed.)',cloneReturn:String(cloneReturn)});
+        // A Sequence name is set through its ProjectItem; assigning Sequence.name does not stick.
+        var renamed = false;
+        try { newSeq.projectItem.name = newName; renamed = (String(newSeq.name) === newName); } catch(eRen) {}
+        if (!renamed) { try { newSeq.name = newName; renamed = (String(newSeq.name) === newName); } catch(eRen2) {} }
+        // openSequence takes a sequenceID STRING; passing the Sequence object raised
+        // "Illegal Parameter type" and the whole tool failed after doing its work.
+        var opened = false;
+        if (${setActive ?? true}) {
+          try { app.project.openSequence(String(newSeq.sequenceID)); opened = (String(app.project.activeSequence.sequenceID) === String(newSeq.sequenceID)); } catch(eOpen) {}
+        }
+        return JSON.stringify({
+          success:true, verified:true,
+          newSequenceId:String(newSeq.sequenceID), newName:String(newSeq.name), requestedName:newName,
+          renamed:renamed, openedAsActive:opened, fromName:name,
+          error: renamed ? null : 'The new version was created but could not be renamed to ' + newName + '; it kept the name Premiere gave it.'
+        });
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
@@ -15424,17 +15457,50 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(`
       try {
         var seq=${this.buildSeqRes(seqId)};
+        if(!seq)return JSON.stringify({success:false,error:'Sequence not found'});
         var markers=[];
         var m=seq.markers.getFirstMarker();
         while(m){if(String(m.type)===${JSON.stringify(markerType)})markers.push({name:String(m.name),start:m.start.seconds,end:m.end?m.end.seconds:m.start.seconds+5});m=seq.markers.getNextMarker(m);}
-        var created=[];
-        for(var i=0;i<markers.length;i++){
+        if(markers.length===0)return JSON.stringify({success:false,markerCount:0,error:'No markers of type ${markerType} were found, so no sequences were created.'});
+        // createNewSequence OPENS THE NEW SEQUENCE DIALOG on this build. That is what wedged the
+        // ExtendScript engine reproducibly in two overnight sweeps: a 45s timeout, a panel that
+        // stopped polling, and a state indistinguishable from a dead engine (two Escapes cleared
+        // it). Our own bridge already documents this — app.project.newSequence(name, presetPath)
+        // is the non-interactive API — but this tool used the interactive one.
+        //
+        // Rewritten on createSubsequence, which is verified working and does what this tool
+        // actually promised: a sequence per marker RANGE, with the content in it, rather than an
+        // empty sequence named after a marker.
+        var MAX_NEW=24;
+        var created=[], failed=[];
+        var capped=markers.length>MAX_NEW;
+        var limit=capped?MAX_NEW:markers.length;
+        var origIn=__seqInSeconds(seq), origOut=__seqOutSeconds(seq);
+        for(var i=0;i<limit;i++){
           try{
-            var sub=app.project.createNewSequence(markers[i].name,seq.sequenceID);
-            if(sub)created.push(markers[i].name);
-          }catch(ec){}
+            // Number arguments are SECONDS; a string would be read as ticks.
+            seq.setInPoint(markers[i].start);
+            seq.setOutPoint(markers[i].end);
+            var sub=seq.createSubsequence(false);
+            if(sub){
+              try{ sub.projectItem.name=markers[i].name; }catch(eRen){}
+              created.push(String(markers[i].name));
+            } else {
+              failed.push(markers[i].name+' (createSubsequence returned null)');
+            }
+          }catch(ec){failed.push(markers[i].name+' ('+ec.toString()+')');}
         }
-        return JSON.stringify({success:true,markerCount:markers.length,sequencesCreated:created.length,note:'Subsequences created; manually copy clip ranges to each.'});
+        // Put the caller's in/out range back: this tool borrowed it as a mechanism and should not
+        // leave it pointing at the last marker.
+        try{ if(origIn!==null) seq.setInPoint(origIn); if(origOut!==null) seq.setOutPoint(origOut); }catch(eR){}
+        return JSON.stringify({
+          success:created.length>0, verified:true,
+          markerCount:markers.length, sequencesCreated:created.length, createdNames:created,
+          failed:failed, sequenceCountNow:app.project.sequences.numSequences,
+          capped:capped,
+          error:created.length===0?'No subsequences could be created; see failed[].':(capped?'Capped at '+MAX_NEW+' of '+markers.length+' markers to bound host work; re-run to continue.':null),
+          note:'Each sequence covers its marker range and contains the clips in it, via createSubsequence. The sequence in/out points were used as the mechanism and have been restored.'
+        });
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
     `);
   }
