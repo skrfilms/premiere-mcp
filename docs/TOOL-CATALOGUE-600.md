@@ -490,16 +490,49 @@ render-truth loop and per-build QE probing.**
 
 ## FORMER WALL — items broken out of the wall by live probing (2026-08-23)
 
-These were listed as "walled" in v1. Live probing on 26.3.2 confirmed scriptable paths exist.
-Each becomes a real tool.
+These were listed as "walled". Live probing on 26.3.2 confirmed scriptable paths. Each becomes a real tool.
+
+### Round 1 cracks (first probe session)
 
 | Was walled | What we found | New tool(s) |
 |---|---|---|
-| **Morph Cut** | `qe.project.getVideoTransitionByName('Morph Cut')` returns a live QEVideoTransition object. `clip.addTransition()` accepts it. Analysis triggers on `seq.renderPreview()`. | `apply_morph_cut` (T1 QE) |
-| **Render previews / Render & Replace analog** | QE sequence exposes `renderAll()`, `renderPreview()`, `renderAudio()` (all zero-arg, confirmed live); `getExportComplete()` for polling; `setUseMaxRenderQuality(bool)`, `setPreviewPresetPath(path)`, `setPreviewFrameSize(w,h)`, `deletePreviewFiles()`. DOM adds `renderVideoFrameAtTime()` (single-frame render — arg format TBD). | `render_sequence_previews`, `render_all_unrendered`, `render_audio`, `delete_preview_files`, `set_preview_quality`, `render_single_frame` (T1 QE+DOM) |
-| **Renderer control** | `qe.project.setRenderer(name)`, `qe.project.getRendererNames()` confirmed present. | `set_renderer`, `list_renderers` (T1 QE) |
-| **Lumetri HSL Secondary / color-keyed masking** | ALL Lumetri component params confirmed readable AND writable via `setValue`: HSL Secondary `Set color`, `Add color`, `Remove color`, `Show Mask`, `Invert Mask`, `Denoise`, `Blur`, correction params (Temperature/Tint/Contrast/Sharpen/Saturation). Live-verified: `setValue(!val, true)` on `Show Mask` → changed=true → restored. | Extends `lumetri_hsl_key_set` (T1) |
-| **AE composition import** | `app.project.importAEComps(path, compNames[])` and `importAllAEComps(path)` confirmed present on DOM project AND qe.project. | `import_ae_comps` (T1) |
+| **Morph Cut** | `qe.project.getVideoTransitionByName('Morph Cut')` live; `clip.addTransition()` accepts it; analysis triggers on `seq.renderPreview()`. | `apply_morph_cut` (T1 QE) |
+| **Render previews** | QE sequence: `renderAll()`, `renderPreview()`, `renderAudio()` (zero-arg, live-confirmed); `getExportComplete()` poll; `setUseMaxRenderQuality(bool)`, `setPreviewPresetPath(path)`, `setPreviewFrameSize(w,h)`, `deletePreviewFiles()`. | `render_sequence_previews`, `render_all_unrendered`, `render_audio`, `delete_preview_files`, `set_preview_quality` (T1 QE) |
+| **Renderer control** | `qe.project.setRenderer(name)` / `getRendererNames()` confirmed. | `set_renderer`, `list_renderers` (T1 QE) |
+| **Lumetri HSL Secondary keyed masking** | All params (Set color, Show Mask, Invert Mask, correction chain) confirmed readable + writable via DOM `setValue`. Live-tested: changed=true, restored. | Extends `lumetri_hsl_key_set` (T1) |
+| **AE composition import** | `app.project.importAEComps(path, compNames[])` + `importAllAEComps(path)` confirmed DOM + QE. | `import_ae_comps` (T1) |
+
+### Round 2 cracks (second probe session)
+
+| Was walled / unknown | What we found | New tool(s) |
+|---|---|---|
+| **Effect stack reorder** | `qeClip.getComponentAt(N)` → `QEComponent` with **`remove()`** — live-confirmed removes exactly that effect (before=6, after=5). Full workflow: serialize params → targeted remove → re-add in new order → restore params. | `reorder_effects` (T1 QE) |
+| **Targeted single-effect removal** | Same `QEComponent.remove()` — no need to removeEffects-all. | Upgrade `remove_effect` to QE path |
+| **QE parameter access** | `QEComponent.getParamList()` → CSV of param names; `getParamValue('Amount')` confirmed; `setParamValue('Amount','30')` confirmed **changed=true**; `getParamKeyframes('Amount')` → Array. Parallel path to DOM setValue — works where DOM fails. | `set_effect_param_qe`, `get_effect_params_qe` (T1 QE) |
+| **Source monitor full control** | `qe.source.openFilePath(path)` live-confirmed (loaded QEMasterClip ✓); `qe.source.clip.setInPoint/OutPoint/clearIn/Out/setVideoIn/Out/setAudioIn/Out`; `qe.source.player.play/stop/step/scrubTo/getPosition/setLoopPlayback`; `player.droppedFrames/avgFPS/avgRenderRate` stats. | `open_in_source_qe`, `set_source_in_out_qe`, `play_source_qe`, `get_source_playback_stats` (T1 QE) |
+| **QEProjectItem** | `qeClip.getProjectItem()` → `QEProjectItem`: `openInSource()`, `rename(name)`, `automateToSequence(×5)`, `createProxy(p0,p1)`, `linkMedia(p0,p1)`, `isAudioConforming/isIndexing/isPending/isOffline` status. | `open_in_source_qe`, `rename_clip_qe`, `automate_to_sequence_qe` (T1/T2 QE) |
+| **Sync lock** | `qe.track.setSyncLock(bool)` / `isSyncLocked()` confirmed on both video + audio tracks. | `set_sync_lock` (T1 QE) |
+| **Track-level insert/overwrite** | QE track `insert(p0,…6args)` / `overwrite(p0,…6args)` / `razor(p0,?,?)` confirmed signatures. | Upgrade `insert_from_source`, `razor_timeline_at_time` (T2 QE) |
+| **Read specific transitions** | `qe.track.getTransitionAt(index)` confirmed. | `get_transition_at` (T2 QE) |
+| **Productions create/open** | `app.newPrProduction(path)` / `app.openPrProduction(path)` confirmed on app object. | `create_production`, `open_production` (T2) |
+| **Event-driven render callback** | `app.addEventListener` confirmed; `app.encoder` fires `onEncoderJobComplete`, `onEncoderJobProgress`, `onEncoderJobError`. Eliminates polling loop. | Internal infra upgrade for all AME-driven tools |
+
+### Round 3 cracks (third probe session)
+
+| Was walled / unknown | What we found | New tool(s) |
+|---|---|---|
+| **Productions / Team Projects — WALL GONE** | `qe.ea` is `QEEA` — full Productions API: `createProduction(name,path,bool,desc,team,bool)`, `openProduction(id,bool)`, `closeProduction`, `renameProduction`, `saveProductionAs`, `getProductionList`, `convertProjectIntoProduction`, `convertProductionIntoProject`, `share`, `sync`, `getConflicts`, `resolveConflict`, `getSessionSyncStatus`. User confirmed logged in as `maintainer@example.com`. | `create_production`, `open_production`, `list_productions`, `share_production`, `sync_production`, `convert_to_production` (T2 QE via qe.ea) |
+| **Runtime export preset creation** | `app.encoder.getExporters()` returns 24 format objects each with `name/classID/fileExtension`. `exporter.getPresets()` gives all presets. `EncoderPreset.setExportParamValue(paramName, value)` — all param names (VBREncoding, TargetBitrate, MaxBitrate, FrameRate, Width, Height, VideoBitrate, AudioBitrate…) confirmed **OK**. `preset.writeToFile(path)` confirmed wrote `.epr` to disk. `app.encoder.exportWithPresetObject(outputPath, preset, seq, ?)` available. Full 24-format catalog: AAC/AIFF/GIF/ProRes/AS-10/DNxHR(152 presets)/DPX/H.264(43)/H.265/JPEG/JP2K/MP3/MPEG2/MPEG4/MXF/OpenEXR/PNG/QuickTime(35)/Targa/TIFF/WAV. | `list_encoder_formats`, `list_encoder_presets`, `create_custom_preset`, `export_with_custom_preset` (T1) |
+| **Render bar timeline status** | QE sequence: `getGreenBarTimes()`, `getRedBarTimes()`, `getYellowBarTimes()`, `getEmptyBarTimes()` — each returns Array of `QETime` objects with `.ticks`, `.secs`, `.frames` all readable. Live: yellow range = 0s→4.04s, 97 frames. `isIncompleteBackgroundVideoEffects()` confirmed. | `get_sequence_render_status` — exact TC ranges per bar color (T1 QE) |
+| **Write sidecar files** | `app.project.writeSidecarFile(fileName, fileExtension, contents)` — write arbitrary sidecar content alongside project. | `write_sidecar_file` (T1) |
+| **Close project programmatically** | `app.project.closeDocument(saveFirst:bool, closeIfLast:bool)` — confirmed signature. | `close_project_document` (T1) |
+| **Pause growing files** | `app.project.pauseGrowing(bool)` — confirmed. Pause/resume live-ingesting media. | `pause_growing_file` (T2) |
+| **QE bin creation** | `qe.project.newBin(name)` — confirmed returning `true` and bin appeared. Simpler than DOM path. | Upgrade `create_bin` (T1) |
+| **QE import** | `qe.project.import(path, isNumberedStills:bool)` — confirmed `mediaAdded: true`. Plus `importPSD(path)`, `importProject(filePath, sequences:bool)`. | Alternative import paths; `import_psd`, `import_project` (T2) |
+| **QE setCTI** | `qe.seq.setCTI(timecodeString)` — confirmed changes playhead (format needs calibration). `seq.isOpen()`, `seq.makeCurrent()` confirmed. | QE playhead control (T2) |
+| **Lumetri auto-tone trigger** | `Auto Tone Analytics Data` param (index 126) stores JSON — `setValue(JSON.stringify({mAutoTonePressed:true,…}))` confirmed `pressedSet:true`. Whether Premiere reacts requires pixel-verify, but the state write works. | `trigger_lumetri_autotone` (T3 — needs pixel verify) |
+| **QETime full read** | `.ticks`, `.secs`, `.frames` all confirmed readable from QETime objects. Lets us build TC strings from any QE time. | Internal: QETime utility used by all QE tools |
+| **`exportTimeline`** | Exists, called, returned `"7"` (error code), no file created. Format/path requirements unknown. | Needs more research — not yet cracked |
 
 ---
 
