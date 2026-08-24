@@ -2700,9 +2700,47 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           if (!blendClip) return fail(pendingSequenceError || "Clip not found");
           var opacityComponent = findComponent(blendClip.clip, "Opacity");
           if (!opacityComponent) return fail("Opacity component not found");
-          var blendResult = setComponentProperty(opacityComponent.component, "Blend Mode", args.mode || args.blendMode || args.value);
-          if (!blendResult.ok) return fail(blendResult.error, { component: "Opacity" });
-          return ok({ blendMode: args.mode || args.blendMode || args.value, result: blendResult });
+          var blendRequested = args.mode !== undefined ? args.mode : (args.blendMode !== undefined ? args.blendMode : args.value);
+          // Blend Mode is a NUMERIC INDEX on this build, not a name. Measured on 26.3.2:
+          // getValue() returns a number, setValue(1, true) round-trips to 1, and
+          // setValue("Multiply", true) raises "Illegal Parameter type". Passing the name through
+          // was the whole bug.
+          //
+          // Deliberately NOT mapping names to indices: the index order is not documented and I
+          // could not verify a full name->index table against this host, so a guessed mapping
+          // would silently apply the WRONG blend mode — worse than refusing. Report the current
+          // index instead so a caller can find the one they want.
+          var blendNumeric = (typeof blendRequested === "number") ? blendRequested : (String(blendRequested).match(/^[0-9]+$/) ? parseInt(blendRequested, 10) : null);
+          var blendParam = null;
+          var opProps = opacityComponent.component.properties;
+          for (var bpi = 0; bpi < opProps.numItems; bpi++) {
+            if (String(opProps[bpi].displayName) === "Blend Mode") { blendParam = opProps[bpi]; break; }
+          }
+          var blendCurrent = null;
+          if (blendParam) { try { blendCurrent = blendParam.getValue(); } catch (eBlendRead) {} }
+          if (blendNumeric === null) {
+            return fail(
+              // No quote characters in this message: expanded.ts is itself delivered as an
+              // ExtendScript source string, so an escaped quote here emits a bare quote into the
+              // generated script and terminates its string literal early. That turned a helpful
+              // error into the generic evalScript failure.
+              "Blend Mode is a numeric index on this build, not a name. Passing " + String(blendRequested) +
+              " raises an Illegal Parameter type error from Premiere. Pass an integer, or its digits as a string. " +
+              "This clip current Blend Mode index is " + String(blendCurrent) + ". " +
+              "No name-to-index table is applied here: the ordering is undocumented, and an unverified guess would " +
+              "silently set the wrong blend mode, which is worse than refusing.",
+              { component: "Opacity", currentIndex: blendCurrent }
+            );
+          }
+          var blendResult = setComponentProperty(opacityComponent.component, "Blend Mode", blendNumeric);
+          if (!blendResult.ok) return fail(blendResult.error, { component: "Opacity", currentIndex: blendCurrent });
+          var blendAfter = null;
+          if (blendParam) { try { blendAfter = blendParam.getValue(); } catch (eBlendRead2) {} }
+          if (blendAfter !== null && Number(blendAfter) !== Number(blendNumeric)) {
+            return fail("Blend Mode was set to " + blendNumeric + " but reads back as " + blendAfter + ".",
+              { component: "Opacity", requested: blendNumeric, actual: blendAfter });
+          }
+          return ok({ blendMode: blendNumeric, previousIndex: blendCurrent, actualIndex: blendAfter, verified: blendAfter !== null, result: blendResult });
 
         case "set_all_tracks_targeted":
           var seqErr = sequenceRequestError();
