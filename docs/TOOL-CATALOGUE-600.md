@@ -534,6 +534,28 @@ These were listed as "walled". Live probing on 26.3.2 confirmed scriptable paths
 | **QETime full read** | `.ticks`, `.secs`, `.frames` all confirmed readable from QETime objects. Lets us build TC strings from any QE time. | Internal: QETime utility used by all QE tools |
 | **`exportTimeline`** | Exists, called, returned `"7"` (error code), no file created. Format/path requirements unknown. | Needs more research — not yet cracked |
 
+### Round 4 cracks (fourth probe session — DOM/QE systematic sweep)
+
+| Item | What we found | New tool(s) |
+|---|---|---|
+| **`Sequence.getSelection/setSelection`** | `getSelection()` → Array of TrackItems. `setSelection([clip,…])` — confirmed programmatic clip selection. `linkSelection()` / `unlinkSelection()` also present. `performSceneEditDetectionOnSelection(clipOperation:string)` — scene edit detection on selected clips only ('ApplyCuts','CreateSubclip','ClearSubclip'). | `get_sequence_selection`, `set_sequence_selection`, `link_unlink_selection`, `detect_scene_edits_on_selection` (T1 DOM) |
+| **`MarkerCollection.createMarker(seconds:float)`** | Creates a Marker object with props: `name`, `comments`, `type`, `start`, `end`, `colorByIndex`, `guid`. All readable AND writable. `deleteMarker(marker)` confirmed. `getFirstMarker/getLastMarker/getNextMarker/getPrevMarker` — linked-list traversal. | Upgrade all marker tools to use collection API directly (T1) |
+| **`getAllLumetriPresetsList()`** | Returns **325 named presets** as CSV string. `getLumetriPresetsForFolderList(folder)` filters by folder. `applyLumetriPreset(name)` takes preset name string. | `list_lumetri_presets` upgrade (T1); `apply_lumetri_preset_by_name` |
+| **`setLUTInterpolationMethod(0\|1)`** | 0=linear, 1=tetrahedral. `getLUTInterpolationMethod()` reads back. Confirmed changeable. | `set_lut_interpolation` (T1) |
+| **`qe.project.newSequence(name, editingModeGUID)`** | Creates a sequence with the same settings as an existing one by passing its editing mode GUID. No dialog — fully scriptable. | `create_sequence_qe` (T1 QE) |
+| **`qe.source.clip.setInPoint/setOutPoint`** | Accepts timecode string. Confirmed no-throw. Full source monitor control: open → set in/out → insert/overwrite on track. | Upgrade `set_source_in_out_qe` (T1) |
+| **`app.isWindowVisible(panelName)`** | Returns real visibility state. Confirmed: Timeline=true, Source Monitor=true, Program Monitor=true, Effects=false, Project=false. | `get_panel_visibility` (T1) |
+| **`ColorSpace` object** | `getOriginalColorSpace()` / `getOverrideColorSpace()` return ColorSpace objects. `isValidOverrideColorSpace(name)` validates names. `getOverrideColorSpaceList()` enumerates valid options. | `get_clip_color_space`, `set_clip_color_space` (T2) |
+| **`ProjectItem.treePath`** | Exact project-panel path including bin hierarchy. `interpretedTimebase`, `sourceTimebase` readable. | Upgrade `get_project_item_info` (T1) |
+| **`ProjectItem.getProjectColumnsMetadata()`** | Returns full JSON array of all project panel column data including Label, Name, custom fields. | `get_item_metadata_columns` (T1) |
+| **`EncoderPreset.setExportParamValue(name:string, value:string)`** | **Runtime export preset modification confirmed**: TargetBitrate, MaxBitrate, FrameRate, Width, Height, VideoBitrate, AudioBitrate, VBREncoding — all returned OK. `writeToFile(path)` writes `.epr` file. `app.encoder.exportWithPresetObject(outPath, preset, seq, bool)` exports with the modified preset. | `create_custom_export_preset`, `export_with_custom_preset` (T1) |
+| **`app.encoder.getExporters()[n].getPresets()`** | 24 formats, each with full preset catalog by name: H.264=43, DNxHR=152, QuickTime=35, ProRes=8, OpenEXR=4, PNG/TIFF sequences, etc. Enumerate ALL presets programmatically. | `list_all_encoder_presets` by format (T1) |
+| **`qe.project.newBin(name)`** | Confirmed `returned:true`, bin appeared. QE alternative to DOM createBin. | QE fallback for `create_bin` (T1) |
+| **`qe.project.import(path, isNumberedStills)`** | `mediaAdded:true` confirmed. `importPSD(path)`, `importProject(filePath, sequences:bool)` also confirmed signatures. | `import_psd`, `import_project` (T2) |
+| **`app.refresh()`** | Confirmed no-throw — force UI refresh. | `refresh_ui` (T2) |
+| **`app.setSDKEventMessage(type, message)`** | Sends messages to other CEP extensions. | Inter-panel messaging (T3) |
+| **`qe.project.getRendererNames()` / `setRenderer()`** | Renderer enumeration and switching confirmed. | `list_renderers`, `set_renderer` (T1 QE) |
+
 ---
 
 ## THE HONEST WALL — what an editor does that NO script surface reaches
