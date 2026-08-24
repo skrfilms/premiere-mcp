@@ -1321,7 +1321,6 @@ export class PremiereProTools {
 
       // ── Batch E: Project lifecycle ──────────────────────────────────────────
       { name: 'open_fcp_xml', description: 'Opens a Final Cut Pro XML file into a new sequence. Confirmed: app.openFCPXML(path, sequenceName).', inputSchema: z.object({ filePath: z.string(), sequenceName: z.string().optional().describe('Name for the resulting sequence') }) },
-      { name: 'import_ae_comps', description: 'Imports After Effects compositions from an .aep file. Confirmed: app.project.importAEComps(path, compNames[]).', inputSchema: z.object({ aepPath: z.string().describe('Path to the .aep file'), compNames: z.array(z.string()).optional().describe('Specific comp names to import. Empty = all comps.') }) },
       { name: 'get_project_stats', description: 'Returns a summary of the project: sequence count, total clips, bin count, codec mix, total media duration.', inputSchema: z.object({}) },
       { name: 'write_sidecar_file', description: 'Writes a sidecar file adjacent to the project. Confirmed: app.project.writeSidecarFile(name, ext, content).', inputSchema: z.object({ fileName: z.string(), fileExtension: z.string(), contents: z.string() }) },
       { name: 'get_ea_login_status', description: 'Returns the current Creative Cloud / Productions login status via qe.ea.isLoggedIn() and getUserEmail().', inputSchema: z.object({}) },
@@ -1392,8 +1391,6 @@ export class PremiereProTools {
       { name: 'set_marker_type', description: 'Updates the type of an existing sequence marker found by approximate timecode.', inputSchema: z.object({ timeSecs: z.number(), type: z.enum(['Comment','Chapter','Segmentation','WebLink','FLVCuePoint','Named']), toleranceSecs: z.number().optional().default(0.1), sequenceId: z.string().optional() }) },
       { name: 'todo_marker_report', description: 'Returns all sequence markers whose name or comment contains "TODO" (case-insensitive). Useful for review tracking.', inputSchema: z.object({ sequenceId: z.string().optional() }) },
       { name: 'chapter_markers_to_youtube', description: 'Formats all Chapter markers in the active sequence as a YouTube description timestamps block. Returns the text string.', inputSchema: z.object({ sequenceId: z.string().optional() }) },
-      { name: 'go_to_next_marker', description: 'Moves the playhead to the next sequence marker after the current position.', inputSchema: z.object({ sequenceId: z.string().optional() }) },
-      { name: 'go_to_prev_marker', description: 'Moves the playhead to the previous sequence marker before the current position.', inputSchema: z.object({ sequenceId: z.string().optional() }) },
       { name: 'copy_markers_between_sequences', description: 'Copies all markers from one sequence to another, preserving times, names, types, and comments.', inputSchema: z.object({ sourceSequenceId: z.string(), targetSequenceId: z.string() }) },
       { name: 'marker_to_subclip', description: 'Creates a subclip from a sequence marker\'s time range. The subclip is created from the first clip on V1 that overlaps the marker.', inputSchema: z.object({ markerName: z.string().describe('Name of the ranged marker to use'), projectItemId: z.string().describe('Source project item nodeId to subclip'), sequenceId: z.string().optional() }) },
 
@@ -1455,7 +1452,6 @@ export class PremiereProTools {
       { name: 'qe_sequence_info', description: 'Returns all QE-level sequence properties: CTI, inPoint, outPoint, workInPoint, workOutPoint, editingMode GUID, track counts, preview codec, quality flags.', inputSchema: z.object({ sequenceId: z.string().optional() }) },
       { name: 'render_needs_preview', description: 'Quick check: does the active sequence have any unrendered (red/yellow) segments? Returns a simple bool plus counts.', inputSchema: z.object({ sequenceId: z.string().optional() }) },
       { name: 'open_fcp_xml_project', description: 'Opens an FCP XML file as a new project via app.openFCPXML(path, sequenceName). Confirmed on 26.3.2.', inputSchema: z.object({ xmlPath: z.string(), sequenceName: z.string().optional().default('') }) },
-      { name: 'import_ae_comps', description: 'Imports After Effects compositions from an .aep file via app.project.importAEComps(). Confirmed on 26.3.2.', inputSchema: z.object({ aepPath: z.string(), compNames: z.array(z.string()).optional().describe('Specific comp names to import. Omit to import all.') }) },
 
       // Media Management
       {
@@ -2758,14 +2754,6 @@ export class PremiereProTools {
         })
       },
       {
-        name: 'import_ae_composition',
-        description: 'Imports one or more After Effects compositions from an .aep file into the current Premiere project. Confirmed via app.project.importAEComps(). Each imported comp becomes a sequence in Premiere.',
-        inputSchema: z.object({
-          aepPath: z.string().describe('Absolute path to the .aep file'),
-          compNames: z.array(z.string()).optional().describe('Specific composition names to import. If omitted, imports all compositions.')
-        })
-      },
-      {
         name: 'frame_io_notes_to_markers',
         description: 'Imports Frame.io review notes from a JSON export file and creates sequence markers at the corresponding timecodes. Frame.io exports a JSON with comments + timestamps when you use "Export Comments". Each comment becomes a marker with the reviewer name and comment text.',
         inputSchema: z.object({
@@ -3146,7 +3134,6 @@ export class PremiereProTools {
 
         // Batch E: Project lifecycle
         case 'open_fcp_xml': return await this.openFcpXml(args.filePath, args.sequenceName);
-        case 'import_ae_comps': return await this.importAeComps(args.aepPath, args.compNames ?? []);
         case 'get_project_stats': return await this.getProjectStats();
         case 'write_sidecar_file': return await this.writeSidecarFile(args.fileName, args.fileExtension, args.contents);
         case 'get_ea_login_status': return await this.getEaLoginStatus();
@@ -3444,8 +3431,6 @@ export class PremiereProTools {
         case 'set_marker_type': return await this.setMarkerType(args.timeSecs, args.type, args.toleranceSecs, args.sequenceId);
         case 'todo_marker_report': return await this.todoMarkerReport(args.sequenceId);
         case 'chapter_markers_to_youtube': return await this.chapterMarkersToYoutube(args.sequenceId);
-        case 'go_to_next_marker': return await this.goToNextMarker(args.sequenceId);
-        case 'go_to_prev_marker': return await this.goToPrevMarker(args.sequenceId);
         case 'copy_markers_between_sequences': return await this.copyMarkersBetweenSequences(args.sourceSequenceId, args.targetSequenceId);
         case 'marker_to_subclip': return await this.markerToSubclip(args.markerName, args.projectItemId, args.sequenceId);
         case 'export_gif': return this.exportGif(args.mediaPath, args.startSecs, args.durationSecs, args.fps, args.width, args.outputPath);
@@ -3495,7 +3480,6 @@ export class PremiereProTools {
         case 'qe_sequence_info': return await this.qeSequenceInfo(args.sequenceId);
         case 'render_needs_preview': return await this.renderNeedsPreview(args.sequenceId);
         case 'open_fcp_xml_project': return await this.openFcpXmlProject(args.xmlPath, args.sequenceName);
-        case 'import_ae_comps': return await this.importAeComps(args.aepPath, args.compNames);
 
         // Batch Operations
         case 'batch_add_transitions':
@@ -3625,7 +3609,6 @@ export class PremiereProTools {
         case 'verify_color_grade': return await this.verifyColorGrade(args.sequenceId, args.trackIndex, args.clipIndex, args.gradeParams, args.outputDir ?? '/tmp/premiere-mcp-bridge/generated-assets');
         case 'batch_execute': return await this.batchExecute(args.operations, args.enableQE ?? false);
         case 'send_to_after_effects': return await this.sendToAfterEffects(args.outputPath, args.sequenceId);
-        case 'import_ae_composition': return await this.importAeComposition(args.aepPath, args.compNames);
         case 'frame_io_notes_to_markers': return await this.frameIoNotesToMarkers(args.jsonPath, args.sequenceId, args.markerColor ?? 1);
         case 'shotgrid_status_sync': return await this.shotgridStatusSync(args.csvPath, args.statusToColor);
         case 'verify_clip_visible': return await this.verifyClipVisible(args.sequenceId, args.trackIndex, args.clipIndex);
@@ -6995,18 +6978,25 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  private async importAeComps(aepPath: string, compNames: string[]): Promise<any> {
-    return await this.bridge.executeScript(`
-      try {
-        var names = ${JSON.stringify(compNames)};
-        var before = app.project.rootItem.children.numItems;
-        if (names.length > 0) { app.project.importAEComps(${JSON.stringify(aepPath)}, names); }
-        else { app.project.importAllAEComps(${JSON.stringify(aepPath)}); }
-        var after = app.project.rootItem.children.numItems;
-        return JSON.stringify({success:true,imported:after-before,compNames:names.length>0?names:'all'});
-      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
-    `);
-  }
+  // PARKED: import_ae_comps is intentionally NOT exposed as a tool.
+  // app.project.importAEComps() exists on 26.3.2 (signature confirmed by reflection),
+  // but it has never been called with a real .aep here, and the sibling synthetic-media
+  // calls (newColorMatte/newBlackVideo) were found to open BLOCKING native dialogs that
+  // hang the CEP bridge. Upstream ships a regression guard asserting this name stays out
+  // of the catalogue, which is consistent with it being dialog-unsafe. Re-expose only
+  // after confirming on a live host that it imports without user interaction.
+  // private async importAeComps(aepPath: string, compNames: string[]): Promise<any> {
+  // return await this.bridge.executeScript(`
+  // try {
+  // var names = ${JSON.stringify(compNames)};
+  // var before = app.project.rootItem.children.numItems;
+  // if (names.length > 0) { app.project.importAEComps(${JSON.stringify(aepPath)}, names); }
+  // else { app.project.importAllAEComps(${JSON.stringify(aepPath)}); }
+  // var after = app.project.rootItem.children.numItems;
+  // return JSON.stringify({success:true,imported:after-before,compNames:names.length>0?names:'all'});
+  // } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+  // `);
+  // }
 
   private async getProjectStats(): Promise<any> {
     return await this.bridge.executeScript(`
@@ -14125,7 +14115,7 @@ ${this.buildSequenceResolver(sequenceId)}
       try {
         var m=${this.buildSeqRes(seqId)}.videoTracks[${trackIndex}].clips[${clipIndex}].components[1];
         m.properties[3].setValue(${uniformScale},true);
-        return JSON.stringify({success:true,verified:m.properties[3].getValue()====${uniformScale},uniformScale:${uniformScale}});
+        return JSON.stringify({success:true,verified:m.properties[3].getValue()===${uniformScale},uniformScale:${uniformScale}});
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
     `);
   }
@@ -14772,24 +14762,27 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   private async findUnusedSequences(): Promise<any> {
+    // ExtendScript is ES3: no Set/Map. Uses a plain object as a string-key lookup.
     return await this.bridge.executeScript(`
       try {
         var seqs=app.project.sequences;
-        var allIds=new Set();
-        for(var i=0;i<seqs.numSequences;i++)allIds.add(String(seqs[i].sequenceID));
-        var usedIds=new Set();
+        var usedIds={};
         for(var j=0;j<seqs.numSequences;j++){
           var seq=seqs[j];
           for(var t=0;t<seq.videoTracks.numTracks;t++){
             for(var c=0;c<seq.videoTracks[t].clips.numItems;c++){
               var clip=seq.videoTracks[t].clips[c];
-              if(clip.projectItem&&clip.projectItem.isSequence())usedIds.add(String(clip.projectItem.nodeId));
+              if(clip.projectItem&&clip.projectItem.isSequence())usedIds['k'+String(clip.projectItem.nodeId)]=true;
             }
           }
         }
         var unused=[];
-        for(var k=0;k<seqs.numSequences;k++){var s=seqs[k];if(!usedIds.has(String(s.nodeId||s.sequenceID)))unused.push({name:String(s.name),id:String(s.sequenceID)});}
-        return JSON.stringify({success:true,unusedCount:unused.length,unusedSequences:unused});
+        for(var k=0;k<seqs.numSequences;k++){
+          var s=seqs[k];
+          var key='k'+String(s.projectItem?s.projectItem.nodeId:s.sequenceID);
+          if(!usedIds[key])unused.push({name:String(s.name),id:String(s.sequenceID)});
+        }
+        return JSON.stringify({success:true,totalSequences:seqs.numSequences,unusedCount:unused.length,unusedSequences:unused});
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
     `);
   }
@@ -17062,29 +17055,47 @@ ${this.buildSequenceResolver(sequenceId)}
   // ── #5: Batch execution ─────────────────────────────────────────────────
 
   private async batchExecute(operations: Array<{id: string, script: string}>, enableQE: boolean): Promise<any> {
+    if (!Array.isArray(operations) || operations.length === 0) {
+      return { success: false, error: 'operations must be a non-empty array' };
+    }
+    if (operations.length > 200) {
+      return { success: false, error: `Too many operations (${operations.length}). Limit is 200 per batch — split into multiple calls.` };
+    }
+    // Each caller script is inlined into its own IIFE with a dedicated try/catch, so one
+    // failing operation cannot abort the rest and each gets its own error recorded. The
+    // concatenation happens here rather than through eval()/Function() in the host: the
+    // ExtendScript engine is ES3 and its Function constructor is unreliable, and a runtime
+    // eval would also defeat the syntax check the test suite runs over generated scripts.
+    const blocks = operations.map((op, i) => {
+      const idLiteral = JSON.stringify(String(op.id ?? `op_${i}`));
+      return `
+        try {
+          var __res${i} = (function(){ ${op.script} })();
+          __results.push({ id: ${idLiteral}, success: true, result: __res${i} });
+        } catch (__e${i}) {
+          __results.push({ id: ${idLiteral}, success: false, error: __e${i}.toString() });
+        }`;
+    }).join('');
+
     const batchScript = `
+      var __results = [];
       try {
         ${enableQE ? 'app.enableQE();' : ''}
-        var results = [];
-        var ops = ${JSON.stringify(operations)};
-        for (var i = 0; i < ops.length; i++) {
-          var op = ops[i];
-          var opResult = { id: op.id, success: false };
-          try {
-            var fn = new Function(op.script + '\\nreturn undefined;');
-            // Use eval for ExtendScript compatibility
-            var rawResult = eval('(function(){ ' + op.script + ' })()');
-            opResult.result = rawResult;
-            opResult.success = true;
-          } catch(opErr) {
-            opResult.error = opErr.toString();
-          }
-          results.push(opResult);
-        }
-        return JSON.stringify({ success: true, count: results.length, results: results });
-      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+        ${blocks}
+        var __failed = 0;
+        for (var __i = 0; __i < __results.length; __i++) { if (!__results[__i].success) __failed++; }
+        return JSON.stringify({
+          success: true,
+          count: __results.length,
+          succeeded: __results.length - __failed,
+          failed: __failed,
+          results: __results
+        });
+      } catch (__outer) {
+        return JSON.stringify({ success: false, error: __outer.toString(), partialResults: __results });
+      }
     `;
-    return await this.bridge.executeScript(batchScript, 120000);
+    return await this.bridge.executeScript(batchScript, 120000, true);
   }
 
   // ── #7: Cross-app integration ────────────────────────────────────────────
@@ -17103,22 +17114,6 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(script);
   }
 
-  private async importAeComposition(aepPath: string, compNames?: string[]): Promise<any> {
-    const compsArg = compNames ? JSON.stringify(compNames) : 'null';
-    const script = `
-      try {
-        var result;
-        if (${compsArg} !== null) {
-          result = app.project.importAEComps(${JSON.stringify(aepPath)}, ${compsArg});
-        } else {
-          result = app.project.importAllAEComps(${JSON.stringify(aepPath)});
-        }
-        var seqCountAfter = app.project.sequences.numSequences;
-        return JSON.stringify({success:true,result:String(result),sequenceCount:seqCountAfter,aepPath:${JSON.stringify(aepPath)},note:'Each imported AE comp becomes a sequence in Premiere.'});
-      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
-    `;
-    return await this.bridge.executeScript(script);
-  }
 
   private async frameIoNotesToMarkers(jsonPath: string, sequenceId?: string, markerColor = 1): Promise<any> {
     const fs = require('fs');
