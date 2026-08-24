@@ -7147,7 +7147,7 @@ ${this.buildSequenceResolver(sequenceId)}
           var domComp = domClip.components[i];
           var qeComp = qeClip.getComponentAt(i);
           var entry = { name: String(domComp.displayName), matchName: String(domComp.matchName), params: {} };
-          if (qeComp) { try { var pl=qeComp.getParamList(); var pns=String(pl).split(',').map(function(s){return s.trim();}).filter(function(s){return s;}); for(var j=0;j<pns.length;j++){try{entry.params[pns[j]]=String(qeComp.getParamValue(pns[j]));}catch(ep){}} } catch(e){} }
+          if (qeComp) { try { var pl=qeComp.getParamList(); var pns=String(pl).split(',').map(function(s){return s.replace(/^\\s+|\\s+$/g,'');}).filter(function(s){return s;}); for(var j=0;j<pns.length;j++){try{entry.params[pns[j]]=String(qeComp.getParamValue(pns[j]));}catch(ep){}} } catch(e){} }
           comps.push(entry);
         }
         // Build order map
@@ -7705,7 +7705,7 @@ ${this.buildSequenceResolver(sequenceId)}
         var orig = item.getOriginalColorSpace ? String(item.getOriginalColorSpace()) : 'N/A';
         var ovr = item.getOverrideColorSpace ? String(item.getOverrideColorSpace()) : 'N/A';
         var list = [];
-        try { var l = item.getOverrideColorSpaceList ? item.getOverrideColorSpaceList() : null; if (l) list = String(l).split(',').map(function(s){return s.trim();}); } catch(e){}
+        try { var l = item.getOverrideColorSpaceList ? item.getOverrideColorSpaceList() : null; if (l) list = String(l).split(',').map(function(s){return s.replace(/^\\s+|\\s+$/g,'');}); } catch(e){}
         return JSON.stringify({success:true,projectItemId:${JSON.stringify(projectItemId)},originalColorSpace:orig,overrideColorSpace:ovr,availableOverrides:list.slice(0,20)});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
@@ -14809,7 +14809,11 @@ ${this.buildSequenceResolver(sequenceId)}
         var props=lumetri.properties;
         for(var j=0;j<props.numItems;j++){
           var n=String(props[j].displayName);
-          if(n&&n.trim().length>0&&!n.startsWith('_')&&n.trim()!==' '){
+          // Neither String.prototype.trim nor startsWith exists in this engine (measured on
+          // 26.3.2: typeof ''.trim === 'undefined'). Both threw a ReferenceError here, so
+          // grade_snapshot could never return a grade.
+          var nTrimmed=n?n.replace(/^\\s+|\\s+$/g,''):'';
+          if(nTrimmed.length>0&&nTrimmed.charAt(0)!=='_'){
             try{grade[n+'_'+j]=props[j].getValue();}catch(ev){}
           }
         }
@@ -14958,19 +14962,94 @@ ${this.buildSequenceResolver(sequenceId)}
     } catch (e: any) { return { success: false, error: e.message }; }
   }
 
+  /**
+   * Export a still at the playhead.
+   *
+   * The QE route (`exportFrameJPEG`) is tried first and is what this tool always used, but on
+   * 26.3.2 it returns false and writes nothing — so this tool reported `success: false` with
+   * NO error field at all, just `qeResult: "false"`. The file-exists check was already correct;
+   * the failure was silent.
+   *
+   * When QE writes nothing, fall back to ffmpeg against the source media of the clip under the
+   * playhead. That distinction is reported rather than smoothed over: ffmpeg renders the SOURCE
+   * frame, without effects, transitions, or anything from tracks above. For a composited frame
+   * use capture_program_output, which is verified working.
+   */
   private async exportThumbnail(outputPath: string, _seqId?: string): Promise<any> {
-    return await this.bridge.executeScript(`
+    const qe: any = await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq=qe.project.getActiveSequence();
-        var cti=seq.CTI;
+        var qseq=qe.project.getActiveSequence();
         var tc='00:00:00:00';
-        try{var s=cti.secs;var h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=Math.floor(s%60),fr=Math.round((s%1)*24);tc=(h<10?'0':'')+h+':'+(m<10?'0':'')+m+':'+(sec<10?'0':'')+sec+':'+(fr<10?'0':'')+fr;}catch(etc){}
-        var result=seq.exportFrameJPEG(${JSON.stringify(outputPath)},tc);
+        var playheadSecs=0;
+        try{
+          var s=qseq.CTI.secs; playheadSecs=s;
+          var h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=Math.floor(s%60),fr=Math.round((s%1)*24);
+          tc=(h<10?'0':'')+h+':'+(m<10?'0':'')+m+':'+(sec<10?'0':'')+sec+':'+(fr<10?'0':'')+fr;
+        }catch(etc){}
+        var result=qseq.exportFrameJPEG(${JSON.stringify(outputPath)},tc);
         var exists=(new File(${JSON.stringify(outputPath)})).exists;
-        return JSON.stringify({success:exists,path:${JSON.stringify(outputPath)},timecode:tc,qeResult:String(result)});
-      }catch(e){return JSON.stringify({success:false,error:e.toString()});}
+        // Source media under the playhead, so the Node side can fall back without a second call.
+        var mediaPath=null, sourceSecs=null;
+        try{
+          var dom=app.project.activeSequence;
+          var vt=dom.videoTracks[0];
+          for(var i=0;i<vt.clips.numItems;i++){
+            var c=vt.clips[i];
+            var st=Number(c.start.ticks)/254016000000, en=Number(c.end.ticks)/254016000000;
+            if(playheadSecs>=st&&playheadSecs<en){
+              mediaPath=String(c.projectItem.getMediaPath());
+              sourceSecs=(Number(c.inPoint.ticks)/254016000000)+(playheadSecs-st);
+              break;
+            }
+          }
+        }catch(em){}
+        return JSON.stringify({qeWrote:exists,path:${JSON.stringify(outputPath)},timecode:tc,qeResult:String(result),playheadSecs:playheadSecs,mediaPath:mediaPath,sourceSecs:sourceSecs});
+      }catch(e){return JSON.stringify({qeWrote:false,error:e.toString()});}
     `);
+
+    if (qe?.qeWrote) {
+      return { success: true, verified: true, path: qe.path, timecode: qe.timecode,
+        route: 'qe.exportFrameJPEG', composited: true };
+    }
+
+    if (!qe?.mediaPath) {
+      return {
+        success: false, verified: true, path: outputPath, timecode: qe?.timecode ?? null,
+        route: 'none',
+        error: `QE exportFrameJPEG returned "${qe?.qeResult ?? 'error'}" and wrote no file (it is inert on this build), and no clip was found under the playhead to fall back to. Move the playhead over a clip, or use capture_program_output for a composited frame.`,
+      };
+    }
+
+    const ff = await this.runFfmpegStill(qe.mediaPath, Number(qe.sourceSecs ?? 0), outputPath);
+    if (!ff.ok) {
+      return {
+        success: false, verified: true, path: outputPath, route: 'ffmpeg',
+        error: `QE exportFrameJPEG wrote nothing (inert on this build) and the ffmpeg fallback failed: ${ff.error}`,
+      };
+    }
+    return {
+      success: true, verified: true, path: outputPath, timecode: qe.timecode,
+      route: 'ffmpeg-source-frame', composited: false,
+      sourceMedia: qe.mediaPath, sourceSeconds: qe.sourceSecs,
+      note: 'QE frame export is inert on this build, so this is the SOURCE frame from the clip under the playhead: no effects, no transitions, and nothing from higher tracks. Use capture_program_output for a composited frame.',
+    };
+  }
+
+  /** Single-frame still via ffmpeg. Returns a result object rather than throwing. */
+  private async runFfmpegStill(mediaPath: string, atSeconds: number, outputPath: string): Promise<{ ok: boolean; error?: string }> {
+    try {
+      execSync(
+        `ffmpeg -y -v error -ss ${Math.max(0, atSeconds).toFixed(3)} -i ${JSON.stringify(mediaPath)} -frames:v 1 ${JSON.stringify(outputPath)}`,
+        { stdio: 'pipe', timeout: 60_000 },
+      );
+    } catch (e: any) {
+      return { ok: false, error: String(e?.stderr?.toString?.() || e?.message || e).slice(0, 300) };
+    }
+    if (!fsSync.existsSync(outputPath) || fsSync.statSync(outputPath).size === 0) {
+      return { ok: false, error: 'ffmpeg reported success but wrote no usable file.' };
+    }
+    return { ok: true };
   }
 
   private listExportPresets(filter?: string): any {
@@ -19242,10 +19321,31 @@ ${this.buildSequenceResolver(sequenceId)}
   private async clearSequenceInOut(_seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
-        seq.clearInPoint(0);
-        seq.clearOutPoint(0);
-        return JSON.stringify({success:true,sequenceName:String(seq.name)});
+        var seq = __findSequence(${JSON.stringify(_seqId ?? null)});
+        if (!seq) return JSON.stringify({success:false,error:'Sequence not found'});
+        // clearInPoint/clearOutPoint are ProjectItem methods and are UNDEFINED on Sequence
+        // (measured on 26.3.2), so this threw on every call. There is no true "clear" for a
+        // sequence in/out range — an unset range simply reads back as 0 .. sequence end — so
+        // resetting to the full sequence is the honest equivalent, and the response says so
+        // rather than implying a clear happened.
+        var endTicks = __seqEndTicks(seq);
+        if (endTicks === null) return JSON.stringify({success:false,verified:false,error:'Could not read the sequence end time, so the in/out range was left unchanged.'});
+        var beforeIn = __seqInSeconds(seq), beforeOut = __seqOutSeconds(seq);
+        // Number arguments are SECONDS here; a STRING argument would be interpreted as ticks.
+        seq.setInPoint(0);
+        seq.setOutPoint(endTicks / 254016000000);
+        var afterIn = __seqInSeconds(seq), afterOut = __seqOutSeconds(seq);
+        var full = afterIn !== null && afterOut !== null && Math.abs(afterIn) < 0.04
+          && Math.abs(afterOut - endTicks / 254016000000) < 0.04;
+        return JSON.stringify({
+          success: full, verified: afterIn !== null && afterOut !== null,
+          changed: afterIn !== beforeIn || afterOut !== beforeOut,
+          before: { inSeconds: beforeIn, outSeconds: beforeOut },
+          after: { inSeconds: afterIn, outSeconds: afterOut },
+          note: 'Premiere exposes no clear for a sequence in/out range; it was reset to span the whole sequence, which is what an unset range reads back as.',
+          error: full ? null : 'The in/out range did not reset to the full sequence.',
+          sequenceName: String(seq.name)
+        });
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
