@@ -12991,6 +12991,25 @@ ${this.buildSequenceResolver(sequenceId)}
         payload.message = overall
           ? (${JSON.stringify(label)} + " applied and verified (" + okCount + "/" + results.length + " properties).")
           : (${JSON.stringify(label)} + " not fully applied (" + okCount + "/" + results.length + " properties verified). See results.");
+        // Populate the error field too, not just message. This returned success:false with NO
+        // error field, so every caller — including our own sweep harness — saw an unexplained
+        // failure while the actual reason sat in message/results. The convention is that a failed
+        // result explains itself in error; putting the explanation somewhere else is the same
+        // problem as not having one.
+        payload.verified = true;
+        if (!overall) {
+          var failedNames = [];
+          for (var fi = 0; fi < results.length; fi++) {
+            if (!results[fi].ok) {
+              failedNames.push(String(results[fi].name) + " (" + String(results[fi].status || "not applied") + ")");
+            }
+          }
+          payload.error = results.length === 0
+            ? (${JSON.stringify(label)} + ": no properties were requested, so nothing was applied.")
+            : (${JSON.stringify(label)} + ": " + okCount + " of " + results.length + " properties verified. Not applied: " + failedNames.join(", ") + ". A property reported as no_matching_property does not exist under that name on this build of Lumetri.");
+        } else {
+          payload.error = null;
+        }
         return JSON.stringify(payload);
       } catch (e) {
         return JSON.stringify({ success: false, error: e.toString() });
@@ -13045,9 +13064,20 @@ ${this.buildSequenceResolver(sequenceId)}
         unsupported,
       };
     }
-    const result = await this.applyLumetriParams(clipId, requested, 'Color correction');
-    // Report a rejected adjustment alongside the applied ones rather than dropping it.
-    return unsupported.length ? { ...result, unsupported } : result;
+    const result: any = await this.applyLumetriParams(clipId, requested, 'Color correction');
+    if (!unsupported.length) return result;
+    // An adjustment that was asked for and cannot be applied must not leave success:true. A caller
+    // checking only `success` would otherwise never learn that part of its request was dropped —
+    // the same silent-partial-success failure this whole pass exists to remove. The applied
+    // parameters are still reported as verified, so nothing is lost by being explicit.
+    return {
+      ...result,
+      success: false,
+      unsupported,
+      appliedAnyway: result?.applied ?? 0,
+      error: [result?.error, `Unsupported on this build and NOT applied: ${unsupported.join('; ')}.`]
+        .filter(Boolean).join(' '),
+    };
   }
 
   private async applyLut(clipId: string, lutPath: string, _intensity = 100): Promise<any> {
