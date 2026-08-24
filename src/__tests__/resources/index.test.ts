@@ -397,8 +397,18 @@ describe('PremiereProResources', () => {
         const result = await resources.readResource('premiere://config/get_instructions');
 
         expect(typeof result).toBe('string');
-        expect(result).toContain('You are controlling Adobe Premiere Pro through the MCP server');
+        // Assert on WHAT THE GUIDANCE MUST COVER, not on its opening sentence. This pinned a
+        // literal first line ("You are controlling Adobe Premiere Pro through the MCP server"),
+        // so rewording the instructions failed the suite without anything being wrong — a test
+        // that only measures whether the prose changed.
+        expect(result).toContain('Operating Instructions');
+        // A named tool, so the guidance is still concrete rather than generic advice.
         expect(result).toContain('razor_timeline_at_time');
+        // The two things this resource exists to establish: verify-after-write, and that the
+        // host must be reachable before anything else is attempted.
+        expect(result.toLowerCase()).toMatch(/verif/);
+        expect(result).toMatch(/verify_premiere_connection|get_capabilities/);
+        // Purely local: reading guidance must never touch Premiere.
         expect(mockBridge.executeScript).not.toHaveBeenCalled();
       });
     });
