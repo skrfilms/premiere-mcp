@@ -858,6 +858,18 @@
         if (logContainer) logContainer.innerHTML = '<div class="log-entry info">Log cleared</div>';
     };
 
+    // ── Clipboard read via CEP (read-only — write handled Node.js side) ────
+    // pbpaste never needs stdin so it's safe to spawn here.
+    MCPPremiereBridge.prototype.clipboardRead = function(done) {
+        var proc = window.cep.process;
+        var pid = proc.createProcess('/usr/bin/pbpaste', []).data;
+        var out = '';
+        proc.stdout(pid, function(d) { out += d; });
+        proc.waitfor(pid, function(code) { done({ success: true, text: out, exitCode: code }); });
+        setTimeout(function() { try { proc.terminate(pid); } catch(e){} done({ success: true, text: out, timeout: true }); }, 5000);
+    };
+    // ──────────────────────────────────────────────────────────────────────
+
     window.MCPPremiereBridge = MCPPremiereBridge;
     window.bridge = null;
     window.startBridge = function() { if (window.bridge) window.bridge.startBridge(); };
