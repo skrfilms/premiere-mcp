@@ -63,7 +63,13 @@ const HOST_GLOBALS = new Set([
  * would only re-report the caller's own code, so they are excluded — as they
  * were before they carried a typed `script`/`expression` field to seed.
  */
-const ARBITRARY_CODE_TOOLS = new Set(['execute_extendscript']);
+const ARBITRARY_CODE_TOOLS = new Set([
+  'execute_extendscript',
+  // batch_execute inlines each caller-supplied `operations[].script` into its own
+  // IIFE so one failure cannot abort the rest. The identifiers inside those blocks
+  // are the caller's for the same reason as above.
+  'batch_execute',
+]);
 
 type Node = Record<string, any>;
 
