@@ -1,21 +1,36 @@
 /**
  * Tool profiles: a curated, env-selected subset of the full catalogue.
  *
- * The server ships 283 tools. That is a feature for power users and a liability
- * for a model with a small tool budget — a large menu dilutes selection accuracy
- * and burns context on schemas the caller will never use. Other MCP servers solve
- * this by exposing a curated default; here the default stays the FULL catalogue
- * (nothing is hidden unless asked for), and curation is strictly opt-in via env.
+ * The server registers 638 tools. Exposing all of them by default was a bug, not a
+ * feature, and it was measured rather than argued:
+ *
+ *   - all  = 638 tools ≈ 102,000 tokens ≈ 51% of a 200k context window, spent before
+ *            the user has said anything.
+ *   - core =  64 tools ≈ 7% of the same window.
+ *
+ * Three independent limits agree that 638 is too many. Anthropic's guidance puts tool
+ * selection degradation past roughly 30–50 tools; MCP's own client best-practice doc
+ * suggests deferring definitions past 1–5% of context; and VS Code / Copilot HARD-ERRORS
+ * above 128 tools, meaning the previous default could not run there at all.
+ *
+ * So the default is now `core`. Nothing is lost, and nothing is hidden silently: both
+ * `get_capabilities` and `find_tool` are always kept, and `find_tool` reports a
+ * profile-hidden match as `exposed: false` WITH the reason rather than omitting it — so
+ * an agent can always discover a capability it cannot currently call, and is told how to
+ * widen. That distinction is the whole reason curation is safe here; without it a curated
+ * deployment would be indistinguishable from a build where the feature was never written,
+ * which is the same class of lie as a fake success.
+ *
+ * Set PREMIERE_MCP_PROFILE=all for the full catalogue.
  *
  * Selection order (later overrides earlier):
- *   1. PREMIERE_MCP_PROFILE  — a named profile below (default: "all").
+ *   1. PREMIERE_MCP_PROFILE  — a named profile below (default: "core").
  *   2. PREMIERE_MCP_TOOLS    — explicit comma/space list; when set it REPLACES the
  *                              profile entirely (an exact allowlist).
  *   3. PREMIERE_MCP_EXCLUDE  — comma/space list removed from whatever the above chose.
  *
  * A profile is matched against a tool name by any of: exact name, a "prefix_*"
- * glob, or a "*" catch-all. `get_capabilities` is always kept so a client can
- * still discover what the running profile exposes even under the tightest set.
+ * glob, or a "*" catch-all.
  */
 
 export interface ProfileEnv {
@@ -35,11 +50,11 @@ export const ALWAYS_KEPT = ['get_capabilities', 'find_tool'] as const;
 /**
  * Named profiles. Patterns are exact names, "prefix_*" globs, or "*".
  * Kept intentionally small and legible; add tools to a profile by name/glob.
- * `all` is the default and matches everything, so behaviour is unchanged unless
- * a profile is explicitly selected.
+ * `core` is the default; `all` matches everything and is one env var away.
  */
 export const PROFILES: Record<string, string[]> = {
-  // Everything. The default — no curation.
+  // Everything, no curation. Opt in with PREMIERE_MCP_PROFILE=all; note that this
+  // exceeds VS Code / Copilot's 128-tool ceiling and costs ~51% of a 200k context.
   all: ['*'],
 
   // Non-mutating introspection only. Safe to point an untrusted agent at.
@@ -80,10 +95,34 @@ export const PROFILES: Record<string, string[]> = {
     'bake_speed_change',
     // markers
     'add_marker', 'update_marker', 'delete_marker', 'list_markers',
-    // transitions / effects (light)
+    // transitions / effects. apply_effect WITHOUT set_effect_property was incoherent:
+    // an agent could add Gaussian Blur and then had no way to set its blurriness, so
+    // the default forced a profile switch on the second call.
     'add_transition', 'apply_effect', 'list_available_effects', 'list_available_transitions',
+    'set_effect_property', 'get_effect_properties', 'list_clip_effects', 'remove_effect',
+    // keyframes. bake_keyframe_ease shipped in core while add_keyframe did not — the
+    // ease-baker was reachable but nothing could create the keyframes it eases.
+    'add_keyframe', 'remove_keyframe', 'get_keyframes', 'set_keyframe_interpolation',
     // eased scalar animation (fades/scale/rotation), baked with verifiable values
     'bake_keyframe_ease',
+    // transform: the four properties an editor actually reaches for
+    'set_clip_scale', 'set_clip_position', 'set_clip_rotation', 'set_clip_opacity',
+    // colour, at the reliable entry point (applyLumetriPreset is fingerprint-verified)
+    'apply_lumetri_preset', 'list_lumetri_presets',
+    // audio basics. A default editorial profile with no level control is not editorial;
+    // the deeper repair/loudness set stays in the audio profile.
+    'set_clip_volume', 'adjust_audio_levels',
+    // tracks
+    'mute_track', 'lock_track', 'toggle_track_visibility',
+    // selection primitives — get_selected_clips alone left nothing able to SET a selection
+    'set_clip_selection', 'select_clips_by_name', 'deselect_all_clips',
+    // undo/redo. Their absence was the single most surprising gap in an editing default.
+    'undo', 'redo',
+    // structure at a glance, and the in/out range everything downstream reads
+    'get_sequence_structure', 'get_timeline_summary', 'get_timeline_gaps',
+    'set_sequence_in_out_points', 'get_sequence_in_out_points',
+    // media health: the questions asked before every session
+    'check_offline_media', 'relink_media', 'probe_media', 'verify_premiere_connection',
     // export
     'export_frame', 'export_sequence', 'add_to_render_queue', 'get_render_queue_status',
     // render-truth: capture the composited Program frame for the feedback loop
@@ -179,7 +218,7 @@ export function resolveProfile(
   }
 
   // 1. Named profile (default "all").
-  const requested = (env.PREMIERE_MCP_PROFILE || 'all').trim();
+  const requested = (env.PREMIERE_MCP_PROFILE || 'core').trim();
   const patterns = PROFILES[requested];
   if (!patterns) {
     // Unknown profile name: fail safe to the full catalogue rather than an

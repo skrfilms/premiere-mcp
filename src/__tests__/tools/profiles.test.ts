@@ -32,16 +32,33 @@ describe('matchesPattern', () => {
 });
 
 describe('default (no env)', () => {
-  it('returns the exact same array reference — zero-cost passthrough', () => {
-    const out = applyProfile(ALL, {});
-    expect(out).toBe(ALL);
+  // The default was `all` and is now `core`. 638 tools is ~51% of a 200k context spent
+  // before the user speaks, and VS Code / Copilot hard-errors above 128, so the old
+  // default could not run there at all. These tests pin the new contract so it cannot
+  // drift back silently — the previous versions of them asserted the opposite.
+  it('curates by default rather than exposing the whole catalogue', () => {
+    const r = resolveProfile(ALL.map((t) => t.name), {});
+    expect(r.source).toBe('profile');
+    expect(r.profileName).toBe('core');
   });
 
-  it('resolveProfile reports source "all" and no curation', () => {
-    const r = resolveProfile(ALL.map((t) => t.name), {});
+  it('still hands back the whole catalogue when asked explicitly', () => {
+    const out = applyProfile(ALL, { PREMIERE_MCP_PROFILE: 'all' });
+    // Same reference: `all` with no excludes is a zero-cost passthrough.
+    expect(out).toBe(ALL);
+    const r = resolveProfile(ALL.map((t) => t.name), { PREMIERE_MCP_PROFILE: 'all' });
     expect(r.source).toBe('all');
     expect(r.profileName).toBeNull();
     expect(r.selected).toHaveLength(ALL.length);
+  });
+
+  it('keeps discovery reachable under the default, so curation cannot hide a capability', () => {
+    // Curation is only honest if the agent can still find what curation removed.
+    // find_tool reports hidden matches as exposed:false; get_capabilities reports the
+    // active profile. Losing either would make a curated build indistinguishable from
+    // one where the feature was never written.
+    const names = applyProfile(ALL, {}).map((t) => t.name);
+    for (const kept of ALWAYS_KEPT) expect(names).toContain(kept);
   });
 });
 
