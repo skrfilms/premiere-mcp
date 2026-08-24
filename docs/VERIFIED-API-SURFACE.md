@@ -373,6 +373,35 @@ removeEventListener, setDiscoveryURL
 
 ---
 
+# FATAL QE CLIP CALLS — these terminate the whole script (26.3.2)
+
+Measured 2026-08-24, **one call per script**, so each attribution is unambiguous. These do **not**
+raise a catchable exception: they kill the entire `evalScript`, so the caller receives only the
+generic *"ExtendScript execution failed via CEP evalScript()"* and learns nothing. A `try/catch`
+around them is useless and actively misleading — `get_qe_clip_info` wrapped every one of these
+reads in `try{}catch{}` and still failed completely.
+
+**Fatal to CALL:** `qeClip.setBorderWidth`, `setBorderColor`, `setReverse`, `setAntiAliasQuality`
+
+**Fatal to READ:** `qeClip.reverse`, `borderWidth`, `borderColor`, `alignment`, `antiAliasQuality`,
+`startPercent`, `endPercent`, `switchSources`
+
+**Safe to READ:** `name`, `type`, `start`, `end`, `duration`, `mediaType`, `numComponents`, `speed`,
+**`reversed`**, `frameBlend`, `multicamEnabled`, `scaleToFrameSize`, `staticClipGain`,
+`timeInterpolationType`
+
+**Safe to CALL:** `setFrameBlend`, `setScaleToFrameSize`, `setSpeed`, `addVideoEffect`, `remove`
+(so this is specific, not a blanket QE problem)
+
+Note **`reversed` (safe) vs `reverse` (fatal)** — one letter apart, and the difference is whether the
+host survives. Where a capability has a working alternative, prefer it: reversing a clip is
+available through `qeClip.setSpeed(rate, tc, reverse, ...)`, which is verified working, so
+`set_clip_reverse` now refuses and routes callers to `set_clip_speed_qe`.
+
+The engine RECOVERS from these — the next command works normally — so they are script-fatal, not
+engine-fatal. That is a different class from `createNewSequence`, which opens a modal and blocks the
+host until a human (or an Escape keystroke) clears it.
+
 # Confirmed NOT available
 
 - `app.findMenuCommandId` / `app.executeCommand` — **absent in the CEP ExtendScript
