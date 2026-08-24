@@ -43,7 +43,7 @@ Field-wide flaws in every existing Premiere MCP, and how Trowel answers each:
 | 4 | **Denied-API features faked** — speed/time-remap (5-yr denied), MOGRT text (opaque token) return success anyway. | **Honest escape-hatch fallbacks** (ffmpeg bake; verified MOGRT text or honest failure). |
 | 5 | **Fragile 3-layer install; non-coders blocked**; some setup scripts destructive. | **One-command, non-destructive `doctor`** with prebuilt binaries, Windows + macOS. |
 | 6 | **Wedge on long ops** — sync export/transcribe freezes transport → false failure. | Heartbeat/fail-fast + chunked ops. |
-| 7 | **Weak cross-platform; ExtendScript EOL Sept 2026.** | **Dual-backend CEP+UXP, Windows-first.** |
+| 7 | **Weak cross-platform.** (An "ExtendScript EOL Sept 2026" claim appeared here and was WRONG — corrected 2026-08-24: no Adobe statement sets that date; Adobe's on-record line is "no definitive end date… side-by-side for many years.") | **Dual-backend CEP+UXP, Windows-first — as a capability play, not deadline work.** |
 
 ### 2a. The `Adam-Duchemann/veracut` twin (read in full, 2026-08-21)
 
@@ -67,7 +67,8 @@ commits all 2026-07-06), never promoted it, 0 stars in six weeks. Takeaways:
 ## 3. Locked decisions (owner, 2026-08-21)
 
 - **Backend:** Dual — CEP+ExtendScript **and** UXP, with a capability handshake that
-  auto-selects the best path per tool. Future-proofs the Sept 2026 ExtendScript EOL.
+  auto-selects the best path per tool. NOT deadline-driven: the "Sept 2026 ExtendScript EOL"
+  was a phantom (see §2). UXP earns its place only where it unlocks capability CEP cannot.
   (`uxp-plugin/` already exists in-repo — audit + extend it, do not start from zero.)
 - **Scope:** Full product — verified primitives **+** creative workflow layer
   (auto silence-cut, captions, montage, edit-by-transcript) **+** hosted/remote (HTTP/SSE).
@@ -209,6 +210,70 @@ bridges' source. Ordered by severity, not effort.
    rather than outstanding work, and an idle healthy panel advertised a queue in the hundreds.
    I misread that field as evidence of a wedged queue during this session. Fixed. Any future
    heartbeat field must be checked for the same "means something other than its name" failure.
+
+### Tier 0a — the ten bridge bugs (from `docs/BRIDGE-COMPARISON.md` §5, all evidenced)
+
+Ordered by severity. #1 is the most important thing in this document.
+
+1. **A DEAD EXTENDSCRIPT ENGINE READS AS HEALTHY — the moat has a hole in it.** [MEASURED]
+   The engine can die such that every call times out *permanently* while the heartbeat
+   reports `connected: true, isProcessing: false`, age ~90 ms. Our heartbeat proves the
+   **panel** is alive; it says nothing about the **engine**. This is the single root cause of
+   most of the confusion in the 2026-08-24 session: I repeatedly diagnosed "stale queue" or
+   blamed innocent tools when the real state was a dead engine behind a healthy-looking
+   beacon. **No Premiere MCP in the field detects this.** Fix = a **drain sentinel** (a
+   trivial round-trip probe whose failure is unambiguous), and after N consecutive failures
+   say plainly *"restart Premiere Pro"*. The pattern is proven in JUNKDOGE's After Effects
+   bridge and ports verbatim. Closing this makes us the only Premiere bridge that can tell an
+   agent *"your edit may or may not have applied, and here is which"* — worth more than any
+   latency work.
+2. **Timeouts throw away the one fact that matters:** whether the command was *consumed*. The
+   `finally` unlink already computes it (`index.ts:731-733`) and discards it. Near-free, and
+   the biggest honesty win available: "never ran" vs "may have run" is the difference between
+   safe retry and double-applying an edit.
+3. **Spurious "panel stopped responding".** [MEASURED] A *single* transient heartbeat
+   `ENOENT` — observed on a live, healthy panel — trips the death verdict
+   (`index.ts:871-883`). Require 2–3 consecutive stale/missing reads.
+4. **No depth cap or cycle detection in `__mcpStringify`** (`index.ts:79-173`), against a DOM
+   full of parent/child back-references. Plausibly a *cause* of the engine death in #1. Add a
+   depth cap, a `seen` set, and an actionable overflow message.
+5. **The prelude ships twice per call** (~20 KB of pure overhead on a size-capped channel),
+   and the denylist scans both copies (`index.ts:619-638`, `bridge-cep.js:499`). Load helpers
+   once via a content-hashed `$.evalFile`.
+6. **The 45 s panel watchdog is a floor that cannot be lowered** — `timeoutMs` only ever
+   raises it (`bridge-cep.js:503-506`) — so one bad script wedges the bridge for 45 s no
+   matter what the caller asked for. Every probe in the survey cost exactly ~45 s. Honour a
+   *lower* requested timeout above a sane floor.
+7. **No startup sweep, and no ownership check on a pre-existing temp dir**
+   (`index.ts:1855-1858`). A leftover `command-*.json` **executes when the panel next
+   starts.** Combined with Tier 0 #1 (no auth) this is a persistence vector, not just
+   untidiness.
+8. **No cross-process mutual exclusion.** Two server instances sharing the dir have no lock;
+   `isProcessing` is per-panel. `kumoproductions` solves it with `open("wx")`.
+9. **`uxp-plugin/` cannot work as written** — `require('premiere')` is the wrong module and it
+   depends on non-existent `app.executeExtendScript`/`app.evalScript`
+   (`uxp-plugin/bridge.js:11, 144-174`). Rebuild against native `premierepro` or delete it;
+   shipping a plausible-looking dead plugin is worse than not shipping one.
+10. **`queueLength` was a lifetime counter** — fixed this session, listed for completeness.
+
+### Tier 0b — the one rival genuinely ahead of us
+
+**`leancoderkavy/premiere-pro-mcp`** (211★, 284 commits, pushed the day of the survey) is the
+only Premiere server ahead of us architecturally, and only in specific places: three
+transports instead of one, `fs.watch` **push** on the response edge, helpers loaded **once**
+via content-hashed `$.evalFile`, an atomic rename-claim ownership protocol, stricter temp-dir
+ownership, and — the part that matters — **a working native-UXP plugin with per-command
+capability negotiation.** That last item is our stated moat implemented at the transport
+layer, by someone else, today.
+
+They are *behind* us on JSON safety in a way that will silently corrupt real responses (they
+escape only `\\ " \n` and ship **no `JSON.parse` at all**) and on liveness granularity. Read
+their `src/bridge/uxp-websocket-bridge.ts` and `uxp-plugin/index.cjs` before building ours.
+
+**`ayushozha` is not the threat its README implies.** The gRPC/Rust is real but sits behind
+its own MCP server; their own `.proto` admits the last hop is CEP `evalScript`, and their
+audit concedes *"Live CEP/Premiere execution was not performed."* Their genuine lead is
+transport **auth** (see Tier 0 #1).
 
 **Tier 0 — strategic risks surfaced by the bridge survey**
 
