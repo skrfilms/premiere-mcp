@@ -5678,55 +5678,133 @@ ${this.buildSequenceResolver(sequenceId)}
 
   // ── Batch 1: Lumetri Numeric Control ─────────────────────────────────
 
-  private lumetriParamScript(seqId: string | undefined, ti: number, ci: number, assignments: string): string {
+  /**
+   * Set Lumetri parameters BY INDEX BUT CHECKED BY NAME, and verify each one by readback.
+   *
+   * The previous version took a blob of assignments, each individually wrapped in
+   * `try{...}catch(e){}`, and then returned `success: true, verified: true`
+   * unconditionally. So every failure was swallowed and reported as a verified success —
+   * the exact shape of lie this server exists to prevent.
+   *
+   * Two things make the index approach safe now:
+   *
+   *  - Each index carries the NAME it is expected to be, checked before writing. The indices
+   *    are correct on 26.3.2 (14 Temperature, 15 Tint, 16 Saturation, 19 Exposure, 20 Contrast,
+   *    21 Highlights, 22 Shadows, 23 Whites, 24 Blacks, 40 Faded Film, 41 Sharpen, 42 Vibrance,
+   *    43 Saturation, 110-113 Vignette) — but a hardcoded index that silently shifts in a future
+   *    build would write a real value to the WRONG parameter, mis-grading a shot with no error.
+   *    On a mismatch this falls back to a by-name search and says which route it used; if the
+   *    name is nowhere to be found it reports that instead of writing anything.
+   *  - Every write is read back and compared, so `verified` means something.
+   *
+   * Lumetri's flat list repeats several names (Temperature at 14 and 101, Contrast at 20 and 103,
+   * Saturation at 16, 43 and 105), which is why the index is the primary key and the name is the
+   * guard rather than the other way round.
+   */
+  private lumetriParamScript(
+    seqId: string | undefined,
+    ti: number,
+    ci: number,
+    targets: Array<{ index: number; name: string; value: number }>,
+  ): string {
     return `
       try {
         var seq = ${seqId ? `(function(){var ss=app.project.sequences;for(var i=0;i<ss.numSequences;i++){if(ss[i].sequenceID===${JSON.stringify(seqId)})return ss[i];}return app.project.activeSequence;})()` : 'app.project.activeSequence'};
-        var clip = seq.videoTracks[${ti}].clips[${ci}];
-        if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
+        if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
+        var track = seq.videoTracks[${ti}];
+        if (!track) return JSON.stringify({success:false,error:'Video track ${ti} not found'});
+        var clip = track.clips[${ci}];
+        if (!clip) return JSON.stringify({success:false,error:'Clip not found at track ${ti} index ${ci}'});
         var lumetri = null;
         for (var i=0;i<clip.components.numItems;i++) { if (String(clip.components[i].displayName).indexOf('Lumetri')>=0) { lumetri=clip.components[i]; break; } }
         if (!lumetri) return JSON.stringify({success:false,error:'No Lumetri Color on clip — apply it first with apply_lumetri_preset'});
         var props = lumetri.properties;
-        ${assignments}
-        return JSON.stringify({success:true,verified:true});
+        var targets = ${JSON.stringify(targets)};
+        var results = [], applied = 0;
+        for (var t=0;t<targets.length;t++) {
+          var spec = targets[t];
+          var param = null, route = 'index';
+          if (spec.index < props.numItems) {
+            var candidate = props[spec.index];
+            var actualName = '';
+            try { actualName = String(candidate.displayName); } catch (eN) {}
+            if (actualName === spec.name) { param = candidate; }
+          }
+          if (!param) {
+            // Index did not hold the expected parameter on this build — find it by name instead.
+            for (var pj=0; pj<props.numItems; pj++) {
+              var nm2 = '';
+              try { nm2 = String(props[pj].displayName); } catch (eN2) {}
+              if (nm2 === spec.name) { param = props[pj]; route = 'name-fallback(index ' + pj + ')'; break; }
+            }
+          }
+          if (!param) {
+            results.push({ name: spec.name, expectedIndex: spec.index, ok: false, status: 'parameter_not_found',
+              error: 'Lumetri on this clip has no parameter named ' + spec.name + ' at index ' + spec.index + ' or anywhere in its ' + props.numItems + ' parameters. Nothing was written.' });
+            continue;
+          }
+          var before = null; try { before = param.getValue(); } catch (eB) {}
+          var setError = null;
+          try { param.setValue(spec.value, true); } catch (eS) { setError = eS.toString(); }
+          var after = null; try { after = param.getValue(); } catch (eA) {}
+          var landed = after !== null && Math.abs(Number(after) - Number(spec.value)) < 0.001;
+          if (landed) applied++;
+          results.push({ name: spec.name, route: route, valueRequested: spec.value, valueBefore: before,
+            valueAfter: after, changed: before !== after, ok: landed,
+            status: landed ? 'verified' : (setError ? 'set_threw' : 'not_applied'),
+            error: landed ? null : (setError || ('Value reads back as ' + after + ' rather than ' + spec.value + '.')) });
+        }
+        return JSON.stringify({
+          success: applied > 0 && applied === targets.length,
+          verified: true, applied: applied, requested: targets.length, results: results,
+          error: applied === targets.length ? null : (applied === 0 ? 'No Lumetri parameter could be applied; see results[].' : 'Only ' + applied + ' of ' + targets.length + ' parameters applied; see results[].')
+        });
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `;
   }
 
   private async lumetriBasicSet(args: any): Promise<any> {
     const ti = args.trackIndex ?? 0; const ci = args.clipIndex ?? 0;
-    const sets: string[] = [];
-    if (args.temperature !== undefined) sets.push(`try{props[14].setValue(${args.temperature},true);}catch(e){}`);
-    if (args.tint !== undefined) sets.push(`try{props[15].setValue(${args.tint},true);}catch(e){}`);
-    if (args.saturation !== undefined) sets.push(`try{props[16].setValue(${args.saturation},true);}catch(e){}`);
-    if (args.exposure !== undefined) sets.push(`try{props[19].setValue(${args.exposure},true);}catch(e){}`);
-    if (args.contrast !== undefined) sets.push(`try{props[20].setValue(${args.contrast},true);}catch(e){}`);
-    if (args.highlights !== undefined) sets.push(`try{props[21].setValue(${args.highlights},true);}catch(e){}`);
-    if (args.shadows !== undefined) sets.push(`try{props[22].setValue(${args.shadows},true);}catch(e){}`);
-    if (args.whites !== undefined) sets.push(`try{props[23].setValue(${args.whites},true);}catch(e){}`);
-    if (args.blacks !== undefined) sets.push(`try{props[24].setValue(${args.blacks},true);}catch(e){}`);
-    return await this.bridge.executeScript(this.lumetriParamScript(args.sequenceId, ti, ci, sets.join('\n')));
+    const targets: Array<{ index: number; name: string; value: number }> = [];
+    // index/name pairs verified against 26.3.2; the name is checked before the write.
+    const map: Array<[string, number, string]> = [
+      ['temperature', 14, 'Temperature'], ['tint', 15, 'Tint'], ['saturation', 16, 'Saturation'],
+      ['exposure', 19, 'Exposure'], ['contrast', 20, 'Contrast'], ['highlights', 21, 'Highlights'],
+      ['shadows', 22, 'Shadows'], ['whites', 23, 'Whites'], ['blacks', 24, 'Blacks'],
+    ];
+    for (const [arg, index, name] of map) {
+      if (args[arg] !== undefined) targets.push({ index, name, value: Number(args[arg]) });
+    }
+    if (targets.length === 0) return { success: false, error: `No Lumetri basic parameters provided. Supply at least one of: ${map.map((m) => m[0]).join(', ')}.` };
+    return await this.bridge.executeScript(this.lumetriParamScript(args.sequenceId, ti, ci, targets));
   }
 
   private async lumetriCreativeSet(args: any): Promise<any> {
     const ti = args.trackIndex ?? 0; const ci = args.clipIndex ?? 0;
-    const sets: string[] = [];
-    if (args.fadedFilm !== undefined) sets.push(`try{props[40].setValue(${args.fadedFilm},true);}catch(e){}`);
-    if (args.sharpen !== undefined) sets.push(`try{props[41].setValue(${args.sharpen},true);}catch(e){}`);
-    if (args.vibrance !== undefined) sets.push(`try{props[42].setValue(${args.vibrance},true);}catch(e){}`);
-    if (args.saturation !== undefined) sets.push(`try{props[43].setValue(${args.saturation},true);}catch(e){}`);
-    return await this.bridge.executeScript(this.lumetriParamScript(args.sequenceId, ti, ci, sets.join('\n')));
+    const targets: Array<{ index: number; name: string; value: number }> = [];
+    const map: Array<[string, number, string]> = [
+      ['fadedFilm', 40, 'Faded Film'], ['sharpen', 41, 'Sharpen'],
+      ['vibrance', 42, 'Vibrance'], ['saturation', 43, 'Saturation'],
+    ];
+    for (const [arg, index, name] of map) {
+      if (args[arg] !== undefined) targets.push({ index, name, value: Number(args[arg]) });
+    }
+    if (targets.length === 0) return { success: false, error: `No Lumetri creative parameters provided. Supply at least one of: ${map.map((m) => m[0]).join(', ')}.` };
+    return await this.bridge.executeScript(this.lumetriParamScript(args.sequenceId, ti, ci, targets));
   }
 
   private async lumetriVignetteSet(args: any): Promise<any> {
     const ti = args.trackIndex ?? 0; const ci = args.clipIndex ?? 0;
-    const sets: string[] = [];
-    if (args.amount !== undefined) sets.push(`try{props[110].setValue(${args.amount},true);}catch(e){}`);
-    if (args.midpoint !== undefined) sets.push(`try{props[111].setValue(${args.midpoint},true);}catch(e){}`);
-    if (args.roundness !== undefined) sets.push(`try{props[112].setValue(${args.roundness},true);}catch(e){}`);
-    if (args.feather !== undefined) sets.push(`try{props[113].setValue(${args.feather},true);}catch(e){}`);
-    return await this.bridge.executeScript(this.lumetriParamScript(args.sequenceId, ti, ci, sets.join('\n')));
+    const targets: Array<{ index: number; name: string; value: number }> = [];
+    const map: Array<[string, number, string]> = [
+      ['amount', 110, 'Amount'], ['midpoint', 111, 'Midpoint'],
+      ['roundness', 112, 'Roundness'], ['feather', 113, 'Feather'],
+    ];
+    for (const [arg, index, name] of map) {
+      if (args[arg] !== undefined) targets.push({ index, name, value: Number(args[arg]) });
+    }
+    if (targets.length === 0) return { success: false, error: `No Lumetri vignette parameters provided. Supply at least one of: ${map.map((m) => m[0]).join(', ')}.` };
+    return await this.bridge.executeScript(this.lumetriParamScript(args.sequenceId, ti, ci, targets));
   }
 
   private async lumetriReport(sequenceId: string | undefined, ti: number, ci: number): Promise<any> {
@@ -5760,23 +5838,75 @@ ${this.buildSequenceResolver(sequenceId)}
     const grade = JSON.parse(gradeJson);
     const names = ['Blob','HDR','BasicCorrection','Active','','','InputLUT','InputLUT2','HDRWhite','','','Intensity','Color','WhiteBalance','Temperature','Tint','Saturation','','Light','Exposure','Contrast','Highlights','Shadows','Whites','Blacks','HDRSpecular','','','','','Creative','Active2','','','Look','Look2','','ColorSpace','Intensity2','Adjustments','FadedFilm','Sharpen','Vibrance','Saturation2','','TintBalance','','','Curves','Active3','RGBCurves','Active4','HDRRange','','','HueSatCurves','Active5','HueSatSel','HueSat','Active6','HueHueSel','HueHue','Active7','HueLumaSel','HueLuma','Active8','LumaSatSel','LumaSat','Active9','SatSatSel','SatSat','','','ColorWheels','Active10','','FaceDetection','','HDRWhite2','','','HSLSecondary','Active11','Key','SetColor','AddColor','RemoveColor','','ShowMask','','InvertMask','','','','Refine','Denoise','Blur','Blur2','Correction','','','Temperature2','Tint2','Contrast2','Sharpen2','Saturation3','Saturation4','','Vignette','Active12','Amount','Midpoint','Roundness','Feather'];
     const numericKeys = ['Temperature','Tint','Saturation','Exposure','Contrast','Highlights','Shadows','Whites','Blacks','FadedFilm','Sharpen','Vibrance','Saturation2','Amount','Midpoint','Roundness','Feather','Intensity','Intensity2'];
-    const sets = names.map((n, i) => {
-      if (!n || !(n in grade) || !numericKeys.includes(n)) return '';
-      return `try{props[${i}].setValue(${grade[n]},true);}catch(e){}`;
-    }).filter(Boolean).join('\n');
+    // The `names` table above is a positional map of Lumetri's flat parameter list, with
+    // synthetic suffixes for the repeated names (Saturation2, Temperature2, ...). Only the real
+    // parameter name is checked against the host, so strip the suffix before passing it as the
+    // expected name — otherwise every de-duplicated entry would fail its own name guard.
+    const paramTargets = names
+      .map((n, i) => ({ n, i }))
+      .filter(({ n }) => n && (n in grade) && numericKeys.includes(n))
+      .map(({ n, i }) => ({ index: i, name: n.replace(/[0-9]+$/, ''), value: Number(grade[n]) }))
+      .filter((t) => Number.isFinite(t.value));
+
+    if (paramTargets.length === 0) {
+      return { success: false, error: 'The supplied grade contained no numeric Lumetri parameters that this tool knows how to paste.', pasted: 0, results: [] };
+    }
+
     const results: any[] = [];
     for (const t of targets) {
-      const r = await this.bridge.executeScript(this.lumetriParamScript(sequenceId, t.trackIndex, t.clipIndex, sets));
-      results.push({ trackIndex: t.trackIndex, clipIndex: t.clipIndex, success: r.success });
+      const r: any = await this.bridge.executeScript(this.lumetriParamScript(sequenceId, t.trackIndex, t.clipIndex, paramTargets));
+      results.push({ trackIndex: t.trackIndex, clipIndex: t.clipIndex, success: r?.success === true,
+        applied: r?.applied ?? 0, requested: r?.requested ?? paramTargets.length, error: r?.error ?? null });
     }
-    return { success: true, pasted: results.length, results };
+    // Previously returned success:true and pasted:results.length no matter what each clip did,
+    // so a paste that landed on nothing reported total success.
+    const fullyPasted = results.filter((r) => r.success).length;
+    return {
+      success: fullyPasted > 0 && fullyPasted === results.length,
+      verified: true,
+      pasted: fullyPasted, attempted: results.length, parameters: paramTargets.length, results,
+      error: fullyPasted === results.length ? null
+        : (fullyPasted === 0 ? 'The grade was pasted to no clips; see results[].' : `Only ${fullyPasted} of ${results.length} clips received the full grade; see results[].`),
+    };
   }
 
   private async autoWhiteBalance(sequenceId: string | undefined, ti: number, ci: number): Promise<any> {
     const newData = JSON.stringify({ mAutoTonePressed: true, mBlacks: 0, mContrast: 0, mExposure: 0, mHighlights: 0, mLastPressedAutoToneButton: 0, mResetPressed: false, mSaturation: 0, mShadows: 0, mTemperature: 0, mTint: 0, mWhites: 0 });
-    return await this.bridge.executeScript(this.lumetriParamScript(sequenceId, ti, ci,
-      `try{props[126].setValue(${JSON.stringify(newData)},true);}catch(e){}`
-    ));
+    // This one writes a JSON BLOB to the Auto Tone Analytics Data parameter, not a number, so the
+    // numeric helper does not apply. Verified by comparing the blob string back, and honest that a
+    // successful write is not proof Premiere has finished analysing.
+    return await this.bridge.executeScript(`
+      try {
+        var seq = ${sequenceId ? `(function(){var ss=app.project.sequences;for(var i=0;i<ss.numSequences;i++){if(ss[i].sequenceID===${JSON.stringify(sequenceId)})return ss[i];}return app.project.activeSequence;})()` : 'app.project.activeSequence'};
+        if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
+        var track = seq.videoTracks[${ti}];
+        var clip = track && track.clips[${ci}];
+        if (!clip) return JSON.stringify({success:false,error:'Clip not found at track ${ti} index ${ci}'});
+        var lumetri = null;
+        for (var i=0;i<clip.components.numItems;i++) { if (String(clip.components[i].displayName).indexOf('Lumetri')>=0) { lumetri=clip.components[i]; break; } }
+        if (!lumetri) return JSON.stringify({success:false,error:'No Lumetri Color on clip — apply it first with apply_lumetri_preset'});
+        var props = lumetri.properties;
+        // Locate the parameter by NAME, falling back to the known index, so a shifted parameter
+        // list produces an error rather than a value written into the wrong slot.
+        var param = null, route = 'name';
+        for (var pj=0; pj<props.numItems; pj++) {
+          var nm=''; try { nm=String(props[pj].displayName); } catch(eN){}
+          if (nm === 'Auto Tone Analytics Data') { param = props[pj]; break; }
+        }
+        if (!param && props.numItems > 126) { param = props[126]; route = 'index-126-fallback'; }
+        if (!param) return JSON.stringify({success:false,error:'Lumetri exposes no Auto Tone Analytics Data parameter on this clip, so auto white balance cannot be triggered by script.'});
+        var before=null; try{ before=String(param.getValue()); }catch(eB){}
+        var setError=null;
+        try { param.setValue(${JSON.stringify(newData)}, true); } catch(eS) { setError=eS.toString(); }
+        var after=null; try{ after=String(param.getValue()); }catch(eA){}
+        var wrote = after !== null && after !== before;
+        return JSON.stringify({
+          success: wrote, verified: after !== null, route: route, changed: wrote,
+          error: wrote ? null : (setError || 'The Auto Tone blob read back unchanged, so the request was not accepted.'),
+          note: wrote ? 'Auto Tone was requested. Premiere performs the analysis itself, so the resulting Temperature/Tint values are not readable from this call — read them with lumetri_report once the analysis has settled.' : null
+        });
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
   }
 
   private async setLutInterpolation(method: number): Promise<any> {
