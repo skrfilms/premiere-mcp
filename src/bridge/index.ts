@@ -499,13 +499,21 @@ function __seqPointSeconds(seq, which) {
 }
 function __seqInSeconds(seq) { return __seqPointSeconds(seq, 'in'); }
 function __seqOutSeconds(seq) { return __seqPointSeconds(seq, 'out'); }
+/*
+ * A sequence with no in/out range set reports a NEGATIVE seconds value (about -0.04, i.e. one
+ * frame below zero) rather than null. Passing that straight through produced an attempt to move
+ * the playhead to a negative tick position, which then failed with an accurate but unhelpful
+ * "playhead did not land" message. Treat negative as "not set" so callers get the real reason.
+ */
 function __seqInTicks(seq) {
   var s = __seqInSeconds(seq);
-  return s === null ? null : Math.round(s * 254016000000);
+  if (s === null || s < 0) return null;
+  return Math.round(s * 254016000000);
 }
 function __seqOutTicks(seq) {
   var s = __seqOutSeconds(seq);
-  return s === null ? null : Math.round(s * 254016000000);
+  if (s === null || s < 0) return null;
+  return Math.round(s * 254016000000);
 }
 /*
  * Work area readback. The AsTime variants are the reliable pair on 26.3.2; the plain getters are
