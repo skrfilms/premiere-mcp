@@ -392,11 +392,71 @@
         fs.renameSync(staging, responseFile);
     };
 
+    /**
+     * Read the per-session auth token the server writes to auth-token.json.
+     *
+     * Re-read on every check rather than cached: the server rewrites the file each session, and a
+     * cached token would make the panel reject every command from a server that restarted while the
+     * panel stayed open — which is the normal case, since the MCP server is launched per session
+     * over stdio and Premiere outlives it.
+     */
+    MCPPremiereBridge.prototype.readExpectedToken = function() {
+        try {
+            var tokenPath = path.join(this.tempDirectory, 'auth-token.json');
+            if (!fs.existsSync(tokenPath)) return null;
+            var parsed = JSON.parse(fs.readFileSync(tokenPath, 'utf8'));
+            return (parsed && typeof parsed.token === 'string' && parsed.token.length > 0) ? parsed.token : null;
+        } catch (e) {
+            return null;
+        }
+    };
+
+    /**
+     * Decide whether to run a command.
+     *
+     * Enforced ONLY when auth-token.json exists. That is the backwards-compatible half: an older
+     * server that never writes a token keeps working, while any current server always writes one, so
+     * enforcement is on in practice. Rejection is by comparing the whole string — this is a local
+     * file-permission boundary, not a network one, so timing-attack hardening would be theatre
+     * against an attacker who can simply read the file.
+     */
+    MCPPremiereBridge.prototype.isCommandAuthorized = function(command) {
+        var expected = this.readExpectedToken();
+        if (!expected) return { ok: true, reason: 'no token file present; running unauthenticated (older server)' };
+        var supplied = command && typeof command.token === 'string' ? command.token : '';
+        if (supplied.length !== expected.length) return { ok: false, reason: supplied ? 'token length mismatch' : 'command carried no token' };
+        var same = true;
+        for (var i = 0; i < expected.length; i++) { if (supplied.charAt(i) !== expected.charAt(i)) same = false; }
+        return same ? { ok: true } : { ok: false, reason: 'token did not match this session' };
+    };
+
     MCPPremiereBridge.prototype.processCommandFile = function(filePath) {
         var self = this;
         try {
             var fileContent = fs.readFileSync(filePath, 'utf8');
             var command = JSON.parse(fileContent);
+
+            // AUTHORISE BEFORE EXECUTING. Anything that can write into this directory could
+            // previously run arbitrary ExtendScript inside Premiere, with full project access and
+            // filesystem reach through the cep_js path. A rejected command is answered (so a
+            // legitimate-but-misconfigured caller learns why instead of waiting for a timeout) and
+            // deleted, but never run.
+            var authResult = this.isCommandAuthorized(command);
+            if (!authResult.ok) {
+                this.log('REJECTED command ' + command.id + ': ' + authResult.reason, 'error');
+                try {
+                    this.writeResponseAtomic(filePath.replace('command-', 'response-'), {
+                        success: false,
+                        error: 'Command rejected by the Premiere bridge panel: ' + authResult.reason +
+                               '. The panel requires the per-session token from auth-token.json in the shared temp directory.',
+                        code: 'UNAUTHORIZED',
+                        timestamp: new Date().toISOString()
+                    });
+                } catch (eAuthWrite) {}
+                try { fs.unlinkSync(filePath); } catch (eAuthUnlink) {}
+                return;
+            }
+
             this.log('Processing command: ' + command.id, 'info');
             this.addToQueue(command);
             this.isProcessing = true;

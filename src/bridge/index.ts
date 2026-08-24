@@ -7,7 +7,7 @@
 
 import { Logger } from '../utils/logger.js';
 import { ChildProcess, execSync, spawnSync } from 'child_process';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { promises as fs } from 'fs';
 import { extname, join } from 'path';
 import { createSecureTempDir, validateFilePath } from '../utils/security.js';
@@ -644,6 +644,8 @@ export class PremiereProBridge implements PremiereProTransport {
   private uxpProcess?: ChildProcess;
   private isInitialized = false;
   private sessionId: string;
+  /** Per-session token the panel must echo on every command. Null when it could not be written. */
+  private authToken: string | null = null;
 
   constructor() {
     this.logger = new Logger('PremiereProBridge');
@@ -668,13 +670,119 @@ export class PremiereProBridge implements PremiereProTransport {
     }
   }
 
+  /**
+   * Establish the shared directory, and make it safe to share.
+   *
+   * Three things happen here, and the honest scope of each matters:
+   *
+   * 1. The directory is created 0700 AND, if it already existed, re-chmodded and ownership-checked.
+   *    Creating with a mode does nothing when the directory is already there — which it always is
+   *    when PREMIERE_TEMP_DIR points at a fixed path — so the previous code protected only the
+   *    first run on a machine.
+   * 2. Leftover `command-*.json` files are swept. A stale command file EXECUTES the moment the
+   *    panel next starts, so an abandoned command from a crashed session was a delayed-action
+   *    script with nobody waiting for its result.
+   * 3. A per-session token is written 0600 and required on every command (see writeAuthToken).
+   *
+   * What this does NOT do, stated plainly because the alternative is security theatre: any process
+   * running as this user can read the token file, so the token does not stop a same-user attacker.
+   * Its real jobs are to block BLIND writes into the directory, to keep two concurrent server
+   * instances from consuming each other's commands, and to make the trust boundary explicit. The
+   * protection against other users is the 0700 directory and the ownership check, not the token.
+   */
   private async setupTempDirectory(): Promise<void> {
     try {
-      await fs.mkdir(this.tempDir, { recursive: true, mode: 0o700 }); // Restrict to owner only
-      this.logger.debug(`Secure temp directory created: ${this.tempDir}`);
+      await fs.mkdir(this.tempDir, { recursive: true, mode: 0o700 });
+      // mkdir's mode is ignored for an existing directory, so assert it every time.
+      try {
+        const stats = await fs.stat(this.tempDir);
+        if (stats.uid !== process.getuid?.()) {
+          throw new Error(
+            `Refusing to use ${this.tempDir}: it is owned by uid ${stats.uid}, not by this process (uid ${process.getuid?.()}). ` +
+            'A directory owned by someone else can feed arbitrary ExtendScript into Premiere.',
+          );
+        }
+        const mode = stats.mode & 0o777;
+        if (mode !== 0o700) {
+          await fs.chmod(this.tempDir, 0o700);
+          this.logger.warn(`Tightened ${this.tempDir} from mode ${mode.toString(8)} to 700`);
+        }
+      } catch (statError) {
+        // An ownership mismatch must abort; a stat/chmod failure for any other reason should not
+        // take the bridge down, since the directory may still be perfectly usable.
+        if (statError instanceof Error && statError.message.startsWith('Refusing to use')) throw statError;
+        this.logger.warn(`Could not verify temp directory permissions: ${statError}`);
+      }
+
+      await this.sweepStaleCommands();
+      await this.writeAuthToken();
+      this.logger.debug(`Secure temp directory ready: ${this.tempDir}`);
     } catch (error) {
       this.logger.error('Failed to create temp directory:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Remove `command-*.json` files left behind by an earlier session.
+   *
+   * These are not litter: the panel polls for that exact pattern and runs whatever it finds, so a
+   * command abandoned by a crashed server executes against whatever project happens to be open
+   * when Premiere next starts. Orphaned `response-*` and `.tmp-*` files go too — a stale response
+   * could satisfy a future command that reuses its id (astronomically unlikely with UUIDs, but
+   * free to rule out).
+   */
+  private async sweepStaleCommands(): Promise<void> {
+    try {
+      const entries = await fs.readdir(this.tempDir);
+      const stale = entries.filter((name) =>
+        (name.startsWith('command-') && name.endsWith('.json')) ||
+        (name.startsWith('response-') && name.endsWith('.json')) ||
+        name.startsWith('.tmp-'));
+      for (const name of stale) {
+        try { await fs.unlink(join(this.tempDir, name)); } catch { /* another instance won the race */ }
+      }
+      if (stale.length > 0) {
+        this.logger.warn(
+          `Swept ${stale.length} leftover command/response file(s) from ${this.tempDir}. ` +
+          'A stale command file would have executed when the panel next started.',
+        );
+      }
+    } catch (error) {
+      this.logger.warn(`Could not sweep stale commands: ${error}`);
+    }
+  }
+
+  /**
+   * Write the per-session token the panel must echo back.
+   *
+   * Backwards compatibility is deliberate: the panel enforces a token only when this file EXISTS.
+   * An older server that never writes one keeps working with a new panel, and a new server always
+   * writes one so enforcement is always on in practice. The file is rewritten every session, so a
+   * token cannot outlive the process that issued it.
+   */
+  private async writeAuthToken(): Promise<void> {
+    this.authToken = randomBytes(32).toString('hex');
+    const tokenFile = join(this.tempDir, 'auth-token.json');
+    const payload = JSON.stringify({
+      token: this.authToken,
+      sessionId: this.sessionId,
+      pid: process.pid,
+      issuedAt: new Date().toISOString(),
+    });
+    try {
+      // Write-then-rename so the panel can never read a half-written token, and 0600 so it is not
+      // group- or world-readable even if the directory mode is somehow loosened later.
+      const staging = join(this.tempDir, '.auth-token.tmp');
+      await fs.writeFile(staging, payload, { mode: 0o600 });
+      await fs.chmod(staging, 0o600);
+      await fs.rename(staging, tokenFile);
+      this.logger.debug('Wrote per-session bridge auth token');
+    } catch (error) {
+      // A bridge that cannot authenticate should still run rather than refuse to start; the panel
+      // falls back to accepting untokened commands exactly as it did before.
+      this.logger.warn(`Could not write auth token, continuing without it: ${error}`);
+      this.authToken = null;
     }
   }
 
@@ -811,6 +919,10 @@ export class PremiereProBridge implements PremiereProTransport {
         type: 'cep_js',
         script,
         timeoutMs,
+        // The cep_js path needs the token as much as the ExtendScript one — arguably more, since it
+        // runs in the panel's own JS context with window and filesystem reach. An authenticated
+        // ExtendScript channel beside an unauthenticated CEP one would be no protection at all.
+        token: this.authToken,
         timestamp: new Date().toISOString()
       }));
       await fs.rename(commandStaging, commandFile);
@@ -856,6 +968,10 @@ export class PremiereProBridge implements PremiereProTransport {
         id: commandId,
         script: fullScript,
         timeoutMs: timeoutMs,
+        // Echoed from auth-token.json. The panel rejects a mismatched token when that file exists,
+        // so a process that can write to this directory but has not read the token cannot inject a
+        // command. See setupTempDirectory for the honest limits of that guarantee.
+        token: this.authToken,
         timestamp: new Date().toISOString()
       }));
       await fs.rename(commandStaging, commandFile);
