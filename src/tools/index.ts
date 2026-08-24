@@ -1439,6 +1439,240 @@ export class PremiereProTools {
       { name: 'get_item_xmp_metadata', description: 'Returns the full XMP metadata XML string from a project item. Useful for reading all metadata fields.', inputSchema: z.object({ projectItemId: z.string() }) },
       { name: 'project_media_report', description: 'Returns a comprehensive project media report: total clips, total duration, codec mix, frame rate mix, resolution mix, offline count.', inputSchema: z.object({}) },
       { name: 'get_proxy_status', description: 'For each clip in the active sequence, reports hasProxy and proxyPath.', inputSchema: z.object({ sequenceId: z.string().optional() }) },
+      // ── Gap closure from docs/API-COVERAGE-MATRIX.md ────────────────────────
+      // Each of these exposes a live-reflected API symbol that no tool previously
+      // called. They were found by diffing docs/VERIFIED-API-SURFACE.md against the
+      // catalogue, which is how app.getEnableProxies() should have been caught.
+      {
+        name: 'get_app_state',
+        description: 'Reports application-level state in one call: whether a document is open, the open project view IDs, the current project-panel selection, app version/build/path, and whether proxy playback is enabled. Read-only.',
+        inputSchema: z.object({})
+      },
+      {
+        name: 'refresh_ui',
+        description: 'Forces Premiere to refresh its UI (app.refresh()). Useful after scripted changes that the panels have not picked up. Returns success only if the call did not throw; there is no readback for a UI repaint, so verified is not claimed.',
+        inputSchema: z.object({})
+      },
+      {
+        name: 'get_project_panel_selection',
+        description: 'Returns the items currently selected in the Project panel, for the current view or a named view. Uses app.getProjectViewSelection / getCurrentProjectViewSelection — distinct from get_sequence_selection, which reads the TIMELINE selection.',
+        inputSchema: z.object({
+          viewId: z.string().optional().describe('Project view GUID from get_app_state. Defaults to the current view.')
+        })
+      },
+      {
+        name: 'set_project_panel_selection',
+        description: 'Selects items in the Project panel by nodeId. Verifies by reading the selection back and comparing counts.',
+        inputSchema: z.object({
+          projectItemIds: z.array(z.string()).describe('nodeIds of project items to select'),
+          viewId: z.string().optional().describe('Project view GUID. Defaults to the current view.')
+        })
+      },
+      {
+        name: 'get_project_panel_columns',
+        description: 'Reads the PROJECT-level Project-panel metadata blob (column layout/config) via app.project.getProjectPanelMetadata(). NOTE: this is a different API from get_project_panel_metadata, which despite its name reads a single ITEM\'s metadata via ProjectItem.getProjectMetadata(). Use this one for panel column configuration.',
+        inputSchema: z.object({})
+      },
+      {
+        name: 'set_project_panel_columns',
+        description: 'Writes the PROJECT-level Project-panel metadata blob via app.project.setProjectPanelMetadata(). Reads the blob back and reports verified:false if it did not change. Pass a blob previously obtained from get_project_panel_columns.',
+        inputSchema: z.object({
+          metadata: z.string().describe('The panel metadata blob to write')
+        })
+      },
+      {
+        name: 'get_location_copy_settings',
+        description: 'Reports the project\'s Adobe/shared location copy settings: isAdobeLocationCopyEnabled, isSharedLocationCopyEnabled, and the configured shared location path. These govern where Premiere copies media for collaboration.',
+        inputSchema: z.object({})
+      },
+      {
+        name: 'set_location_copy_settings',
+        description: 'Enables Adobe location copy, enables shared location copy, or disables copy-to-location entirely. Reads the flags back and reports verified accordingly.',
+        inputSchema: z.object({
+          mode: z.enum(['adobe', 'shared', 'disabled']).describe('adobe = enableAdobeLocationCopy, shared = enableSharedLocationCopy, disabled = disableCopyToLocationSetting')
+        })
+      },
+      {
+        name: 'get_color_management_options',
+        description: 'Reports the color-management capabilities and current values for this build: supported graphics white luminance values, current luminance, supported LUT interpolation methods, and the current method. Read this before calling set_graphics_white_luminance or set_lut_interpolation so you pass a value the build accepts.',
+        inputSchema: z.object({})
+      },
+      {
+        name: 'set_log_color_management',
+        description: 'Turns log color management on or off for the project (app.project.setLogColorManagement). There is no getter for this flag, so verified is not claimed — the call is reported as dispatched.',
+        inputSchema: z.object({ enabled: z.boolean() })
+      },
+      {
+        name: 'export_project_as_fcp_xml',
+        description: 'Exports the ENTIRE PROJECT as Final Cut Pro XML via app.project.exportFinalCutProXML(). Distinct from export_as_fcp_xml, which exports a single SEQUENCE via Sequence.exportAsFinalCutProXML(). Verifies the file exists on disk afterwards.',
+        inputSchema: z.object({
+          outputPath: z.string().describe('Absolute path for the .xml file'),
+          suppressUI: z.boolean().optional().describe('Suppress Premiere UI during export. Default true.')
+        })
+      },
+      {
+        name: 'pause_growing_file',
+        description: 'Pauses or resumes Premiere\'s growing-file monitoring (app.project.pauseGrowing). Relevant when ingesting media that is still being written. No getter exists, so verified is not claimed.',
+        inputSchema: z.object({ paused: z.boolean() })
+      },
+      {
+        name: 'get_clip_flags',
+        description: 'Reports the boolean/positional flags on a timeline clip that other tools do not surface: isSpeedReversed, parentTrackIndex, isSelected, isAdjustmentLayer, isMGT, disabled, mediaType, and the clip matchName. Read-only.',
+        inputSchema: z.object({
+          trackIndex: z.number().describe('0-based video track index'),
+          clipIndex: z.number().describe('0-based clip index'),
+          sequenceId: z.string().optional()
+        })
+      },
+      {
+        name: 'get_item_color_management',
+        description: 'Reports a project item\'s full color-management state: original/override color space, the list of valid override color spaces, embedded and input LUT IDs, and whether the media is color managed. Read this before set_clip_color_space so the name you pass is accepted.',
+        inputSchema: z.object({ projectItemId: z.string() })
+      },
+      {
+        name: 'set_item_pixel_aspect_ratio',
+        description: 'Overrides a project item\'s pixel aspect ratio (ProjectItem.setOverridePixelAspectRatio). Takes a numerator and denominator. No direct getter for the override exists, so the call is reported as dispatched rather than verified.',
+        inputSchema: z.object({
+          projectItemId: z.string(),
+          numerator: z.number().describe('PAR numerator, e.g. 1'),
+          denominator: z.number().describe('PAR denominator, e.g. 1')
+        })
+      },
+      {
+        name: 'find_items_matching_media_path',
+        description: 'Finds project items whose media path matches a substring, using ProjectItem.findItemsMatchingMediaPath() on the root item. This is the DOM\'s own matcher; find_items_by_media_path walks the tree manually instead. Useful for locating every item that references one source file.',
+        inputSchema: z.object({
+          pathSubstring: z.string().describe('Substring of the media path to match'),
+          ignoreSubclips: z.boolean().optional().describe('Exclude subclips from results. Default false.')
+        })
+      },
+      {
+        name: 'get_item_video_components',
+        description: 'Returns the ComponentCollection attached to a project item via ProjectItem.videoComponents() — the MASTER clip effects, which are distinct from the per-timeline-clip components that list_clip_effects reports. Master clip effects apply everywhere the item is used.',
+        inputSchema: z.object({ projectItemId: z.string() })
+      },
+      {
+        name: 'find_keyframe_near_time',
+        description: 'Navigates keyframes on an effect parameter: reports the nearest, next, and previous keyframe to a given time, whether a keyframe exists exactly at that time, whether the param has any keyframes, and the interpolated value at that time. Uses ComponentParam findNearestKey/findNextKey/findPreviousKey/keyExistsAtTime/isEmpty/getValueAtTime. Read-only.',
+        inputSchema: z.object({
+          trackIndex: z.number(),
+          clipIndex: z.number(),
+          componentIndex: z.number().describe('Index into clip.components'),
+          paramIndex: z.number().describe('Index into component.properties'),
+          timeSeconds: z.number().describe('Time to search around, in seconds'),
+          sequenceId: z.string().optional()
+        })
+      },
+      {
+        name: 'get_encoder_state',
+        description: 'Reports Adobe Media Encoder integration state: the last export media folder, and the count of available exporters. Read-only; does not launch AME.',
+        inputSchema: z.object({})
+      },
+      {
+        name: 'set_encoder_xmp_options',
+        description: 'Controls whether AME writes XMP metadata embedded in the output file and/or as a sidecar (app.encoder.setEmbeddedXMPEnabled / setSidecarXMPEnabled). No getters exist for these flags, so the calls are reported as dispatched.',
+        inputSchema: z.object({
+          embedded: z.boolean().optional().describe('Embed XMP in the output file'),
+          sidecar: z.boolean().optional().describe('Write a sidecar XMP file')
+        })
+      },
+      {
+        name: 'get_qe_project_info',
+        description: 'QE-level project introspection not available through the documented DOM: project size on disk, the undo stack index, and how many metadata cache entries are still pending indexing. Read-only.',
+        inputSchema: z.object({})
+      },
+      {
+        name: 'create_bin_qe',
+        description: 'Creates a bin via the QE API (qe.project.newBin), optionally a smart bin (newSmartBin). An alternative to create_bin when the DOM path misbehaves; verifies by counting root items before and after.',
+        inputSchema: z.object({
+          name: z.string(),
+          smart: z.boolean().optional().describe('Create a smart bin instead of a regular bin. Default false.')
+        })
+      },
+      {
+        name: 'import_media_qe',
+        description: 'Imports a media file via the QE API (qe.project.import), which accepts an isNumberedStills flag for image sequences. Verifies by counting project items before and after. Alternative route to import_media.',
+        inputSchema: z.object({
+          filePath: z.string().describe('Absolute path to the media file'),
+          numberedStills: z.boolean().optional().describe('Treat as a numbered still sequence. Default false.')
+        })
+      },
+      {
+        name: 'get_qe_sequence_settings',
+        description: 'Reports QE-only sequence settings that the DOM does not expose: the preset list, multicam state, audio frame rate, audio/video display formats, field type, PAR, editing mode GUID, and preview codec. Read-only.',
+        inputSchema: z.object({})
+      },
+      {
+        name: 'get_qe_clip_settings',
+        description: 'Reports QE-only clip settings the DOM does not expose: anti-alias quality, border colour and width, start/end percent, scale-to-frame-size, switch sources, static clip gain, frame blend and time interpolation type. Read-only.',
+        inputSchema: z.object({
+          trackIndex: z.number(),
+          clipIndex: z.number()
+        })
+      },
+      {
+        name: 'set_track_lock_qe',
+        description: 'Locks or unlocks a single track via the QE track API (setLock), verifying against the DOM track isLocked() readback. Complements lock_track.',
+        inputSchema: z.object({
+          trackIndex: z.number(),
+          locked: z.boolean(),
+          audio: z.boolean().optional().describe('Target an audio track instead of video. Default false.')
+        })
+      },
+      {
+        name: 'get_media_processing_status',
+        description: 'Reports whether Premiere is still working on a media item: indexing, audio conforming, audio peak generation, pending state, whether it contains a speech track, its metadata size, and offline state. Use this to tell "playback is slow because Premiere is still ingesting" apart from a real performance problem. Read-only, via QEProjectItem.',
+        inputSchema: z.object({
+          trackIndex: z.number().optional().describe('Video track of a timeline clip whose project item to inspect. Default 0.'),
+          clipIndex: z.number().optional().describe('Clip index on that track. Default 0.')
+        })
+      },
+      {
+        name: 'link_media_qe',
+        description: 'Relinks a project item to a media file via QEProjectItem.linkMedia(). Verifies by reading isOffline() back afterwards. An alternative to relink_media.',
+        inputSchema: z.object({
+          trackIndex: z.number().optional().describe('Video track of the timeline clip. Default 0.'),
+          clipIndex: z.number().optional().describe('Clip index. Default 0.'),
+          mediaPath: z.string().describe('Absolute path to the media file to link'),
+          renameClip: z.boolean().optional().describe('Rename the clip to match the new media. Default false.')
+        })
+      },
+      {
+        name: 'create_proxy_qe',
+        description: 'Creates a proxy for a project item via QEProjectItem.createProxy(). Note that generating a proxy does NOT switch playback to it — call set_proxies_enabled(true) as well, which is the usual reason proxies appear to have no effect.',
+        inputSchema: z.object({
+          trackIndex: z.number().optional().describe('Video track of the timeline clip. Default 0.'),
+          clipIndex: z.number().optional().describe('Clip index. Default 0.'),
+          presetPath: z.string().describe('Absolute path to the ingest/proxy preset (.epr)')
+        })
+      },
+      {
+        name: 'open_item_in_source_qe',
+        description: 'Opens a project item in the Source Monitor via QEProjectItem.openInSource() — a zero-argument QE route that avoids the path handling in open_in_source.',
+        inputSchema: z.object({
+          trackIndex: z.number().optional().describe('Video track of the timeline clip. Default 0.'),
+          clipIndex: z.number().optional().describe('Clip index. Default 0.')
+        })
+      },
+      {
+        name: 'get_production_info',
+        description: 'Reports Productions / Team Projects status using only READ-ONLY qe.ea calls: login state, user identity, whether this is a Production, share/sync command availability, unshared changes, local media presence, archived production list, invite list, admin flag, and remote server build. Does not mutate any cloud state.',
+        inputSchema: z.object({})
+      },
+      {
+        name: 'get_cloud_queue_info',
+        description: 'Reports read-only state from Premiere\'s cloud task queue dispatcher (qe.tqm): active region, supported regions, and the queue list object type. Does NOT log in, create queues, or fetch auth tokens. Exploratory — this surface is undocumented.',
+        inputSchema: z.object({})
+      },
+      {
+        name: 'attach_sequence_custom_property',
+        description: 'Attaches a custom key/value property to a sequence via Sequence.attachCustomProperty(). Useful for stamping pipeline metadata (shot code, version, status) onto a sequence. No getter exists for these properties, so the call is reported as dispatched rather than verified.',
+        inputSchema: z.object({
+          key: z.string(),
+          value: z.string(),
+          sequenceId: z.string().optional()
+        })
+      },
       {
         name: 'get_proxies_enabled',
         description: 'Reports whether Premiere is currently PLAYING BACK proxies (the global Toggle Proxies state). This is separate from whether proxies are attached: a clip can have a proxy attached and still play at full resolution because the toggle is off, which is the usual reason "I made proxies but playback is still slow". Pair with get_proxy_status (attachment) to tell the two apart.',
@@ -3483,6 +3717,39 @@ export class PremiereProTools {
         case 'get_item_xmp_metadata': return await this.getItemXmpMetadata(args.projectItemId);
         case 'project_media_report': return await this.projectMediaReport();
         case 'get_proxy_status': return await this.getProxyStatus(args.sequenceId);
+        case 'get_app_state': return await this.getAppState();
+        case 'refresh_ui': return await this.refreshUi();
+        case 'get_project_panel_selection': return await this.getProjectPanelSelection(args.viewId);
+        case 'set_project_panel_selection': return await this.setProjectPanelSelection(args.projectItemIds, args.viewId);
+        case 'get_project_panel_columns': return await this.getProjectPanelColumns();
+        case 'set_project_panel_columns': return await this.setProjectPanelColumns(args.metadata);
+        case 'get_location_copy_settings': return await this.getLocationCopySettings();
+        case 'set_location_copy_settings': return await this.setLocationCopySettings(args.mode);
+        case 'get_color_management_options': return await this.getColorManagementOptions();
+        case 'set_log_color_management': return await this.setLogColorManagementTool(args.enabled);
+        case 'export_project_as_fcp_xml': return await this.exportProjectAsFcpXml(args.outputPath, args.suppressUI ?? true);
+        case 'pause_growing_file': return await this.pauseGrowingFile(args.paused);
+        case 'get_clip_flags': return await this.getClipFlags(args.trackIndex, args.clipIndex, args.sequenceId);
+        case 'get_item_color_management': return await this.getItemColorManagement(args.projectItemId);
+        case 'set_item_pixel_aspect_ratio': return await this.setItemPixelAspectRatio(args.projectItemId, args.numerator, args.denominator);
+        case 'find_items_matching_media_path': return await this.findItemsMatchingMediaPathTool(args.pathSubstring, args.ignoreSubclips ?? false);
+        case 'get_item_video_components': return await this.getItemVideoComponents(args.projectItemId);
+        case 'find_keyframe_near_time': return await this.findKeyframeNearTime(args.trackIndex, args.clipIndex, args.componentIndex, args.paramIndex, args.timeSeconds, args.sequenceId);
+        case 'get_encoder_state': return await this.getEncoderState();
+        case 'set_encoder_xmp_options': return await this.setEncoderXmpOptions(args.embedded, args.sidecar);
+        case 'get_qe_project_info': return await this.getQeProjectInfo();
+        case 'create_bin_qe': return await this.createBinQe(args.name, args.smart ?? false);
+        case 'import_media_qe': return await this.importMediaQe(args.filePath, args.numberedStills ?? false);
+        case 'get_qe_sequence_settings': return await this.getQeSequenceSettings();
+        case 'get_qe_clip_settings': return await this.getQeClipSettings(args.trackIndex, args.clipIndex);
+        case 'set_track_lock_qe': return await this.setTrackLockQe(args.trackIndex, args.locked, args.audio ?? false);
+        case 'get_media_processing_status': return await this.getMediaProcessingStatus(args.trackIndex ?? 0, args.clipIndex ?? 0);
+        case 'link_media_qe': return await this.linkMediaQe(args.trackIndex ?? 0, args.clipIndex ?? 0, args.mediaPath, args.renameClip ?? false);
+        case 'create_proxy_qe': return await this.createProxyQe(args.trackIndex ?? 0, args.clipIndex ?? 0, args.presetPath);
+        case 'open_item_in_source_qe': return await this.openItemInSourceQe(args.trackIndex ?? 0, args.clipIndex ?? 0);
+        case 'get_production_info': return await this.getProductionInfo();
+        case 'get_cloud_queue_info': return await this.getCloudQueueInfo();
+        case 'attach_sequence_custom_property': return await this.attachSequenceCustomProperty(args.key, args.value, args.sequenceId);
         case 'get_proxies_enabled': return await this.getProxiesEnabled();
         case 'set_proxies_enabled': return await this.setProxiesEnabled(args.enabled);
         case 'timeline_fingerprint': return await this.timelineFingerprint(args.sequenceId);
@@ -15047,6 +15314,691 @@ ${this.buildSequenceResolver(sequenceId)}
         walk(app.project.rootItem);
         return JSON.stringify({success:true,totalItems:total,offlineItems:offline,onlineItems:total-offline,totalDurationSecs:Math.round(totalDur)});
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
+    `);
+  }
+
+  // ── Gap-closure implementations ─────────────────────────────────────────
+  // Every method below exposes a live-reflected symbol that no tool previously called.
+  // Where the API has a getter, the mutation is read back and `verified` reflects the
+  // readback. Where no getter exists the response says so rather than implying proof.
+
+  private async getAppState(): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var o = { success: true };
+        try { o.documentOpen = app.isDocumentOpen(); } catch(e1) { o.documentOpenError = e1.toString(); }
+        try { o.version = String(app.version); } catch(e2) {}
+        try { o.build = String(app.build); } catch(e3) {}
+        try { o.appPath = String(app.path); } catch(e4) {}
+        try { o.proxiesEnabled = app.getEnableProxies() === true; } catch(e5) {}
+        try {
+          var ids = app.getProjectViewIDs();
+          o.projectViewIds = [];
+          if (ids) for (var i = 0; i < ids.length; i++) o.projectViewIds.push(String(ids[i]));
+        } catch(e6) { o.projectViewIdsError = e6.toString(); }
+        try {
+          var sel = app.getCurrentProjectViewSelection();
+          o.currentViewSelectionCount = sel ? sel.length : 0;
+          o.currentViewSelection = [];
+          if (sel) for (var j = 0; j < sel.length; j++) {
+            o.currentViewSelection.push({ name: String(sel[j].name), nodeId: String(sel[j].nodeId) });
+          }
+        } catch(e7) { o.selectionError = e7.toString(); }
+        try { o.openProjectCount = app.projects ? app.projects.numProjects : null; } catch(e8) {}
+        try {
+          // Resolve each view GUID to its project so a caller can map views to documents
+          // without a second round trip.
+          var vids = app.getProjectViewIDs();
+          o.viewProjects = [];
+          if (vids) for (var k = 0; k < vids.length; k++) {
+            try {
+              var pr = app.getProjectFromViewID(String(vids[k]));
+              o.viewProjects.push({ viewId: String(vids[k]), project: pr ? String(pr.name) : null });
+            } catch(e9) {}
+          }
+        } catch(e10) {}
+        try { o.currentProjectIsDocument = app.isDocument(String(app.project.path)); } catch(e11) {}
+        return JSON.stringify(o);
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+  }
+
+  private async refreshUi(): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.refresh();
+        return JSON.stringify({ success: true, verified: false, note: 'app.refresh() dispatched. A UI repaint has no readback, so this is not verified.' });
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+  }
+
+  private async getProjectPanelSelection(viewId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var sel;
+        var usedView = ${viewId ? JSON.stringify(viewId) : 'null'};
+        if (usedView) { sel = app.getProjectViewSelection(usedView); }
+        else { sel = app.getCurrentProjectViewSelection(); }
+        var items = [];
+        if (sel) for (var i = 0; i < sel.length; i++) {
+          var it = sel[i];
+          var e = { name: String(it.name), nodeId: String(it.nodeId) };
+          try { e.treePath = String(it.treePath); } catch(x) {}
+          try { e.isSequence = it.isSequence(); } catch(x) {}
+          items.push(e);
+        }
+        return JSON.stringify({ success: true, viewId: usedView, count: items.length, items: items,
+          note: 'This is the PROJECT PANEL selection. For the timeline selection use get_sequence_selection.' });
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+  }
+
+  private async setProjectPanelSelection(projectItemIds: string[], viewId?: string): Promise<any> {
+    const ids = JSON.stringify(Array.isArray(projectItemIds) ? projectItemIds : []);
+    return await this.bridge.executeScript(`
+      try {
+        var wanted = ${ids};
+        if (!wanted.length) return JSON.stringify({ success: false, error: 'projectItemIds was empty' });
+        function findById(bin, id) {
+          for (var i = 0; i < bin.children.numItems; i++) {
+            var c = bin.children[i];
+            if (String(c.nodeId) === id) return c;
+            if (c.type === 2) { var r = findById(c, id); if (r) return r; }
+          }
+          return null;
+        }
+        var found = [], missing = [];
+        for (var i = 0; i < wanted.length; i++) {
+          var it = findById(app.project.rootItem, String(wanted[i]));
+          if (it) found.push(it); else missing.push(String(wanted[i]));
+        }
+        if (!found.length) return JSON.stringify({ success: false, error: 'None of the given nodeIds were found', missing: missing });
+        var usedView = ${viewId ? JSON.stringify(viewId) : 'null'};
+        if (usedView) { app.setProjectViewSelection(found, usedView); }
+        else {
+          var ids = app.getProjectViewIDs();
+          if (!ids || !ids.length) return JSON.stringify({ success: false, error: 'No project view available to select in' });
+          app.setProjectViewSelection(found, String(ids[0]));
+          usedView = String(ids[0]);
+        }
+        var after = app.getProjectViewSelection(usedView);
+        var afterCount = after ? after.length : 0;
+        return JSON.stringify({ success: true, verified: afterCount === found.length,
+          requested: wanted.length, resolved: found.length, selectedAfter: afterCount,
+          missing: missing, viewId: usedView });
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+  }
+
+  private async getProjectPanelColumns(): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var blob = app.project.getProjectPanelMetadata();
+        var str = blob === null || blob === undefined ? null : String(blob);
+        return JSON.stringify({ success: true, length: str ? str.length : 0, metadata: str,
+          note: 'PROJECT-level panel metadata (column layout). Distinct from get_project_panel_metadata, which reads a single ITEM.' });
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+  }
+
+  private async setProjectPanelColumns(metadata: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var before = '';
+        try { before = String(app.project.getProjectPanelMetadata()); } catch(eb) {}
+        app.project.setProjectPanelMetadata(${JSON.stringify(metadata)});
+        var after = '';
+        try { after = String(app.project.getProjectPanelMetadata()); } catch(ea) {}
+        return JSON.stringify({ success: true, verified: after !== before, changed: after !== before,
+          note: after === before ? 'The blob read back unchanged: the write may have been rejected.' : undefined });
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+  }
+
+  private async getLocationCopySettings(): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var o = { success: true };
+        try { o.adobeLocationCopyEnabled = app.project.isAdobeLocationCopyEnabled(); } catch(e1) { o.adobeError = e1.toString(); }
+        try { o.sharedLocationCopyEnabled = app.project.isSharedLocationCopyEnabled(); } catch(e2) { o.sharedError = e2.toString(); }
+        try { o.sharedLocation = String(app.project.getSharedLocation()); } catch(e3) { o.sharedLocationError = e3.toString(); }
+        return JSON.stringify(o);
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+  }
+
+  private async setLocationCopySettings(mode: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var mode = ${JSON.stringify(mode)};
+        var beforeAdobe = null, beforeShared = null;
+        try { beforeAdobe = app.project.isAdobeLocationCopyEnabled(); } catch(e1) {}
+        try { beforeShared = app.project.isSharedLocationCopyEnabled(); } catch(e2) {}
+        if (mode === 'adobe') { app.project.enableAdobeLocationCopy(true); }
+        else if (mode === 'shared') { app.project.enableSharedLocationCopy(true); }
+        else { app.project.disableCopyToLocationSetting(); }
+        var afterAdobe = null, afterShared = null;
+        try { afterAdobe = app.project.isAdobeLocationCopyEnabled(); } catch(e3) {}
+        try { afterShared = app.project.isSharedLocationCopyEnabled(); } catch(e4) {}
+        var expectAdobe = mode === 'adobe';
+        var expectShared = mode === 'shared';
+        var ok = (afterAdobe === expectAdobe) && (afterShared === expectShared);
+        return JSON.stringify({ success: true, verified: ok, mode: mode,
+          before: { adobe: beforeAdobe, shared: beforeShared },
+          after: { adobe: afterAdobe, shared: afterShared },
+          note: ok ? undefined : 'Flags did not read back as requested; the build may not support this combination.' });
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+  }
+
+  private async getColorManagementOptions(): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var o = { success: true };
+        try { o.currentGraphicsWhiteLuminance = app.project.getGraphicsWhiteLuminance(); } catch(e1) {}
+        try { o.supportedGraphicsWhiteLuminances = String(app.project.getSupportedGraphicsWhiteLuminances()); } catch(e2) { o.supportedLuminanceError = e2.toString(); }
+        try { o.currentLutInterpolationMethod = String(app.project.getLUTInterpolationMethod()); } catch(e3) {}
+        try { o.supportedLutInterpolationMethods = String(app.project.getSupportedLUTInterpolationMethods()); } catch(e4) { o.supportedLutError = e4.toString(); }
+        o.note = 'Pass only values from the supported lists to set_graphics_white_luminance / set_lut_interpolation.';
+        return JSON.stringify(o);
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+  }
+
+  private async setLogColorManagementTool(enabled: boolean): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.project.setLogColorManagement(${enabled});
+        return JSON.stringify({ success: true, verified: false, enabled: ${enabled},
+          note: 'No getter exists for this flag, so the value could not be read back.' });
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+  }
+
+  private async exportProjectAsFcpXml(outputPath: string, suppressUI: boolean): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var out = ${JSON.stringify(outputPath)};
+        var r = app.project.exportFinalCutProXML(out, ${suppressUI});
+        var f = new File(out);
+        if (!f.exists) {
+          return JSON.stringify({ success: false, verified: false,
+            error: 'exportFinalCutProXML() returned ' + String(r) + ' but no file exists at ' + out,
+            outputPath: out });
+        }
+        return JSON.stringify({ success: true, verified: true, outputPath: out, fileSize: f.length,
+          scope: 'entire project',
+          note: 'This exported the whole PROJECT. Use export_as_fcp_xml for a single sequence.' });
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+  }
+
+  private async pauseGrowingFile(paused: boolean): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.project.pauseGrowing(${paused});
+        return JSON.stringify({ success: true, verified: false, paused: ${paused},
+          note: 'No getter exists for growing-file state, so this could not be read back.' });
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+  }
+
+  private async getClipFlags(trackIndex: number, clipIndex: number, seqId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var seq = ${this.buildSeqRes(seqId)};
+        if (!seq) return JSON.stringify({ success: false, error: 'No active sequence' });
+        var track = seq.videoTracks[${trackIndex}];
+        if (!track) return JSON.stringify({ success: false, error: 'Video track ${trackIndex} not found' });
+        var clip = track.clips[${clipIndex}];
+        if (!clip) return JSON.stringify({ success: false, error: 'Clip ${clipIndex} not found on that track' });
+        var o = { success: true, name: String(clip.name) };
+        try { o.isSpeedReversed = clip.isSpeedReversed(); } catch(e1) {}
+        try { o.parentTrackIndex = clip.parentTrackIndex; } catch(e2) {}
+        try { o.isSelected = clip.isSelected(); } catch(e3) {}
+        try { o.isAdjustmentLayer = clip.isAdjustmentLayer(); } catch(e4) {}
+        try { o.isMGT = clip.isMGT(); } catch(e5) {}
+        try { o.disabled = clip.disabled; } catch(e6) {}
+        try { o.mediaType = String(clip.mediaType); } catch(e7) {}
+        try { o.matchName = String(clip.matchName); } catch(e8) {}
+        try { o.speed = clip.getSpeed(); } catch(e9) {}
+        return JSON.stringify(o);
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+  }
+
+  private async getItemColorManagement(projectItemId: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var item = ${this.findItemById(projectItemId)};
+        if (!item) return JSON.stringify({ success: false, error: 'Project item not found: ' + ${JSON.stringify(projectItemId)} });
+        var o = { success: true, name: String(item.name) };
+        try { o.isColorManagedMedia = item.isColorManagedMedia(); } catch(e1) {}
+        try { o.originalColorSpace = String(item.getOriginalColorSpace()); } catch(e2) {}
+        try { o.overrideColorSpace = String(item.getOverrideColorSpace()); } catch(e3) {}
+        try { o.overrideColorSpaceList = String(item.getOverrideColorSpaceList); } catch(e4) {}
+        try { o.colorSpace = String(item.getColorSpace()); } catch(e5) {}
+        try { o.embeddedLUTID = String(item.getEmbeddedLUTID()); } catch(e6) {}
+        try { o.inputLUTID = String(item.getInputLUTID()); } catch(e7) {}
+        try { o.isReference = item.isReference(); } catch(e8) {}
+        try { o.timeDisplayFormat = String(item.timeDisplayFormat); } catch(e9) {}
+        return JSON.stringify(o);
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+  }
+
+  private async setItemPixelAspectRatio(projectItemId: string, numerator: number, denominator: number): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var item = ${this.findItemById(projectItemId)};
+        if (!item) return JSON.stringify({ success: false, error: 'Project item not found' });
+        item.setOverridePixelAspectRatio(${numerator}, ${denominator});
+        return JSON.stringify({ success: true, verified: false, numerator: ${numerator}, denominator: ${denominator},
+          note: 'No getter exists for the PAR override, so the value could not be read back. Use get_footage_interpretation to inspect interpretation.' });
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+  }
+
+  private async findItemsMatchingMediaPathTool(pathSubstring: string, ignoreSubclips: boolean): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var matches = app.project.rootItem.findItemsMatchingMediaPath(${JSON.stringify(pathSubstring)}, ${ignoreSubclips ? 1 : 0});
+        var out = [];
+        if (matches) for (var i = 0; i < matches.length; i++) {
+          var m = matches[i];
+          var e = { name: String(m.name), nodeId: String(m.nodeId) };
+          try { e.mediaPath = String(m.getMediaPath()); } catch(x) {}
+          try { e.treePath = String(m.treePath); } catch(x) {}
+          out.push(e);
+        }
+        return JSON.stringify({ success: true, pathSubstring: ${JSON.stringify(pathSubstring)}, count: out.length, items: out });
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+  }
+
+  private async getItemVideoComponents(projectItemId: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var item = ${this.findItemById(projectItemId)};
+        if (!item) return JSON.stringify({ success: false, error: 'Project item not found' });
+        var coll = item.videoComponents();
+        if (!coll) return JSON.stringify({ success: true, count: 0, components: [], note: 'videoComponents() returned nothing for this item.' });
+        var n = 0;
+        try { n = coll.numItems; } catch(x) {}
+        var comps = [];
+        for (var i = 0; i < n; i++) {
+          var c = coll[i];
+          if (!c) continue;
+          var e = {};
+          try { e.displayName = String(c.displayName); } catch(x) {}
+          try { e.matchName = String(c.matchName); } catch(x) {}
+          try { e.instanceName = String(c.instanceName); } catch(x) {}
+          comps.push(e);
+        }
+        return JSON.stringify({ success: true, count: comps.length, components: comps,
+          note: 'These are MASTER CLIP effects on the project item, which apply everywhere the item is used — distinct from the per-timeline-clip effects list_clip_effects reports.' });
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+  }
+
+  private async findKeyframeNearTime(trackIndex: number, clipIndex: number, componentIndex: number, paramIndex: number, timeSeconds: number, seqId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var seq = ${this.buildSeqRes(seqId)};
+        if (!seq) return JSON.stringify({ success: false, error: 'No active sequence' });
+        var track = seq.videoTracks[${trackIndex}];
+        var clip = track && track.clips[${clipIndex}];
+        if (!clip) return JSON.stringify({ success: false, error: 'Clip not found' });
+        var comp = clip.components[${componentIndex}];
+        if (!comp) return JSON.stringify({ success: false, error: 'Component ${componentIndex} not found on clip' });
+        var prop = comp.properties[${paramIndex}];
+        if (!prop) return JSON.stringify({ success: false, error: 'Param ${paramIndex} not found on component' });
+        var t = new Time(); t.seconds = ${timeSeconds};
+        var o = { success: true, component: String(comp.displayName), param: String(prop.displayName), timeSeconds: ${timeSeconds} };
+        try { o.keyframesSupported = prop.areKeyframesSupported(); } catch(x) {}
+        try { o.isTimeVarying = prop.isTimeVarying(); } catch(x) {}
+        try { o.isEmpty = prop.isEmpty(); } catch(x) {}
+        try { o.keyExistsAtTime = prop.keyExistsAtTime(t); } catch(x) {}
+        try { var nk = prop.findNearestKey(t, 1); o.nearestKeySeconds = nk ? nk.seconds : null; } catch(x) { o.nearestKeyError = String(x); }
+        try { var nx = prop.findNextKey(t); o.nextKeySeconds = nx ? nx.seconds : null; } catch(x) {}
+        try { var pv = prop.findPreviousKey(t); o.previousKeySeconds = pv ? pv.seconds : null; } catch(x) {}
+        try { o.valueAtTime = prop.getValueAtTime(t); } catch(x) {}
+        try { o.colorValueAtTime = prop.getColorValue ? prop.getColorValue() : null; } catch(x) {}
+        return JSON.stringify(o);
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+  }
+
+  private async getEncoderState(): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var o = { success: true };
+        try { o.lastExportMediaFolder = String(app.encoder.lastExportMediaFolder); } catch(e1) { o.lastFolderError = e1.toString(); }
+        try { var ex = app.encoder.getExporters(); o.exporterCount = ex ? ex.length : 0; } catch(e2) { o.exporterError = e2.toString(); }
+        o.note = 'Read-only. Does not launch Adobe Media Encoder.';
+        return JSON.stringify(o);
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+  }
+
+  private async setEncoderXmpOptions(embedded?: boolean, sidecar?: boolean): Promise<any> {
+    if (embedded === undefined && sidecar === undefined) {
+      return { success: false, error: 'Pass at least one of embedded or sidecar.' };
+    }
+    return await this.bridge.executeScript(`
+      try {
+        var applied = [];
+        ${embedded !== undefined ? `app.encoder.setEmbeddedXMPEnabled(${embedded}); applied.push('embedded=${embedded}');` : ''}
+        ${sidecar !== undefined ? `app.encoder.setSidecarXMPEnabled(${sidecar}); applied.push('sidecar=${sidecar}');` : ''}
+        return JSON.stringify({ success: true, verified: false, applied: applied,
+          note: 'No getters exist for the XMP flags, so these could not be read back.' });
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+  }
+
+  private async getQeProjectInfo(): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var o = { success: true };
+        try { o.sizeOnDiskBytes = String(qe.project.sizeOnDisk()); } catch(e1) { o.sizeError = e1.toString(); }
+        try { o.undoStackIndex = qe.project.undoStackIndex(); } catch(e2) { o.undoError = e2.toString(); }
+        try { o.remainingMetadataCacheIndexCount = qe.project.getRemainingMetadataCacheIndexCount(); } catch(e3) { o.metaCacheError = e3.toString(); }
+        try { var b = qe.project.getBinAt(0); o.firstBinType = b ? String(b.reflect.name) : null; } catch(e4) { o.firstBinError = e4.toString(); }
+        try { var si = qe.project.getSequenceItemAt(0); o.firstSequenceItem = si ? String(si.name) : null; } catch(e5) { o.seqItemError = e5.toString(); }
+        try {
+          // Round-trip a known nodeId through findItemByID so callers know whether QE
+          // id lookup works on this build before relying on it.
+          var probeId = null;
+          var root = app.project.rootItem;
+          if (root.children.numItems > 0) probeId = String(root.children[0].nodeId);
+          if (probeId) {
+            var byId = qe.project.findItemByID(probeId);
+            o.findItemByIdWorks = byId ? true : false;
+            o.findItemByIdSample = byId ? String(byId.name) : null;
+          }
+        } catch(e6) { o.findItemByIdError = e6.toString(); }
+        o.note = 'remainingMetadataCacheIndexCount > 0 means Premiere is still indexing media, which can explain sluggish behaviour.';
+        return JSON.stringify(o);
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+  }
+
+  private async createBinQe(name: string, smart: boolean): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var before = app.project.rootItem.children.numItems;
+        var r = ${smart} ? qe.project.newSmartBin(${JSON.stringify(name)}, '') : qe.project.newBin(${JSON.stringify(name)});
+        var after = app.project.rootItem.children.numItems;
+        if (after <= before) {
+          return JSON.stringify({ success: false, verified: false,
+            error: (${smart} ? 'newSmartBin' : 'newBin') + '() returned ' + String(r) + ' but the root item count did not increase.',
+            before: before, after: after });
+        }
+        return JSON.stringify({ success: true, verified: true, name: ${JSON.stringify(name)}, smart: ${smart}, before: before, after: after });
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+  }
+
+  private async importMediaQe(filePath: string, numberedStills: boolean): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var f = new File(${JSON.stringify(filePath)});
+        if (!f.exists) return JSON.stringify({ success: false, error: 'File does not exist: ' + ${JSON.stringify(filePath)} });
+        var before = app.project.rootItem.children.numItems;
+        var r = qe.project.import(${JSON.stringify(filePath)}, ${numberedStills});
+        var after = app.project.rootItem.children.numItems;
+        if (after <= before) {
+          return JSON.stringify({ success: false, verified: false,
+            error: 'qe.project.import() returned ' + String(r) + ' but no new project item appeared.',
+            before: before, after: after });
+        }
+        return JSON.stringify({ success: true, verified: true, filePath: ${JSON.stringify(filePath)},
+          numberedStills: ${numberedStills}, itemsAdded: after - before });
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+  }
+
+  private async getQeSequenceSettings(): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var seq = qe.project.getActiveSequence();
+        if (!seq) return JSON.stringify({ success: false, error: 'No active sequence' });
+        var o = { success: true, name: String(seq.name) };
+        try { o.editingModeGUID = String(seq.editingMode); } catch(x) {}
+        try { o.videoFrameRate = String(seq.videoFrameRate); } catch(x) {}
+        try { o.audioFrameRate = String(seq.audioFrameRate); } catch(x) {}
+        try { o.videoDisplayFormat = String(seq.videoDisplayFormat); } catch(x) {}
+        try { o.audioDisplayFormat = String(seq.audioDisplayFormat); } catch(x) {}
+        try { o.fieldType = String(seq.fieldType); } catch(x) {}
+        try { o.par = String(seq.par); } catch(x) {}
+        try { o.multicam = String(seq.multicam); } catch(x) {}
+        try { o.numVideoTracks = seq.numVideoTracks; } catch(x) {}
+        try { o.numAudioTracks = seq.numAudioTracks; } catch(x) {}
+        try { o.previewPresetPath = String(seq.previewPresetPath); } catch(x) {}
+        try { o.previewPresetCodec = String(seq.previewPresetCodec); } catch(x) {}
+        try { o.useMaxRenderQuality = seq.useMaxRenderQuality; } catch(x) {}
+        try { o.useMaxBitDepth = seq.useMaxBitDepth; } catch(x) {}
+        try { o.isOpen = seq.isOpen(); } catch(x) {}
+        try { var pl = String(seq.presetList); o.presetListSample = pl.length > 200 ? pl.substring(0, 200) : pl; } catch(x) {}
+        return JSON.stringify(o);
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+  }
+
+  private async getQeClipSettings(trackIndex: number, clipIndex: number): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var seq = qe.project.getActiveSequence();
+        if (!seq) return JSON.stringify({ success: false, error: 'No active sequence' });
+        var track = seq.getVideoTrackAt(${trackIndex});
+        if (!track) return JSON.stringify({ success: false, error: 'QE video track ${trackIndex} not found' });
+        var clip = track.getItemAt(${clipIndex});
+        if (!clip) return JSON.stringify({ success: false, error: 'QE clip ${clipIndex} not found' });
+        var o = { success: true };
+        try { o.name = String(clip.name); } catch(x) {}
+        try { o.antiAliasQuality = String(clip.antiAliasQuality); } catch(x) {}
+        try { o.borderColor = String(clip.borderColor); } catch(x) {}
+        try { o.borderWidth = String(clip.borderWidth); } catch(x) {}
+        try { o.startPercent = String(clip.startPercent); } catch(x) {}
+        try { o.endPercent = String(clip.endPercent); } catch(x) {}
+        try { o.scaleToFrameSize = String(clip.scaleToFrameSize); } catch(x) {}
+        try { o.switchSources = String(clip.switchSources); } catch(x) {}
+        try { o.staticClipGain = String(clip.staticClipGain); } catch(x) {}
+        try { o.frameBlend = String(clip.frameBlend); } catch(x) {}
+        try { o.timeInterpolationType = String(clip.timeInterpolationType); } catch(x) {}
+        try { o.speed = String(clip.speed); } catch(x) {}
+        try { o.reversed = String(clip.reversed); } catch(x) {}
+        try { o.multicamEnabled = String(clip.multicamEnabled); } catch(x) {}
+        try { o.numComponents = clip.numComponents; } catch(x) {}
+        return JSON.stringify(o);
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+  }
+
+  private async setTrackLockQe(trackIndex: number, locked: boolean, audio: boolean): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var seq = qe.project.getActiveSequence();
+        if (!seq) return JSON.stringify({ success: false, error: 'No active sequence' });
+        var qeTrack = ${audio} ? seq.getAudioTrackAt(${trackIndex}) : seq.getVideoTrackAt(${trackIndex});
+        if (!qeTrack) return JSON.stringify({ success: false, error: 'QE track ${trackIndex} not found' });
+        var domSeq = app.project.activeSequence;
+        var domTrack = ${audio} ? domSeq.audioTracks[${trackIndex}] : domSeq.videoTracks[${trackIndex}];
+        var before = null;
+        try { before = domTrack.isLocked(); } catch(x) {}
+        qeTrack.setLock(${locked});
+        var after = null;
+        try { after = domTrack.isLocked(); } catch(x) {}
+        return JSON.stringify({ success: true, verified: after === ${locked}, requested: ${locked},
+          before: before, after: after, audio: ${audio},
+          note: after === ${locked} ? undefined : 'Lock state did not read back as requested.' });
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+  }
+
+  private async getMediaProcessingStatus(trackIndex: number, clipIndex: number): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var seq = qe.project.getActiveSequence();
+        if (!seq) return JSON.stringify({ success: false, error: 'No active sequence' });
+        var track = seq.getVideoTrackAt(${trackIndex});
+        var clip = track && track.getItemAt(${clipIndex});
+        if (!clip) return JSON.stringify({ success: false, error: 'QE clip not found at track ${trackIndex} clip ${clipIndex}' });
+        var pi = clip.getProjectItem();
+        if (!pi) return JSON.stringify({ success: false, error: 'getProjectItem() returned nothing' });
+        var o = { success: true };
+        try { o.name = String(pi.name); } catch(x) {}
+        try { o.isIndexing = pi.isIndexing(); } catch(x) { o.isIndexingError = String(x); }
+        try { o.isAudioConforming = pi.isAudioConforming(); } catch(x) {}
+        try { o.isAudioPeakGenerating = pi.isAudioPeakGenerating(); } catch(x) {}
+        try { o.isPending = pi.isPending(); } catch(x) {}
+        try { o.isOffline = pi.isOffline(); } catch(x) {}
+        try { o.containsSpeechTrack = pi.containsSpeechTrack(); } catch(x) {}
+        try { o.metadataSize = pi.getMetadataSize(); } catch(x) {}
+        var busy = (o.isIndexing === true) || (o.isAudioConforming === true) || (o.isAudioPeakGenerating === true) || (o.isPending === true);
+        o.stillProcessing = busy;
+        o.note = busy
+          ? 'Premiere is still processing this media (indexing/conforming/peaks). Sluggish playback now is expected and should improve when it finishes.'
+          : 'No background processing in progress for this item.';
+        return JSON.stringify(o);
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+  }
+
+  private async linkMediaQe(trackIndex: number, clipIndex: number, mediaPath: string, renameClip: boolean): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var f = new File(${JSON.stringify(mediaPath)});
+        if (!f.exists) return JSON.stringify({ success: false, error: 'Media file does not exist: ' + ${JSON.stringify(mediaPath)} });
+        var seq = qe.project.getActiveSequence();
+        var track = seq && seq.getVideoTrackAt(${trackIndex});
+        var clip = track && track.getItemAt(${clipIndex});
+        if (!clip) return JSON.stringify({ success: false, error: 'QE clip not found' });
+        var pi = clip.getProjectItem();
+        if (!pi) return JSON.stringify({ success: false, error: 'getProjectItem() returned nothing' });
+        var offlineBefore = null;
+        try { offlineBefore = pi.isOffline(); } catch(x) {}
+        pi.linkMedia(${JSON.stringify(mediaPath)}, ${renameClip});
+        var offlineAfter = null;
+        try { offlineAfter = pi.isOffline(); } catch(x) {}
+        return JSON.stringify({ success: true, verified: offlineAfter === false,
+          mediaPath: ${JSON.stringify(mediaPath)}, offlineBefore: offlineBefore, offlineAfter: offlineAfter,
+          note: offlineAfter === false ? undefined : 'Item still reports offline after linkMedia(); the path may not match the expected media.' });
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+  }
+
+  private async createProxyQe(trackIndex: number, clipIndex: number, presetPath: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var f = new File(${JSON.stringify(presetPath)});
+        if (!f.exists) return JSON.stringify({ success: false, error: 'Preset file does not exist: ' + ${JSON.stringify(presetPath)} });
+        var seq = qe.project.getActiveSequence();
+        var track = seq && seq.getVideoTrackAt(${trackIndex});
+        var clip = track && track.getItemAt(${clipIndex});
+        if (!clip) return JSON.stringify({ success: false, error: 'QE clip not found' });
+        var pi = clip.getProjectItem();
+        if (!pi) return JSON.stringify({ success: false, error: 'getProjectItem() returned nothing' });
+        var r = pi.createProxy(${JSON.stringify(presetPath)}, '');
+        var proxiesOn = null;
+        try { proxiesOn = app.getEnableProxies() === true; } catch(x) {}
+        return JSON.stringify({ success: true, verified: false, dispatched: String(r),
+          proxyPlaybackEnabled: proxiesOn,
+          note: proxiesOn
+            ? 'Proxy creation dispatched to Media Encoder. Proxy playback is already enabled.'
+            : 'Proxy creation dispatched, but proxy PLAYBACK is currently OFF — call set_proxies_enabled(true) or the finished proxy will be ignored.' });
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+  }
+
+  private async openItemInSourceQe(trackIndex: number, clipIndex: number): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var seq = qe.project.getActiveSequence();
+        var track = seq && seq.getVideoTrackAt(${trackIndex});
+        var clip = track && track.getItemAt(${clipIndex});
+        if (!clip) return JSON.stringify({ success: false, error: 'QE clip not found' });
+        var pi = clip.getProjectItem();
+        if (!pi) return JSON.stringify({ success: false, error: 'getProjectItem() returned nothing' });
+        pi.openInSource();
+        var loaded = null;
+        try { var li = app.sourceMonitor.getProjectItem(); loaded = li ? String(li.name) : null; } catch(x) {}
+        return JSON.stringify({ success: true, verified: loaded !== null, loadedInSource: loaded });
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+  }
+
+  private async getProductionInfo(): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        if (typeof qe.ea === 'undefined' || !qe.ea) {
+          return JSON.stringify({ success: false, error: 'qe.ea is unavailable on this build' });
+        }
+        var o = { success: true };
+        try { o.isLoggedIn = qe.ea.isLoggedIn(); } catch(x) { o.loginError = String(x); }
+        try { o.userEmail = String(qe.ea.getUserEmail()); } catch(x) {}
+        try { o.username = String(qe.ea.getUsername()); } catch(x) {}
+        try { o.isAdministrator = qe.ea.isAdministrator; } catch(x) {}
+        try { o.isCollaborationOnly = qe.ea.isCollaborationOnly(); } catch(x) {}
+        try { o.isHostedCollaborationOnly = qe.ea.isHostedCollaborationOnly(); } catch(x) {}
+        try { o.canShare = qe.ea.canShare(); } catch(x) {}
+        try { o.isShareCommandEnabled = qe.ea.isShareCommandEnabled(); } catch(x) {}
+        try { o.isSyncCommandEnabled = qe.ea.isSyncCommandEnabled(); } catch(x) {}
+        try { o.hasUnsharedChanges = qe.ea.doesProjectHaveUnsharedChanges(); } catch(x) {}
+        try { o.hasLocalMedia = qe.ea.doesEditingSessionHaveLocalMedia(); } catch(x) {}
+        try { o.sessionSyncStatus = String(qe.ea.getSessionSyncStatus()); } catch(x) {}
+        try { o.productionList = String(qe.ea.getProductionList()); } catch(x) {}
+        try { o.archivedProductionList = String(qe.ea.getArchivedProductionList()); } catch(x) {}
+        try { o.inviteList = String(qe.ea.getInviteList()); } catch(x) {}
+        try { o.creativeCloudIdentity = String(qe.ea.getCreativeCloudIdentity()); } catch(x) {}
+        try { o.remoteServerBuildVersion = String(qe.ea.getRemoteServerBuildVersion()); } catch(x) {}
+        try { o.convertToProductionRunning = qe.ea.isConvertProjectIntoProductionRunning(); } catch(x) {}
+        try { o.convertToProjectRunning = qe.ea.isConvertProductionIntoProjectRunning(); } catch(x) {}
+        o.note = 'Read-only. No cloud state was modified.';
+        return JSON.stringify(o);
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+  }
+
+  private async getCloudQueueInfo(): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        if (typeof qe.tqm === 'undefined' || !qe.tqm) {
+          return JSON.stringify({ success: false, error: 'qe.tqm is unavailable on this build' });
+        }
+        var o = { success: true };
+        try { o.dispatcherType = String(qe.tqm.reflect.name); } catch(x) {}
+        try { o.activeRegion = String(qe.tqm.getActiveRegion()); } catch(x) { o.activeRegionError = String(x); }
+        try { o.supportedRegions = String(qe.tqm.getSupportedRegionList()); } catch(x) { o.regionsError = String(x); }
+        try { var q = qe.tqm.getQueueListObject(); o.queueListType = q ? String(q.reflect.name) : null; } catch(x) { o.queueListError = String(x); }
+        o.note = 'Read-only exploration of an undocumented surface. No login performed, no queue created, no auth token fetched.';
+        return JSON.stringify(o);
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+  }
+
+  private async attachSequenceCustomProperty(key: string, value: string, seqId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var seq = ${this.buildSeqRes(seqId)};
+        if (!seq) return JSON.stringify({ success: false, error: 'No active sequence' });
+        seq.attachCustomProperty(${JSON.stringify(key)}, ${JSON.stringify(value)});
+        return JSON.stringify({ success: true, verified: false, sequenceName: String(seq.name),
+          key: ${JSON.stringify(key)}, value: ${JSON.stringify(value)},
+          note: 'No getter exists for custom properties, so this could not be read back.' });
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
     `);
   }
 
