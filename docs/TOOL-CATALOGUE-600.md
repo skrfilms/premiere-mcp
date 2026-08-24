@@ -488,27 +488,47 @@ render-truth loop and per-build QE probing.**
 
 ---
 
+## FORMER WALL — items broken out of the wall by live probing (2026-08-23)
+
+These were listed as "walled" in v1. Live probing on 26.3.2 confirmed scriptable paths exist.
+Each becomes a real tool.
+
+| Was walled | What we found | New tool(s) |
+|---|---|---|
+| **Morph Cut** | `qe.project.getVideoTransitionByName('Morph Cut')` returns a live QEVideoTransition object. `clip.addTransition()` accepts it. Analysis triggers on `seq.renderPreview()`. | `apply_morph_cut` (T1 QE) |
+| **Render previews / Render & Replace analog** | QE sequence exposes `renderAll()`, `renderPreview()`, `renderAudio()` (all zero-arg, confirmed live); `getExportComplete()` for polling; `setUseMaxRenderQuality(bool)`, `setPreviewPresetPath(path)`, `setPreviewFrameSize(w,h)`, `deletePreviewFiles()`. DOM adds `renderVideoFrameAtTime()` (single-frame render — arg format TBD). | `render_sequence_previews`, `render_all_unrendered`, `render_audio`, `delete_preview_files`, `set_preview_quality`, `render_single_frame` (T1 QE+DOM) |
+| **Renderer control** | `qe.project.setRenderer(name)`, `qe.project.getRendererNames()` confirmed present. | `set_renderer`, `list_renderers` (T1 QE) |
+| **Lumetri HSL Secondary / color-keyed masking** | ALL Lumetri component params confirmed readable AND writable via `setValue`: HSL Secondary `Set color`, `Add color`, `Remove color`, `Show Mask`, `Invert Mask`, `Denoise`, `Blur`, correction params (Temperature/Tint/Contrast/Sharpen/Saturation). Live-verified: `setValue(!val, true)` on `Show Mask` → changed=true → restored. | Extends `lumetri_hsl_key_set` (T1) |
+| **AE composition import** | `app.project.importAEComps(path, compNames[])` and `importAllAEComps(path)` confirmed present on DOM project AND qe.project. | `import_ae_comps` (T1) |
+
+---
+
 ## THE HONEST WALL — what an editor does that NO script surface reaches
 
 Published limitations, not hidden ones. Each gets a doc entry and, where possible, an
 honest alternative. **This list is itself a differentiator — nobody else publishes one.**
 
+**Probing methodology:** every item below was tested with live reflection against 26.3.2.
+"Walled" means we checked DOM, QE, and file paths and found no scriptable route.
+
 | Editor function | Why it's walled | Honest alternative |
 |---|---|---|
-| **Masks & mask tracking** on effects | Mask objects not exposed in DOM or QE | `mosaic_region` crop-duplicate technique (limits stated); AE round-trip note |
-| **Morph Cut** interior params / analysis | Analysis not scriptable | Apply-and-pixel-verify only |
-| **Essential Sound panel** auto-tagging/analysis | Panel logic not exposed | Direct effect-chain tools (EQ/compressor/denoise) achieve the same result |
-| **Render & Replace** | Not in any API | `render_and_replace` via ffmpeg bake + relink (documented as our workaround) |
-| **Productions / Team Projects** | Zero scripting surface | Checkpoint + export_as_project versioning |
-| **Clipboard** (copy/paste clips/attributes) | No scripting access | `copy_effects_between_clips`, `match_transform`, `copy_grade` replicate the common cases |
-| **Text/graphics advanced styling** (tracking, gradients, shape layers) | Essential Graphics authoring not exposed | MOGRT param control + rendered-PNG import path |
-| **Caption full styling** | Caption style objects partially opaque | Probe + honest partial; burn-in path via SRT→styled graphics |
-| **UI state** (track heights, panel layout beyond workspaces, monitor zoom) | UI-only | `set_workspace` covers the real need |
-| **Speech-to-Text (native)** | Not scriptable | `transcribe_to_srt` (our own Whisper path) — already better |
+| **Free-draw shape masks on effects** (per-effect ellipse/rectangle/bezier masks in Effect Controls) | Mask geometry is NOT exposed as component params. `getVideoEffectByName('Mask')` and 'Mask2' resolve to Lumetri Color (QE naming alias). The per-effect draw-mask shape vertices have no DOM/QE surface. Live-probed: no blank param contains vertex data. | `track_matte_setup` (luma/alpha matte via any clip or solid = fully scriptable polygon); `crop_clip` for rectangles; `lumetri_hsl_key_set` for color isolation; `ultra_key_setup` for green screen. |
+| **Mask tracking** (motion-tracked masks) | No tracking surface in any scripting layer | Keyframed position ramp on the matte source clip (approximates for slow motion) |
+| **4-Point / 8-Point Garbage Matte** | Not found in QE effect list on 26.3.2. May have been removed or renamed. | `track_matte_setup` + solid clip positioned programmatically |
+| **Essential Sound panel** auto-tagging | Panel logic not exposed via DOM or QE (confirmed: audio track + clip reflect show no tag/dialog/essential methods) | Direct effect-chain tools: `parametric_eq_set`, `compressor_set`, `limiter_set`, `denoise_clip` — the same underlying effects |
+| **Render & Replace** (bake-to-media in place) | QE `renderPreview()` writes to preview cache, not source media. No bake-to-source-media method found. DOM project methods show no renderAndReplace. | `bake_speed_change` (ffmpeg bake + relink); `render_sequence_previews` (cache render) achieves playback smoothness without baking |
+| **Productions / Team Projects** | Zero scripting surface | Checkpoint + `export_as_project` versioning |
+| **Clipboard** (copy/paste clips/attributes) | `app.reflect.methods` shows no clipboard/paste/copy methods | `copy_effects_between_clips`, `match_transform`, `copy_grade` replicate all common use cases |
+| **Text/graphics advanced styling** (tracking, gradients, shape layers in Essential Graphics) | Authoring panel not exposed | MOGRT param control (`set_mogrt_text`, `set_mogrt_param`) + rendered-PNG import; `lower_third_preset` covers the 90% case |
+| **Caption full styling** | Caption style objects partially opaque at DOM level | Honest partial probe + burn-in path via SRT→styled graphics layer |
+| **UI state** (track heights, panel layout, monitor zoom) | UI-only, no DOM/QE surface | `set_workspace` covers the real need |
+| **Speech-to-Text (native Premiere)** | Not scriptable | Our `transcribe_to_srt` (Whisper path) is already better |
 | **Auto Reframe per-clip adjustments** | Only sequence-level exposed | `auto_reframe_sequence` + manual position keyframes |
-| **Merged clips creation** | Not scriptable | `align_audio_by_waveform` + link — same outcome |
-| **Effect stack reorder** | Not in DOM; QE unproven | `qe_capability_probe` will test per build; else remove+re-add in order |
-| **Time Remap keyframes** | Component exposed but keyframe write unproven | T3 probe; `speed_ramp_bake` guarantees the result today |
+| **Merged clips creation** | ProjectItem.isMergedClip() exists (detection only); no creation method | `align_audio_by_waveform` + `link_audio_video` achieves the same sync result |
+| **Effect stack reorder** | Not in DOM; QE has no reorder method on clip reflect | Remove + re-add in desired order (destructive but correct; keyframes are lost) |
+| **Time Remap keyframes** (variable speed) | The Time Remapping component exists but keyframe write is unproven on 26.3.2 | T3 probe planned; `speed_ramp_bake` (ffmpeg) guarantees the visual result today |
+| **renderVideoFrameAtTime** correct call | Exists on DOM sequence, returns null (no error) but arg format for path/colorspace not yet cracked | Currently uses `capture_program_output` (render-truth capture) for single frames |
 
 ---
 
