@@ -19300,16 +19300,25 @@ ${this.buildSequenceResolver(sequenceId)}
         var clip = track && track.clips[${clipIndex}];
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         var before = track.clips.numItems;
-        seq.setSelection([clip]);
-        seq.remove(seq.getSelection(), false, false);
+        var wasMogrt = false; try { wasMogrt = !!clip.isMGT(); } catch (eM) {}
+        // Sequence has NO remove() method — remove() lives on TrackItem (confirmed by reflection
+        // on 26.3.2). The old call raised "seq.remove is not a function" every time, and the
+        // dead-end fallback below it built two Time objects and then did nothing with them, so
+        // the tool reported success:true with verified:false rather than failing.
+        var removed = false, err = null;
+        try { clip.remove(false, false); removed = true; } catch (eR) { err = eR.toString(); }
         var after = track.clips.numItems;
-        if (after >= before) {
-          clip.setSelected(true, true);
-          // fallback: use remove_from_timeline approach
-          var inT = new Time(); inT.ticks = String(clip.start.ticks);
-          var outT = new Time(); outT.ticks = String(clip.end.ticks);
+        if (!removed || after >= before) {
+          return JSON.stringify({
+            success: false, verified: true,
+            error: err ? ('TrackItem.remove() threw: ' + err) : 'TrackItem.remove() ran but the clip is still on the track.',
+            clipsBefore: before, clipsAfter: after, wasMogrt: wasMogrt
+          });
         }
-        return JSON.stringify({success:true,verified:after<before,clipsBefore:before,clipsAfter:after});
+        return JSON.stringify({
+          success: true, verified: true, clipsBefore: before, clipsAfter: after, wasMogrt: wasMogrt,
+          note: wasMogrt ? null : 'This clip was not a Motion Graphics Template; it was removed anyway.'
+        });
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
@@ -19411,21 +19420,57 @@ ${this.buildSequenceResolver(sequenceId)}
         var newItem = __findProjectItem(${JSON.stringify(newItemId)});
         if (!newItem) return JSON.stringify({success:false,error:'New item not found'});
         var replaced = 0;
+        var failures = [];
         var seqs = ${seqId ? `(function(){ var arr=[]; var ss=app.project.sequences; for(var i=0;i<ss.numSequences;i++){if(ss[i].sequenceID===${JSON.stringify(seqId)})arr.push(ss[i]);} return arr; })()` : `(function(){ var arr=[]; var ss=app.project.sequences; for(var i=0;i<ss.numSequences;i++) arr.push(ss[i]); return arr; })()`};
         for (var s=0;s<seqs.length;s++) {
           var seq = seqs[s];
           for (var t=0;t<seq.videoTracks.numTracks;t++) {
             var track = seq.videoTracks[t];
+            // TrackItem has NO replaceWithClip() — the old call raised
+            // "clip.replaceWithClip is not a function" and the whole tool failed. There is no
+            // DOM replace, so do it as remove + overwriteClip at the same start time.
+            //
+            // Targets are collected BEFORE mutating: removing a clip reshuffles
+            // track.clips indices, so mutating inside the walk skips clips.
+            var targets = [];
             for (var c=0;c<track.clips.numItems;c++) {
               var clip = track.clips[c];
-              if (clip.projectItem && clip.projectItem.nodeId === ${JSON.stringify(oldItemId)}) {
-                clip.replaceWithClip(newItem, 0, false);
-                replaced++;
+              if (clip.projectItem && String(clip.projectItem.nodeId) === ${JSON.stringify(oldItemId)}) {
+                targets.push(String(clip.start.ticks));
               }
+            }
+            for (var ti2=0; ti2<targets.length; ti2++) {
+              var atTicks = targets[ti2];
+              // Re-find by start time, because the previous iteration shifted the collection.
+              var victim = null;
+              for (var c2=0;c2<track.clips.numItems;c2++) {
+                if (String(track.clips[c2].start.ticks) === atTicks) { victim = track.clips[c2]; break; }
+              }
+              if (!victim) { failures.push('no clip at ' + atTicks); continue; }
+              var t = new Time(); t.ticks = atTicks;
+              try {
+                victim.remove(false, false);
+                track.overwriteClip(newItem, t);
+              } catch (eRep) { failures.push(atTicks + ': ' + eRep.toString()); continue; }
+              // Verify the replacement is actually there and references the NEW item.
+              var ok = false;
+              for (var c3=0;c3<track.clips.numItems;c3++) {
+                var cand = track.clips[c3];
+                if (String(cand.start.ticks) !== atTicks) continue;
+                try { ok = String(cand.projectItem.nodeId) === String(newItem.nodeId); } catch (eV) {}
+                break;
+              }
+              if (ok) replaced++; else failures.push(atTicks + ': replacement not present after overwrite');
             }
           }
         }
-        return JSON.stringify({success:true,replaced:replaced,oldItemId:${JSON.stringify(oldItemId)},newItemId:${JSON.stringify(newItemId)}});
+        return JSON.stringify({
+          success: replaced > 0 || failures.length === 0,
+          verified: true,
+          replaced: replaced, failures: failures,
+          oldItemId:${JSON.stringify(oldItemId)}, newItemId:${JSON.stringify(newItemId)},
+          error: failures.length ? ('Some clips could not be replaced: ' + failures.join(' | ')) : null
+        });
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
