@@ -4,7 +4,7 @@
 
 **Operate local Adobe Premiere Pro projects through MCP.**
 
-638 implemented tools — **97 exposed by default**, all 638 one env var away — plus 13 context resources and 10 guided prompts for Codex, Claude Code, Claude Desktop, and other MCP clients. CEP is the supported production bridge; UXP remains experimental.
+639 implemented tools — **97 exposed by default**, all 639 one env var away — plus 13 context resources and 10 guided prompts for Codex, Claude Code, Claude Desktop, and other MCP clients. CEP is the supported production bridge; UXP remains experimental.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-5fd3c6.svg)](LICENSE.md)
 [![Node.js](https://img.shields.io/badge/Node.js-20%2B-339933.svg)](https://nodejs.org/)
@@ -126,7 +126,7 @@ This repository is currently validated for:
 
 Current catalog status as of August 21, 2026:
 
-- `638` MCP tools are implemented for AI-driven video editing. **`97` are exposed by default** (the `core` profile); set `PREMIERE_MCP_PROFILE=all` for the full catalogue. Exposing all 638 by default was a measured mistake: it costs roughly 102,000 tokens (~51% of a 200k context) before the conversation starts, published guidance puts tool-selection degradation past 30–50 tools, and VS Code / Copilot hard-errors above 128 — so the old default could not run there at all. Nothing is hidden silently: `find_tool` searches all 638 and reports a profile-hidden match as `exposed: false` **with the reason**, so an agent can always discover a capability it cannot currently call
+- `639` MCP tools are implemented for AI-driven video editing. **`97` are exposed by default** (the `core` profile); set `PREMIERE_MCP_PROFILE=all` for the full catalogue. Exposing all 639 by default was a measured mistake: it costs roughly 102,000 tokens (~51% of a 200k context) before the conversation starts, published guidance puts tool-selection degradation past 30–50 tools, and VS Code / Copilot hard-errors above 128 — so the old default could not run there at all. Nothing is hidden silently: `find_tool` searches all 639 and reports a profile-hidden match as `exposed: false` **with the reason**, so an agent can always discover a capability it cannot currently call
 - coverage spans project setup, media ingest, bins, sequences, timeline editing, transitions, effects, keyframes, captions, markers, metadata, proxies, multicam, color, audio, exports, and higher-level assembly workflows
 - the catalog includes practical agent workflows such as product-spot assembly, motion-graphics demos, timeline razoring, caption reads, audio ducking, scene edit detection, EDL import, export readiness validation, and linked audio/video operations
 - local-compute tools that Premiere's scripting API cannot provide: `detect_silence` (ffmpeg), `transcribe_to_srt` (local OpenAI Whisper speech-to-text), `probe_media` (ffprobe ground-truth metadata), and `generate_scope` (ffmpeg waveform / vectorscope / histogram / RGB-parade images) — each probes for its binary and returns install guidance instead of failing silently
@@ -135,7 +135,7 @@ Current catalog status as of August 21, 2026:
 
 Most recent completed local live validation:
 
-- `638` tools are implemented and `97` are active under the default profile; `get_capabilities` reports the active profile, local installation, and optional live connection state, while `verify_premiere_connection` is the canonical read-only bridge and host readiness check
+- `639` tools are implemented and `97` are active under the default profile; `get_capabilities` reports the active profile, local installation, and optional live connection state, while `verify_premiere_connection` is the canonical read-only bridge and host readiness check
 - `0` known parked or placeholder tools are advertised
 - `import_ae_comps` is intentionally not advertised because Premiere returned `false` for real `.aep` fixtures in this environment and a generic `.aep` import can wedge the CEP bridge
 
@@ -235,7 +235,7 @@ For a real-host sweep, use a disposable Premiere project and run `node scripts/l
 
 ## Tools
 
-All `638` advertised tools have an implementation. Tool schemas are available through MCP discovery; this catalog explains the editing surface in human terms. Start with `verify_premiere_connection`, then inspect the project before asking an agent to mutate it.
+All `639` advertised tools have an implementation. Tool schemas are available through MCP discovery; this catalog explains the editing surface in human terms. Start with `verify_premiere_connection`, then inspect the project before asking an agent to mutate it.
 
 ### Discovery and project inspection
 
