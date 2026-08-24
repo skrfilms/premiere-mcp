@@ -21,6 +21,7 @@ import { createMotionDemoAssets } from '../utils/demoAssets.js';
 import { executeExpandedTool, getExpandedTools, isExpandedTool } from './expanded.js';
 import { applyProfile, resolveProfile, PROFILES } from './profiles.js';
 import { findTools, type SearchableTool } from './search.js';
+import { generateToolTypings, type TypingsTool, type JsonSchemaNode } from './typings.js';
 import { annotationsFor } from './annotations.js';
 import { describeCatalogueCost, type CatalogueCost } from './catalogue-cost.js';
 import {
@@ -3095,6 +3096,7 @@ export class PremiereProTools {
       // liability for tool-selection accuracy unless the model can search rather
       // than scan. Host-independent: no Premiere request, works with Premiere closed.
       { name: 'find_tool', description: 'Searches THIS server\'s own tool catalogue by keyword and returns the best-matching tool names with their descriptions, ranked. Use it FIRST whenever you are unsure which tool does a job, instead of guessing a name and getting "Tool not found" -- this catalogue has hundreds of tools and searching it is far more reliable than scanning it. Matches against tool names and descriptions (lexical, not semantic, so prefer a domain noun like "marker", "proxy", "lumetri", "caption", "keyframe" over a full sentence). Reports how many tools were searched, and honestly flags any match that exists in this build but is hidden by the active tool profile as exposed:false rather than omitting it, so a curated deployment cannot look like a missing capability. Read-only: makes no Premiere request and changes nothing.', inputSchema: z.object({ query: z.string().describe('Keyword(s) describing the job, e.g. "marker", "audio fade", "export preset", "offline media"'), limit: z.number().optional().describe('Max matches to return (default 15, max 100)'), readOnly: z.boolean().optional().describe('Only return inspection tools (name begins with get/list/read/find/search/inspect/is/check/detect/probe/validate/verify/lint/diff). Naming heuristic, not a capability guarantee.'), includeParameters: z.boolean().optional().describe('Include each match\'s parameter names (default false, to keep the response small)'), includeHidden: z.boolean().optional().describe('Include matches hidden by the active tool profile, flagged exposed:false (default true)') }) },
+      { name: 'get_tool_typings', description: 'Returns TypeScript declarations (.d.ts) for this server\'s tools: an argument interface per tool, a ToolName union, and one overloaded callTool signature per callable tool. Fetch this BEFORE authoring a script or a multi-step plan against these tools -- it turns a wrong argument shape into a compile-time error instead of a runtime tool failure you have to decode from an error string. Generated from the same schemas the server validates against, so it cannot drift. Tools hidden by the active profile are still declared and marked @profileHidden rather than omitted. Read-only: makes no Premiere request.', inputSchema: z.object({ only: z.array(z.string()).optional().describe('Restrict output to these tool names. Omit for the whole catalogue (large - prefer find_tool first, then request typings for the handful you need).'), includeHidden: z.boolean().optional().describe('Declare tools the active profile hides, marked @profileHidden (default true)') }) },
     ];
   }
 
@@ -3163,6 +3165,54 @@ export class PremiereProTools {
       includeParameters: args.includeParameters,
       includeHidden: args.includeHidden,
     });
+  }
+
+  /**
+   * TypeScript declarations for the catalogue.
+   *
+   * Mirrors the pattern Adobe's own MCP server uses (`getToolTypings`), for the same reason: with a
+   * catalogue this size, a typed surface an agent can compile against is a better discovery
+   * mechanism than prose. Reuses the exact JSON Schema conversion `tools/list` serves, so the
+   * declarations cannot describe a shape the server would reject.
+   */
+  private getToolTypings(args: Record<string, any>): any {
+    const includeHidden = args?.includeHidden !== false;
+    const exposed = new Set(this.getAvailableTools().map((tool) => tool.name));
+    const registered = this.getRegisteredTools();
+
+    const source = includeHidden ? registered : registered.filter((tool) => exposed.has(tool.name));
+    const typingsTools: TypingsTool[] = source.map((tool) => {
+      let jsonSchema: JsonSchemaNode = { type: 'object', additionalProperties: true };
+      try {
+        // `unrepresentable: 'any'` matches the tools/list conversion; a schema zod cannot express
+        // in JSON Schema degrades to a permissive object rather than throwing and losing the tool.
+        jsonSchema = z.toJSONSchema(tool.inputSchema as any, { unrepresentable: 'any' }) as JsonSchemaNode;
+      } catch { /* keep the permissive fallback */ }
+      return tool.description
+        ? { name: tool.name, description: tool.description, jsonSchema }
+        : { name: tool.name, jsonSchema };
+    });
+
+    const only: string[] | undefined = Array.isArray(args?.only) && args.only.length ? args.only : undefined;
+    // A requested name that does not exist is reported rather than silently dropped, so a typo
+    // does not look like a tool that was never built.
+    const knownNames = new Set(registered.map((tool) => tool.name));
+    const unknown = only ? only.filter((name) => !knownNames.has(name)) : [];
+
+    const typings = generateToolTypings(typingsTools, {
+      exposedNames: exposed,
+      ...(only ? { only } : {}),
+    });
+
+    return {
+      success: true,
+      typings,
+      language: 'typescript',
+      toolsDeclared: only ? only.filter((name) => knownNames.has(name)).length : typingsTools.length,
+      toolsRegistered: registered.length,
+      toolsCallableUnderActiveProfile: exposed.size,
+      ...(unknown.length ? { unknownToolNames: unknown, note: `${unknown.length} requested name(s) are not tools in this build; use find_tool to search the catalogue.` } : {}),
+    };
   }
 
   /** Every tool this build implements, before the active profile filters anything. */
@@ -3302,6 +3352,8 @@ export class PremiereProTools {
           return await this.getCapabilities(args.checkConnection, args.probeLocalTools);
         case 'find_tool':
           return this.findTool(args);
+        case 'get_tool_typings':
+          return this.getToolTypings(args);
         case 'validate_project_for_export':
           return await this.validateProjectForExport(args.sequenceId, args.outputPath, args.presetPath, args.requireNonEmptyTimeline, args.checkGaps);
         case 'get_encoder_presets':
