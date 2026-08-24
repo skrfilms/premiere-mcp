@@ -118,6 +118,18 @@ const HELPER_SAMPLE = 6;
 const ARBITRARY_CODE_TOOLS = new Set(['execute_extendscript']);
 
 /**
+ * Tools that emit NO ExtendScript at all, so there is no generated script for a caller string to
+ * break out of — this suite's entire subject. Driving them here tests nothing and costs real time:
+ * get_tool_typings re-derives JSON Schema for all 639 tools on every invocation and returns a
+ * ~292 KB blob, which it would do once per payload per position.
+ *
+ * This is an exclusion from the FUZZ, not from scrutiny: get_tool_typings has its own suite
+ * (typings.test.ts) that parses its output with TypeScript's parser, including a description
+ * containing a comment terminator and non-identifier property keys.
+ */
+const NO_GENERATED_SCRIPT = new Set(['get_tool_typings']);
+
+/**
  * Individual ARGUMENT POSITIONS whose contract is a caller-supplied program, on tools that are
  * otherwise fuzzable. `batch_execute` is the case: each `operations[].script` is concatenated in
  * verbatim by design — the caller is running their own code, the same privilege
@@ -184,7 +196,7 @@ describe('generated scripts cannot be broken out of', () => {
     const emittingTools = new Set<string>();
 
     for (const tool of probe.getAvailableTools()) {
-      if (ARBITRARY_CODE_TOOLS.has(tool.name)) continue;
+      if (ARBITRARY_CODE_TOOLS.has(tool.name) || NO_GENERATED_SCRIPT.has(tool.name)) continue;
       let base = seedArgs(tool as never);
       let freeForm = false;
 
@@ -262,5 +274,9 @@ describe('generated scripts cannot be broken out of', () => {
     expect(checked).toBeGreaterThan(900);
     expect([...new Set(escaped)]).toEqual([]);
     expect([...new Set(unparseable)]).toEqual([]);
-  }, 600_000);
+    // Budget raised from 600s. This sweep is O(tools x string positions x payloads) and has crept
+    // 537s -> 549s -> over 600s as the catalogue grew; one added tool tipped it. Raising the ceiling
+    // is right rather than trimming coverage, but if it approaches this again the sweep needs to get
+    // cheaper (sample payloads per position) rather than get another raise.
+  }, 900_000);
 });
