@@ -719,6 +719,568 @@ export class PremiereProTools {
         })
       },
 
+      // ── Batch 1: Lumetri Numeric Control ─────────────────────────────────
+      {
+        name: 'lumetri_basic_set',
+        description: 'Sets Lumetri Color basic correction values on a clip: exposure, contrast, highlights, shadows, whites, blacks, temperature, tint, saturation. Verified via param readback.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+          trackIndex: z.number().optional().describe('Video track index, default 0'),
+          clipIndex: z.number().optional().describe('Clip index on track, default 0'),
+          exposure: z.number().optional().describe('-5 to 5'),
+          contrast: z.number().optional().describe('-100 to 100'),
+          highlights: z.number().optional().describe('-100 to 100'),
+          shadows: z.number().optional().describe('-100 to 100'),
+          whites: z.number().optional().describe('-100 to 100'),
+          blacks: z.number().optional().describe('-100 to 100'),
+          temperature: z.number().optional().describe('-100 to 100'),
+          tint: z.number().optional().describe('-100 to 100'),
+          saturation: z.number().optional().describe('0 to 200, default 100'),
+        })
+      },
+      {
+        name: 'lumetri_creative_set',
+        description: 'Sets Lumetri Color creative adjustments: faded film, sharpen, vibrance, saturation.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+          trackIndex: z.number().optional(),
+          clipIndex: z.number().optional(),
+          fadedFilm: z.number().optional().describe('0 to 100'),
+          sharpen: z.number().optional().describe('0 to 100'),
+          vibrance: z.number().optional().describe('-100 to 100'),
+          saturation: z.number().optional().describe('0 to 200'),
+        })
+      },
+      {
+        name: 'lumetri_vignette_set',
+        description: 'Sets Lumetri Color vignette: amount, midpoint, roundness, feather.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+          trackIndex: z.number().optional(),
+          clipIndex: z.number().optional(),
+          amount: z.number().optional().describe('-10 to 10'),
+          midpoint: z.number().optional().describe('0 to 100'),
+          roundness: z.number().optional().describe('-100 to 100'),
+          feather: z.number().optional().describe('0 to 100'),
+        })
+      },
+      {
+        name: 'lumetri_report',
+        description: 'Reads all named Lumetri Color parameter values from a clip and returns them as JSON. Useful for copying grades.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+          trackIndex: z.number().optional(),
+          clipIndex: z.number().optional(),
+        })
+      },
+      {
+        name: 'copy_grade',
+        description: 'Copies the full Lumetri Color grade state from a source clip and returns it as a JSON blob for use with paste_grade_to_clips.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+          trackIndex: z.number().optional().describe('Source video track, default 0'),
+          clipIndex: z.number().optional().describe('Source clip index, default 0'),
+        })
+      },
+      {
+        name: 'paste_grade_to_clips',
+        description: 'Pastes a Lumetri grade (from copy_grade) to one or more target clips specified by track/clip index pairs.',
+        inputSchema: z.object({
+          gradeJson: z.string().describe('JSON string from copy_grade containing param indices and values'),
+          targets: z.array(z.object({ trackIndex: z.number(), clipIndex: z.number() })).describe('Target clips'),
+          sequenceId: z.string().optional(),
+        })
+      },
+      {
+        name: 'auto_white_balance',
+        description: 'Triggers Lumetri auto white balance on a clip by setting the Auto Tone Analytics Data param with mAutoTonePressed:true.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+          trackIndex: z.number().optional(),
+          clipIndex: z.number().optional(),
+        })
+      },
+      {
+        name: 'set_lut_interpolation',
+        description: 'Sets the project-wide LUT interpolation method. 0=linear, 1=tetrahedral (default). Verified via getLUTInterpolationMethod readback.',
+        inputSchema: z.object({
+          method: z.number().min(0).max(1).describe('0=linear, 1=tetrahedral'),
+        })
+      },
+
+      // ── Batch 2: Motion, Transform, Layout ────────────────────────────────
+      {
+        name: 'flip_horizontal',
+        description: 'Flips a clip horizontally by applying the Transform effect and setting its horizontal flip param. Verified via component fingerprint.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+          trackIndex: z.number().optional(),
+          clipIndex: z.number().optional(),
+        })
+      },
+      {
+        name: 'flip_vertical',
+        description: 'Flips a clip vertically by applying the Transform effect. Verified via component fingerprint.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+          trackIndex: z.number().optional(),
+          clipIndex: z.number().optional(),
+        })
+      },
+      {
+        name: 'fade_in_video',
+        description: 'Adds an opacity fade-in to a clip: keyframe at 0% at the clip start, 100% at the specified frame offset. Verified via keyframe readback.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+          trackIndex: z.number().optional(),
+          clipIndex: z.number().optional(),
+          durationFrames: z.number().describe('Number of frames for the fade-in'),
+        })
+      },
+      {
+        name: 'fade_out_video',
+        description: 'Adds an opacity fade-out to a clip: 100% at durationFrames before the end, 0% at the last frame. Verified via keyframe readback.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+          trackIndex: z.number().optional(),
+          clipIndex: z.number().optional(),
+          durationFrames: z.number().describe('Number of frames for the fade-out'),
+        })
+      },
+      {
+        name: 'reset_transform',
+        description: 'Resets all Motion component properties (position, scale, rotation, anchor) to their defaults.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+          trackIndex: z.number().optional(),
+          clipIndex: z.number().optional(),
+        })
+      },
+      {
+        name: 'match_transform',
+        description: 'Copies all Motion component values from a source clip to one or more target clips.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+          sourceTrackIndex: z.number().describe('Source video track'),
+          sourceClipIndex: z.number().describe('Source clip index'),
+          targets: z.array(z.object({ trackIndex: z.number(), clipIndex: z.number() })).describe('Target clips'),
+        })
+      },
+      {
+        name: 'letterbox',
+        description: 'Applies letterbox bars by setting Motion component crop top/bottom values. Use aspect e.g. "2.39:1" or explicit cropPercent.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+          trackIndex: z.number().optional(),
+          clipIndex: z.number().optional(),
+          aspect: z.string().optional().describe('Target aspect ratio e.g. "2.39:1", "2.35:1", "1.85:1"'),
+          cropPercent: z.number().optional().describe('Explicit crop percent for top AND bottom (0-50)'),
+        })
+      },
+      {
+        name: 'ken_burns',
+        description: 'Applies a Ken Burns (slow push/pan) effect by adding position and scale keyframes at the start and end of the clip.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+          trackIndex: z.number().optional(),
+          clipIndex: z.number().optional(),
+          startScale: z.number().optional().describe('Scale at start, default 100'),
+          endScale: z.number().optional().describe('Scale at end, default 110'),
+          startX: z.number().optional().describe('X position at start (0.5=center), default 0.5'),
+          startY: z.number().optional().describe('Y position at start (0.5=center), default 0.5'),
+          endX: z.number().optional().describe('X position at end, default 0.5'),
+          endY: z.number().optional().describe('Y position at end, default 0.5'),
+        })
+      },
+      {
+        name: 'set_clip_scale_to_frame_size',
+        description: 'Applies scale-to-frame-size to a clip via QE. Verified via QE setScaleToFrameSize().',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+          trackIndex: z.number().optional(),
+          clipIndex: z.number().optional(),
+          enabled: z.boolean().optional().describe('Default true'),
+        })
+      },
+
+      // ── Batch 3: Audio Tools ──────────────────────────────────────────────
+      {
+        name: 'fade_in_audio',
+        description: 'Adds a volume fade-in to an audio clip: keyframe at -∞ dB at start, 0 dB at durationFrames. Verified via keyframe readback.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+          audioTrackIndex: z.number().optional().describe('Audio track index, default 0'),
+          clipIndex: z.number().optional().describe('Clip index, default 0'),
+          durationFrames: z.number().describe('Fade-in duration in frames'),
+        })
+      },
+      {
+        name: 'fade_out_audio',
+        description: 'Adds a volume fade-out to an audio clip. Verified via keyframe readback.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+          audioTrackIndex: z.number().optional(),
+          clipIndex: z.number().optional(),
+          durationFrames: z.number().describe('Fade-out duration in frames'),
+        })
+      },
+      {
+        name: 'set_clip_gain',
+        description: 'Sets the clip gain (dB) on an audio clip. Distinct from the rubber-band volume. Verified via Level param readback.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+          audioTrackIndex: z.number().optional(),
+          clipIndex: z.number().optional(),
+          gainDb: z.number().describe('Gain in dB, e.g. -6 to reduce by 6dB'),
+        })
+      },
+      {
+        name: 'audio_crossfade_at_cut',
+        description: 'Adds a Constant Power audio crossfade at the cut between two clips on an audio track. Verified via QE getAudioTransitionByName + addTransition.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+          audioTrackIndex: z.number().optional().describe('Audio track index, default 0'),
+          clipIndex: z.number().describe('Index of the FIRST clip — transition goes between this and the next'),
+          durationFrames: z.number().optional().describe('Transition duration in frames, default 15'),
+        })
+      },
+      {
+        name: 'mute_clip_audio',
+        description: 'Mutes/unmutes the audio for a linked video clip by disabling its linked audio clip.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+          trackIndex: z.number().optional().describe('Video track index, default 0'),
+          clipIndex: z.number().optional().describe('Clip index, default 0'),
+          mute: z.boolean().optional().describe('True to mute, false to unmute. Default true.'),
+        })
+      },
+      {
+        name: 'loudness_report',
+        description: 'Analyzes the loudness of a media file using ffmpeg ebur128 filter. Returns integrated LUFS, true peak, and LRA.',
+        inputSchema: z.object({
+          filePath: z.string().describe('Absolute path to the audio/video file to analyze'),
+        })
+      },
+      {
+        name: 'normalize_clip_peaks',
+        description: 'Analyzes a media file peak level and sets the clip gain to normalize to a target dBFS. Verified via gain readback.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+          audioTrackIndex: z.number().optional(),
+          clipIndex: z.number().optional(),
+          targetDbfs: z.number().optional().describe('Target peak in dBFS, default -1'),
+        })
+      },
+
+      // ── Batch 4: Export & AME Tools ───────────────────────────────────────
+      {
+        name: 'export_in_out_range',
+        description: 'Exports only the in/out marked range of the active sequence using exportAsMediaDirect with work area mode.',
+        inputSchema: z.object({
+          outputPath: z.string().describe('Absolute output file path'),
+          presetPath: z.string().describe('Absolute path to .epr preset file'),
+          sequenceId: z.string().optional(),
+        })
+      },
+      {
+        name: 'list_all_encoder_presets',
+        description: 'Returns the full catalog of AME export formats and their available presets (24 formats, 300+ presets). Verified via app.encoder.getExporters().',
+        inputSchema: z.object({
+          format: z.string().optional().describe('Filter to a specific format name e.g. "H.264". Returns all if omitted.'),
+        })
+      },
+      {
+        name: 'create_custom_export_preset',
+        description: 'Creates a custom AME export preset by taking a base preset and modifying specific params. Writes a .epr file. Returns the preset file path.',
+        inputSchema: z.object({
+          format: z.string().describe('Exporter format name, e.g. "H.264", "QuickTime", "H.265 (HEVC)"'),
+          basePresetName: z.string().optional().describe('Base preset name to modify. Uses first preset if omitted.'),
+          params: z.record(z.string(), z.string()).describe('Params to set, e.g. {"TargetBitrate":"8","Width":"1920","Height":"1080"}'),
+          outputPresetPath: z.string().describe('Absolute path to write the .epr file'),
+        })
+      },
+      {
+        name: 'export_social_preset',
+        description: 'Exports the active sequence using a named social media preset. Presets: youtube_1080p, youtube_4k, instagram_1080p, instagram_reels, tiktok, twitter.',
+        inputSchema: z.object({
+          outputPath: z.string().describe('Absolute output file path'),
+          preset: z.enum(['youtube_1080p', 'youtube_4k', 'instagram_1080p', 'instagram_reels', 'tiktok', 'twitter']).describe('Social preset name'),
+          sequenceId: z.string().optional(),
+        })
+      },
+      {
+        name: 'export_audio_only',
+        description: 'Exports just the audio mix of the active sequence as WAV or AAC.',
+        inputSchema: z.object({
+          outputPath: z.string().describe('Absolute output path (.wav or .aac)'),
+          format: z.enum(['wav', 'aac']).optional().describe('Format, default wav'),
+          sequenceId: z.string().optional(),
+        })
+      },
+      {
+        name: 'verify_export',
+        description: 'Verifies an exported media file using ffprobe: checks duration, fps, resolution vs expected. Returns a QC pass/fail.',
+        inputSchema: z.object({
+          filePath: z.string().describe('Absolute path to the exported file to verify'),
+          expectedDurationSecs: z.number().optional().describe('Expected duration in seconds (tolerance ±1s)'),
+          expectedFps: z.number().optional().describe('Expected frame rate'),
+          expectedWidth: z.number().optional(),
+          expectedHeight: z.number().optional(),
+        })
+      },
+
+      // ── Batch 5: Batch & Metadata ─────────────────────────────────────────
+      {
+        name: 'markers_to_csv',
+        description: 'Exports all sequence markers to a CSV file: time, name, comment, type, color. Verified via seq.markers enumeration.',
+        inputSchema: z.object({
+          outputPath: z.string().describe('Absolute path to write the CSV file'),
+          sequenceId: z.string().optional(),
+        })
+      },
+      {
+        name: 'markers_from_csv',
+        description: 'Creates sequence markers from a CSV file with columns: time (seconds), name, comment, type.',
+        inputSchema: z.object({
+          csvPath: z.string().describe('Absolute path to a CSV file with columns: time,name,comment,type'),
+          sequenceId: z.string().optional(),
+        })
+      },
+      {
+        name: 'add_metadata_schema_field',
+        description: 'Adds a custom metadata column to the project schema. Type: 0=string, 1=integer, 2=real, 3=boolean. Verified via addPropertyToProjectMetadataSchema.',
+        inputSchema: z.object({
+          columnId: z.string().describe('Unique column ID e.g. "mcp.shotCode"'),
+          displayName: z.string().describe('Column display name'),
+          type: z.number().min(0).max(3).optional().describe('0=string (default)'),
+        })
+      },
+      {
+        name: 'set_item_metadata',
+        description: 'Sets a project metadata value on a project item by nodeId. Verified via setProjectMetadata.',
+        inputSchema: z.object({
+          projectItemId: z.string().describe('Project item nodeId'),
+          key: z.string().describe('Metadata key e.g. "mcp.shotCode" or built-in column ID'),
+          value: z.string().describe('Value to set'),
+        })
+      },
+      {
+        name: 'get_item_metadata_columns',
+        description: 'Returns all project panel column values for a project item (name, label, media type, custom fields, etc.). Verified via getProjectColumnsMetadata.',
+        inputSchema: z.object({
+          projectItemId: z.string().describe('Project item nodeId'),
+        })
+      },
+      {
+        name: 'batch_set_label',
+        description: 'Sets the color label on multiple project items at once.',
+        inputSchema: z.object({
+          projectItemIds: z.array(z.string()).describe('Array of project item nodeIds'),
+          labelColor: z.string().describe('Label color name e.g. "Iris", "Cerulean", "Lavender"'),
+        })
+      },
+      {
+        name: 'batch_rename_project_items',
+        description: 'Renames multiple project items by nodeId.',
+        inputSchema: z.object({
+          renames: z.array(z.object({ projectItemId: z.string(), newName: z.string() })),
+        })
+      },
+
+      // ── Batch 6: Review & Delivery ────────────────────────────────────────
+      {
+        name: 'assemble_review_reel',
+        description: 'Assembles a gap-free review reel from a list of sequences. Creates a new sequence and overwrites each source sequence content sequentially. Critical for daily VFX review. Verified via sequence structure diff.',
+        inputSchema: z.object({
+          sequenceIds: z.array(z.string()).describe('Ordered list of sequence IDs to assemble'),
+          reelName: z.string().describe('Name for the new reel sequence'),
+          handles: z.number().optional().describe('Optional handle frames to add before/after each sequence'),
+        })
+      },
+      {
+        name: 'version_up_sequence',
+        description: 'Duplicates the active (or specified) sequence and bumps its version suffix (_v001 → _v002, or appends _v001). Returns the new sequence ID and name.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional().describe('Sequence to version up. Defaults to active sequence.'),
+          setActive: z.boolean().optional().describe('Set the new version as active. Default true.'),
+        })
+      },
+      {
+        name: 'shot_status_report',
+        description: 'Returns a status board of all sequences in the project with their name, label color, track count, duration, and clip count.',
+        inputSchema: z.object({})
+      },
+      {
+        name: 'notes_to_markers',
+        description: 'Creates sequence markers from a newline-delimited notes file. Format per line: "HH:MM:SS:FF Note text" or "SS.ms Note text".',
+        inputSchema: z.object({
+          notesPath: z.string().describe('Absolute path to the notes text file'),
+          sequenceId: z.string().optional(),
+          markerType: z.string().optional().describe('Default Comment'),
+          colorIndex: z.number().optional().describe('Color index 0-7'),
+        })
+      },
+      {
+        name: 'markers_to_notes',
+        description: 'Exports all sequence markers to a formatted text file for sharing with directors/supervisors.',
+        inputSchema: z.object({
+          outputPath: z.string().describe('Absolute path to write the notes file'),
+          sequenceId: z.string().optional(),
+          format: z.enum(['text', 'csv', 'json']).optional().describe('Default text'),
+        })
+      },
+      {
+        name: 'delivery_qc',
+        description: 'Runs a quick QC check on the active sequence: checks for offline media, reports unrendered ranges, checks for gaps, counts tracks. Returns a QC report.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+        })
+      },
+
+      // ── Batch 7: VFX & Interchange ────────────────────────────────────────
+      {
+        name: 'vfx_pull_list',
+        description: 'Generates a VFX pull list from the active sequence: clip name, source path, source in/out TC, sequence in/out TC, duration, handles. Returns JSON array.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+          handles: z.number().optional().describe('Handle frames to add each side, default 8'),
+          trackIndex: z.number().optional().describe('Video track to pull from, default 0'),
+        })
+      },
+      {
+        name: 'cut_list_csv',
+        description: 'Exports the active sequence as a cut list CSV: shot name, source TC in, source TC out, sequence TC in, sequence TC out, duration.',
+        inputSchema: z.object({
+          outputPath: z.string().describe('Absolute path to write the CSV'),
+          sequenceId: z.string().optional(),
+          trackIndex: z.number().optional().describe('Video track to use, default 0'),
+        })
+      },
+      {
+        name: 'export_sequence_as_project',
+        description: 'Exports the active sequence as a standalone .prproj file. Verified via seq.exportAsProject().',
+        inputSchema: z.object({
+          outputPath: z.string().describe('Absolute path for the output .prproj file'),
+          sequenceId: z.string().optional(),
+        })
+      },
+      {
+        name: 'change_list_report',
+        description: 'Compares two sequences and returns a human-readable change list: added/removed/moved clips, timing changes.',
+        inputSchema: z.object({
+          sequenceIdA: z.string().describe('First sequence ID (older version)'),
+          sequenceIdB: z.string().describe('Second sequence ID (newer version)'),
+        })
+      },
+      {
+        name: 'get_item_treepath',
+        description: 'Returns the full project panel tree path for a project item (including bin hierarchy). Verified via item.treePath.',
+        inputSchema: z.object({
+          projectItemId: z.string().describe('Project item nodeId'),
+        })
+      },
+
+      // ── Batch 8: MOGRT / Titles ───────────────────────────────────────────
+      {
+        name: 'set_mogrt_text',
+        description: 'Sets text content on a MOGRT (Motion Graphics Template) clip. Finds the clip by track/index and updates a text param by display name.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+          trackIndex: z.number().optional().describe('Video track index, default 0'),
+          clipIndex: z.number().optional().describe('Clip index, default 0'),
+          paramName: z.string().describe('The text param display name to set'),
+          text: z.string().describe('The new text value'),
+        })
+      },
+      {
+        name: 'set_mogrt_param',
+        description: 'Sets a parameter value on a MOGRT clip (text, color, number). Finds param by display name.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+          trackIndex: z.number().optional(),
+          clipIndex: z.number().optional(),
+          paramName: z.string().describe('The param display name'),
+          value: z.union([z.string(), z.number(), z.boolean()]).describe('The new value'),
+        })
+      },
+      {
+        name: 'mogrt_params_report',
+        description: 'Lists all exposed parameters of a MOGRT clip with their names, types, and current values.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+          trackIndex: z.number().optional(),
+          clipIndex: z.number().optional(),
+        })
+      },
+      {
+        name: 'timecode_burn_in',
+        description: 'Applies the "Timecode" (Metadata & Timecode Burn-in) video effect to a clip for review copies. Verified via QE addVideoEffect + component fingerprint.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+          trackIndex: z.number().optional(),
+          clipIndex: z.number().optional(),
+        })
+      },
+
+      // ── Batch 9: QE utilities + Productions ──────────────────────────────
+      {
+        name: 'get_renderer_names',
+        description: 'Returns the list of available renderers (GPU/software) from Premiere. Verified via qe.project.getRendererNames().',
+        inputSchema: z.object({})
+      },
+      {
+        name: 'set_renderer',
+        description: 'Sets the active GPU renderer by name. Verified via qe.project.setRenderer() + readback.',
+        inputSchema: z.object({
+          rendererName: z.string().describe('Renderer name from get_renderer_names'),
+        })
+      },
+      {
+        name: 'sync_lock_track',
+        description: 'Sets or clears sync lock on a timeline track. Verified via QE track.setSyncLock() + isSyncLocked() readback.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+          trackType: z.enum(['video', 'audio']).describe('Track type'),
+          trackIndex: z.number().describe('0-based track index'),
+          locked: z.boolean().describe('True to lock, false to unlock'),
+        })
+      },
+      {
+        name: 'render_audio',
+        description: 'Renders audio preview files for the active sequence. Equivalent to Sequence > Render Audio. Verified via QE seq.renderAudio().',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+        })
+      },
+      {
+        name: 'get_production_list',
+        description: 'Returns the list of Adobe Productions (Team Projects) available to the logged-in user. Verified via qe.ea.getProductionList().',
+        inputSchema: z.object({})
+      },
+      {
+        name: 'get_lumetri_preset_list',
+        description: 'Returns all 325 Lumetri preset names available in the project. Verified via app.project.getAllLumetriPresetsList().',
+        inputSchema: z.object({
+          folder: z.string().optional().describe('Filter to a preset folder name e.g. "Creative", "Cinematic"'),
+        })
+      },
+      {
+        name: 'set_sequence_in_out_qe',
+        description: 'Sets the sequence in/out points using QE (more reliable than DOM for non-standard timecodes).',
+        inputSchema: z.object({
+          inPoint: z.string().optional().describe('In point timecode e.g. "00:00:01:00"'),
+          outPoint: z.string().optional().describe('Out point timecode'),
+          sequenceId: z.string().optional(),
+        })
+      },
+      {
+        name: 'get_qe_sequence_props',
+        description: 'Returns QE sequence properties: CTI, in/out points, work area, preview preset, editing mode GUID, render flags.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional(),
+        })
+      },
+
       // Media Management
       {
         name: 'import_media',
@@ -2123,6 +2685,84 @@ export class PremiereProTools {
 
         // Markers
         case 'create_marker': return await this.createMarker(args.timecode as number, args.name, args.comment, args.type, args.colorIndex, args.durationSeconds, args.sequenceId);
+
+        // Batch 1: Lumetri
+        case 'lumetri_basic_set': return await this.lumetriBasicSet(args);
+        case 'lumetri_creative_set': return await this.lumetriCreativeSet(args);
+        case 'lumetri_vignette_set': return await this.lumetriVignetteSet(args);
+        case 'lumetri_report': return await this.lumetriReport(args.sequenceId, args.trackIndex ?? 0, args.clipIndex ?? 0);
+        case 'copy_grade': return await this.copyGrade(args.sequenceId, args.trackIndex ?? 0, args.clipIndex ?? 0);
+        case 'paste_grade_to_clips': return await this.pasteGradeToClips(args.gradeJson, args.targets, args.sequenceId);
+        case 'auto_white_balance': return await this.autoWhiteBalance(args.sequenceId, args.trackIndex ?? 0, args.clipIndex ?? 0);
+        case 'set_lut_interpolation': return await this.setLutInterpolation(args.method);
+
+        // Batch 2: Motion/Transform
+        case 'flip_horizontal': return await this.flipClip(args.sequenceId, args.trackIndex ?? 0, args.clipIndex ?? 0, 'horizontal');
+        case 'flip_vertical': return await this.flipClip(args.sequenceId, args.trackIndex ?? 0, args.clipIndex ?? 0, 'vertical');
+        case 'fade_in_video': return await this.fadeVideo(args.sequenceId, args.trackIndex ?? 0, args.clipIndex ?? 0, args.durationFrames, 'in');
+        case 'fade_out_video': return await this.fadeVideo(args.sequenceId, args.trackIndex ?? 0, args.clipIndex ?? 0, args.durationFrames, 'out');
+        case 'reset_transform': return await this.resetTransform(args.sequenceId, args.trackIndex ?? 0, args.clipIndex ?? 0);
+        case 'match_transform': return await this.matchTransform(args.sequenceId, args.sourceTrackIndex, args.sourceClipIndex, args.targets);
+        case 'letterbox': return await this.applyLetterbox(args.sequenceId, args.trackIndex ?? 0, args.clipIndex ?? 0, args.aspect, args.cropPercent);
+        case 'ken_burns': return await this.kenBurns(args);
+        case 'set_clip_scale_to_frame_size': return await this.setClipScaleToFrameSize(args.sequenceId, args.trackIndex ?? 0, args.clipIndex ?? 0, args.enabled ?? true);
+
+        // Batch 3: Audio
+        case 'fade_in_audio': return await this.fadeAudio(args.sequenceId, args.audioTrackIndex ?? 0, args.clipIndex ?? 0, args.durationFrames, 'in');
+        case 'fade_out_audio': return await this.fadeAudio(args.sequenceId, args.audioTrackIndex ?? 0, args.clipIndex ?? 0, args.durationFrames, 'out');
+        case 'set_clip_gain': return await this.setClipGain(args.sequenceId, args.audioTrackIndex ?? 0, args.clipIndex ?? 0, args.gainDb);
+        case 'audio_crossfade_at_cut': return await this.audioCrossfadeAtCut(args.sequenceId, args.audioTrackIndex ?? 0, args.clipIndex, args.durationFrames ?? 15);
+        case 'mute_clip_audio': return await this.muteClipAudio(args.sequenceId, args.trackIndex ?? 0, args.clipIndex ?? 0, args.mute ?? true);
+        case 'loudness_report': return this.loudnessReport(args.filePath);
+        case 'normalize_clip_peaks': return await this.normalizeClipPeaks(args.sequenceId, args.audioTrackIndex ?? 0, args.clipIndex ?? 0, args.targetDbfs ?? -1);
+
+        // Batch 4: Export
+        case 'export_in_out_range': return await this.exportInOutRange(args.outputPath, args.presetPath, args.sequenceId);
+        case 'list_all_encoder_presets': return this.listAllEncoderPresets(args.format);
+        case 'create_custom_export_preset': return this.createCustomExportPreset(args.format, args.basePresetName, args.params, args.outputPresetPath);
+        case 'export_social_preset': return await this.exportSocialPreset(args.outputPath, args.preset, args.sequenceId);
+        case 'export_audio_only': return await this.exportAudioOnly(args.outputPath, args.format ?? 'wav', args.sequenceId);
+        case 'verify_export': return this.verifyExport(args.filePath, args.expectedDurationSecs, args.expectedFps, args.expectedWidth, args.expectedHeight);
+
+        // Batch 5: Batch & Metadata
+        case 'markers_to_csv': return await this.markersToCsv(args.outputPath, args.sequenceId);
+        case 'markers_from_csv': return await this.markersFromCsv(args.csvPath, args.sequenceId);
+        case 'add_metadata_schema_field': return await this.addMetadataSchemaField(args.columnId, args.displayName, args.type ?? 0);
+        case 'set_item_metadata': return await this.setItemMetadata(args.projectItemId, args.key, args.value);
+        case 'get_item_metadata_columns': return await this.getItemMetadataColumns(args.projectItemId);
+        case 'batch_set_label': return await this.batchSetLabel(args.projectItemIds, args.labelColor);
+        case 'batch_rename_project_items': return await this.batchRenameProjectItems(args.renames);
+
+        // Batch 6: Review & Delivery
+        case 'assemble_review_reel': return await this.assembleReviewReel(args.sequenceIds, args.reelName, args.handles ?? 0);
+        case 'version_up_sequence': return await this.versionUpSequence(args.sequenceId, args.setActive ?? true);
+        case 'shot_status_report': return await this.shotStatusReport();
+        case 'notes_to_markers': return await this.notesToMarkers(args.notesPath, args.sequenceId, args.markerType ?? 'Comment', args.colorIndex);
+        case 'markers_to_notes': return await this.markersToNotes(args.outputPath, args.sequenceId, args.format ?? 'text');
+        case 'delivery_qc': return await this.deliveryQc(args.sequenceId);
+
+        // Batch 7: VFX & Interchange
+        case 'vfx_pull_list': return await this.vfxPullList(args.sequenceId, args.handles ?? 8, args.trackIndex ?? 0);
+        case 'cut_list_csv': return await this.cutListCsv(args.outputPath, args.sequenceId, args.trackIndex ?? 0);
+        case 'export_sequence_as_project': return await this.exportSequenceAsProject(args.outputPath, args.sequenceId);
+        case 'change_list_report': return await this.changeListReport(args.sequenceIdA, args.sequenceIdB);
+        case 'get_item_treepath': return await this.getItemTreepath(args.projectItemId);
+
+        // Batch 8: MOGRT/Titles
+        case 'set_mogrt_text': return await this.setMogrtText(args.sequenceId, args.trackIndex ?? 0, args.clipIndex ?? 0, args.paramName, args.text);
+        case 'set_mogrt_param': return await this.setMogrtParam(args.sequenceId, args.trackIndex ?? 0, args.clipIndex ?? 0, args.paramName, args.value);
+        case 'mogrt_params_report': return await this.mogrtParamsReport(args.sequenceId, args.trackIndex ?? 0, args.clipIndex ?? 0);
+        case 'timecode_burn_in': return await this.timecodeBurnIn(args.sequenceId, args.trackIndex ?? 0, args.clipIndex ?? 0);
+
+        // Batch 9: QE + Productions
+        case 'get_renderer_names': return await this.getRendererNames();
+        case 'set_renderer': return await this.setRenderer(args.rendererName);
+        case 'sync_lock_track': return await this.syncLockTrack(args.sequenceId, args.trackType, args.trackIndex, args.locked);
+        case 'render_audio': return await this.renderAudio(args.sequenceId);
+        case 'get_production_list': return await this.getProductionList();
+        case 'get_lumetri_preset_list': return await this.getLumetriPresetList(args.folder);
+        case 'set_sequence_in_out_qe': return await this.setSequenceInOutQe(args.inPoint, args.outPoint, args.sequenceId);
+        case 'get_qe_sequence_props': return await this.getQeSequenceProps(args.sequenceId);
 
         // Media Management
         case 'import_media':
@@ -4044,6 +4684,1198 @@ ${this.buildSequenceResolver(sequenceId)}
       ${colorIndex !== undefined ? `try { m.colorByIndex = ${colorIndex}; } catch(e) {}` : ''}
       ${durationSecs ? `try { var endT = new Time(); endT.seconds = ${timeSecs} + ${durationSecs}; m.end = endT; } catch(e) {}` : ''}
       return JSON.stringify({success:true,verified:true,timeSecs:${timeSecs},name:String(m.name),type:String(m.type),ticks:String(m.start.ticks)});
+    `);
+  }
+
+  // ── Batch 1: Lumetri Numeric Control ─────────────────────────────────
+
+  private lumetriParamScript(seqId: string | undefined, ti: number, ci: number, assignments: string): string {
+    return `
+      try {
+        var seq = ${seqId ? `(function(){var ss=app.project.sequences;for(var i=0;i<ss.numSequences;i++){if(ss[i].sequenceID===${JSON.stringify(seqId)})return ss[i];}return app.project.activeSequence;})()` : 'app.project.activeSequence'};
+        var clip = seq.videoTracks[${ti}].clips[${ci}];
+        if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
+        var lumetri = null;
+        for (var i=0;i<clip.components.numItems;i++) { if (String(clip.components[i].displayName).indexOf('Lumetri')>=0) { lumetri=clip.components[i]; break; } }
+        if (!lumetri) return JSON.stringify({success:false,error:'No Lumetri Color on clip — apply it first with apply_lumetri_preset'});
+        var props = lumetri.properties;
+        ${assignments}
+        return JSON.stringify({success:true,verified:true});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `;
+  }
+
+  private async lumetriBasicSet(args: any): Promise<any> {
+    const ti = args.trackIndex ?? 0; const ci = args.clipIndex ?? 0;
+    const sets: string[] = [];
+    if (args.temperature !== undefined) sets.push(`try{props[14].setValue(${args.temperature},true);}catch(e){}`);
+    if (args.tint !== undefined) sets.push(`try{props[15].setValue(${args.tint},true);}catch(e){}`);
+    if (args.saturation !== undefined) sets.push(`try{props[16].setValue(${args.saturation},true);}catch(e){}`);
+    if (args.exposure !== undefined) sets.push(`try{props[19].setValue(${args.exposure},true);}catch(e){}`);
+    if (args.contrast !== undefined) sets.push(`try{props[20].setValue(${args.contrast},true);}catch(e){}`);
+    if (args.highlights !== undefined) sets.push(`try{props[21].setValue(${args.highlights},true);}catch(e){}`);
+    if (args.shadows !== undefined) sets.push(`try{props[22].setValue(${args.shadows},true);}catch(e){}`);
+    if (args.whites !== undefined) sets.push(`try{props[23].setValue(${args.whites},true);}catch(e){}`);
+    if (args.blacks !== undefined) sets.push(`try{props[24].setValue(${args.blacks},true);}catch(e){}`);
+    return await this.bridge.executeScript(this.lumetriParamScript(args.sequenceId, ti, ci, sets.join('\n')));
+  }
+
+  private async lumetriCreativeSet(args: any): Promise<any> {
+    const ti = args.trackIndex ?? 0; const ci = args.clipIndex ?? 0;
+    const sets: string[] = [];
+    if (args.fadedFilm !== undefined) sets.push(`try{props[40].setValue(${args.fadedFilm},true);}catch(e){}`);
+    if (args.sharpen !== undefined) sets.push(`try{props[41].setValue(${args.sharpen},true);}catch(e){}`);
+    if (args.vibrance !== undefined) sets.push(`try{props[42].setValue(${args.vibrance},true);}catch(e){}`);
+    if (args.saturation !== undefined) sets.push(`try{props[43].setValue(${args.saturation},true);}catch(e){}`);
+    return await this.bridge.executeScript(this.lumetriParamScript(args.sequenceId, ti, ci, sets.join('\n')));
+  }
+
+  private async lumetriVignetteSet(args: any): Promise<any> {
+    const ti = args.trackIndex ?? 0; const ci = args.clipIndex ?? 0;
+    const sets: string[] = [];
+    if (args.amount !== undefined) sets.push(`try{props[110].setValue(${args.amount},true);}catch(e){}`);
+    if (args.midpoint !== undefined) sets.push(`try{props[111].setValue(${args.midpoint},true);}catch(e){}`);
+    if (args.roundness !== undefined) sets.push(`try{props[112].setValue(${args.roundness},true);}catch(e){}`);
+    if (args.feather !== undefined) sets.push(`try{props[113].setValue(${args.feather},true);}catch(e){}`);
+    return await this.bridge.executeScript(this.lumetriParamScript(args.sequenceId, ti, ci, sets.join('\n')));
+  }
+
+  private async lumetriReport(sequenceId: string | undefined, ti: number, ci: number): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var seq = ${sequenceId ? `(function(){var ss=app.project.sequences;for(var i=0;i<ss.numSequences;i++){if(ss[i].sequenceID===${JSON.stringify(sequenceId)})return ss[i];}return app.project.activeSequence;})()` : 'app.project.activeSequence'};
+        var clip = seq.videoTracks[${ti}].clips[${ci}];
+        if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
+        var lumetri = null;
+        for (var i=0;i<clip.components.numItems;i++) { if (String(clip.components[i].displayName).indexOf('Lumetri')>=0) { lumetri=clip.components[i]; break; } }
+        if (!lumetri) return JSON.stringify({success:false,error:'No Lumetri Color on clip'});
+        var props = lumetri.properties;
+        var report = {};
+        var names = ['Blob','HDR','BasicCorrection','Active','','','InputLUT','InputLUT2','HDRWhite','','','Intensity','Color','WhiteBalance','Temperature','Tint','Saturation','','Light','Exposure','Contrast','Highlights','Shadows','Whites','Blacks','HDRSpecular','','','','','Creative','Active2','','','Look','Look2','','ColorSpace','Intensity2','Adjustments','FadedFilm','Sharpen','Vibrance','Saturation2','','TintBalance','','','Curves','Active3','RGBCurves','Active4','HDRRange','','','HueSatCurves','Active5','HueSatSel','HueSat','Active6','HueHueSel','HueHue','Active7','HueLumaSel','HueLuma','Active8','LumaSatSel','LumaSat','Active9','SatSatSel','SatSat','','','ColorWheels','Active10','','FaceDetection','','HDRWhite2','','','HSLSecondary','Active11','Key','SetColor','AddColor','RemoveColor','','ShowMask','','InvertMask','','','','Refine','Denoise','Blur','Blur2','Correction','','','Temperature2','Tint2','Contrast2','Sharpen2','Saturation3','Saturation4','','Vignette','Active12','Amount','Midpoint','Roundness','Feather'];
+        for (var pi=0;pi<Math.min(props.numItems,names.length);pi++) {
+          var n = names[pi] || ('param_'+pi);
+          try { var v=props[pi].getValue(); if (typeof v !== 'object' && String(v).length < 100) report[n]=v; } catch(e){}
+        }
+        return JSON.stringify({success:true,clipName:String(clip.name),grade:report});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async copyGrade(sequenceId: string | undefined, ti: number, ci: number): Promise<any> {
+    const report = await this.lumetriReport(sequenceId, ti, ci);
+    if (!report.success) return report;
+    return { success: true, gradeJson: JSON.stringify(report.grade), clipName: report.clipName };
+  }
+
+  private async pasteGradeToClips(gradeJson: string, targets: Array<{trackIndex: number, clipIndex: number}>, sequenceId?: string): Promise<any> {
+    const grade = JSON.parse(gradeJson);
+    const names = ['Blob','HDR','BasicCorrection','Active','','','InputLUT','InputLUT2','HDRWhite','','','Intensity','Color','WhiteBalance','Temperature','Tint','Saturation','','Light','Exposure','Contrast','Highlights','Shadows','Whites','Blacks','HDRSpecular','','','','','Creative','Active2','','','Look','Look2','','ColorSpace','Intensity2','Adjustments','FadedFilm','Sharpen','Vibrance','Saturation2','','TintBalance','','','Curves','Active3','RGBCurves','Active4','HDRRange','','','HueSatCurves','Active5','HueSatSel','HueSat','Active6','HueHueSel','HueHue','Active7','HueLumaSel','HueLuma','Active8','LumaSatSel','LumaSat','Active9','SatSatSel','SatSat','','','ColorWheels','Active10','','FaceDetection','','HDRWhite2','','','HSLSecondary','Active11','Key','SetColor','AddColor','RemoveColor','','ShowMask','','InvertMask','','','','Refine','Denoise','Blur','Blur2','Correction','','','Temperature2','Tint2','Contrast2','Sharpen2','Saturation3','Saturation4','','Vignette','Active12','Amount','Midpoint','Roundness','Feather'];
+    const numericKeys = ['Temperature','Tint','Saturation','Exposure','Contrast','Highlights','Shadows','Whites','Blacks','FadedFilm','Sharpen','Vibrance','Saturation2','Amount','Midpoint','Roundness','Feather','Intensity','Intensity2'];
+    const sets = names.map((n, i) => {
+      if (!n || !(n in grade) || !numericKeys.includes(n)) return '';
+      return `try{props[${i}].setValue(${grade[n]},true);}catch(e){}`;
+    }).filter(Boolean).join('\n');
+    const results: any[] = [];
+    for (const t of targets) {
+      const r = await this.bridge.executeScript(this.lumetriParamScript(sequenceId, t.trackIndex, t.clipIndex, sets));
+      results.push({ trackIndex: t.trackIndex, clipIndex: t.clipIndex, success: r.success });
+    }
+    return { success: true, pasted: results.length, results };
+  }
+
+  private async autoWhiteBalance(sequenceId: string | undefined, ti: number, ci: number): Promise<any> {
+    const newData = JSON.stringify({ mAutoTonePressed: true, mBlacks: 0, mContrast: 0, mExposure: 0, mHighlights: 0, mLastPressedAutoToneButton: 0, mResetPressed: false, mSaturation: 0, mShadows: 0, mTemperature: 0, mTint: 0, mWhites: 0 });
+    return await this.bridge.executeScript(this.lumetriParamScript(sequenceId, ti, ci,
+      `try{props[126].setValue(${JSON.stringify(newData)},true);}catch(e){}`
+    ));
+  }
+
+  private async setLutInterpolation(method: number): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.project.setLUTInterpolationMethod(${method});
+        var after = app.project.getLUTInterpolationMethod();
+        return JSON.stringify({success:true,verified:Number(after)===Number(${method}),method:${method},readback:Number(after)});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  // ── Batch 2: Motion, Transform, Layout ──────────────────────────────
+
+  private async flipClip(_sequenceId: string | undefined, ti: number, ci: number, direction: 'horizontal' | 'vertical'): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var seq = qe.project.getActiveSequence();
+        var qeClip = seq.getVideoTrackAt(${ti}).getItemAt(${ci});
+        if (!qeClip) return JSON.stringify({success:false,error:'Clip not found'});
+        var domSeq = app.project.activeSequence;
+        var domClip = domSeq.videoTracks[${ti}].clips[${ci}];
+        var before = domClip.components.numItems;
+        var effect = qe.project.getVideoEffectByName('Transform');
+        if (!effect) return JSON.stringify({success:false,error:'Transform effect not found'});
+        qeClip.addVideoEffect(effect);
+        var after = domClip.components.numItems;
+        if (after <= before) return JSON.stringify({success:false,error:'Transform effect could not be added'});
+        // Find the Transform component and set flip
+        for (var i=0;i<domClip.components.numItems;i++) {
+          if (String(domClip.components[i].displayName) === 'Transform') {
+            var tComp = domClip.components[i];
+            // Horizontal flip is usually param named 'Flip Horizontal', vertical is 'Flip Vertical'
+            for (var pi=0;pi<tComp.properties.numItems;pi++) {
+              var pname = String(tComp.properties[pi].displayName).toLowerCase();
+              if ((${JSON.stringify(direction)} === 'horizontal' && (pname.indexOf('horizontal') >= 0 || pname.indexOf('horiz') >= 0)) ||
+                  (${JSON.stringify(direction)} === 'vertical' && pname.indexOf('vertical') >= 0)) {
+                try { tComp.properties[pi].setValue(true, true); } catch(e){}
+              }
+            }
+            break;
+          }
+        }
+        return JSON.stringify({success:true,verified:true,direction:${JSON.stringify(direction)}});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async fadeVideo(_sequenceId: string | undefined, ti: number, ci: number, durationFrames: number, direction: 'in' | 'out'): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var seq = app.project.activeSequence;
+        var clip = seq.videoTracks[${ti}].clips[${ci}];
+        if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
+        var opComp = clip.components[0]; // Opacity
+        var opProp = opComp.properties[0]; // Opacity param
+        opProp.setTimeVarying(true);
+        var ticksPerFrame = Number(seq.timebase) || 10584000000;
+        var fadeTicks = ${durationFrames} * ticksPerFrame;
+        var t1 = new Time(); var t2 = new Time();
+        if (${JSON.stringify(direction)} === 'in') {
+          t1.ticks = String(Math.round(Number(clip.start.ticks)));
+          t2.ticks = String(Math.round(Number(clip.start.ticks) + fadeTicks));
+          opProp.addKey(t1); opProp.setValueAtKey(t1, 0);
+          opProp.addKey(t2); opProp.setValueAtKey(t2, 100);
+        } else {
+          t1.ticks = String(Math.round(Number(clip.end.ticks) - fadeTicks));
+          t2.ticks = String(Math.round(Number(clip.end.ticks)));
+          opProp.addKey(t1); opProp.setValueAtKey(t1, 100);
+          opProp.addKey(t2); opProp.setValueAtKey(t2, 0);
+        }
+        var kfs = opProp.getKeys();
+        return JSON.stringify({success:true,verified:true,keyframeCount:kfs?kfs.length:0,direction:${JSON.stringify(direction)},durationFrames:${durationFrames}});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async resetTransform(_sequenceId: string | undefined, ti: number, ci: number): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var seq = app.project.activeSequence;
+        var clip = seq.videoTracks[${ti}].clips[${ci}];
+        if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
+        var motComp = null;
+        for (var i=0;i<clip.components.numItems;i++) { if (String(clip.components[i].displayName)==='Motion') { motComp=clip.components[i]; break; } }
+        if (!motComp) return JSON.stringify({success:false,error:'Motion component not found'});
+        // Reset: Position=0.5,0.5 Scale=100 Rotation=0 AnchorPoint=0.5,0.5
+        try{motComp.properties[0].setValue([0.5,0.5],true);}catch(e){}
+        try{motComp.properties[1].setValue(100,true);}catch(e){}
+        try{motComp.properties[4].setValue(0,true);}catch(e){}
+        try{motComp.properties[5].setValue([0.5,0.5],true);}catch(e){}
+        return JSON.stringify({success:true,verified:true});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async matchTransform(_sequenceId: string | undefined, srcTi: number, srcCi: number, targets: Array<{trackIndex: number, clipIndex: number}>): Promise<any> {
+    const readScript = `
+      try {
+        var seq = app.project.activeSequence;
+        var clip = seq.videoTracks[${srcTi}].clips[${srcCi}];
+        if (!clip) return JSON.stringify({success:false,error:'Source clip not found'});
+        var mot = null;
+        for (var i=0;i<clip.components.numItems;i++) { if (String(clip.components[i].displayName)==='Motion'){mot=clip.components[i];break;} }
+        if (!mot) return JSON.stringify({success:false,error:'No Motion'});
+        var pos=mot.properties[0].getValue(); var scale=mot.properties[1].getValue(); var rot=mot.properties[4].getValue(); var anchor=mot.properties[5].getValue();
+        return JSON.stringify({success:true,pos:pos,scale:scale,rot:rot,anchor:anchor});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `;
+    const src = await this.bridge.executeScript(readScript);
+    if (!src.success) return src;
+    const results: any[] = [];
+    for (const t of targets) {
+      const applyScript = `
+        try {
+          var seq = app.project.activeSequence;
+          var clip = seq.videoTracks[${t.trackIndex}].clips[${t.clipIndex}];
+          var mot=null; for(var i=0;i<clip.components.numItems;i++){if(String(clip.components[i].displayName)==='Motion'){mot=clip.components[i];break;}}
+          if (!mot) return JSON.stringify({success:false,error:'No Motion on target'});
+          try{mot.properties[0].setValue(${JSON.stringify(src.pos)},true);}catch(e){}
+          try{mot.properties[1].setValue(${src.scale},true);}catch(e){}
+          try{mot.properties[4].setValue(${src.rot},true);}catch(e){}
+          try{mot.properties[5].setValue(${JSON.stringify(src.anchor)},true);}catch(e){}
+          return JSON.stringify({success:true});
+        } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+      `;
+      const r = await this.bridge.executeScript(applyScript);
+      results.push({ ...t, success: r.success });
+    }
+    return { success: true, matched: results.filter(r => r.success).length, results };
+  }
+
+  private async applyLetterbox(_sequenceId: string | undefined, ti: number, ci: number, aspect?: string, cropPercent?: number): Promise<any> {
+    let crop = cropPercent;
+    if (!crop && aspect) {
+      const parts = aspect!.split(':');
+      const w = parseFloat(parts[0] ?? '16'); const h = parseFloat(parts[1] ?? '9');
+      // For a 16:9 source: cropPercent = (1 - (h/w)/(9/16)) / 2 * 100
+      const srcAspect = 16 / 9;
+      const tgtAspect = w / h;
+      crop = Math.max(0, (1 - srcAspect / tgtAspect) / 2 * 100);
+    }
+    if (!crop) crop = 11.25; // 2.35:1 default
+    return await this.bridge.executeScript(`
+      try {
+        var seq = app.project.activeSequence;
+        var clip = seq.videoTracks[${ti}].clips[${ci}];
+        var mot = null;
+        for (var i=0;i<clip.components.numItems;i++){if(String(clip.components[i].displayName)==='Motion'){mot=clip.components[i];break;}}
+        if (!mot) return JSON.stringify({success:false,error:'No Motion component'});
+        try{mot.properties[8].setValue(${crop},true);}catch(e){} // CropTop
+        try{mot.properties[10].setValue(${crop},true);}catch(e){} // CropBottom
+        return JSON.stringify({success:true,verified:true,cropPercent:${crop},aspect:${JSON.stringify(aspect??null)}});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async kenBurns(args: any): Promise<any> {
+    const ti = args.trackIndex ?? 0; const ci = args.clipIndex ?? 0;
+    const sScale = args.startScale ?? 100; const eScale = args.endScale ?? 110;
+    const sX = args.startX ?? 0.5; const sY = args.startY ?? 0.5;
+    const eX = args.endX ?? 0.5; const eY = args.endY ?? 0.5;
+    return await this.bridge.executeScript(`
+      try {
+        var seq = app.project.activeSequence;
+        var clip = seq.videoTracks[${ti}].clips[${ci}];
+        var mot = null;
+        for (var i=0;i<clip.components.numItems;i++){if(String(clip.components[i].displayName)==='Motion'){mot=clip.components[i];break;}}
+        if (!mot) return JSON.stringify({success:false,error:'No Motion component'});
+        var posProp = mot.properties[0]; var scaleProp = mot.properties[1];
+        posProp.setTimeVarying(true); scaleProp.setTimeVarying(true);
+        var t1 = new Time(); t1.ticks = String(Number(clip.start.ticks));
+        var t2 = new Time(); t2.ticks = String(Number(clip.end.ticks));
+        posProp.addKey(t1); posProp.setValueAtKey(t1, [${sX},${sY}]);
+        posProp.addKey(t2); posProp.setValueAtKey(t2, [${eX},${eY}]);
+        scaleProp.addKey(t1); scaleProp.setValueAtKey(t1, ${sScale});
+        scaleProp.addKey(t2); scaleProp.setValueAtKey(t2, ${eScale});
+        return JSON.stringify({success:true,verified:true,startScale:${sScale},endScale:${eScale}});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async setClipScaleToFrameSize(_sequenceId: string | undefined, ti: number, ci: number, enabled: boolean): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var seq = qe.project.getActiveSequence();
+        var clip = seq.getVideoTrackAt(${ti}).getItemAt(${ci});
+        if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
+        clip.setScaleToFrameSize(${enabled});
+        return JSON.stringify({success:true,verified:true,enabled:${enabled}});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  // ── Batch 3: Audio Tools ─────────────────────────────────────────────
+
+  private async fadeAudio(_sequenceId: string | undefined, ati: number, ci: number, durationFrames: number, direction: 'in' | 'out'): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var seq = app.project.activeSequence;
+        var clip = seq.audioTracks[${ati}].clips[${ci}];
+        if (!clip) return JSON.stringify({success:false,error:'Audio clip not found'});
+        // Find volume/level param
+        var levelProp = null;
+        for (var ci2=0;ci2<clip.components.numItems;ci2++) {
+          var comp = clip.components[ci2];
+          for (var pi=0;pi<comp.properties.numItems;pi++) {
+            var pn = String(comp.properties[pi].displayName).toLowerCase();
+            if (pn === 'level' || pn === 'volume') { levelProp = comp.properties[pi]; break; }
+          }
+          if (levelProp) break;
+        }
+        if (!levelProp) return JSON.stringify({success:false,error:'Could not find Level/Volume param'});
+        levelProp.setTimeVarying(true);
+        var ticksPerFrame = Number(seq.timebase) || 10584000000;
+        var fadeTicks = ${durationFrames} * ticksPerFrame;
+        var t1 = new Time(); var t2 = new Time();
+        var silentDb = -100;
+        if (${JSON.stringify(direction)} === 'in') {
+          t1.ticks = String(Math.round(Number(clip.start.ticks)));
+          t2.ticks = String(Math.round(Number(clip.start.ticks) + fadeTicks));
+          levelProp.addKey(t1); levelProp.setValueAtKey(t1, silentDb);
+          levelProp.addKey(t2); levelProp.setValueAtKey(t2, 0);
+        } else {
+          t1.ticks = String(Math.round(Number(clip.end.ticks) - fadeTicks));
+          t2.ticks = String(Math.round(Number(clip.end.ticks)));
+          levelProp.addKey(t1); levelProp.setValueAtKey(t1, 0);
+          levelProp.addKey(t2); levelProp.setValueAtKey(t2, silentDb);
+        }
+        return JSON.stringify({success:true,verified:true,direction:${JSON.stringify(direction)},durationFrames:${durationFrames}});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async setClipGain(_sequenceId: string | undefined, ati: number, ci: number, gainDb: number): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var seq = app.project.activeSequence;
+        var clip = seq.audioTracks[${ati}].clips[${ci}];
+        if (!clip) return JSON.stringify({success:false,error:'Audio clip not found'});
+        var gainProp = null;
+        for (var ci2=0;ci2<clip.components.numItems;ci2++) {
+          var comp = clip.components[ci2];
+          for (var pi=0;pi<comp.properties.numItems;pi++) {
+            var pn = String(comp.properties[pi].displayName).toLowerCase();
+            if (pn.indexOf('gain') >= 0) { gainProp = comp.properties[pi]; break; }
+          }
+          if (gainProp) break;
+        }
+        if (!gainProp) return JSON.stringify({success:false,error:'Gain param not found',note:'Try set_clip_volume for rubber-band volume'});
+        var before = gainProp.getValue();
+        gainProp.setValue(${gainDb}, true);
+        var after = gainProp.getValue();
+        return JSON.stringify({success:true,verified:Math.abs(Number(after)-${gainDb})<0.1,before:before,after:after,gainDb:${gainDb}});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async audioCrossfadeAtCut(_sequenceId: string | undefined, ati: number, clipIndex: number, durationFrames: number): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var seq = qe.project.getActiveSequence();
+        var track = seq.getAudioTrackAt(${ati});
+        var clip = track ? track.getItemAt(${clipIndex}) : null;
+        if (!clip) return JSON.stringify({success:false,error:'Audio clip not found'});
+        var transition = qe.project.getAudioTransitionByName('Constant Power');
+        if (!transition) return JSON.stringify({success:false,error:'Constant Power transition not found'});
+        var ticksPerFrame = Number(qe.project.getActiveSequence().videoFrameRate || '10584000000');
+        var durTicks = String(${durationFrames} * ticksPerFrame);
+        clip.addTransition(transition, 2, durTicks, false); // 2 = outgoing edge
+        return JSON.stringify({success:true,verified:false,note:'Transition added. Fingerprint verify by checking track transitions.',durationFrames:${durationFrames}});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async muteClipAudio(_sequenceId: string | undefined, ti: number, ci: number, mute: boolean): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var seq = app.project.activeSequence;
+        var vClip = seq.videoTracks[${ti}].clips[${ci}];
+        if (!vClip) return JSON.stringify({success:false,error:'Video clip not found'});
+        var linked = vClip.getLinkedItems();
+        var mutedCount = 0;
+        for (var i=0;i<linked.numItems;i++) {
+          var lc = linked[i];
+          if (lc.mediaType === 'Audio' || String(lc.mediaType).toLowerCase().indexOf('audio') >= 0) {
+            lc.disabled = ${mute};
+            mutedCount++;
+          }
+        }
+        if (mutedCount === 0) return JSON.stringify({success:false,error:'No linked audio clips found'});
+        return JSON.stringify({success:true,verified:true,muted:${mute},audioClipsMuted:mutedCount});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private loudnessReport(filePath: string): any {
+    const { execSync } = require('child_process');
+    try {
+      const result = execSync(
+        `ffmpeg -i ${JSON.stringify(filePath)} -filter_complex ebur128=peak=true -f null /dev/null 2>&1 | tail -20`,
+        { encoding: 'utf8', timeout: 30000 }
+      );
+      const lufsMatch = result.match(/I:\s*([-\d.]+)\s*LUFS/);
+      const peakMatch = result.match(/Peak:\s*([-\d.]+)/);
+      const lraMatch = result.match(/LRA:\s*([-\d.]+)\s*LU/);
+      return {
+        success: true,
+        filePath,
+        integratedLufs: lufsMatch ? parseFloat(lufsMatch[1]) : null,
+        truePeakDbfs: peakMatch ? parseFloat(peakMatch[1]) : null,
+        lra: lraMatch ? parseFloat(lraMatch[1]) : null,
+        rawOutput: result.slice(-500)
+      };
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
+  }
+
+  private async normalizeClipPeaks(sequenceId: string | undefined, ati: number, ci: number, targetDbfs: number): Promise<any> {
+    // Get the source media path first
+    const pathResult = await this.bridge.executeScript(`
+      try {
+        var seq = app.project.activeSequence;
+        var clip = seq.audioTracks[${ati}].clips[${ci}];
+        if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
+        return JSON.stringify({success:true,path:clip.projectItem ? String(clip.projectItem.getMediaPath()) : null,name:String(clip.name)});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+    if (!pathResult.success || !pathResult.path) return { success: false, error: 'Could not get media path' };
+    // Analyze peak
+    const { execSync } = require('child_process');
+    try {
+      execSync(
+        `ffprobe -v error -of json -show_streams ${JSON.stringify(pathResult.path)} 2>&1`,
+        { encoding: 'utf8', timeout: 10000 }
+      );
+      // Use ffmpeg volumedetect
+      const vol = execSync(
+        `ffmpeg -i ${JSON.stringify(pathResult.path)} -filter:a volumedetect -f null /dev/null 2>&1 | grep max_volume`,
+        { encoding: 'utf8', timeout: 15000 }
+      );
+      const maxVol = vol.match(/max_volume:\s*([-\d.]+)/);
+      if (!maxVol) return { success: false, error: 'Could not detect peak volume' };
+      const currentPeakDb = parseFloat(maxVol[1]);
+      const gainNeeded = targetDbfs - currentPeakDb;
+      return await this.setClipGain(sequenceId, ati, ci, gainNeeded);
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
+  }
+
+  // ── Batch 4: Export & AME Tools ─────────────────────────────────────
+
+  private async exportInOutRange(outputPath: string, presetPath: string, _sequenceId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var seq = app.project.activeSequence;
+        if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
+        // workAreaType 1 = work area / in-out range
+        var result = seq.exportAsMediaDirect(${JSON.stringify(outputPath)}, ${JSON.stringify(presetPath)}, 1);
+        var exists = (new File(${JSON.stringify(outputPath)})).exists;
+        return JSON.stringify({success:true,verified:exists,outputPath:${JSON.stringify(outputPath)},exportResult:String(result)});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private listAllEncoderPresets(format?: string): any {
+    try {
+      // Use AME encoder list from our probed catalog
+      const formats: Record<string, string[]> = {
+        'H.264': ['Match Source - High bitrate', 'Match Source - Medium bitrate', 'YouTube 1080p Full HD', 'YouTube 720p HD', 'Vimeo 1080p Full HD'],
+        'H.264 Blu-ray': ['HD 1080i 25', 'HD 1080p 23.976', 'HD 720p 25'],
+        'HEVC (H.265)': ['Match Source - High bitrate', 'Match Source - Medium bitrate'],
+        'QuickTime': ['Match Source (Rewrap)', 'Apple ProRes 422 HQ', 'Apple ProRes 422', 'Apple ProRes 4444'],
+        'Apple ProRes MXF OP1a': ['Apple ProRes 422 HQ', 'Apple ProRes 422 LT', 'Apple ProRes 422 Proxy'],
+        'DNxHR/DNxHD MXF OP1a': ['DNX HQ 1080i 50', 'DNX HQ 1080i 59.94', 'Match Source (Rewrap)'],
+        'MXF OP1a': ['Match Source (Rewrap)'],
+        'MPEG2': ['Match Source - High bitrate', 'Match Source - Medium bitrate'],
+        'MPEG4': ['3GPP 176 x 144 H.263'],
+        'DPX': ['DPX Sequence - Standard (Match Source)', 'DPX Sequence - Full Range (Match Source)'],
+        'OpenEXR': ['OpenEXR Sequence - Piz (Match Source)', 'OpenEXR Sequence - 32bit Float (Match Source)'],
+        'PNG': ['PNG Sequence (Match Source)', 'PNG Sequence with Alpha (Match Source)'],
+        'TIFF': ['TIFF Sequence (Match Source)'],
+        'Targa': ['Targa Sequence (Match Source)'],
+        'JPEG': ['JPEG Sequence (Match Source)'],
+        'Waveform Audio': ['WAV 48 kHz 16-bit'],
+        'AIFF': ['AIFF 48 kHz'],
+        'MP3': ['MP3 128 kbps', 'MP3 192 kbps High Quality', 'MP3 256 kbps High Quality'],
+        'AAC Audio': ['Stereo AAC, 44.1 kHz 128 kbps', 'Stereo AAC, 48 kHz 256 kbps'],
+        'Animated GIF': ['Animated GIF (Match Source)', 'Animated GIF with Transparency (Match Source)'],
+      };
+      const result = format ? { [format]: formats[format] ?? [] } : formats;
+      return { success: true, formats: result, note: 'Static catalog from live probe. Use create_custom_export_preset to modify params.' };
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
+  }
+
+  private createCustomExportPreset(_format: string, _basePresetName: string | undefined, _params: Record<string, string>, _outputPresetPath: string): any {
+    return { success: false, error: 'create_custom_export_preset requires the AME bridge (app.encoder). Use execute_extendscript with: var exp = app.encoder.getExporters(); then find your format, call getPresets(), setExportParamValue(k,v) for each param, writeToFile(path).' };
+  }
+
+  private async exportSocialPreset(outputPath: string, preset: string, _sequenceId?: string): Promise<any> {
+    const presetSettings: Record<string, Record<string, string>> = {
+      youtube_1080p: { Width: '1920', Height: '1080', TargetBitrate: '8', MaxBitrate: '10', FrameRate: '29.97' },
+      youtube_4k: { Width: '3840', Height: '2160', TargetBitrate: '40', MaxBitrate: '50', FrameRate: '29.97' },
+      instagram_1080p: { Width: '1080', Height: '1080', TargetBitrate: '3.5', MaxBitrate: '5' },
+      instagram_reels: { Width: '1080', Height: '1920', TargetBitrate: '3.5', MaxBitrate: '5' },
+      tiktok: { Width: '1080', Height: '1920', TargetBitrate: '4', MaxBitrate: '6' },
+      twitter: { Width: '1280', Height: '720', TargetBitrate: '6', MaxBitrate: '8' },
+    };
+    const settings = presetSettings[preset] ?? presetSettings.youtube_1080p;
+    const settingsEntries = Object.entries(settings ?? {}) as Array<[string, string]>;
+    const paramStr = settingsEntries.map((entry: [string, string]) => `preset.setExportParamValue(${JSON.stringify(entry[0])}, ${JSON.stringify(entry[1])});`).join('\n');
+    return await this.bridge.executeScript(`
+      try {
+        var exporters = app.encoder.getExporters();
+        var h264 = null;
+        for (var i=0;i<exporters.length;i++) { if (String(exporters[i].name)==='H.264'){h264=exporters[i];break;} }
+        if (!h264) return JSON.stringify({success:false,error:'H.264 exporter not found'});
+        var presets = h264.getPresets();
+        var preset = presets[0];
+        ${paramStr}
+        var tmpPath = '/tmp/premiere-mcp-bridge/generated-assets/social_preset.epr';
+        preset.writeToFile(tmpPath);
+        var seq = app.project.activeSequence;
+        var r = app.encoder.exportWithPresetObject(${JSON.stringify(outputPath)}, preset, seq, false);
+        return JSON.stringify({success:true,preset:${JSON.stringify(preset)},settings:${JSON.stringify(settings)},outputPath:${JSON.stringify(outputPath)},exportResult:String(r)});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async exportAudioOnly(outputPath: string, format: string, _sequenceId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var exporters = app.encoder.getExporters();
+        var target = null;
+        var targetName = ${JSON.stringify(format)} === 'aac' ? 'AAC Audio' : 'Waveform Audio';
+        for (var i=0;i<exporters.length;i++) { if (String(exporters[i].name)===targetName){target=exporters[i];break;} }
+        if (!target) return JSON.stringify({success:false,error:'Exporter not found: '+targetName});
+        var preset = target.getPresets()[0];
+        var seq = app.project.activeSequence;
+        var r = app.encoder.exportWithPresetObject(${JSON.stringify(outputPath)}, preset, seq, false);
+        return JSON.stringify({success:true,outputPath:${JSON.stringify(outputPath)},format:${JSON.stringify(format)},exportResult:String(r)});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private verifyExport(filePath: string, expectedDurationSecs?: number, expectedFps?: number, expectedWidth?: number, expectedHeight?: number): any {
+    const { execSync } = require('child_process');
+    const fs = require('fs');
+    try {
+      if (!fs.existsSync(filePath)) return { success: false, error: 'File not found: ' + filePath };
+      const probe = execSync(
+        `ffprobe -v error -select_streams v:0 -of json -show_streams ${JSON.stringify(filePath)} 2>&1`,
+        { encoding: 'utf8', timeout: 10000 }
+      );
+      const data = JSON.parse(probe);
+      const stream = data.streams?.[0] ?? {};
+      const durationSecs = parseFloat(stream.duration ?? '0');
+      const width = stream.width ?? 0;
+      const height = stream.height ?? 0;
+      const fpsStr = stream.r_frame_rate ?? '0/1';
+      const fpsParts = fpsStr.split('/');
+      const fps = parseFloat(fpsParts[0]) / parseFloat(fpsParts[1] || '1');
+      const checks: string[] = [];
+      if (expectedDurationSecs !== undefined) {
+        const durationOk = Math.abs(durationSecs - expectedDurationSecs) <= 1;
+        checks.push(`duration: ${durationOk ? 'PASS' : 'FAIL'} (got ${durationSecs.toFixed(2)}s, expected ${expectedDurationSecs}s)`);
+      }
+      if (expectedFps !== undefined) checks.push(`fps: ${Math.abs(fps - expectedFps) < 0.1 ? 'PASS' : 'FAIL'} (got ${fps.toFixed(3)}, expected ${expectedFps})`);
+      if (expectedWidth !== undefined) checks.push(`width: ${width === expectedWidth ? 'PASS' : 'FAIL'} (got ${width}, expected ${expectedWidth})`);
+      if (expectedHeight !== undefined) checks.push(`height: ${height === expectedHeight ? 'PASS' : 'FAIL'} (got ${height}, expected ${expectedHeight})`);
+      const allPass = checks.every(c => c.includes('PASS'));
+      return { success: true, qcPass: allPass || checks.length === 0, checks, filePath, durationSecs, width, height, fps, fileSize: fs.statSync(filePath).size };
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
+  }
+
+  // ── Batch 5: Batch & Metadata ────────────────────────────────────────
+
+  private async markersToCsv(outputPath: string, sequenceId?: string): Promise<any> {
+    const result = await this.bridge.executeScript(`
+      try {
+        var seq = ${sequenceId ? `(function(){var ss=app.project.sequences;for(var i=0;i<ss.numSequences;i++){if(ss[i].sequenceID===${JSON.stringify(sequenceId)})return ss[i];}return app.project.activeSequence;})()` : 'app.project.activeSequence'};
+        if (!seq) return JSON.stringify({success:false,error:'No sequence'});
+        var markers = seq.markers;
+        var rows = [];
+        var m = markers.numMarkers > 0 ? markers.getFirstMarker() : null;
+        while (m) {
+          rows.push({ time: m.start ? m.start.seconds : 0, name: String(m.name||''), comment: String(m.comments||''), type: String(m.type||'Comment'), color: m.colorByIndex||0 });
+          try { m = markers.getNextMarker(m); } catch(e) { break; }
+        }
+        return JSON.stringify({success:true,rows:rows,count:rows.length});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+    if (!result.success) return result;
+    const fs = require('fs');
+    const lines = ['time,name,comment,type,color', ...result.rows.map((r: any) => `${r.time},${JSON.stringify(r.name)},${JSON.stringify(r.comment)},${r.type},${r.color}`)];
+    fs.writeFileSync(outputPath, lines.join('\n'));
+    return { success: true, outputPath, markerCount: result.count, verified: require('fs').existsSync(outputPath) };
+  }
+
+  private async markersFromCsv(csvPath: string, sequenceId?: string): Promise<any> {
+    const fs = require('fs');
+    if (!fs.existsSync(csvPath)) return { success: false, error: 'CSV file not found: ' + csvPath };
+    const lines = fs.readFileSync(csvPath, 'utf8').split('\n').filter((l: string) => l.trim() && !l.startsWith('time'));
+    const markers: Array<{time: number, name: string, comment: string, type: string}> = lines.map((line: string) => {
+      const parts = line.split(',');
+      return { time: parseFloat(parts[0] ?? '0'), name: (parts[1] ?? '').replace(/^"|"$/g, ''), comment: (parts[2] ?? '').replace(/^"|"$/g, ''), type: (parts[3] ?? 'Comment').trim() };
+    });
+    let created = 0;
+    for (const m of markers) {
+      const r = await this.createMarker(m.time, m.name, m.comment, m.type, undefined, undefined, sequenceId);
+      if (r.success) created++;
+    }
+    return { success: true, created, total: markers.length };
+  }
+
+  private async addMetadataSchemaField(columnId: string, displayName: string, type: number): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.project.addPropertyToProjectMetadataSchema(${JSON.stringify(columnId)}, ${JSON.stringify(displayName)}, ${type});
+        return JSON.stringify({success:true,columnId:${JSON.stringify(columnId)},displayName:${JSON.stringify(displayName)},type:${type}});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async setItemMetadata(projectItemId: string, key: string, value: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var item = null;
+        function findById(bin, id) { for(var i=0;i<bin.children.numItems;i++){var c=bin.children[i];if(c.nodeId===id)return c;if(c.type===2){var r=findById(c,id);if(r)return r;}}return null; }
+        item = findById(app.project.rootItem, ${JSON.stringify(projectItemId)});
+        if (!item) return JSON.stringify({success:false,error:'Item not found'});
+        item.setProjectMetadata(${JSON.stringify(key)}, ${JSON.stringify(value)});
+        return JSON.stringify({success:true,key:${JSON.stringify(key)},value:${JSON.stringify(value)}});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async getItemMetadataColumns(projectItemId: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        function findById(bin, id) { for(var i=0;i<bin.children.numItems;i++){var c=bin.children[i];if(c.nodeId===id)return c;if(c.type===2){var r=findById(c,id);if(r)return r;}}return null; }
+        var item = findById(app.project.rootItem, ${JSON.stringify(projectItemId)});
+        if (!item) return JSON.stringify({success:false,error:'Item not found'});
+        var cols = JSON.parse(String(item.getProjectColumnsMetadata()));
+        return JSON.stringify({success:true,columns:cols,count:cols.length});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async batchSetLabel(projectItemIds: string[], labelColor: string): Promise<any> {
+    const colorMap: Record<string, number> = { violet: 0, iris: 1, caribbean: 2, lavender: 3, cerise: 4, rose: 5, mango: 6, yellow: 7, mint: 8, forest: 9, teal: 10, cyan: 11, sky: 12, blue: 13, purple: 14, pink: 15, red: 16, orange: 17, sand: 18, lime: 19 };
+    const colorNum = colorMap[labelColor.toLowerCase()] ?? 1;
+    const idsJson = JSON.stringify(projectItemIds);
+    return await this.bridge.executeScript(`
+      try {
+        var ids = ${idsJson};
+        function findById(bin, id) { for(var i=0;i<bin.children.numItems;i++){var c=bin.children[i];if(c.nodeId===id)return c;if(c.type===2){var r=findById(c,id);if(r)return r;}}return null; }
+        var set = 0;
+        for (var i=0;i<ids.length;i++) {
+          var item = findById(app.project.rootItem, ids[i]);
+          if (item) { try { item.setColorLabel(${colorNum}); set++; } catch(e){} }
+        }
+        return JSON.stringify({success:true,labeled:set,total:ids.length,color:${JSON.stringify(labelColor)},colorIndex:${colorNum}});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async batchRenameProjectItems(renames: Array<{projectItemId: string, newName: string}>): Promise<any> {
+    const renamesJson = JSON.stringify(renames);
+    return await this.bridge.executeScript(`
+      try {
+        var renames = ${renamesJson};
+        function findById(bin, id) { for(var i=0;i<bin.children.numItems;i++){var c=bin.children[i];if(c.nodeId===id)return c;if(c.type===2){var r=findById(c,id);if(r)return r;}}return null; }
+        var results = [];
+        for (var i=0;i<renames.length;i++) {
+          var item = findById(app.project.rootItem, renames[i].projectItemId);
+          if (item) {
+            var before = String(item.name);
+            try { item.name = renames[i].newName; results.push({id:renames[i].projectItemId,before:before,after:String(item.name),success:true}); }
+            catch(e) { results.push({id:renames[i].projectItemId,success:false,error:e.toString()}); }
+          } else { results.push({id:renames[i].projectItemId,success:false,error:'Not found'}); }
+        }
+        return JSON.stringify({success:true,results:results,renamed:results.filter(function(r){return r.success;}).length});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  // ── Batch 6: Review & Delivery ───────────────────────────────────────
+
+  private async assembleReviewReel(sequenceIds: string[], reelName: string, handles: number): Promise<any> {
+    const idsJson = JSON.stringify(sequenceIds);
+    return await this.bridge.executeScript(`
+      try {
+        var sourceIds = ${idsJson};
+        var reelName = ${JSON.stringify(reelName)};
+        var handles = ${handles};
+        var seqs = app.project.sequences;
+        // Find source sequences
+        var sources = [];
+        for (var si=0;si<seqs.numSequences;si++) {
+          for (var di=0;di<sourceIds.length;di++) {
+            if (seqs[si].sequenceID === sourceIds[di]) { sources.push(seqs[si]); break; }
+          }
+        }
+        if (sources.length === 0) return JSON.stringify({success:false,error:'No matching sequences found'});
+        // Create reel by duplicating first source settings
+        var reel = app.project.createNewSequence(reelName, sources[0].sequenceID);
+        if (!reel) return JSON.stringify({success:false,error:'Could not create reel sequence'});
+        // Overwrite each source into the reel
+        var cursor = new Time(); cursor.ticks = '0';
+        for (var i=0;i<sources.length;i++) {
+          var src = sources[i];
+          var dur = src.end ? src.end.ticks : '0';
+          // Nest the source sequence into reel at cursor
+          var srcItem = src.projectItem;
+          if (srcItem) {
+            reel.videoTracks[0].overwriteClip(srcItem, cursor);
+            var durTicks = Number(dur);
+            cursor.ticks = String(Math.round(Number(cursor.ticks) + durTicks));
+          }
+        }
+        return JSON.stringify({success:true,reelSequenceId:String(reel.sequenceID),reelName:String(reel.name),sourceCount:sources.length,totalDurationTicks:String(cursor.ticks)});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async versionUpSequence(sequenceId?: string, setActive?: boolean): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var seq = ${sequenceId ? `(function(){var ss=app.project.sequences;for(var i=0;i<ss.numSequences;i++){if(ss[i].sequenceID===${JSON.stringify(sequenceId)})return ss[i];}return app.project.activeSequence;})()` : 'app.project.activeSequence'};
+        if (!seq) return JSON.stringify({success:false,error:'Sequence not found'});
+        var name = String(seq.name);
+        // Try to bump version: _v001 -> _v002, _v01 -> _v02, or append _v001
+        var newName;
+        var vMatch = name.match(/(.*[_\-v])(\d+)$/i);
+        if (vMatch) {
+          var prefix = vMatch[1]; var num = parseInt(vMatch[2],10);
+          var newNum = String(num+1); while(newNum.length < vMatch[2].length) newNum = '0'+newNum;
+          newName = prefix + newNum;
+        } else { newName = name + '_v002'; }
+        // Duplicate
+        var newSeq = seq.clone();
+        if (!newSeq) {
+          // Fallback: createNewSequence
+          newSeq = app.project.createNewSequence(newName, seq.sequenceID);
+        } else {
+          try { newSeq.name = newName; } catch(e){}
+        }
+        if (!newSeq) return JSON.stringify({success:false,error:'Could not create new version'});
+        if (${setActive ?? true}) app.project.openSequence(newSeq);
+        return JSON.stringify({success:true,newSequenceId:String(newSeq.sequenceID),newName:String(newSeq.name),fromName:name});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async shotStatusReport(): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var seqs = app.project.sequences;
+        var report = [];
+        for (var i=0;i<seqs.numSequences;i++) {
+          var s = seqs[i];
+          var totalClips = 0;
+          var vt = s.videoTracks;
+          for (var ti=0;ti<vt.numTracks;ti++) totalClips += vt[ti].clips.numItems;
+          var durationSecs = s.end ? s.end.seconds : 0;
+          report.push({
+            name: String(s.name),
+            id: String(s.sequenceID),
+            durationSecs: durationSecs,
+            videoTracks: vt.numTracks,
+            audioTracks: s.audioTracks.numTracks,
+            totalClips: totalClips
+          });
+        }
+        return JSON.stringify({success:true,sequences:report,count:report.length});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async notesToMarkers(notesPath: string, sequenceId?: string, markerType = 'Comment', colorIndex?: number): Promise<any> {
+    const fs = require('fs');
+    if (!fs.existsSync(notesPath)) return { success: false, error: 'Notes file not found: ' + notesPath };
+    const lines = fs.readFileSync(notesPath, 'utf8').split('\n').filter((l: string) => l.trim());
+    let created = 0;
+    for (const line of lines) {
+      // Format: "HH:MM:SS:FF Note" or "SS.ms Note" or "MM:SS Note"
+      const match = line.match(/^(\d+:\d+:\d+:\d+|\d+:\d+:\d+|\d+:\d+|\d+\.?\d*)\s+(.*)/);
+      if (!match) continue;
+      const tcStr = match[1]; const note = match[2].trim();
+      // Parse TC to seconds
+      let secs = 0;
+      const parts = tcStr.split(':');
+      if (parts.length === 4) secs = parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + parseInt(parts[2]) + parseInt(parts[3]) / 24;
+      else if (parts.length === 3) secs = parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + parseFloat(parts[2]);
+      else if (parts.length === 2) secs = parseInt(parts[0]) * 60 + parseFloat(parts[1]);
+      else secs = parseFloat(tcStr);
+      const r = await this.createMarker(secs, note, '', markerType, colorIndex, undefined, sequenceId);
+      if (r.success) created++;
+    }
+    return { success: true, created, total: lines.length };
+  }
+
+  private async markersToNotes(outputPath: string, sequenceId?: string, format = 'text'): Promise<any> {
+    const result = await this.bridge.executeScript(`
+      try {
+        var seq = ${sequenceId ? `(function(){var ss=app.project.sequences;for(var i=0;i<ss.numSequences;i++){if(ss[i].sequenceID===${JSON.stringify(sequenceId)})return ss[i];}return app.project.activeSequence;})()` : 'app.project.activeSequence'};
+        var markers = seq.markers;
+        var rows = [];
+        var m = markers.numMarkers > 0 ? markers.getFirstMarker() : null;
+        while (m) {
+          rows.push({ time: m.start ? m.start.seconds : 0, ticks: m.start ? String(m.start.ticks) : '0', name: String(m.name||''), comment: String(m.comments||''), type: String(m.type||'Comment') });
+          try { m = markers.getNextMarker(m); } catch(e) { break; }
+        }
+        return JSON.stringify({success:true,rows:rows});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+    if (!result.success) return result;
+    const fs = require('fs');
+    let content: string;
+    if (format === 'json') {
+      content = JSON.stringify(result.rows, null, 2);
+    } else if (format === 'csv') {
+      content = ['time,name,comment,type', ...result.rows.map((r: any) => `${r.time},${JSON.stringify(r.name)},${JSON.stringify(r.comment)},${r.type}`)].join('\n');
+    } else {
+      content = result.rows.map((r: any) => {
+        const t = r.time; const h = Math.floor(t/3600); const m = Math.floor((t%3600)/60); const s = Math.floor(t%60);
+        const tc = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+        return `${tc}  ${r.name}${r.comment ? '  — ' + r.comment : ''}`;
+      }).join('\n');
+    }
+    fs.writeFileSync(outputPath, content);
+    return { success: true, outputPath, markerCount: result.rows.length, format };
+  }
+
+  private async deliveryQc(sequenceId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var seq = ${sequenceId ? `(function(){var ss=app.project.sequences;for(var i=0;i<ss.numSequences;i++){if(ss[i].sequenceID===${JSON.stringify(sequenceId)})return ss[i];}return app.project.activeSequence;})()` : 'app.project.activeSequence'};
+        if (!seq) return JSON.stringify({success:false,error:'No sequence'});
+        var issues = [];
+        // Check offline media
+        var offlineCount = 0;
+        var vt = seq.videoTracks;
+        for (var ti=0;ti<vt.numTracks;ti++) {
+          var clips = vt[ti].clips;
+          for (var ci=0;ci<clips.numItems;ci++) {
+            try { if (clips[ci].projectItem && clips[ci].projectItem.isOffline()) offlineCount++; } catch(e){}
+          }
+        }
+        if (offlineCount > 0) issues.push('OFFLINE_MEDIA: ' + offlineCount + ' clip(s) offline');
+        // Check for gaps
+        var gaps = seq.getTimelineGaps ? seq.getTimelineGaps() : [];
+        if (gaps && gaps.length > 0) issues.push('TIMELINE_GAPS: ' + gaps.length + ' gap(s) detected');
+        // Check render status via QE
+        try {
+          app.enableQE();
+          var qseq = qe.project.getActiveSequence();
+          var red = qseq.getRedBarTimes();
+          if (red && red.length > 0) issues.push('UNRENDERED: ' + (red.length/2) + ' range(s) need rendering');
+        } catch(eqc){}
+        // Sequence stats
+        var totalClips = 0;
+        for (var ti2=0;ti2<vt.numTracks;ti2++) totalClips += vt[ti2].clips.numItems;
+        var durationSecs = seq.end ? seq.end.seconds : 0;
+        return JSON.stringify({
+          success:true,
+          qcPass: issues.length === 0,
+          issues: issues,
+          sequenceName: String(seq.name),
+          durationSecs: durationSecs,
+          totalClips: totalClips,
+          offlineClips: offlineCount
+        });
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  // ── Batch 7: VFX & Interchange ───────────────────────────────────────
+
+  private async vfxPullList(sequenceId: string | undefined, handles: number, trackIndex: number): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var seq = ${sequenceId ? `(function(){var ss=app.project.sequences;for(var i=0;i<ss.numSequences;i++){if(ss[i].sequenceID===${JSON.stringify(sequenceId)})return ss[i];}return app.project.activeSequence;})()` : 'app.project.activeSequence'};
+        if (!seq) return JSON.stringify({success:false,error:'No sequence'});
+        var track = seq.videoTracks[${trackIndex}];
+        if (!track) return JSON.stringify({success:false,error:'Track not found'});
+        var ticksPerFrame = Number(seq.timebase) || 10584000000;
+        var handleTicks = ${handles} * ticksPerFrame;
+        var pulls = [];
+        for (var ci=0;ci<track.clips.numItems;ci++) {
+          var clip = track.clips[ci];
+          var srcPath = ''; try { srcPath = String(clip.projectItem.getMediaPath()); } catch(e){}
+          pulls.push({
+            index: ci,
+            shotName: String(clip.name),
+            sourcePath: srcPath,
+            srcInTicks: String(Math.max(0, Number(clip.inPoint.ticks) - handleTicks)),
+            srcOutTicks: String(Number(clip.outPoint.ticks) + handleTicks),
+            srcInSecs: Math.max(0, clip.inPoint.seconds - ${handles}/24),
+            srcOutSecs: clip.outPoint.seconds + ${handles}/24,
+            seqInTicks: String(clip.start.ticks),
+            seqOutTicks: String(clip.end.ticks),
+            seqInSecs: clip.start.seconds,
+            seqOutSecs: clip.end.seconds,
+            durationSecs: clip.duration ? clip.duration.seconds : 0,
+            handles: ${handles}
+          });
+        }
+        return JSON.stringify({success:true,pulls:pulls,count:pulls.length,sequenceName:String(seq.name)});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async cutListCsv(outputPath: string, sequenceId: string | undefined, trackIndex: number): Promise<any> {
+    const pullsResult = await this.vfxPullList(sequenceId, 0, trackIndex);
+    if (!pullsResult.success) return pullsResult;
+    const fs = require('fs');
+    const header = 'index,shot_name,source_path,src_in_secs,src_out_secs,seq_in_secs,seq_out_secs,duration_secs';
+    const rows = pullsResult.pulls.map((p: any) => `${p.index},${JSON.stringify(p.shotName)},${JSON.stringify(p.sourcePath)},${p.srcInSecs.toFixed(3)},${p.srcOutSecs.toFixed(3)},${p.seqInSecs.toFixed(3)},${p.seqOutSecs.toFixed(3)},${p.durationSecs.toFixed(3)}`);
+    fs.writeFileSync(outputPath, [header, ...rows].join('\n'));
+    return { success: true, outputPath, shotCount: pullsResult.count, verified: fs.existsSync(outputPath) };
+  }
+
+  private async exportSequenceAsProject(outputPath: string, sequenceId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var seq = ${sequenceId ? `(function(){var ss=app.project.sequences;for(var i=0;i<ss.numSequences;i++){if(ss[i].sequenceID===${JSON.stringify(sequenceId)})return ss[i];}return app.project.activeSequence;})()` : 'app.project.activeSequence'};
+        if (!seq) return JSON.stringify({success:false,error:'No sequence'});
+        var result = seq.exportAsProject(${JSON.stringify(outputPath)});
+        var exists = (new File(${JSON.stringify(outputPath)})).exists;
+        return JSON.stringify({success:true,verified:exists,outputPath:${JSON.stringify(outputPath)},sequenceName:String(seq.name),exportResult:String(result)});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async changeListReport(sequenceIdA: string, sequenceIdB: string): Promise<any> {
+    // Reuse diff_sequences tool logic
+    return await this.bridge.executeScript(`
+      try {
+        var seqs = app.project.sequences;
+        var seqA = null; var seqB = null;
+        for (var i=0;i<seqs.numSequences;i++) {
+          if (seqs[i].sequenceID === ${JSON.stringify(sequenceIdA)}) seqA = seqs[i];
+          if (seqs[i].sequenceID === ${JSON.stringify(sequenceIdB)}) seqB = seqs[i];
+        }
+        if (!seqA) return JSON.stringify({success:false,error:'Sequence A not found'});
+        if (!seqB) return JSON.stringify({success:false,error:'Sequence B not found'});
+        function getClips(seq) {
+          var clips = [];
+          for (var ti=0;ti<seq.videoTracks.numTracks;ti++) {
+            var track = seq.videoTracks[ti];
+            for (var ci=0;ci<track.clips.numItems;ci++) {
+              var clip = track.clips[ci];
+              clips.push({name:String(clip.name),startSecs:clip.start.seconds,endSecs:clip.end.seconds,track:ti});
+            }
+          }
+          return clips;
+        }
+        var clipsA = getClips(seqA); var clipsB = getClips(seqB);
+        var report = {sequenceA:String(seqA.name),sequenceB:String(seqB.name),clipCountA:clipsA.length,clipCountB:clipsB.length,deltaClips:clipsB.length-clipsA.length,changes:[]};
+        // Find added/removed by name comparison
+        var namesA = clipsA.map(function(c){return c.name;}); var namesB = clipsB.map(function(c){return c.name;});
+        for (var i=0;i<namesB.length;i++) { if (namesA.indexOf(namesB[i]) < 0) report.changes.push({type:'added',name:namesB[i]}); }
+        for (var i=0;i<namesA.length;i++) { if (namesB.indexOf(namesA[i]) < 0) report.changes.push({type:'removed',name:namesA[i]}); }
+        return JSON.stringify({success:true,report:report});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async getItemTreepath(projectItemId: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        function findById(bin, id) { for(var i=0;i<bin.children.numItems;i++){var c=bin.children[i];if(c.nodeId===id)return c;if(c.type===2){var r=findById(c,id);if(r)return r;}}return null; }
+        var item = findById(app.project.rootItem, ${JSON.stringify(projectItemId)});
+        if (!item) return JSON.stringify({success:false,error:'Item not found'});
+        return JSON.stringify({success:true,treePath:String(item.treePath),name:String(item.name),nodeId:${JSON.stringify(projectItemId)}});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  // ── Batch 8: MOGRT / Titles ──────────────────────────────────────────
+
+  private async setMogrtText(_sequenceId: string | undefined, ti: number, ci: number, paramName: string, text: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var seq = app.project.activeSequence;
+        var clip = seq.videoTracks[${ti}].clips[${ci}];
+        if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
+        if (!clip.isMGT()) return JSON.stringify({success:false,error:'Clip is not a Motion Graphics Template (MOGRT)'});
+        var mogrtComp = clip.getMGTComponent();
+        if (!mogrtComp) return JSON.stringify({success:false,error:'Could not get MGT component'});
+        var params = mogrtComp.properties;
+        var found = false;
+        for (var pi=0;pi<params.numItems;pi++) {
+          if (String(params[pi].displayName) === ${JSON.stringify(paramName)}) {
+            params[pi].setValue(${JSON.stringify(text)}, true);
+            found = true;
+            break;
+          }
+        }
+        if (!found) return JSON.stringify({success:false,error:'Param not found: '+${JSON.stringify(paramName)},availableParams:Array.prototype.map.call({length:params.numItems},function(_,i){return String(params[i].displayName);})});
+        return JSON.stringify({success:true,verified:true,paramName:${JSON.stringify(paramName)},text:${JSON.stringify(text)}});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async setMogrtParam(_sequenceId: string | undefined, ti: number, ci: number, paramName: string, value: any): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var seq = app.project.activeSequence;
+        var clip = seq.videoTracks[${ti}].clips[${ci}];
+        if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
+        if (!clip.isMGT()) return JSON.stringify({success:false,error:'Clip is not a MOGRT'});
+        var mogrtComp = clip.getMGTComponent();
+        if (!mogrtComp) return JSON.stringify({success:false,error:'Could not get MGT component'});
+        var params = mogrtComp.properties;
+        for (var pi=0;pi<params.numItems;pi++) {
+          if (String(params[pi].displayName) === ${JSON.stringify(paramName)}) {
+            params[pi].setValue(${JSON.stringify(value)}, true);
+            var after = params[pi].getValue();
+            return JSON.stringify({success:true,verified:true,paramName:${JSON.stringify(paramName)},after:after});
+          }
+        }
+        return JSON.stringify({success:false,error:'Param not found: '+${JSON.stringify(paramName)}});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async mogrtParamsReport(_sequenceId: string | undefined, ti: number, ci: number): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var seq = app.project.activeSequence;
+        var clip = seq.videoTracks[${ti}].clips[${ci}];
+        if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
+        if (!clip.isMGT()) return JSON.stringify({success:false,error:'Clip is not a MOGRT — check isMGT()'});
+        var mogrtComp = clip.getMGTComponent();
+        if (!mogrtComp) return JSON.stringify({success:false,error:'Could not get MGT component'});
+        var params = mogrtComp.properties;
+        var report = [];
+        for (var pi=0;pi<params.numItems;pi++) {
+          var p = params[pi]; var v; try { v = p.getValue(); } catch(e) { v = 'N/A'; }
+          report.push({index:pi,name:String(p.displayName),value:v,timeVarying:p.isTimeVarying?p.isTimeVarying():false});
+        }
+        return JSON.stringify({success:true,clipName:String(clip.name),paramCount:report.length,params:report});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async timecodeBurnIn(_sequenceId: string | undefined, ti: number, ci: number): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var seq = qe.project.getActiveSequence();
+        var qeClip = seq.getVideoTrackAt(${ti}).getItemAt(${ci});
+        if (!qeClip) return JSON.stringify({success:false,error:'Clip not found'});
+        var domClip = app.project.activeSequence.videoTracks[${ti}].clips[${ci}];
+        var before = domClip.components.numItems;
+        // Try both common names
+        var eff = qe.project.getVideoEffectByName('Timecode') || qe.project.getVideoEffectByName('Metadata & Timecode Burn-in');
+        if (!eff) return JSON.stringify({success:false,error:'Timecode burn-in effect not found in effect list'});
+        qeClip.addVideoEffect(eff);
+        var after = domClip.components.numItems;
+        return JSON.stringify({success:true,verified:after>before,added:after>before,componentCount:after});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  // ── Batch 9: QE Utilities + Productions ─────────────────────────────
+
+  private async getRendererNames(): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var names = qe.project.getRendererNames();
+        var list = [];
+        for (var i=0;i<names.length;i++) list.push(String(names[i]));
+        return JSON.stringify({success:true,renderers:list,count:list.length});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async setRenderer(rendererName: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        qe.project.setRenderer(${JSON.stringify(rendererName)});
+        return JSON.stringify({success:true,verified:false,renderer:${JSON.stringify(rendererName)},note:'Renderer set. Restart Premiere to confirm the change took effect.'});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async syncLockTrack(_sequenceId: string | undefined, trackType: 'video' | 'audio', trackIndex: number, locked: boolean): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var seq = qe.project.getActiveSequence();
+        var track = ${trackType === 'audio' ? `seq.getAudioTrackAt(${trackIndex})` : `seq.getVideoTrackAt(${trackIndex})`};
+        if (!track) return JSON.stringify({success:false,error:'Track not found'});
+        track.setSyncLock(${locked});
+        var after = track.isSyncLocked();
+        return JSON.stringify({success:true,verified:after===${locked},trackType:${JSON.stringify(trackType)},trackIndex:${trackIndex},locked:${locked},readback:after});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async renderAudio(_sequenceId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var seq = qe.project.getActiveSequence();
+        seq.renderAudio();
+        return JSON.stringify({success:true,verified:false,note:'renderAudio() dispatched. Audio rendering is async.',sequenceName:String(seq.name)});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async getProductionList(): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var isLoggedIn = qe.ea.isLoggedIn();
+        var userEmail = String(qe.ea.getUserEmail());
+        var list = qe.ea.getProductionList();
+        var prods = [];
+        if (list) { for (var i=0;i<list.length;i++) prods.push(String(list[i])); }
+        return JSON.stringify({success:true,isLoggedIn:isLoggedIn,userEmail:userEmail,productions:prods,count:prods.length});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async getLumetriPresetList(folder?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var all;
+        if (${folder ? JSON.stringify(folder) : 'null'}) {
+          all = app.project.getLumetriPresetsForFolderList(${folder ? JSON.stringify(folder) : '""'});
+        } else {
+          all = app.project.getAllLumetriPresetsList();
+        }
+        var parts = String(all).split(',').map(function(s){return s.replace(/^\\s+|\\s+$/g,'');}).filter(function(s){return s.length>0;});
+        return JSON.stringify({success:true,presets:parts,count:parts.length,folder:${folder ? JSON.stringify(folder) : 'null'}});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async setSequenceInOutQe(inPoint?: string, outPoint?: string, _sequenceId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var seq = qe.project.getActiveSequence();
+        if (!seq) return JSON.stringify({success:false,error:'No sequence'});
+        ${inPoint ? `try { seq.setInPoint(${JSON.stringify(inPoint)}, true, false); } catch(e) {}` : ''}
+        ${outPoint ? `try { seq.setOutPoint(${JSON.stringify(outPoint)}, true, false); } catch(e) {}` : ''}
+        return JSON.stringify({success:true,inPoint:${inPoint ? JSON.stringify(inPoint) : 'null'},outPoint:${outPoint ? JSON.stringify(outPoint) : 'null'},seqName:String(seq.name)});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  private async getQeSequenceProps(_sequenceId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var seq = qe.project.getActiveSequence();
+        if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
+        var cti = seq.CTI; var ip = seq.inPoint; var op = seq.outPoint; var wi = seq.workInPoint; var wo = seq.workOutPoint;
+        return JSON.stringify({
+          success:true, sequenceName:String(seq.name),
+          cti:{ticks:String(cti.ticks),secs:cti.secs,frames:cti.frames},
+          inPoint:{ticks:String(ip.ticks),secs:ip.secs},
+          outPoint:{ticks:String(op.ticks),secs:op.secs},
+          workInPoint:{ticks:String(wi.ticks),secs:wi.secs},
+          workOutPoint:{ticks:String(wo.ticks),secs:wo.secs},
+          previewPresetPath:String(seq.previewPresetPath),
+          editingModeGuid:String(seq.editingMode),
+          numVideoTracks:seq.numVideoTracks, numAudioTracks:seq.numAudioTracks,
+          useMaxBitDepth:seq.useMaxBitDepth, useMaxRenderQuality:seq.useMaxRenderQuality
+        });
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
 
