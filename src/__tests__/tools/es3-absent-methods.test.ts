@@ -5,9 +5,15 @@
  * this suite exists with a MEASURED table rather than a remembered one. Probed live against
  * Premiere Pro 26.3.2 on 2026-08-24:
  *
- *   PRESENT:  Array.prototype.map, Array.prototype.filter, Array.prototype.indexOf
- *   ABSENT:   Array.prototype.forEach, String.prototype.trim, String.prototype.startsWith,
- *             String.prototype.endsWith, String.prototype.includes, Object.keys
+ *   PRESENT:  Array.prototype.map, Array.prototype.filter, Array.prototype.indexOf,
+ *             Array.isArray, JSON.stringify (the latter installed by the bridge prelude)
+ *   ABSENT:   Array.prototype.forEach, find, findIndex, some, every, reduce, lastIndexOf,
+ *             String.prototype.trim, startsWith, endsWith, includes, padStart, padEnd, repeat,
+ *             Function.prototype.bind, Object.keys, Object.assign, Set, Map
+ *
+ * The selective shape is the point: it has map/filter/indexOf but not forEach/some/every/reduce,
+ * so no single-sentence rule predicts it. Every entry below was probed with typeof against the
+ * live host, not inferred.
  *
  * Both halves matter. Believing `map` was absent nearly cost 13 working call sites a pointless
  * rewrite; believing `trim` was present cost `grade_snapshot` its entire output — it threw
@@ -31,6 +37,16 @@ const ABSENT: Array<{ pattern: RegExp; name: string; use: string }> = [
   { pattern: /\bObject\.keys\s*\(/g, name: 'Object.keys', use: 'for (var k in obj) with a hasOwnProperty guard' },
   { pattern: /\bnew\s+Set\s*\(/g, name: 'Set', use: 'a plain object used as a lookup table' },
   { pattern: /\bnew\s+Map\s*\(/g, name: 'Map', use: 'a plain object' },
+  // Added after frames_to_timecode threw "String().padStart is not a function" on a live host.
+  { pattern: /\.padStart\s*\(/g, name: 'String.prototype.padStart', use: "a while loop, or __padLeft in the prelude" },
+  { pattern: /\.padEnd\s*\(/g, name: 'String.prototype.padEnd', use: 'a while loop' },
+  { pattern: /\.repeat\s*\(/g, name: 'String.prototype.repeat', use: 'a while loop' },
+  { pattern: /\.findIndex\s*\(/g, name: 'Array.prototype.findIndex', use: 'a for loop' },
+  { pattern: /\.some\s*\(/g, name: 'Array.prototype.some', use: 'a for loop with an early return' },
+  { pattern: /\.every\s*\(/g, name: 'Array.prototype.every', use: 'a for loop with an early return' },
+  { pattern: /\.reduce\s*\(/g, name: 'Array.prototype.reduce', use: 'a for loop with an accumulator' },
+  { pattern: /\.lastIndexOf\s*\(/g, name: 'Array.prototype.lastIndexOf', use: 'a reverse for loop' },
+  { pattern: /\bObject\.assign\s*\(/g, name: 'Object.assign', use: 'explicit property copies' },
 ];
 
 /**
@@ -67,7 +83,7 @@ describe('generated ExtendScript avoids methods this engine does not have', () =
   // suite pass vacuously. This asserts the patterns fire against known-bad text, which is exactly
   // the shape of the code that shipped in grade_snapshot and threw on every call.
   it('detects the absent-method calls it is looking for', () => {
-    const knownBad = "var t = name.trim(); if (s.startsWith('_')) {} arr.forEach(function(x){}); Object.keys(o); var q = new Set();";
+    const knownBad = "var t = name.trim(); if (s.startsWith('_')) {} arr.forEach(function(x){}); Object.keys(o); var q = new Set(); var p = String(h).padStart(2,'0'); arr.reduce(function(a,b){return a;});";
     const fired = ABSENT.filter(({ pattern }) => { pattern.lastIndex = 0; return pattern.test(knownBad); }).map((a) => a.name);
     expect(fired).toEqual(expect.arrayContaining([
       'String.prototype.trim',
@@ -75,6 +91,8 @@ describe('generated ExtendScript avoids methods this engine does not have', () =
       'Array.prototype.forEach',
       'Object.keys',
       'Set',
+      'String.prototype.padStart',
+      'Array.prototype.reduce',
     ]));
     // And it must not fire on the ES3-safe replacements the codebase uses instead.
     const knownGood = "var t = name.replace(/^\\s+|\\s+$/g,''); if (s.indexOf('_') === 0) {} for (var k in o) {} var m = [1].map(function(x){return x;});";
