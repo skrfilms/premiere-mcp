@@ -43,7 +43,7 @@ interface BridgeHeartbeat {
   queueLength: number;
 }
 
-const EXTENDSCRIPT_HELPERS = `
+export const EXTENDSCRIPT_HELPERS = `
 function __mcpEscapeString(value) {
   // Built from character codes rather than backslash literals on purpose: this
   // function is written inside a TypeScript template literal, where an escape
@@ -319,6 +319,12 @@ function __mcpParse(text) {
 JSON.parse = __mcpParse;
 function __findSequence(id) {
   if (!app.project || !app.project.sequences) return null;
+  // Fall back to the active sequence when no id is given. Most sequence tools in this catalogue
+  // already default that way, and the ones that did not silently reported "Sequence not found"
+  // for the entirely reasonable call of "act on the sequence I am looking at".
+  if (id === null || typeof id === 'undefined' || id === '') {
+    return app.project.activeSequence ? app.project.activeSequence : null;
+  }
   for (var i = 0; i < app.project.sequences.numSequences; i++) {
     if (app.project.sequences[i].sequenceID === id) return app.project.sequences[i];
   }
@@ -436,6 +442,126 @@ function __ticksToSeconds(ticks) {
 }
 function __secondsToTicks(seconds) {
   return String(Math.round(seconds * 254016000000));
+}
+/*
+ * Sequence time accessors are the sharpest footgun in this API. Measured on 26.3.2:
+ *
+ *   Sequence.end                        -> STRING of TICKS      ("2540160000000")
+ *   Sequence.getInPoint()/getOutPoint() -> STRING of SECONDS     ("0", "2")
+ *   ProjectItem.getInPoint()/getOutPoint() -> Time object        (.ticks / .seconds)
+ *   TrackItem.start/end/inPoint/outPoint   -> Time object        (.ticks / .seconds)
+ *
+ * So the two Sequence accessors have the SAME type and DIFFERENT units, with nothing in the
+ * value to tell them apart. Reading .ticks off either yields undefined, which becomes the
+ * literal string "undefined" when handed to setPlayerPosition (the playhead silently does not
+ * move) or NaN when added into a duration total (serialised as null).
+ *
+ * These are deliberately one helper per accessor rather than one clever unit-sniffing function:
+ * a magnitude heuristic cannot distinguish 2 seconds from 2 ticks, and a wrong guess here is
+ * invisible. Each helper also tolerates a Time object, in case a future build changes shape.
+ */
+function __timeFieldToNumber(value) {
+  if (value === null || typeof value === 'undefined') return null;
+  if (typeof value === 'object') {
+    if (typeof value.ticks !== 'undefined') return Number(value.ticks);
+    if (typeof value.seconds !== 'undefined') return Number(value.seconds) * 254016000000;
+    return null;
+  }
+  var n = Number(value);
+  return isNaN(n) ? null : n;
+}
+/* Sequence.end is TICKS. Returns Number of ticks, or null when unreadable. */
+function __seqEndTicks(seq) {
+  if (!seq) return null;
+  var v = seq.end;
+  if (v === null || typeof v === 'undefined') return null;
+  if (typeof v === 'object') return __timeFieldToNumber(v);
+  var n = Number(v);
+  return isNaN(n) ? null : n;
+}
+function __seqEndSeconds(seq) {
+  var t = __seqEndTicks(seq);
+  return t === null ? null : t / 254016000000;
+}
+/* Sequence.getInPoint()/getOutPoint() are SECONDS. Returns Number of seconds, or null. */
+function __seqPointSeconds(seq, which) {
+  if (!seq) return null;
+  var raw;
+  try { raw = (which === 'out') ? seq.getOutPoint() : seq.getInPoint(); } catch (e) { return null; }
+  if (raw === null || typeof raw === 'undefined') return null;
+  if (typeof raw === 'object') {
+    if (typeof raw.seconds !== 'undefined') return Number(raw.seconds);
+    if (typeof raw.ticks !== 'undefined') return Number(raw.ticks) / 254016000000;
+    return null;
+  }
+  var n = Number(raw);
+  return isNaN(n) ? null : n;
+}
+function __seqInSeconds(seq) { return __seqPointSeconds(seq, 'in'); }
+function __seqOutSeconds(seq) { return __seqPointSeconds(seq, 'out'); }
+function __seqInTicks(seq) {
+  var s = __seqInSeconds(seq);
+  return s === null ? null : Math.round(s * 254016000000);
+}
+function __seqOutTicks(seq) {
+  var s = __seqOutSeconds(seq);
+  return s === null ? null : Math.round(s * 254016000000);
+}
+/*
+ * Work area readback. The AsTime variants are the reliable pair on 26.3.2; the plain getters are
+ * kept as a fallback in case a build exposes only those.
+ *
+ * Note for callers: the work-area SETTERS are inert on 26.3.2. setWorkAreaInPoint /
+ * setWorkAreaOutPoint are present and accept values without throwing, and QE
+ * setWorkInOutPoints likewise, but the readback never moves — even after
+ * setWorkAreaEnabled(true) flips isWorkAreaEnabled() to true. Premiere 2026 deprecated the
+ * work-area bar in favour of sequence in/out points, which ARE settable. Read the work area
+ * freely; do not trust a write to it.
+ */
+function __readWorkArea(seq) {
+  var inTicks = null, outTicks = null;
+  try {
+    inTicks = __timeFieldToNumber(seq.getWorkAreaInPointAsTime());
+    outTicks = __timeFieldToNumber(seq.getWorkAreaOutPointAsTime());
+  } catch (e) {}
+  if (outTicks === null) {
+    try {
+      inTicks = __timeFieldToNumber(seq.getWorkAreaInPoint());
+      outTicks = __timeFieldToNumber(seq.getWorkAreaOutPoint());
+    } catch (e2) {}
+  }
+  return { inTicks: inTicks, outTicks: outTicks };
+}
+function __workAreaEnabled(seq) {
+  try { return !!seq.isWorkAreaEnabled(); } catch (e) { return null; }
+}
+/*
+ * Move the playhead and PROVE it landed. setPlayerPosition takes a ticks string and silently
+ * accepts garbage, so the readback comparison is the only thing separating a real move from a
+ * fake success. Tolerance is one frame's worth of ticks at 24fps unless told otherwise.
+ */
+function __setPlayheadVerified(seq, targetTicks, toleranceTicks) {
+  if (targetTicks === null || typeof targetTicks === 'undefined' || isNaN(Number(targetTicks))) {
+    return { moved: false, verified: false, error: 'Refusing to set the playhead to a non-numeric position (' + String(targetTicks) + '). Nothing was changed.' };
+  }
+  var tol = (typeof toleranceTicks === 'number') ? toleranceTicks : 10584000000;
+  var target = Math.round(Number(targetTicks));
+  var before = null;
+  try { before = __timeFieldToNumber(seq.getPlayerPosition()); } catch (e) {}
+  try { seq.setPlayerPosition(String(target)); } catch (e2) {
+    return { moved: false, verified: false, error: 'setPlayerPosition threw: ' + e2.toString(), beforeTicks: before };
+  }
+  var after = null;
+  try { after = __timeFieldToNumber(seq.getPlayerPosition()); } catch (e3) {}
+  if (after === null) {
+    return { moved: false, verified: false, error: 'Could not read the playhead back, so the move is unproven.', targetTicks: target, beforeTicks: before };
+  }
+  var landed = Math.abs(after - target) <= tol;
+  return {
+    moved: landed, verified: true, targetTicks: target, actualTicks: after,
+    actualSeconds: after / 254016000000, beforeTicks: before,
+    error: landed ? null : 'Playhead did not land on the requested position (asked ' + target + ' ticks, got ' + after + ').'
+  };
 }
 `;
 

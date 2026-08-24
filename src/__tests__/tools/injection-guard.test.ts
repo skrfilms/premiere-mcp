@@ -118,6 +118,23 @@ const HELPER_SAMPLE = 6;
 const ARBITRARY_CODE_TOOLS = new Set(['execute_extendscript']);
 
 /**
+ * Individual ARGUMENT POSITIONS whose contract is a caller-supplied program, on tools that are
+ * otherwise fuzzable. `batch_execute` is the case: each `operations[].script` is concatenated in
+ * verbatim by design — the caller is running their own code, the same privilege
+ * `execute_extendscript` grants outright — but its sibling `operations[].id` is an ordinary
+ * string that MUST still be escaped. Exempting the whole tool (the only lever that existed)
+ * would have stopped checking the id too, so the exemption is per-position.
+ *
+ * Numeric path segments are normalised to `*`, so this matches any array index.
+ */
+const ARBITRARY_CODE_POSITIONS = new Set([
+  'batch_execute.operations.*.script',
+]);
+
+const positionKey = (toolName: string, path: (string | number)[]): string =>
+  `${toolName}.${path.map((seg) => (/^\d+$/.test(String(seg)) ? '*' : seg)).join('.')}`;
+
+/**
  * The 171 free-form tools emit one shared ~123 KB body, so every payload against
  * every one of them re-parses that body. They are driven with the breakout
  * payloads only: those are what detect an escape, and they exercise the parse
@@ -200,6 +217,9 @@ describe('generated scripts cannot be broken out of', () => {
       const payloads = freeForm ? BREAKOUT_PAYLOADS : PAYLOADS;
 
       for (const path of paths) {
+        // A position that is documented to be executed verbatim cannot "break out" of anything;
+        // fuzzing it only proves that a script runs. Its siblings are still fuzzed.
+        if (ARBITRARY_CODE_POSITIONS.has(positionKey(tool.name, path))) continue;
         for (const payload of payloads) {
           const scripts: string[] = [];
           const tools = new PremiereProTools({

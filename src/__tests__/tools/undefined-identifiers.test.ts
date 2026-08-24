@@ -26,6 +26,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse } from 'acorn';
 import { PremiereProTools } from '../../tools/index.js';
+import { EXTENDSCRIPT_HELPERS } from '../../bridge/index.js';
 import { expandedToolNames } from '../../tools/expanded.js';
 import { seedArgs, seedRequiredArgs } from '../helpers/schema-args.js';
 
@@ -45,15 +46,29 @@ afterAll(() => {
   try { rmSync(scratchCwd, { recursive: true, force: true }); } catch { /* best effort */ }
 });
 
-// Provided by the ExtendScript host or by the prelude the bridge prepends.
-const HOST_GLOBALS = new Set([
+/**
+ * Names the ExtendScript host itself provides. These genuinely have to be listed by hand.
+ */
+const HOST_BUILTINS = [
   'app', 'qe', 'JSON', 'Sequence', 'File', 'Folder', 'Time', 'String', 'Number', 'Boolean',
   'Math', 'Date', 'Array', 'Object', 'RegExp', 'Error', 'parseInt', 'parseFloat',
   'isFinite', 'isNaN', 'undefined', 'NaN', 'Infinity', '$', 'XMPMeta', 'ExternalObject',
-  '__findSequence', '__findClip', '__findClipInSequence', '__findProjectItem',
-  '__samePath', '__ticksToSeconds', '__secondsToTicks', '__mcpStringify',
-  '__mcpEscapeString', '__qeSequenceFor', '__findQeClipByDomClip',
-]);
+];
+
+/**
+ * Helpers the bridge prepends are DERIVED from the prelude source rather than mirrored by hand.
+ *
+ * This list used to be hardcoded, which meant adding a helper to the prelude broke this suite
+ * with a message that pointed at the tool using it rather than at the missing registration —
+ * and the obvious "fix" was to append the name here, i.e. to keep maintaining a second copy of
+ * the truth. Reading the declarations out of the prelude removes the copy entirely: a helper
+ * that exists is known, and a helper that was deleted stops being known on the same commit.
+ */
+const PRELUDE_FUNCTIONS = Array.from(
+  EXTENDSCRIPT_HELPERS.matchAll(/function\s+(__[A-Za-z0-9_$]+)\s*\(/g),
+).map((m) => m[1] as string);
+
+const HOST_GLOBALS = new Set([...HOST_BUILTINS, ...PRELUDE_FUNCTIONS]);
 
 /**
  * Tools whose entire contract is to run a caller-supplied program verbatim: the
