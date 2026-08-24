@@ -2031,14 +2031,18 @@ export class PremiereProTools {
         description: 'Applies basic color correction adjustments to a video clip.',
         inputSchema: z.object({
           clipId: z.string().describe('The ID of the clip to color correct'),
-          brightness: z.number().optional().describe('Brightness adjustment (-100 to 100)'),
-          contrast: z.number().optional().describe('Contrast adjustment (-100 to 100)'),
-          saturation: z.number().optional().describe('Saturation adjustment (-100 to 100)'),
-          hue: z.number().optional().describe('Hue adjustment in degrees (-180 to 180)'),
-          highlights: z.number().optional().describe('Adjustment for the brightest parts of the image (-100 to 100)'),
-          shadows: z.number().optional().describe('Adjustment for the darkest parts of the image (-100 to 100)'),
-          temperature: z.number().optional().describe('Color temperature adjustment (-100 to 100)'),
-          tint: z.number().optional().describe('Tint adjustment (-100 to 100)')
+          brightness: z.number().optional().describe('Mapped to Lumetri EXPOSURE, which is the closest equivalent — Lumetri has no parameter called Brightness on this build'),
+          exposure: z.number().optional().describe('Lumetri Exposure (stops). Same parameter as brightness; prefer this name'),
+          contrast: z.number().optional().describe('Contrast adjustment'),
+          saturation: z.number().optional().describe('Saturation, where 100 is neutral'),
+          vibrance: z.number().optional().describe('Vibrance — saturation weighted toward less-saturated tones'),
+          hue: z.number().optional().describe('NOT AVAILABLE: Lumetri Basic Correction exposes no Hue parameter on this build. Passing it returns an explicit unsupported result rather than silently doing nothing'),
+          highlights: z.number().optional().describe('Adjustment for the brightest parts of the image'),
+          shadows: z.number().optional().describe('Adjustment for the darkest parts of the image'),
+          whites: z.number().optional().describe('White point adjustment'),
+          blacks: z.number().optional().describe('Black point adjustment'),
+          temperature: z.number().optional().describe('Color temperature adjustment'),
+          tint: z.number().optional().describe('Tint adjustment')
         })
       },
       {
@@ -12866,18 +12870,54 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(script);
   }
 
+  /**
+   * Basic colour correction, mapped to the parameter names Lumetri ACTUALLY exposes.
+   *
+   * Enumerated live on 26.3.2: Lumetri's Basic Correction parameters are Temperature, Tint,
+   * Saturation, Exposure, Contrast, Highlights, Shadows, Whites, Blacks and (further down)
+   * Vibrance. There is **no parameter called Brightness**, so the previous mapping of
+   * brightness -> "Brightness" could never match and the tool reported
+   * no_matching_property for the one adjustment people reach for first. Exposure is the
+   * equivalent, so brightness maps there.
+   *
+   * There is also no Hue parameter in Basic Correction, so `hue` is rejected explicitly instead
+   * of being sent to a name that does not exist. Silently accepting an adjustment that cannot be
+   * applied is the failure mode this whole server is built to avoid.
+   *
+   * Note several names appear more than once in the flat parameter list (Temperature at 14 and
+   * 101, Contrast at 20 and 103, Saturation at 16, 43 and 105). Matching by name takes the first,
+   * which is the Basic Correction instance — the one a caller means.
+   */
   private async colorCorrect(clipId: string, adjustments: any): Promise<any> {
     const requested: Record<string, number> = {};
-    if (adjustments.brightness !== undefined) requested["Brightness"] = adjustments.brightness;
+    // brightness and exposure are the same Lumetri parameter; an explicit exposure wins.
+    if (adjustments.brightness !== undefined) requested["Exposure"] = adjustments.brightness;
+    if (adjustments.exposure !== undefined) requested["Exposure"] = adjustments.exposure;
     if (adjustments.contrast !== undefined) requested["Contrast"] = adjustments.contrast;
     if (adjustments.saturation !== undefined) requested["Saturation"] = adjustments.saturation;
-    if (adjustments.hue !== undefined) requested["Hue"] = adjustments.hue;
+    if (adjustments.vibrance !== undefined) requested["Vibrance"] = adjustments.vibrance;
+    if (adjustments.highlights !== undefined) requested["Highlights"] = adjustments.highlights;
+    if (adjustments.shadows !== undefined) requested["Shadows"] = adjustments.shadows;
+    if (adjustments.whites !== undefined) requested["Whites"] = adjustments.whites;
+    if (adjustments.blacks !== undefined) requested["Blacks"] = adjustments.blacks;
     if (adjustments.temperature !== undefined) requested["Temperature"] = adjustments.temperature;
     if (adjustments.tint !== undefined) requested["Tint"] = adjustments.tint;
+
+    const unsupported: string[] = [];
+    if (adjustments.hue !== undefined) unsupported.push('hue (Lumetri Basic Correction exposes no Hue parameter on this build; use vibrance or saturation, or a Hue/Saturation Curves preset)');
+
     if (Object.keys(requested).length === 0) {
-      return { success: false, error: "No color adjustments provided. Supply at least one of: brightness, contrast, saturation, hue, temperature, tint." };
+      return {
+        success: false,
+        error: unsupported.length
+          ? `No applicable colour adjustments. ${unsupported.join('; ')}.`
+          : 'No colour adjustments provided. Supply at least one of: brightness (=exposure), exposure, contrast, saturation, vibrance, highlights, shadows, whites, blacks, temperature, tint.',
+        unsupported,
+      };
     }
-    return await this.applyLumetriParams(clipId, requested, "Color correction");
+    const result = await this.applyLumetriParams(clipId, requested, 'Color correction');
+    // Report a rejected adjustment alongside the applied ones rather than dropping it.
+    return unsupported.length ? { ...result, unsupported } : result;
   }
 
   private async applyLut(clipId: string, lutPath: string, _intensity = 100): Promise<any> {
