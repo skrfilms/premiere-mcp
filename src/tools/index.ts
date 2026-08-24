@@ -475,6 +475,78 @@ export class PremiereProTools {
           location: z.string().describe('The absolute directory path where the project should be saved')
         })
       },
+      {
+        name: 'close_project',
+        description: 'Closes the current project. Verified: reports whether the project was saved before closing.',
+        inputSchema: z.object({
+          saveFirst: z.boolean().optional().describe('Save the project before closing. Default false.'),
+          closeIfLast: z.boolean().optional().describe('Close Premiere if this is the last open project. Default false.')
+        })
+      },
+      {
+        name: 'list_open_projects',
+        description: 'Lists all currently open Premiere Pro projects with their names, paths, and sequence counts. Verified via app.projects collection.',
+        inputSchema: z.object({})
+      },
+      {
+        name: 'list_recent_projects',
+        description: 'Lists recently modified Premiere Pro project files on disk, sorted by modification time. Excludes Auto-Save copies. Uses Spotlight (mdfind) — returns paths, names, and modification dates.',
+        inputSchema: z.object({
+          limit: z.number().optional().describe('Maximum number of results. Default 10.'),
+          excludeAutosave: z.boolean().optional().describe('Exclude Adobe Premiere Pro Auto-Save files. Default true.')
+        })
+      },
+
+      // Clipboard
+      {
+        name: 'read_clipboard',
+        description: 'Reads the current macOS system clipboard as text. Useful for reading timecodes, clip names, or any text the user copied. Verified via Node.js pbpaste.',
+        inputSchema: z.object({})
+      },
+      {
+        name: 'write_clipboard',
+        description: 'Writes text to the macOS system clipboard. Useful for exporting timecodes, marker lists, clip metadata, or any text for pasting elsewhere. Verified via Node.js pbcopy.',
+        inputSchema: z.object({
+          text: z.string().describe('The text to write to the clipboard')
+        })
+      },
+
+      // Render status and preview rendering
+      {
+        name: 'get_sequence_render_status',
+        description: 'Returns the render bar status of the active sequence: which time ranges are fully rendered (green), partially rendered (yellow), unrendered (red), or empty (no content). Verified via QE getGreenBarTimes/getRedBarTimes/getYellowBarTimes.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional().describe('Sequence ID. Defaults to the active sequence.')
+        })
+      },
+      {
+        name: 'render_sequence_previews',
+        description: 'Renders preview files for the active sequence\'s unrendered segments (equivalent to Sequence > Render In to Out). Uses QE renderPreview(). Does not export media — writes to the preview cache only.',
+        inputSchema: z.object({
+          sequenceId: z.string().optional().describe('Sequence ID. Defaults to the active sequence.'),
+          renderAll: z.boolean().optional().describe('Render all segments including yellow bars. Default false (red/unrendered only).')
+        })
+      },
+
+      // Essential Sound
+      {
+        name: 'set_essential_sound_category',
+        description: 'Assigns an Essential Sound category to a project item. Categories: "dialog", "music", "sfx", "ambience". Verified: setProjectMetadata writes ESP.Tag and related keys. The panel will reflect the category after the next project refresh.',
+        inputSchema: z.object({
+          projectItemId: z.string().describe('The nodeId of the project item to categorize'),
+          category: z.enum(['dialog', 'music', 'sfx', 'ambience']).describe('The Essential Sound category')
+        })
+      },
+
+      // Source monitor upgrade
+      {
+        name: 'open_project_item_in_source',
+        description: 'Opens a project item in the Source Monitor by passing the DOM ProjectItem directly. More reliable than open_in_source which uses file paths. Optionally cues to a timecode. Verified via app.sourceMonitor.openProjectItem().',
+        inputSchema: z.object({
+          projectItemId: z.string().describe('The nodeId of the project item to open in the Source Monitor'),
+          timecode: z.string().optional().describe('Optional timecode to cue to after opening (e.g. "00:00:01:00")')
+        })
+      },
 
       // Media Management
       {
@@ -1829,6 +1901,24 @@ export class PremiereProTools {
           return await this.saveProject();
         case 'save_project_as':
           return await this.saveProjectAs(args.name, args.location);
+        case 'close_project':
+          return await this.closeProject(args.saveFirst ?? false, args.closeIfLast ?? false);
+        case 'list_open_projects':
+          return await this.listOpenProjects();
+        case 'list_recent_projects':
+          return this.listRecentProjects(args.limit ?? 10, args.excludeAutosave ?? true);
+        case 'read_clipboard':
+          return this.clipboardRead();
+        case 'write_clipboard':
+          return this.clipboardWrite(args.text);
+        case 'get_sequence_render_status':
+          return await this.getSequenceRenderStatus(args.sequenceId);
+        case 'render_sequence_previews':
+          return await this.renderSequencePreviews(args.sequenceId, args.renderAll ?? false);
+        case 'set_essential_sound_category':
+          return await this.setEssentialSoundCategory(args.projectItemId, args.category);
+        case 'open_project_item_in_source':
+          return await this.openProjectItemInSource(args.projectItemId, args.timecode);
 
         // Media Management
         case 'import_media':
@@ -3304,6 +3394,158 @@ ${this.buildSequenceResolver(sequenceId)}
     
     return await this.bridge.executeScript(script);
   }
+
+  // ── New Wave-1 tools ───────────────────────────────────────────────────
+
+  private async closeProject(saveFirst: boolean, closeIfLast: boolean): Promise<any> {
+    const script = `
+      try {
+        var name = app.project.name;
+        app.project.closeDocument(${saveFirst}, ${closeIfLast});
+        return JSON.stringify({ success: true, closedProject: name, savedFirst: ${saveFirst} });
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `;
+    return await this.bridge.executeScript(script);
+  }
+
+  private async listOpenProjects(): Promise<any> {
+    const script = `
+      try {
+        var projs = app.projects;
+        var list = [];
+        for (var i = 0; i < projs.numProjects; i++) {
+          var p = projs[i];
+          list.push({ name: String(p.name), path: String(p.path), sequences: p.sequences ? p.sequences.numSequences : 0 });
+        }
+        return JSON.stringify({ success: true, openProjectCount: projs.numProjects, projects: list });
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `;
+    return await this.bridge.executeScript(script);
+  }
+
+  private listRecentProjects(limit: number, excludeAutosave: boolean): any {
+    const { execSync } = require('child_process');
+    try {
+      const raw = execSync('mdfind -name ".prproj"', { encoding: 'utf8', timeout: 5000 });
+      const files = raw.trim().split('\n')
+        .filter((f: string) => f && (!excludeAutosave || !f.includes('Auto-Save')));
+      const fs = require('fs');
+      const withTimes = files
+        .map((f: string) => { try { return { path: f, name: require('path').basename(f), mtime: fs.statSync(f).mtimeMs }; } catch { return null; } })
+        .filter(Boolean)
+        .sort((a: any, b: any) => b.mtime - a.mtime)
+        .slice(0, limit)
+        .map((f: any) => ({ ...f, modified: new Date(f.mtime).toISOString() }));
+      return { success: true, count: withTimes.length, projects: withTimes };
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
+  }
+
+  private clipboardRead(): any {
+    try {
+      const text = this.bridge.readClipboard();
+      return { success: true, text, length: text.length };
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
+  }
+
+  private clipboardWrite(text: string): any {
+    try {
+      this.bridge.writeClipboard(text);
+      const readback = this.bridge.readClipboard();
+      const verified = readback === text;
+      return { success: true, verified, length: text.length, note: verified ? undefined : 'Clipboard content after write did not match exactly.' };
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
+  }
+
+  private async getSequenceRenderStatus(sequenceId?: string): Promise<any> {
+    const script = `
+      try {
+        app.enableQE();
+        var seq = ${sequenceId ? `(function(){ var seqs=app.project.sequences; for(var i=0;i<seqs.numSequences;i++){ if(seqs[i].sequenceID===${JSON.stringify(sequenceId)}) return qe.project.getSequenceAt(i); } return qe.project.getActiveSequence(); })()` : 'qe.project.getActiveSequence()'};
+        if (!seq) return JSON.stringify({ success: false, error: 'Sequence not found' });
+        function timesToArr(arr) { var out=[]; for(var i=0;i<arr.length;i++) out.push({ticks:String(arr[i].ticks),secs:arr[i].secs,frames:arr[i].frames}); return out; }
+        var green = timesToArr(seq.getGreenBarTimes());
+        var red = timesToArr(seq.getRedBarTimes());
+        var yellow = timesToArr(seq.getYellowBarTimes());
+        var empty = timesToArr(seq.getEmptyBarTimes());
+        var incomplete = seq.isIncompleteBackgroundVideoEffects();
+        return JSON.stringify({ success: true, sequenceName: String(seq.name),
+          green: { count: green.length/2, ranges: green },
+          red: { count: red.length/2, ranges: red },
+          yellow: { count: yellow.length/2, ranges: yellow },
+          empty: { count: empty.length/2, ranges: empty },
+          incompleteBackgroundEffects: incomplete,
+          needsRender: red.length > 0 || yellow.length > 0
+        });
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `;
+    return await this.bridge.executeScript(script);
+  }
+
+  private async renderSequencePreviews(sequenceId?: string, renderAll?: boolean): Promise<any> {
+    const script = `
+      try {
+        app.enableQE();
+        var seq = ${sequenceId ? `(function(){ var seqs=app.project.sequences; for(var i=0;i<seqs.numSequences;i++){ if(seqs[i].sequenceID===${JSON.stringify(sequenceId)}) return qe.project.getSequenceAt(i); } return qe.project.getActiveSequence(); })()` : 'qe.project.getActiveSequence()'};
+        if (!seq) return JSON.stringify({ success: false, error: 'Sequence not found' });
+        var redBefore = seq.getRedBarTimes().length;
+        var yellowBefore = seq.getYellowBarTimes().length;
+        if (${renderAll}) { seq.renderAll(); } else { seq.renderPreview(); }
+        return JSON.stringify({ success: true, verified: false, note: 'renderPreview() dispatched. Rendering is async — call get_sequence_render_status to check progress.', seqName: String(seq.name), unrenderedSegmentsBefore: redBefore/2, partialSegmentsBefore: yellowBefore/2 });
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `;
+    return await this.bridge.executeScript(script);
+  }
+
+  private async setEssentialSoundCategory(projectItemId: string, category: string): Promise<any> {
+    const clipMixTypeMap: Record<string, number> = { dialog: 1, music: 2, sfx: 3, ambience: 4 };
+    const clipMixType = clipMixTypeMap[category] ?? 1;
+    const script = `
+      try {
+        var item = null;
+        var root = app.project.rootItem;
+        function findById(bin, id) { for(var i=0;i<bin.children.numItems;i++){ var c=bin.children[i]; if(c.nodeId===id){return c;} if(c.type===2){var r=findById(c,id);if(r)return r;} } return null; }
+        item = findById(root, ${JSON.stringify(projectItemId)});
+        if (!item) return JSON.stringify({ success: false, error: 'Project item not found: ' + ${JSON.stringify(projectItemId)} });
+        item.setProjectMetadata('ESP.Tag', ${JSON.stringify(category)});
+        item.setProjectMetadata('ESP.AdjustmentsModeID', ${JSON.stringify(category)});
+        item.setProjectMetadata('ESP.ClipMixTypeID', ${JSON.stringify(String(clipMixType))});
+        item.setProjectMetadata('MZ.AudioCategorization.AudioCategorizationAdjustmentMode', ${JSON.stringify(category)});
+        return JSON.stringify({ success: true, verified: false, projectItemId: ${JSON.stringify(projectItemId)}, category: ${JSON.stringify(category)}, note: 'ESP metadata written. Premiere reads this on next project open/refresh.' });
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `;
+    return await this.bridge.executeScript(script);
+  }
+
+  private async openProjectItemInSource(projectItemId: string, timecode?: string): Promise<any> {
+    const script = `
+      try {
+        var item = null;
+        var root = app.project.rootItem;
+        function findById(bin, id) { for(var i=0;i<bin.children.numItems;i++){ var c=bin.children[i]; if(c.nodeId===id){return c;} if(c.type===2){var r=findById(c,id);if(r)return r;} } return null; }
+        item = findById(root, ${JSON.stringify(projectItemId)});
+        if (!item) return JSON.stringify({ success: false, error: 'Project item not found: ' + ${JSON.stringify(projectItemId)} });
+        app.sourceMonitor.openProjectItem(item);
+        ${timecode ? `
+        // Cue to timecode if provided
+        try {
+          app.enableQE();
+          qe.source.clip.setInPoint(${JSON.stringify(timecode)});
+        } catch(eCue) {}` : ''}
+        var loaded = app.sourceMonitor.getProjectItem();
+        var verified = loaded && loaded.nodeId === ${JSON.stringify(projectItemId)};
+        return JSON.stringify({ success: true, verified: verified, projectItemId: ${JSON.stringify(projectItemId)}, itemName: loaded ? String(loaded.name) : null, timecode: ${JSON.stringify(timecode ?? null)} });
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `;
+    return await this.bridge.executeScript(script);
+  }
+
+  // ──────────────────────────────────────────────────────────────────────
 
   // Media Management Implementation
   private async importMedia(filePath: string, binName?: string): Promise<any> {

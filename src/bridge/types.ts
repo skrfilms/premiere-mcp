@@ -7,6 +7,8 @@ import type {
 
 export interface PremiereProTransport {
   executeScript(script: string, timeoutMs?: number, callerAuthored?: boolean): Promise<any>;
+  readClipboard(): string;
+  writeClipboard(text: string): void;
   createProject(name: string, location: string): Promise<PremiereProProject>;
   openProject(path: string): Promise<PremiereProProject>;
   saveProject(): Promise<void>;
