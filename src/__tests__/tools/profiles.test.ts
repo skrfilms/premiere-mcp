@@ -14,7 +14,9 @@ import {
 } from '../../tools/profiles.js';
 
 const ALL = [
-  'get_capabilities', 'get_project_info', 'list_sequences',
+  // find_tool is in ALWAYS_KEPT alongside get_capabilities: curation is only safe if
+  // the agent can still discover what curation removed.
+  'get_capabilities', 'find_tool', 'get_project_info', 'list_sequences',
   'add_to_timeline', 'razor_timeline_at_time', 'export_sequence',
   'color_correct', 'apply_lut', 'adjust_audio_levels', 'setup_ducking',
   'execute_extendscript', 'evaluate_expression',

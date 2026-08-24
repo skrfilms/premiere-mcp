@@ -251,13 +251,19 @@ describe('PremiereProPrompts', () => {
   });
 
   describe('Prompt Message Structure', () => {
-    it('should include a user-role instruction message for context', async () => {
+    it('should open with a role and a named tool chain', async () => {
       const result = await prompts.getPrompt('create_video_project', {
         project_type: 'documentary'
       });
 
       expect(result.messages[0].role).toBe('user');
-      expect(result.messages[0].content.text).toContain('You are an expert video editor');
+      const text = result.messages[0].content.text;
+      // The prompts used to open with "You are an expert video editor" followed by a
+      // pre-written assistant essay of generic advice that named none of this server's
+      // tools. They now open with a role plus the ordered tool chain to walk.
+      expect(text).toContain('through the Premiere MCP tools');
+      expect(text).toContain('Tools:');
+      expect(text).toContain('verify_premiere_connection');
     });
 
     it('should include user message for query', async () => {
@@ -269,14 +275,26 @@ describe('PremiereProPrompts', () => {
       expect(userMessages.length).toBeGreaterThan(0);
     });
 
-    it('should include assistant message with guidance', async () => {
+    it('should not pre-write the assistant turn', async () => {
       const result = await prompts.getPrompt('create_video_project', {
         project_type: 'documentary'
       });
 
+      // A prompt template that supplies the assistant's answer teaches the model that
+      // prose is the correct response, which is the opposite of what an MCP prompt is
+      // for. The template now states the task and stops.
       const assistantMessages = result.messages.filter(m => m.role === 'assistant');
-      expect(assistantMessages.length).toBeGreaterThan(0);
-      expect(assistantMessages[0].content.text.length).toBeGreaterThan(50);
+      expect(assistantMessages).toHaveLength(0);
+    });
+
+    it('should state the verification discipline', async () => {
+      const result = await prompts.getPrompt('create_video_project', {
+        project_type: 'documentary'
+      });
+
+      const text = result.messages.map(m => m.content.text).join('\n');
+      expect(text).toContain('verified');
+      expect(text).toContain('do not report success');
     });
 
     it('should recommend attaching the operating instructions resource', async () => {
