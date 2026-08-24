@@ -20,6 +20,9 @@ import { Logger } from '../utils/logger.js';
 import { createMotionDemoAssets } from '../utils/demoAssets.js';
 import { executeExpandedTool, getExpandedTools, isExpandedTool } from './expanded.js';
 import { applyProfile, resolveProfile, PROFILES } from './profiles.js';
+import { findTools, type SearchableTool } from './search.js';
+import { annotationsFor } from './annotations.js';
+import { describeCatalogueCost, type CatalogueCost } from './catalogue-cost.js';
 import {
   RECOVERY_PREFIX,
   buildRecoveryCheckpointName,
@@ -3083,7 +3086,79 @@ export class PremiereProTools {
       { name: 'list_video_transitions', description: 'Lists all available video transitions by name via qe.project.getVideoTransitionList(). Includes Morph Cut.', inputSchema: z.object({}) },
       { name: 'list_audio_transitions', description: 'Lists all available audio transitions by name via qe.project.getAudioTransitionList(). Returns Constant Power, Constant Gain, Exponential Fade.', inputSchema: z.object({}) },
       { name: 'get_ea_status', description: 'Returns full Creative Cloud / Productions login status: isLoggedIn, userEmail, username, productionList count, sessionSyncStatus. Uses qe.ea confirmed APIs.', inputSchema: z.object({}) },
+
+      // Catalogue discovery. This server exposes hundreds of tools, which is a
+      // liability for tool-selection accuracy unless the model can search rather
+      // than scan. Host-independent: no Premiere request, works with Premiere closed.
+      { name: 'find_tool', description: 'Searches THIS server\'s own tool catalogue by keyword and returns the best-matching tool names with their descriptions, ranked. Use it FIRST whenever you are unsure which tool does a job, instead of guessing a name and getting "Tool not found" -- this catalogue has hundreds of tools and searching it is far more reliable than scanning it. Matches against tool names and descriptions (lexical, not semantic, so prefer a domain noun like "marker", "proxy", "lumetri", "caption", "keyframe" over a full sentence). Reports how many tools were searched, and honestly flags any match that exists in this build but is hidden by the active tool profile as exposed:false rather than omitting it, so a curated deployment cannot look like a missing capability. Read-only: makes no Premiere request and changes nothing.', inputSchema: z.object({ query: z.string().describe('Keyword(s) describing the job, e.g. "marker", "audio fade", "export preset", "offline media"'), limit: z.number().optional().describe('Max matches to return (default 15, max 100)'), readOnly: z.boolean().optional().describe('Only return inspection tools (name begins with get/list/read/find/search/inspect/is/check/detect/probe/validate/verify/lint/diff). Naming heuristic, not a capability guarantee.'), includeParameters: z.boolean().optional().describe('Include each match\'s parameter names (default false, to keep the response small)'), includeHidden: z.boolean().optional().describe('Include matches hidden by the active tool profile, flagged exposed:false (default true)') }) },
     ];
+  }
+
+  /**
+   * The full catalogue before profile curation, as plain searchable records.
+   * Kept separate from getAvailableTools() so find_tool can tell "this build does
+   * not have that tool" apart from "the active profile hides it".
+   */
+  private getSearchableCatalogue(): SearchableTool[] {
+    const localTools = this.getLocalTools();
+    const all = [
+      ...localTools,
+      ...getExpandedTools(new Set(localTools.map((tool) => tool.name))),
+    ];
+    return all.map((tool) => {
+      let parameters: string[] | undefined;
+      // Zod object schemas expose their keys via .shape; anything else (or a
+      // future schema type) simply reports no parameter list rather than throwing.
+      try {
+        const shape = (tool.inputSchema as any)?.shape;
+        if (shape && typeof shape === 'object') parameters = Object.keys(shape);
+      } catch {
+        parameters = undefined;
+      }
+      // Built conditionally: `exactOptionalPropertyTypes` makes an explicit
+      // `parameters: undefined` a type error against an optional property.
+      return parameters
+        ? { name: tool.name, description: tool.description, parameters }
+        : { name: tool.name, description: tool.description };
+    });
+  }
+
+  /**
+   * Measure what the exposed catalogue actually costs a client in context.
+   *
+   * Serializes the same shape `tools/list` sends (name + description + JSON Schema +
+   * annotations) so the figure reflects the real payload rather than a guess. Schema
+   * conversion is best-effort per tool: a schema that will not serialize contributes
+   * its name and description only, which under-counts rather than inventing a number.
+   */
+  measureCatalogueCost(exposed: MCPTool[] = this.getAvailableTools()): CatalogueCost {
+    let chars = 0;
+    for (const tool of exposed) {
+      let schemaText = '{"type":"object"}';
+      try {
+        schemaText = JSON.stringify(z.toJSONSchema(tool.inputSchema as any, { io: 'input' }));
+      } catch {
+        // Leave the minimal placeholder; under-counting beats fabricating.
+      }
+      chars += JSON.stringify({
+        name: tool.name,
+        description: tool.description,
+        annotations: annotationsFor(tool.name),
+      }).length + schemaText.length;
+    }
+    return describeCatalogueCost(exposed.length, chars);
+  }
+
+  /** find_tool: rank the full catalogue against a keyword query. No host call. */
+  private findTool(args: Record<string, any>): any {
+    const exposed = new Set(this.getAvailableTools().map((tool) => tool.name));
+    return findTools(this.getSearchableCatalogue(), exposed, {
+      query: args.query,
+      limit: args.limit,
+      readOnly: args.readOnly,
+      includeParameters: args.includeParameters,
+      includeHidden: args.includeHidden,
+    });
   }
 
   getAvailableTools(): MCPTool[] {
@@ -3113,10 +3188,30 @@ export class PremiereProTools {
 
     const tool = this.getAvailableTools().find(t => t.name === name);
     if (!tool) {
+      // Dumping every tool name here used to be the whole answer. On a catalogue
+      // this size that is a multi-kilobyte wall of names the model must scan, and
+      // it does not distinguish "no such tool" from "the active profile hides it".
+      // Return a ranked shortlist derived from the name that was attempted, plus
+      // that distinction, and point at find_tool for a real search.
+      const exposedNames = new Set(this.getAvailableTools().map((t) => t.name));
+      const catalogue = this.getSearchableCatalogue();
+      const hiddenByProfile = catalogue.some(
+        (t) => t.name === name && !exposedNames.has(t.name),
+      );
+      const suggestions = findTools(catalogue, exposedNames, {
+        query: name.replace(/_/g, ' '),
+        limit: 8,
+      }).matches.map((m) => ({ name: m.name, exposed: m.exposed, description: m.description }));
       return {
         success: false,
-        error: `Tool '${name}' not found`,
-        availableTools: this.getAvailableTools().map(t => t.name)
+        error: hiddenByProfile
+          ? `Tool '${name}' exists in this build but is NOT exposed by the active tool profile, so it cannot be called. Widen PREMIERE_MCP_PROFILE / PREMIERE_MCP_TOOLS / PREMIERE_MCP_EXCLUDE, or see get_capabilities for the active profile.`
+          : `Tool '${name}' does not exist in this build. Closest matches by name are listed in didYouMean; call find_tool with a keyword to search the whole catalogue.`,
+        existsButHiddenByProfile: hiddenByProfile,
+        didYouMean: suggestions,
+        toolsInCatalogue: catalogue.length,
+        toolsExposed: exposedNames.size,
+        hint: 'find_tool({ query: "<keyword>" }) searches tool names and descriptions and needs no Premiere connection.',
       };
     }
 
@@ -3195,6 +3290,8 @@ export class PremiereProTools {
           return await this.verifyPremiereConnection();
         case 'get_capabilities':
           return await this.getCapabilities(args.checkConnection, args.probeLocalTools);
+        case 'find_tool':
+          return this.findTool(args);
         case 'validate_project_for_export':
           return await this.validateProjectForExport(args.sequenceId, args.outputPath, args.presetPath, args.requireNonEmptyTimeline, args.checkGaps);
         case 'get_encoder_presets':
@@ -4331,6 +4428,14 @@ ${this.buildSequenceResolver(sequenceId)}
             note: profile.source === 'all'
               ? 'Full catalogue exposed (default). Set PREMIERE_MCP_PROFILE, PREMIERE_MCP_TOOLS, or PREMIERE_MCP_EXCLUDE to curate.'
               : `Curated set active. ${exposed.length}/${total} tools exposed.`
+          },
+          // Measured, not asserted. A catalogue this size has a real context cost and
+          // published guidance says it degrades tool-selection accuracy; reporting the
+          // number is the same honesty rule we apply to edits.
+          contextCost: this.measureCatalogueCost(exposed),
+          discovery: {
+            searchTool: 'find_tool',
+            note: 'find_tool searches tool names and descriptions with no Premiere request, and is exposed under every profile. Prefer it over scanning the full list.'
           },
           resources: 13,
           prompts: 10

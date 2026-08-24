@@ -24,8 +24,13 @@ export interface ProfileEnv {
   PREMIERE_MCP_EXCLUDE?: string;
 }
 
-/** Named tool always retained so clients can introspect the active profile. */
-export const ALWAYS_KEPT = ['get_capabilities'] as const;
+/**
+ * Named tools always retained so a client can introspect the active profile and
+ * still search the catalogue under the tightest set. `find_tool` is kept because
+ * curation is only safe if the agent can discover what curation removed — it
+ * reports profile-hidden matches as `exposed: false` rather than hiding them.
+ */
+export const ALWAYS_KEPT = ['get_capabilities', 'find_tool'] as const;
 
 /**
  * Named profiles. Patterns are exact names, "prefix_*" globs, or "*".
