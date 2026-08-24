@@ -7666,14 +7666,48 @@ ${this.buildSequenceResolver(sequenceId)}
         var clip = seq.videoTracks[${trackIndex}].clips[${clipIndex}];
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         var pat = ${JSON.stringify(effectName.toLowerCase())};
-        var found = [];
+        var found = [], present = [], noToggle = [];
         for (var i=0; i<clip.components.numItems; i++) {
-          if (String(clip.components[i].displayName).toLowerCase().indexOf(pat) >= 0) {
-            clip.components[i].enabled = ${enabled};
-            found.push({index:i,name:String(clip.components[i].displayName)});
+          var comp = clip.components[i];
+          var nm = String(comp.displayName);
+          present.push(nm);
+          if (nm.toLowerCase().indexOf(pat) < 0) continue;
+          // VideoComponent has NO enabled property at all — measured on 26.3.2, typeof is undefined on
+          // every component. Assigning it merely creates a stray JS property on the ScriptObject,
+          // so reading it back verifies OUR OWN WRITE and nothing about Premiere. That is the
+          // exact false-verification this server exists to avoid, and it is what this tool did.
+          //
+          // The real toggle is the component's own "Active" parameter, which round-trips through
+          // ComponentParam.setValue/getValue (verified: true -> false -> true).
+          var active = null;
+          for (var pj=0; pj<comp.properties.numItems; pj++) {
+            if (String(comp.properties[pj].displayName).toLowerCase() === 'active') { active = comp.properties[pj]; break; }
+          }
+          if (!active) {
+            var pnames = [];
+            for (var pk=0; pk<comp.properties.numItems && pk<12; pk++) pnames.push(String(comp.properties[pk].displayName));
+            noToggle.push({ index: i, name: nm, params: pnames });
+            continue;
+          }
+          var was = null; try { was = active.getValue(); } catch (eR) {}
+          try { active.setValue(${enabled}, true); } catch (eS) {}
+          var now = null; try { now = active.getValue(); } catch (eR2) {}
+          if (!!now === ${enabled}) {
+            found.push({ index: i, name: nm, was: !!was, now: !!now, changed: !!was !== !!now, via: 'Active parameter' });
+          } else {
+            noToggle.push({ index: i, name: nm, reason: 'the Active parameter did not accept the new value (reads back as ' + now + ')' });
           }
         }
-        return JSON.stringify({success:found.length>0,enabled:${enabled},matched:found.length,components:found});
+        if (found.length === 0) {
+          return JSON.stringify({
+            success: false, verified: true,
+            error: noToggle.length
+              ? ('Matched ' + noToggle.length + ' component(s), but none could be toggled. On this build an effect is enabled/disabled through its "Active" parameter; effects without one cannot be toggled by script. Details in notToggleable[].')
+              : ('No effect on this clip matched ' + ${JSON.stringify(effectName)} + '. Components present: ' + (present.length ? present.join(', ') : '(none)')),
+            matched: 0, componentsPresent: present, notToggleable: noToggle
+          });
+        }
+        return JSON.stringify({ success: true, verified: true, enabled: ${enabled}, matched: found.length, components: found, componentsPresent: present, notToggleable: noToggle });
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
