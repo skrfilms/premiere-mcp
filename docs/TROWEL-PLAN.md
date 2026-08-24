@@ -471,6 +471,46 @@ transport **auth** (see Tier 0 #1).
 - Confirm `razor_timeline_at_time` (cut-through-all-layers) + active-sequence defaults
   remain correct — both are explicitly requested elsewhere; keep as strengths.
 
+## 6.5 Rules earned overnight 2026-08-24 (each cost real time)
+
+1. **Verify against PREMIERE, never against your own write.** `enable_disable_effect` assigned
+   `component.enabled` and read it back. `VideoComponent` has no such property — the assignment
+   created a stray JS property on the ScriptObject, so the readback confirmed the write and said
+   nothing about the host. **A verification that cannot fail is worse than none**, because it
+   launders a no-op into `verified: true`. Before trusting any property as a verification channel,
+   confirm it EXISTS (`typeof`) and that a round-trip changes something.
+2. **A readback cannot distinguish "changed it" from "was already correct".** `clear_work_area`
+   passed because its target already equalled the current state. Capture `before`, and report
+   `changed` separately from `onTarget`.
+3. **Never compute `verified:` as a bare inequality with no explanation.** Three trim tools
+   returned `success: true, verified: false` with an EMPTY reason, and one of them left a
+   half-applied edit (source in-point moved, clip did not ripple) while reporting success. Enumerate
+   the outcomes: nothing-to-do, landed, or partially applied.
+4. **Measure the engine; do not recite "it's ES3".** Wrong in both directions on 26.3.2:
+   `Array.prototype.map`/`filter`/`indexOf` are PRESENT, while `forEach`, `String.prototype.trim`,
+   `startsWith`, `endsWith`, `includes` and `Object.keys` are ABSENT. Guarded by
+   `es3-absent-methods.test.ts`; add to its table only what has been measured.
+5. **Comments inside a TypeScript template literal must not contain backticks.** They terminate the
+   literal. This bit three times in one night. `tsc` catches it instantly, which is the only reason
+   it stayed a detour.
+6. **Every caller-supplied string reaching generated script goes through `JSON.stringify`, never
+   raw interpolation.** I introduced an injection in `sequence_from_markers` this way and the
+   injection-guard suite caught it two commits later.
+7. **A tool count, a capability claim, or a "cannot do" list that is hardcoded WILL go stale and
+   become a lie.** `api_surface_report` published `total_tools: 600` against a 638-tool build and
+   still called the clipboard impossible after we cracked it. Compute counts; date capability
+   claims; record what was removed.
+8. **An apparent engine death is usually a MODAL.** Try Escape (System Events keystroke) before
+   killing Premiere: ~6s versus ~32s, and no state lost. Adobe exposes zero windows to the
+   accessibility API, so keystrokes are the only route — and never send an AppleEvent to a blocked
+   Premiere, because `activate` will not return.
+9. **When a whole family of tools fails identically, suspect the harness first.** 45 tools reported
+   "Clip not found" because the sweep passed `ProjectItem.nodeId` where `TrackItem.nodeId` was
+   wanted. One bug, 45 false accusations.
+10. **Narrowing the default profile narrowed the test suites.** Seventy tests began failing with
+    "unknown tool" — reading as broken implementations rather than hidden ones. Suites run with
+    `PREMIERE_MCP_PROFILE=all`; the default is a deployment choice, not a correctness one.
+
 ## 7. Guardrails (non-negotiable)
 - Never return fake success (verify-after-write). Every tool has a Zod schema.
 - Generated ExtendScript is ES3-safe (`var` only, no arrow fns). **This means no `Set`, no
