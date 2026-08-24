@@ -604,16 +604,37 @@
     };
 
     MCPPremiereBridge.prototype.addToQueue = function(command) {
-        this.commandQueue.push({ id: command.id, status: 'pending', script: (command.script || '').substring(0, 50) + '...' });
+        this.commandQueue.push({ id: command.id, status: 'pending', queuedAt: Date.now(), script: (command.script || '').substring(0, 50) + '...' });
         this.updateCommandQueueUI();
     };
 
+    // Finished entries are removed rather than left marked 'completed'. Previously nothing
+    // ever left commandQueue: it was push-only, so it grew for the lifetime of the panel and
+    // heartbeat.queueLength reported a running TOTAL of every command ever seen, not the
+    // number still outstanding. That made the field actively misleading — a healthy idle
+    // panel would report queueLength in the hundreds, which reads as a deep backlog — and it
+    // leaked memory across a long session. Terminal states are dropped; only genuinely
+    // outstanding work is counted.
     MCPPremiereBridge.prototype.updateCommandStatus = function(commandId, status) {
+        var terminal = (status === 'completed' || status === 'failed' || status === 'error');
         for (var i = 0; i < this.commandQueue.length; i++) {
             if (this.commandQueue[i].id === commandId) {
-                this.commandQueue[i].status = status;
+                if (terminal) {
+                    this.commandQueue.splice(i, 1);
+                } else {
+                    this.commandQueue[i].status = status;
+                }
                 break;
             }
+        }
+        // Backstop: if a command ever terminated without reaching this function, the entry
+        // would sit pending forever and inflate the count again. Anything older than five
+        // minutes cannot still be running — the server's own ceiling is far below that.
+        var now = Date.now();
+        for (var j = this.commandQueue.length - 1; j >= 0; j--) {
+            var entry = this.commandQueue[j];
+            if (!entry.queuedAt) { entry.queuedAt = now; continue; }
+            if (now - entry.queuedAt > 300000) this.commandQueue.splice(j, 1);
         }
         this.updateCommandQueueUI();
     };

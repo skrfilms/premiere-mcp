@@ -1439,6 +1439,18 @@ export class PremiereProTools {
       { name: 'get_item_xmp_metadata', description: 'Returns the full XMP metadata XML string from a project item. Useful for reading all metadata fields.', inputSchema: z.object({ projectItemId: z.string() }) },
       { name: 'project_media_report', description: 'Returns a comprehensive project media report: total clips, total duration, codec mix, frame rate mix, resolution mix, offline count.', inputSchema: z.object({}) },
       { name: 'get_proxy_status', description: 'For each clip in the active sequence, reports hasProxy and proxyPath.', inputSchema: z.object({ sequenceId: z.string().optional() }) },
+      {
+        name: 'get_proxies_enabled',
+        description: 'Reports whether Premiere is currently PLAYING BACK proxies (the global Toggle Proxies state). This is separate from whether proxies are attached: a clip can have a proxy attached and still play at full resolution because the toggle is off, which is the usual reason "I made proxies but playback is still slow". Pair with get_proxy_status (attachment) to tell the two apart.',
+        inputSchema: z.object({})
+      },
+      {
+        name: 'set_proxies_enabled',
+        description: 'Turns proxy playback on or off globally — the scripted equivalent of the Toggle Proxies button. Attaching proxies alone does not switch playback to them; this is what does. Verifies by reading the flag back.',
+        inputSchema: z.object({
+          enabled: z.boolean().describe('true = play proxies, false = play full-resolution originals')
+        })
+      },
 
       // Verification & introspection
       { name: 'timeline_fingerprint', description: 'Computes a structural checksum of the active sequence (clip positions + names hash). Changes if anything moves or is renamed.', inputSchema: z.object({ sequenceId: z.string().optional() }) },
@@ -3471,6 +3483,8 @@ export class PremiereProTools {
         case 'get_item_xmp_metadata': return await this.getItemXmpMetadata(args.projectItemId);
         case 'project_media_report': return await this.projectMediaReport();
         case 'get_proxy_status': return await this.getProxyStatus(args.sequenceId);
+        case 'get_proxies_enabled': return await this.getProxiesEnabled();
+        case 'set_proxies_enabled': return await this.setProxiesEnabled(args.enabled);
         case 'timeline_fingerprint': return await this.timelineFingerprint(args.sequenceId);
         case 'snapshot_state': return await this.snapshotState(args.outputPath, args.sequenceId);
         case 'assert_clips_unchanged': return await this.assertClipsUnchanged(args.snapshotPath, args.sequenceId);
@@ -15033,6 +15047,35 @@ ${this.buildSequenceResolver(sequenceId)}
         walk(app.project.rootItem);
         return JSON.stringify({success:true,totalItems:total,offlineItems:offline,onlineItems:total-offline,totalDurationSecs:Math.round(totalDur)});
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
+    `);
+  }
+
+  private async getProxiesEnabled(): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var enabled = app.getEnableProxies();
+        return JSON.stringify({
+          success: true,
+          proxiesEnabled: enabled === true,
+          note: enabled === true
+            ? 'Proxy playback is ON: attached proxies are being used.'
+            : 'Proxy playback is OFF. Any attached proxies are being IGNORED and clips play at full resolution. This is the usual cause of slow playback after generating proxies — enable it with set_proxies_enabled.'
+        });
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+  }
+
+  private async setProxiesEnabled(enabled: boolean): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var before = app.getEnableProxies();
+        app.setEnableProxies(${enabled});
+        var after = app.getEnableProxies();
+        if (after !== ${enabled}) {
+          return JSON.stringify({ success: false, verified: false, error: 'setEnableProxies(${enabled}) ran but the flag reads back as ' + after + '.', before: before, after: after });
+        }
+        return JSON.stringify({ success: true, verified: true, proxiesEnabled: after, changed: before !== after });
+      } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
     `);
   }
 
