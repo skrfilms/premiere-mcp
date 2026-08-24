@@ -7065,12 +7065,24 @@ ${this.buildSequenceResolver(sequenceId)}
     return `var __seq=${seqScript};var __clip=__seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});`;
   }
 
-  private async setClipReverse(trackIndex: number, clipIndex: number, reverse: boolean, sequenceId?: string): Promise<any> {
+  private async setClipReverse(trackIndex: number, clipIndex: number, _reverse: boolean, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       app.enableQE(); ${this.qeClipScript(trackIndex, clipIndex, sequenceId)}
       if (!__clip) return JSON.stringify({success:false,error:'Clip not found'});
-      __clip.setReverse(${reverse});
-      return JSON.stringify({success:true,verified:true,reverse:${reverse},reversed:__clip.reversed});
+      // qeClip.setReverse TERMINATES the entire evalScript on 26.3.2 — not a catchable exception,
+      // so this tool could only ever return the generic "ExtendScript execution failed". Measured
+      // one-call-per-script. Reading clip.reverse is fatal in the same way, though clip.reversed
+      // (one letter different) is safe to read.
+      //
+      // There IS a working alternative, so route the caller to it instead of failing blankly:
+      // qeClip.setSpeed takes reverse as its third argument and is verified working.
+      var currentlyReversed = null;
+      try { currentlyReversed = !!__clip.reversed; } catch (eRev) {}
+      return JSON.stringify({
+        success:false, verified:true, available:false,
+        currentlyReversed: currentlyReversed,
+        error:'qeClip.setReverse terminates the ExtendScript engine on this build (26.3.2), so this tool cannot run. Use set_clip_speed_qe with reverse: true instead (it takes clipId, not trackIndex/clipIndex — get_qe_clip_info returns the nodeId). Verified working on this build. The clip is currently reversed=' + currentlyReversed + '.'
+      });
     `);
   }
 
@@ -7092,21 +7104,29 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  private async setClipBorderColor(trackIndex: number, clipIndex: number, r: number, g: number, b: number, sequenceId?: string): Promise<any> {
+  private async setClipBorderColor(trackIndex: number, clipIndex: number, _r: number, _g: number, _b: number, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       app.enableQE(); ${this.qeClipScript(trackIndex, clipIndex, sequenceId)}
       if (!__clip) return JSON.stringify({success:false,error:'Clip not found'});
-      __clip.setBorderColor(${r},${g},${b});
-      return JSON.stringify({success:true,r:${r},g:${g},b:${b}});
+      // A CALL THAT KILLS THE SCRIPT IS NOT WORTH EMITTING.
+      // Measured one-call-per-script on 26.3.2: qeClip.setBorderWidth, setBorderColor, setReverse and setAntiAliasQuality do not throw a catchable exception — they terminate the entire evalScript, so the tool returned only the generic "ExtendScript execution failed" and the caller learned nothing.
+      // Reading the matching properties (borderWidth, borderColor, reverse, antiAliasQuality, alignment, startPercent, endPercent, switchSources) is fatal in the same way.
+      // setFrameBlend and setScaleToFrameSize are fine, so this is specific, not a blanket QE problem.
+      return JSON.stringify({success:false,verified:true,available:false,error:'qeClip.setBorderColor terminates the ExtendScript engine on this build (26.3.2), so this tool cannot run. No scripted alternative exists for clip borders; set them in the Effect Controls panel.'});
+
     `);
   }
 
-  private async setClipBorderWidth(trackIndex: number, clipIndex: number, width: number, sequenceId?: string): Promise<any> {
+  private async setClipBorderWidth(trackIndex: number, clipIndex: number, _width: number, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       app.enableQE(); ${this.qeClipScript(trackIndex, clipIndex, sequenceId)}
       if (!__clip) return JSON.stringify({success:false,error:'Clip not found'});
-      __clip.setBorderWidth(${width});
-      return JSON.stringify({success:true,width:${width},borderWidth:__clip.borderWidth});
+      // A CALL THAT KILLS THE SCRIPT IS NOT WORTH EMITTING.
+      // Measured one-call-per-script on 26.3.2: qeClip.setBorderWidth, setBorderColor, setReverse and setAntiAliasQuality do not throw a catchable exception — they terminate the entire evalScript, so the tool returned only the generic "ExtendScript execution failed" and the caller learned nothing.
+      // Reading the matching properties (borderWidth, borderColor, reverse, antiAliasQuality, alignment, startPercent, endPercent, switchSources) is fatal in the same way.
+      // setFrameBlend and setScaleToFrameSize are fine, so this is specific, not a blanket QE problem.
+      return JSON.stringify({success:false,verified:true,available:false,error:'qeClip.setBorderWidth terminates the ExtendScript engine on this build (26.3.2), so this tool cannot run. No scripted alternative exists for clip borders; set them in the Effect Controls panel.'});
+
     `);
   }
 
@@ -16186,18 +16206,30 @@ ${this.buildSequenceResolver(sequenceId)}
         var clip = track.getItemAt(${clipIndex});
         if (!clip) return JSON.stringify({ success: false, error: 'QE clip ${clipIndex} not found' });
         var o = { success: true };
+        // EIGHT QE CLIP PROPERTIES CANNOT BE READ ON 26.3.2, and reading one does not throw a
+        // catchable exception — it kills the entire evalScript, so the whole tool returned the
+        // generic "ExtendScript execution failed" with nothing usable. The try/catch wrappers
+        // below gave false confidence: the failure is at the evalScript layer, beneath JS.
+        //
+        // Measured one-property-per-call:
+        //   FATAL to read: reverse, borderWidth, borderColor, alignment, antiAliasQuality,
+        //                  startPercent, endPercent, switchSources
+        //   SAFE  to read: name, type, start, end, duration, mediaType, numComponents, speed,
+        //                  reversed, frameBlend, multicamEnabled, scaleToFrameSize,
+        //                  staticClipGain, timeInterpolationType
+        //
+        // Note reversed (safe) vs reverse (fatal) — the two names differ by one letter and by
+        // whether they take the host down.
         try { o.name = String(clip.name); } catch(x) {}
-        try { o.antiAliasQuality = String(clip.antiAliasQuality); } catch(x) {}
-        try { o.borderColor = String(clip.borderColor); } catch(x) {}
-        try { o.borderWidth = String(clip.borderWidth); } catch(x) {}
-        try { o.startPercent = String(clip.startPercent); } catch(x) {}
-        try { o.endPercent = String(clip.endPercent); } catch(x) {}
         try { o.scaleToFrameSize = String(clip.scaleToFrameSize); } catch(x) {}
-        try { o.switchSources = String(clip.switchSources); } catch(x) {}
         try { o.staticClipGain = String(clip.staticClipGain); } catch(x) {}
         try { o.frameBlend = String(clip.frameBlend); } catch(x) {}
         try { o.timeInterpolationType = String(clip.timeInterpolationType); } catch(x) {}
         try { o.speed = String(clip.speed); } catch(x) {}
+        try { o.reversed = String(clip.reversed); } catch(x) {}
+        try { o.multicamEnabled = String(clip.multicamEnabled); } catch(x) {}
+        o.unreadableOnThisBuild = ['reverse','borderWidth','borderColor','alignment','antiAliasQuality','startPercent','endPercent','switchSources'];
+        o.unreadableNote = 'Those eight QE properties terminate the whole script when read on 26.3.2, so they are deliberately not read here. Use reversed instead of reverse; the border and percent values have no readable equivalent.';
         try { o.reversed = String(clip.reversed); } catch(x) {}
         try { o.multicamEnabled = String(clip.multicamEnabled); } catch(x) {}
         try { o.numComponents = clip.numComponents; } catch(x) {}
