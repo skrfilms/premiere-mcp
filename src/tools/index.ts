@@ -5036,7 +5036,12 @@ ${this.buildSequenceResolver(sequenceId)}
       var newInTicks = Number(clip.inPoint.ticks) + frameDelta;
       if (newInTicks < 0) return JSON.stringify({success:false,error:'Not enough head room to trim to playhead'});
       var newIn = new Time(); newIn.ticks = String(Math.round(newInTicks));
-      clip.setInPoint(newIn, 4); // 4 = ripple
+      // TrackItem exposes inPoint as a writable property; there is no setInPoint()
+      // method on it (confirmed by reflection on 26.3.2). Read back to prove it took.
+      var __inBefore = Number(clip.inPoint.ticks);
+      clip.inPoint = newIn;
+      var __inAfter = Number(clip.inPoint.ticks);
+      if (__inAfter === __inBefore) return JSON.stringify({success:false,verified:false,error:'Assigning clip.inPoint did not change it (property may be read-only on this build). No ripple performed.',requestedTicks:String(newIn.ticks)});
       var afterStart = String(clip.start.ticks);
       return JSON.stringify({success:true,verified:afterStart !== beforeStart,beforeStart:beforeStart,afterStart:afterStart,playheadTicks:String(playhead.ticks)});
     `);
@@ -5055,7 +5060,10 @@ ${this.buildSequenceResolver(sequenceId)}
       var frameDelta = Number(clip.end.ticks) - Number(playhead.ticks);
       var newOutTicks = Number(clip.outPoint.ticks) - frameDelta;
       var newOut = new Time(); newOut.ticks = String(Math.round(newOutTicks));
-      clip.setOutPoint(newOut, 4); // 4 = ripple
+      var __outBefore = Number(clip.outPoint.ticks);
+      clip.outPoint = newOut;
+      var __outAfter = Number(clip.outPoint.ticks);
+      if (__outAfter === __outBefore) return JSON.stringify({success:false,verified:false,error:'Assigning clip.outPoint did not change it (property may be read-only on this build). No ripple performed.',requestedTicks:String(newOut.ticks)});
       var afterEnd = String(clip.end.ticks);
       return JSON.stringify({success:true,verified:afterEnd !== beforeEnd,beforeEnd:beforeEnd,afterEnd:afterEnd,playheadTicks:String(playhead.ticks)});
     `);
@@ -5075,7 +5083,7 @@ ${this.buildSequenceResolver(sequenceId)}
       var extendIn = distToIn < distToOut;
       var beforeTick = extendIn ? String(clip.start.ticks) : String(clip.end.ticks);
       var t = new Time(); t.ticks = String(ph);
-      if (extendIn) { clip.setInPoint(t, 2); } else { clip.setOutPoint(t, 2); }
+      if (extendIn) { clip.inPoint = t; } else { clip.outPoint = t; }
       var afterTick = extendIn ? String(clip.start.ticks) : String(clip.end.ticks);
       return JSON.stringify({success:true,verified:afterTick !== beforeTick,extendedEdge:extendIn?'in':'out',before:beforeTick,after:afterTick});
     `);
@@ -5111,7 +5119,7 @@ ${this.buildSequenceResolver(sequenceId)}
       var ticksPerFrame = Number(seq.timebase) || 10584000000;
       var before = String(aClip.start.ticks);
       var newAIn = new Time(); newAIn.ticks = String(Math.max(0, Math.round(Number(aClip.inPoint.ticks) - ${frames} * ticksPerFrame)));
-      aClip.setInPoint(newAIn, 4);
+      aClip.inPoint = newAIn;
       var after = String(aClip.start.ticks);
       return JSON.stringify({success:true,verified:after !== before,frames:${frames},audioStartBefore:before,audioStartAfter:after,type:'j_cut'});
     `);
@@ -5131,7 +5139,7 @@ ${this.buildSequenceResolver(sequenceId)}
       var ticksPerFrame = Number(seq.timebase) || 10584000000;
       var before = String(aClip.end.ticks);
       var newAOut = new Time(); newAOut.ticks = String(Math.round(Number(aClip.outPoint.ticks) + ${frames} * ticksPerFrame));
-      aClip.setOutPoint(newAOut, 4);
+      aClip.outPoint = newAOut;
       var after = String(aClip.end.ticks);
       return JSON.stringify({success:true,verified:after !== before,frames:${frames},audioEndBefore:before,audioEndAfter:after,type:'l_cut'});
     `);
@@ -14211,7 +14219,7 @@ ${this.buildSequenceResolver(sequenceId)}
         var clip=${this.buildSeqRes(seqId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
         var newEndSecs=clip.start.seconds+${targetSeconds};
         var t=new Time();t.seconds=clip.outPoint.seconds+(newEndSecs-clip.end.seconds);
-        clip.setOutPoint(t,2);
+        clip.outPoint=t;
         return JSON.stringify({success:true,method:'trim',targetSeconds:${targetSeconds},newEnd:newEndSecs});
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
     `);
