@@ -556,6 +556,34 @@ These were listed as "walled". Live probing on 26.3.2 confirmed scriptable paths
 | **`app.setSDKEventMessage(type, message)`** | Sends messages to other CEP extensions. | Inter-panel messaging (T3) |
 | **`qe.project.getRendererNames()` / `setRenderer()`** | Renderer enumeration and switching confirmed. | `list_renderers`, `set_renderer` (T1 QE) |
 
+### Rounds 5–10 cracks (systematic DOM/QE sweep, 2026-08-23)
+
+| Item | What we found | New tool(s) |
+|---|---|---|
+| **`autoReframeSequence(w,h,preset,name,bool)`** | Returns Sequence object. Presets: 'slower', 'default', 'faster'. LIVE confirmed. | `auto_reframe_sequence` (T1 DOM) |
+| **`createSubsequence(bool)` confirmed** | Creates subsequence from work area. | `create_subsequence` (T1 DOM) |
+| **`sequence.exportAsProject(path)` confirmed** | fileExists=true. Exports sequence as its own .prproj. | `export_sequence_as_project` (T1) |
+| **`exportFinalCutProXML(path, bool)` confirmed** | Valid XMEML output. | Upgrade `export_as_fcp_xml` (T1) |
+| **`exportWithPresetObject(path, preset, seq, bool)` confirmed** | result=true with runtime-modified preset. Full export pipeline: getExporters → getPresets → setExportParamValue(20+ params) → exportWithPresetObject. | `export_with_custom_preset` (T1) |
+| **Component matchNames** | Opacity=`AE.ADBE Opacity`, Motion=`AE.ADBE Motion`, Gaussian Blur=`AE.Impact_Blur_FX`, Lumetri=`AE.ADBE Lumetri`. | Upgrade all effect tools to matchName lookup (T1) |
+| **76 audio + 136 video effects enumerated** | Full QE catalogs. Audio effect add to clip confirmed with full param list. | `list_all_effects`, `apply_audio_effect_qe` (T1) |
+| **QE track+sequence razor confirmed** | `track.razor('TC', bool, bool)` and `seq.razor('TC', bool, bool)` — both work + undoable. | Upgrade razor tools (T1 QE) |
+| **QE addTracks(1,idx,0,0,0,0,0,0) confirmed** | addedV=true + removed cleanly. | `add_tracks_qe` (T1) |
+| **QE source setInPoint/setOutPoint confirmed** | Both accept timecode strings. | Upgrade source monitor tools (T1) |
+| **QE player: `play(speed)`, `step(deltaTC:string)`, `scrubTo(tc:string)`** | Correct arg types confirmed. | `step_frames_qe`, `scrub_to_qe` (T1) |
+| **All 6 marker types settable** | Comment, Chapter, Segmentation, WebLink, FLVCuePoint, Named. `colorByIndex` settable. | Upgrade marker tools (T1) |
+| **Custom metadata schema** | `addPropertyToProjectMetadataSchema` + `setProjectMetadata` BOTH confirmed. Add custom columns and write values to any project item. | `add_metadata_field`, `set_item_metadata` (T1) |
+| **`clip.getLinkedItems()` confirmed** | Returns TrackItemCollection (video+audio pair). | `get_linked_items` (T1) |
+| **`clip.isMGT()` — new PP2026 method** | Is this clip a Motion Graphics Template. | Part of `get_clip_properties` |
+| **`clip.isSelected()` readable** | Per-clip selection state. | Part of `get_clip_properties` |
+| **All clip timing props** | `start`, `end`, `inPoint`, `outPoint`, `duration` — ticks+seconds confirmed. | Already in tools |
+| **DOM Track: `insertClip()`, `overwriteClip()`, `isTargeted()`** | Unexplored DOM methods. | `insert_clip_on_track_dom`, `is_track_targeted` (T2) |
+| **Essential Sound via `setProjectMetadata`** | ALL 10 ESP keys write-confirmed: `ESP.Tag`, `ESP.AdjustmentsModeID`, `ESP.ClipMixTypeID`, and full adjustment settings chain. Premiere reaction needs pixel-verify. | `set_essential_sound_category` (T1 verify needed) |
+| **PP2026 Object Mask architecture** | Masks moved to top-level clip Object Mask tool. Draw → appears as new component in `clip.components`. No QE mask creation API found. Component probe pending the maintainer drawing a mask. | `set_clip_mask` (T2 — component probe pending) |
+| **`setLogColorManagement(bool)` + `setLUTInterpolationMethod(0|1)` confirmed** | Both writable. | `set_log_color_management`, `set_lut_interpolation` (T1) |
+| **`exportAsMediaDirect(outputPath, presetPath, workAreaType:number)` full sig** | 3 args confirmed. workAreaType: 0=entire sequence, 1=work area. | Upgrade `export_sequence` (T1) |
+| **QE sequence properties all readable** | CTI, inPoint, outPoint, workInPoint, workOutPoint, player, previewPresetPath, previewPresetCodec, editingMode (GUID), useMaxBitDepth, useMaxRenderQuality. | Already in tools |
+
 ---
 
 ## THE HONEST WALL — what an editor does that NO script surface reaches
