@@ -15461,7 +15461,12 @@ ${this.buildSequenceResolver(sequenceId)}
         var markers=[];
         var m=seq.markers.getFirstMarker();
         while(m){if(String(m.type)===${JSON.stringify(markerType)})markers.push({name:String(m.name),start:m.start.seconds,end:m.end?m.end.seconds:m.start.seconds+5});m=seq.markers.getNextMarker(m);}
-        if(markers.length===0)return JSON.stringify({success:false,markerCount:0,error:'No markers of type ${markerType} were found, so no sequences were created.'});
+        // markerType goes through JSON.stringify, NOT raw interpolation. I wrote it raw inside a
+        // single-quoted ExtendScript string two commits ago and the injection-guard suite caught
+        // it: a quote in the value broke out of the literal and made the whole script
+        // unparseable. Every caller-supplied string that reaches generated script has to be
+        // escaped by the serialiser, never pasted.
+        if(markers.length===0)return JSON.stringify({success:false,markerCount:0,error:'No markers of type '+${JSON.stringify(markerType)}+' were found, so no sequences were created.'});
         // createNewSequence OPENS THE NEW SEQUENCE DIALOG on this build. That is what wedged the
         // ExtendScript engine reproducibly in two overnight sweeps: a 45s timeout, a panel that
         // stopped polling, and a state indistinguishable from a dead engine (two Escapes cleared
