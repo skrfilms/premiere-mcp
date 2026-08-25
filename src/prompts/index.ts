@@ -58,6 +58,19 @@ interface WorkflowSpec {
   /** Role the agent should adopt, one sentence. */
   role: string;
   /**
+   * The task bundle whose advertised tool list covers this workflow's opening step.
+   *
+   * Named so an operator can pre-select the right menu, and so the agent knows the chain
+   * below was composed against a real, measured selection rather than the whole catalogue.
+   * Enforced by `src/__tests__/prompts/bundle-alignment.test.ts`: the bundle must exist,
+   * and every tool in step 1 must be in it — a prompt whose first instruction forces a
+   * profile switch is the same defect as a bundle that cannot verify its own edit.
+   * Omitted when no single bundle covers the workflow, which the prompt then says.
+   */
+  bundle?: string;
+  /** Recipe resources worth reading before this workflow, beyond the always-listed ones. */
+  recipes?: string[];
+  /**
    * The ordered chain. Each step is a plain-English goal plus the exact tools to use.
    * Tool names are validated against the live catalogue in tests.
    */
@@ -86,6 +99,8 @@ const WORKFLOWS: WorkflowSpec[] = [
       { name: 'duration', description: 'Expected duration of the final video', required: false },
     ],
     role: 'You are an assistant editor building a project from scratch through the Premiere MCP tools.',
+    bundle: 'task-rough-cut',
+    recipes: ['premiere://recipes/first-90-seconds'],
     steps: [
       { goal: 'Confirm the bridge is live and see what already exists before creating anything', tools: ORIENT },
       { goal: 'Survey the media on disk BEFORE importing, so you import deliberately rather than everything', tools: ['index_footage', 'search_footage', 'probe_media'] },
@@ -114,6 +129,8 @@ const WORKFLOWS: WorkflowSpec[] = [
       { name: 'video_clips', description: 'List of video clip paths', required: true },
     ],
     role: 'You are a music-video editor cutting to a track through the Premiere MCP tools.',
+    bundle: 'task-rough-cut',
+    recipes: ['premiere://recipes/time-units'],
     steps: [
       { goal: 'Orient in the project', tools: ORIENT },
       { goal: 'Import the track and the picture, and read the track\'s real duration and sample rate', tools: ['import_media', 'probe_media'] },
@@ -142,6 +159,8 @@ const WORKFLOWS: WorkflowSpec[] = [
       { name: 'target_mood', description: 'Desired mood or look (e.g., "cinematic", "vibrant", "moody")', required: false },
     ],
     role: 'You are a colorist grading through the Premiere MCP tools.',
+    bundle: 'task-grade',
+    recipes: ['premiere://recipes/effect-match-names', 'premiere://recipes/verify-or-refuse'],
     steps: [
       { goal: 'Orient, and identify exactly which clips you are grading', tools: [...ORIENT, 'get_selected_clips', 'get_clip_properties'] },
       { goal: 'Read the source ground truth — codec, bit depth, color space — before choosing a treatment', tools: ['probe_media', 'get_color_space', 'get_footage_interpretation'] },
@@ -170,6 +189,8 @@ const WORKFLOWS: WorkflowSpec[] = [
       { name: 'sync_method', description: 'Method for syncing cameras (timecode, audio, markers)', required: true },
     ],
     role: 'You are an editor assembling a multicam edit through the Premiere MCP tools.',
+    bundle: 'task-rough-cut',
+    recipes: ['premiere://recipes/time-units'],
     steps: [
       { goal: 'Orient in the project', tools: ORIENT },
       { goal: 'Import every angle and read each one\'s real timecode, frame rate and duration', tools: ['import_media', 'import_folder', 'probe_media', 'get_project_item_info'] },
@@ -198,6 +219,8 @@ const WORKFLOWS: WorkflowSpec[] = [
       { name: 'episode_length', description: 'Target length of the episode', required: false },
     ],
     role: 'You are a dialogue editor cutting a podcast through the Premiere MCP tools.',
+    bundle: 'task-cut-dialogue',
+    recipes: ['premiere://recipes/recovery-first', 'premiere://recipes/honest-wall'],
     steps: [
       { goal: 'Orient, and take a recovery point before any bulk removal', tools: [...ORIENT, 'create_recovery_checkpoint'] },
       { goal: 'Find the dead air by measurement rather than by ear', tools: ['detect_silence', 'probe_media'] },
@@ -228,6 +251,8 @@ const WORKFLOWS: WorkflowSpec[] = [
       { name: 'content_type', description: 'Type of content (story, post, reel, etc.)', required: true },
     ],
     role: 'You are an editor producing a platform-native cutdown through the Premiere MCP tools.',
+    bundle: 'task-conform-deliver',
+    recipes: ['premiere://recipes/verify-or-refuse'],
     steps: [
       { goal: 'Orient, and duplicate the master so the cutdown never edits it', tools: [...ORIENT, 'duplicate_sequence'] },
       { goal: 'Set the delivery frame size for the platform', tools: ['set_sequence_resolution', 'get_sequence_settings'] },
@@ -255,6 +280,8 @@ const WORKFLOWS: WorkflowSpec[] = [
       { name: 'narrative_structure', description: 'Narrative structure (chronological, thematic, etc.)', required: false },
     ],
     role: 'You are a documentary editor working from transcripts through the Premiere MCP tools.',
+    bundle: 'task-rough-cut',
+    recipes: ['premiere://recipes/honest-wall'],
     steps: [
       { goal: 'Orient in the project', tools: ORIENT },
       { goal: 'Index the material on disk first — footage discovery is the real bottleneck on a doc', tools: ['index_footage', 'search_footage', 'probe_media'] },
@@ -283,6 +310,8 @@ const WORKFLOWS: WorkflowSpec[] = [
       { name: 'product_type', description: 'Type of product being advertised', required: false },
     ],
     role: 'You are an editor cutting a commercial to an exact duration through the Premiere MCP tools.',
+    bundle: 'task-conform-deliver',
+    recipes: ['premiere://recipes/time-units', 'premiere://recipes/effect-match-names'],
     steps: [
       { goal: 'Orient in the project', tools: ORIENT },
       { goal: 'Assemble the spot — a composite tool does the placement, motion and transitions in one round trip', tools: ['assemble_product_spot', 'build_brand_spot_from_mogrt_and_assets', 'add_to_timeline_batch'] },
@@ -312,6 +341,7 @@ const WORKFLOWS: WorkflowSpec[] = [
       { name: 'hardware_specs', description: 'Hardware specifications', required: false },
     ],
     role: 'You are a post-production engineer tuning a Premiere project through the MCP tools.',
+    recipes: ['premiere://recipes/honest-wall'],
     steps: [
       { goal: 'Establish what this build can actually do on THIS machine before recommending anything', tools: ['get_capabilities', 'verify_premiere_connection', 'get_version_info'] },
       { goal: 'Find the real problems in the project', tools: ['get_full_project_overview', 'get_offline_media', 'check_offline_media', 'get_unused_media', 'get_duplicate_media'] },
@@ -340,6 +370,8 @@ const WORKFLOWS: WorkflowSpec[] = [
       { name: 'audio_source', description: 'Source of the audio (microphone, phone, etc.)', required: false },
     ],
     role: 'You are an audio post engineer repairing a mix through the Premiere MCP tools.',
+    bundle: 'task-cut-dialogue',
+    recipes: ['premiere://recipes/recovery-first'],
     steps: [
       { goal: 'Orient, and identify the clips in question', tools: [...ORIENT, 'get_selected_clips', 'list_sequence_tracks'] },
       { goal: 'MEASURE before you treat — codec, channels, sample rate, loudness, dead air', tools: ['probe_media', 'loudness_report', 'detect_silence', 'channel_remap_report'] },
@@ -359,6 +391,205 @@ const WORKFLOWS: WorkflowSpec[] = [
       return `Repair audio problems: ${issues}${source ? ` (source: ${source})` : ''}.`;
     },
   },
+  {
+    // The onboarding prompt. Added because the shortest path to a correct first edit was
+    // documented nowhere an agent would look: the instructions said "orient before
+    // editing" without saying which calls, in what order, or what counts as proof.
+    name: 'first_verified_edit',
+    description:
+      'The first 90 seconds on an unfamiliar host: prove the bridge and the engine, orient in the project, make one small edit, verify it by readback, undo it, and report what was proven',
+    arguments: [
+      { name: 'sequence', description: 'Sequence to work in. Omit to use the active sequence.', required: false },
+    ],
+    role: 'You are an agent connecting to this Premiere server for the first time and establishing that the whole path works before attempting real work.',
+    bundle: 'task-orient',
+    recipes: ['premiere://recipes/first-90-seconds', 'premiere://recipes/verify-or-refuse'],
+    steps: [
+      { goal: 'Prove the transport, then prove the engine — they fail independently', tools: ['ping', 'verify_premiere_connection', 'get_premiere_state'] },
+      { goal: 'Read this build capabilities rather than assuming them: tool count, active profile, local backends', tools: ['get_capabilities'] },
+      { goal: 'Orient, and carry the sequence ID forward instead of the name', tools: ['get_project_info', 'list_sequences', 'get_active_sequence', 'get_timeline_summary'] },
+      { goal: 'Check the ground before trusting anything downstream', tools: ['check_offline_media', 'lint_timeline'] },
+      { goal: 'Make the smallest real mutation this server offers', tools: ['add_marker'] },
+      { goal: 'READ IT BACK and compare name, time and type. This comparison is the verification, not the response to the previous call', tools: ['list_markers'] },
+      { goal: 'Leave the project exactly as you found it', tools: ['delete_marker', 'undo'] },
+    ],
+    cautions: [
+      'ping proves the file IPC to the CEP panel; verify_premiere_connection proves the ExtendScript engine still evaluates. A build where ping answers and the second does not means the engine is dead, not that the tool is broken.',
+      'Premiere with no project open never loads the CEP panel at all, so a running application is not a live bridge.',
+      'Do not skip the readback because the write reported success. Nine tools once reported verified true while doing nothing, and every one of them was caught by a readback comparison.',
+    ],
+    task: (args) => {
+      const sequence = args.sequence;
+      return `Establish that this Premiere MCP connection works end to end${sequence ? `, working in the sequence ${sequence}` : ''}, then report exactly what you proved.`;
+    },
+  },
+  {
+    // The failure-path prompt. Every other workflow describes the happy path; this one is
+    // what to do when a call returns verified:false, times out, or the host stops
+    // answering. Retrying was the default behaviour and it is the wrong first move.
+    name: 'recover_from_failure',
+    description:
+      'What to do when a tool returns verified:false, a call times out, or Premiere stops answering: classify the failure, check independently whether the edit landed, roll back deliberately, and report the honest state',
+    arguments: [
+      { name: 'symptom', description: 'What happened — the error text, verified:false, or the timeout you saw', required: true },
+      { name: 'last_tool', description: 'The tool you called last, if you know it', required: false },
+    ],
+    role: 'You are diagnosing a failed or unverified Premiere edit, and your job is an accurate account of the current state rather than a successful-looking retry.',
+    bundle: 'task-orient',
+    recipes: ['premiere://recipes/recovery-first', 'premiere://recipes/verify-or-refuse', 'premiere://recipes/qe-fragility'],
+    steps: [
+      { goal: 'Classify the failure before touching anything: is the panel there, is the engine alive, is this a refusal', tools: ['ping', 'verify_premiere_connection', 'get_premiere_state', 'get_capabilities'] },
+      { goal: 'If script still evaluates, re-establish where you actually are — a relaunch may have reopened an older save', tools: ['get_project_info', 'get_active_sequence', 'get_timeline_summary', 'get_playhead_position'] },
+      { goal: 'Check INDEPENDENTLY whether the edit landed, rather than re-calling the tool that reported it', tools: ['get_clip_properties', 'get_effect_properties', 'get_keyframes', 'lumetri_report', 'list_markers', 'capture_program_output'] },
+      { goal: 'Rule out the environmental causes that masquerade as tool bugs', tools: ['check_offline_media', 'get_offline_media', 'verify_media_online', 'lint_timeline'] },
+      { goal: 'Roll back deliberately instead of retrying', tools: ['undo', 'multiple_undo', 'list_recovery_checkpoints', 'restore_recovery_checkpoint'] },
+      { goal: 'Prove the rollback actually restored the prior state', tools: ['timeline_fingerprint', 'assert_clips_unchanged', 'lint_timeline'] },
+      { goal: 'Report: what you attempted, what the independent check found, what you rolled back, and what the human must do', tools: ['get_capabilities'] },
+    ],
+    cautions: [
+      'A retry is the wrong first move. A call that silently no-ops will no-op again, and the second success-looking response makes the false belief stronger.',
+      'If ping times out, either the CEP panel is not running or a MODAL DIALOG is open in Premiere. THE BRIDGE CANNOT ADVANCE A DIALOG and no tool here can: ask the human to bring Premiere forward and press Escape. Do not queue more calls behind it.',
+      'If ping answers and verify_premiere_connection does not, the ExtendScript engine is dead. Recovery is a human relaunch, and it must reopen the PROJECT — Premiere on its Home screen never loads the panel, so relaunching the application alone leaves the bridge down. Report the project path to reopen.',
+      'A refusal is not a failure. If call_tool says a read-only profile, an explicit allowlist or an operator exclusion refused the call, that is a real boundary: report it and stop, rather than looking for a way around it.',
+      'A readback that always agrees with you is not verification. Assigning to a property Premiere does not have creates it on the script object, which is how one tool confirmed its own writes for weeks.',
+    ],
+    task: (args) => {
+      const symptom = args.symptom || 'an unverified or failed edit';
+      const last = args.last_tool;
+      return `Diagnose and recover from this failure: ${symptom}${last ? ` (last tool called: ${last})` : ''}. Report the true state of the project, not a retry that looks like success.`;
+    },
+  },
+  {
+    name: 'conform_and_deliver',
+    description:
+      'Tool-chain workflow to conform a sequence to a delivery spec and ship it: settings mismatches first, media health second, picture and audio QC third, then an export that is probed before it is called delivered',
+    arguments: [
+      { name: 'delivery_spec', description: 'The delivery specification — resolution, frame rate, codec, loudness target', required: true },
+      { name: 'output_path', description: 'Where the deliverable should be written', required: false },
+    ],
+    role: 'You are a finishing editor conforming and delivering a sequence through the Premiere MCP tools.',
+    bundle: 'task-conform-deliver',
+    recipes: ['premiere://recipes/time-units', 'premiere://recipes/verify-or-refuse'],
+    steps: [
+      { goal: 'Orient in the project', tools: ORIENT },
+      { goal: 'Read what the sequence and the sources actually are before changing either', tools: ['get_sequence_settings', 'get_sequence_duration', 'get_sequence_structure', 'probe_media'] },
+      { goal: 'Find the mismatches explicitly rather than conforming blind', tools: ['detect_settings_mismatch', 'get_footage_interpretation'] },
+      { goal: 'Take a checkpoint, then conform', tools: ['create_recovery_checkpoint', 'conform_sequence_settings', 'set_sequence_settings', 'set_sequence_resolution', 'set_sequence_frame_rate', 'set_footage_interpretation'] },
+      { goal: 'Every asset must be online, or the render will silently deliver black', tools: ['check_offline_media', 'get_offline_media', 'relink_media', 'verify_media_online'] },
+      { goal: 'QC the picture against the spec', tools: ['validate_project_for_export', 'lint_timeline', 'get_timeline_gaps', 'black_frame_scan', 'flash_frame_scan', 'safe_area_check', 'broadcast_safe_check'] },
+      { goal: 'Hit the audio spec and MEASURE the result rather than asserting it', tools: ['loudness_report', 'normalize_loudness', 'audio_peaks_report'] },
+      { goal: 'Export, and wait for the queue rather than assuming the file is finished', tools: ['list_export_presets', 'create_custom_export_preset', 'export_sequence', 'add_to_render_queue', 'get_render_queue_status', 'get_export_progress'] },
+      { goal: 'Probe the delivered file and only then call it delivered', tools: ['verify_export', 'verify_export_file', 'delivery_qc', 'capture_program_output'] },
+    ],
+    cautions: [
+      'create_custom_export_preset writes an .epr file and returns its path. Pass that path as the presetPath of export_sequence; there is no single-call custom-preset export tool.',
+      'Use the FRAME count from get_sequence_duration for an exact-duration deliverable. Seconds round, and a 30.04s spot is a rejected spot.',
+      'A queued export returns immediately. Poll get_render_queue_status or get_export_progress before verifying, or verify_export will probe a file that is still being written and report a mismatch that is really a race.',
+      'Sequence settings changes are broad and hard to reverse by hand: create_recovery_checkpoint first.',
+    ],
+    task: (args) => {
+      const spec = args.delivery_spec || 'the supplied delivery specification';
+      const output = args.output_path;
+      return `Conform the sequence to ${spec} and deliver it${output ? ` to ${output}` : ''}.`;
+    },
+  },
+  {
+    name: 'caption_sequence',
+    description:
+      'Tool-chain workflow to caption a sequence: transcribe to a file, edit the cues where they are actually editable (on disk), validate, ingest, then prove the caption track exists',
+    arguments: [
+      { name: 'language', description: 'Spoken language of the material', required: false },
+      { name: 'style_notes', description: 'Caption style requirements — line length, speaker labels, censoring', required: false },
+    ],
+    role: 'You are a captioning editor working through the Premiere MCP tools, where caption editing happens on the file on disk and Premiere only ingests it.',
+    bundle: 'task-caption',
+    recipes: ['premiere://recipes/honest-wall', 'premiere://recipes/verify-or-refuse'],
+    steps: [
+      { goal: 'Orient in the project', tools: ORIENT },
+      { goal: 'Know the runtime and the audio you are transcribing before you start', tools: ['get_sequence_duration', 'list_sequence_tracks', 'probe_media'] },
+      { goal: 'Transcribe to an .srt on disk', tools: ['transcribe_to_srt', 'captions_from_transcript_json'] },
+      { goal: 'Edit the cues where they CAN be edited — the file, not the sequence', tools: ['read_srt', 'validate_srt', 'update_srt_cue', 'insert_srt_cue', 'remove_srt_cue', 'shift_srt_timing', 'write_srt'] },
+      { goal: 'QC the cue text and timing before ingest, because a malformed cue is accepted quietly', tools: ['caption_qc_report', 'caption_qc_fix', 'srt_diff', 'validate_srt'] },
+      { goal: 'Ingest the file, then read the track back — that readback is the proof', tools: ['create_caption_track', 'read_sequence_captions'] },
+      { goal: 'Confirm on the picture, and leave a reviewable artifact behind', tools: ['capture_program_output', 'export_captions_to_srt', 'captions_to_markers'] },
+    ],
+    cautions: [
+      'Premiere can INGEST an .srt and nothing more: there is no caption read, update or delete API inside Premiere. Every edit happens on the file before (re-)ingest, which is what the srt family of tools is for.',
+      'transcribe_to_srt needs a local Whisper CLI. get_capabilities says whether this machine has one; if it does not, say so up front rather than failing mid-workflow.',
+      'validate_srt before create_caption_track. An out-of-order or overlapping cue is ingested without complaint and shows up as missing text on the timeline.',
+    ],
+    task: (args) => {
+      const language = args.language;
+      const style = args.style_notes;
+      return `Caption the sequence${language ? ` (spoken language: ${language})` : ''}${style ? `, following these style requirements: ${style}` : ''}.`;
+    },
+  },
+  {
+    name: 'animate_clip_motion',
+    description:
+      'Tool-chain workflow to add an effect or a motion move to a clip: identify the clip, add by matchName, learn the real parameter names, set values, ease the keyframes, and prove the FRAME changed rather than just the DOM',
+    arguments: [
+      { name: 'target', description: 'Which clip to animate — track and time, or clip name', required: true },
+      { name: 'move', description: 'The move or look you want (e.g., "slow push in", "blur out over 12 frames")', required: false },
+    ],
+    role: 'You are an editor animating a clip through the Premiere MCP tools, where adding an effect and setting its parameters are two different calls.',
+    bundle: 'task-motion',
+    recipes: ['premiere://recipes/effect-match-names', 'premiere://recipes/verify-or-refuse'],
+    steps: [
+      { goal: 'Orient, then identify the exact clip — track item ids are not project item ids', tools: [...ORIENT, 'get_selected_clips', 'get_clip_at_position', 'get_clip_properties'] },
+      { goal: 'Take a checkpoint before layering effects onto a clip', tools: ['create_recovery_checkpoint'] },
+      { goal: 'Check what the clip already carries, then add by matchName rather than display name', tools: ['list_clip_effects', 'effect_stack_report', 'list_available_effects', 'apply_effect', 'apply_video_effect'] },
+      { goal: 'Learn the REAL parameter names and indices on this build before setting anything', tools: ['get_effect_properties'] },
+      { goal: 'Set the values, then read them back', tools: ['set_effect_property', 'get_effect_properties'] },
+      { goal: 'Animate with eased keyframes rather than a linear ramp', tools: ['add_keyframe', 'bake_keyframe_ease', 'set_keyframe_interpolation', 'get_keyframes', 'get_value_at_time'] },
+      { goal: 'Use a static transform where a static value is what you actually want', tools: ['set_clip_scale', 'set_clip_position', 'set_clip_rotation', 'set_clip_opacity', 'reset_transform'] },
+      { goal: 'Prove the PICTURE changed, not only the property', tools: ['verify_effect_rendered', 'verify_clip_visible', 'capture_program_output', 'export_frame'] },
+    ],
+    cautions: [
+      'apply_effect only ADDS the effect with its defaults; it cannot set a value. The pattern is apply_effect, then set_effect_property, then get_effect_properties to confirm.',
+      'Use matchNames, never display names: Opacity is AE.ADBE Opacity, Motion is AE.ADBE Motion, Lumetri is AE.ADBE Lumetri, Gaussian Blur is AE.Impact_Blur_FX. Everything else comes from list_available_effects.',
+      'A two-value parameter such as position or anchor point needs two values. Passing a scalar reads back as Illegal Parameter type and looks like a broken tool.',
+      'set_blend_mode takes a numeric index. A blend mode NAME raises Illegal Parameter type, and the index ordering is undocumented, so read the current index back rather than guessing.',
+      'Applying the same effect twice stacks it twice. list_clip_effects first.',
+    ],
+    task: (args) => {
+      const target = args.target || 'the specified clip';
+      const move = args.move;
+      return `Animate ${target}${move ? `: ${move}` : ''}, and report the values you read back.`;
+    },
+  },
+  {
+    name: 'review_notes_round_trip',
+    description:
+      'Tool-chain workflow to bring review notes into a sequence as markers, reconcile every one against the source list, and send the state back out — plus the review reel a human actually watches',
+    arguments: [
+      { name: 'notes_source', description: 'Where the notes are: a CSV or notes file path, or the notes themselves', required: true },
+      { name: 'sequence', description: 'Sequence the notes apply to. Omit to use the active sequence.', required: false },
+    ],
+    role: 'You are an assistant editor turning review notes into addressable markers and reporting exactly which ones landed.',
+    bundle: 'task-review-notes',
+    recipes: ['premiere://recipes/verify-or-refuse'],
+    steps: [
+      { goal: 'Orient in the project', tools: ORIENT },
+      { goal: 'See what is ALREADY marked before adding anything, or you will duplicate the round', tools: ['list_markers', 'get_all_markers', 'get_sequence_markers_by_type', 'get_timeline_summary'] },
+      { goal: 'Take a checkpoint: a bulk marker import is trivial to apply twice', tools: ['create_recovery_checkpoint'] },
+      { goal: 'Import the notes as markers through the tool that matches the source format', tools: ['notes_to_markers', 'markers_from_csv', 'frame_io_notes_to_markers'] },
+      { goal: 'Read EVERY marker back and reconcile it against the source list, note by note', tools: ['list_markers', 'get_all_markers', 'markers_to_csv'] },
+      { goal: 'Fix what landed wrong, individually rather than by re-importing', tools: ['update_marker', 'delete_marker', 'add_marker', 'set_marker_type'] },
+      { goal: 'Turn the marked ranges into something a human can watch', tools: ['create_subclips_from_markers', 'marker_to_subclip', 'export_per_marker_range', 'sequence_thumbnail_strip', 'assemble_review_reel'] },
+      { goal: 'Send the state back out, and report which notes are still open', tools: ['markers_to_notes', 'markers_to_csv', 'todo_marker_report', 'capture_program_output', 'save_project'] },
+    ],
+    cautions: [
+      'add_marker is NOT idempotent: running an import twice gives you two of every note. Read the existing markers first, and take a checkpoint before the import.',
+      'Marker tools default to the active sequence. Pass the sequence ID explicitly when the project has more than one, or the notes land on whatever happens to be in front.',
+      'A comment marker and a chapter marker are different types, and a notes list usually mixes them. Reconcile with get_sequence_markers_by_type rather than by count.',
+    ],
+    task: (args) => {
+      const source = args.notes_source || 'the supplied notes';
+      const sequence = args.sequence;
+      return `Bring these review notes into the timeline as markers and reconcile them: ${source}${sequence ? ` (sequence: ${sequence})` : ''}.`;
+    },
+  },
 ];
 
 /** Every tool named by any workflow. Used by the test that keeps this file honest. */
@@ -373,7 +604,12 @@ export function referencedToolNames(): string[] {
 }
 
 /** The workflow specs, exported for tests. */
-export function workflowSpecs(): ReadonlyArray<{ name: string; steps: Array<{ tools: string[] }> }> {
+export function workflowSpecs(): ReadonlyArray<{
+  name: string;
+  steps: Array<{ tools: string[] }>;
+  bundle?: string;
+  recipes?: string[];
+}> {
   return WORKFLOWS;
 }
 
@@ -422,6 +658,32 @@ function renderSystemText(workflow: WorkflowSpec): string {
       "build's verified effect names, the honest list of what Premiere's scripting API cannot do, " +
       'and the bridge setup steps.',
   );
+  // Recipes are where the expensive, host-specific knowledge lives. Naming the two or
+  // three that matter for THIS workflow is the difference between an agent reading the
+  // ticks-vs-seconds table before it moves a playhead and reading it after.
+  const recipes = [
+    ...(workflow.recipes || []),
+    'premiere://recipes/verify-or-refuse',
+    'premiere://recipes/recovery-first',
+  ].filter((uri, index, all) => all.indexOf(uri) === index);
+  lines.push('');
+  lines.push('Read these resources first — each one prevents a failure that has really happened here:');
+  for (const uri of recipes) lines.push(`- ${uri}`);
+  if (workflow.bundle) {
+    lines.push('');
+    lines.push(
+      `This chain was composed against the ${workflow.bundle} tool bundle, and its first step is ` +
+        'covered by that bundle. An operator can select it with PREMIERE_MCP_PROFILE=' +
+        `${workflow.bundle}. Later steps may name a tool your list does not advertise; that is a ` +
+        'context-saving curation, not an absence — find_tool locates it and call_tool runs it.',
+    );
+  } else {
+    lines.push('');
+    lines.push(
+      'No single tool bundle covers this workflow. Run under the core profile (or all) and reach ' +
+        'anything missing with find_tool, then call_tool.',
+    );
+  }
   lines.push('');
   lines.push('Work this tool chain in order. Each step names the tools that actually do the job:');
   lines.push('');
@@ -461,6 +723,35 @@ function renderSystemText(workflow: WorkflowSpec): string {
   lines.push(
     '- Finish by reporting what completed, what was skipped, and what failed. Do not summarize an ' +
       'unverified edit as done.',
+  );
+  lines.push(
+    '- Report the EVIDENCE, not the call. "Set opacity to 40 and read back 40 on clip 3" is a ' +
+      'report; "applied opacity" is a claim. Quote the values you read back.',
+  );
+  lines.push('');
+  // The failure paths. Every workflow above describes the happy path; without this block
+  // the honest response to a stall was undefined, and the observed default behaviour —
+  // retry, then report success — is the exact failure this server exists to prevent.
+  lines.push('When something goes wrong, these are the three cases and the correct response:');
+  lines.push(
+    '- verified:false — the edit is NOT confirmed. Check independently with the matching read tool ' +
+      '(get_effect_properties, get_keyframes, lumetri_report, list_markers, lint_timeline, ' +
+      'capture_program_output), and do not simply re-call the tool: a call that silently no-ops will ' +
+      'no-op again and look like success twice. If the check disagrees, roll back with undo or ' +
+      'restore_recovery_checkpoint and report the limitation.',
+  );
+  lines.push(
+    '- A CALL TIMES OUT OR HANGS — Premiere is probably holding a MODAL DIALOG (Link Media, an ' +
+      'obsolete audio effect, a New Sequence dialog). The bridge cannot advance a dialog and no tool ' +
+      'here can: everything queued behind it stalls. Stop calling tools, say plainly that a dialog ' +
+      'is blocking Premiere, and ask the human to bring Premiere forward and press Escape.',
+  );
+  lines.push(
+    '- ping ANSWERS BUT verify_premiere_connection DOES NOT — the ExtendScript engine has died while ' +
+      'the panel lives. That needs a human relaunch, and the relaunch must REOPEN THE PROJECT, ' +
+      'because Premiere on its Home screen never loads the bridge panel. Report the project path. ' +
+      'After any recovery, re-orient before resuming: the project you are now talking to may be an ' +
+      'older save.',
   );
   return lines.join('\n');
 }

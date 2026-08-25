@@ -17,6 +17,14 @@ import { homedir, platform, tmpdir } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, parse } from 'node:path';
 import type { PremiereProTransport } from '../bridge/types.js';
 import { Logger } from '../utils/logger.js';
+// Imported ONLY so get_capabilities can COUNT them. `resources: 13` and `prompts: 10` were
+// hardcoded literals in this file describing sets that two other modules own, and the resource
+// count had already drifted to 21 — the same defect as api_surface_report once publishing
+// a hardcoded 600 against a 638-tool build. A count that cannot drift is one that is computed.
+// Neither module imports tools/index.js (resources reaches only tools/profiles.js), so there is
+// no cycle.
+import { PremiereProResources } from '../resources/index.js';
+import { PremiereProPrompts } from '../prompts/index.js';
 import { createMotionDemoAssets } from '../utils/demoAssets.js';
 import { executeExpandedTool, getExpandedTools, isExpandedTool } from './expanded.js';
 import { applyProfile, resolveProfile, PROFILES } from './profiles.js';
@@ -64,6 +72,18 @@ export interface MCPTool {
 }
 
 type MotionStyle = 'push_in' | 'pull_out' | 'alternate' | 'none';
+
+/**
+ * One Motion-component parameter write. `index` is the position it is EXPECTED at and
+ * `name`/`aliases` are the labels that make trusting that index safe — a bare index writes a
+ * real value into whatever parameter has drifted into that slot, with no error.
+ */
+interface MotionParamTarget {
+  index: number;
+  name: string;
+  value: number | number[] | boolean;
+  aliases?: string[];
+}
 type InsertMode = 'overwrite' | 'insert';
 type ExportSourceRange = 'entire' | 'in_out' | 'work_area';
 
@@ -978,7 +998,7 @@ export class PremiereProTools {
       },
       {
         name: 'audio_crossfade_at_cut',
-        description: 'Adds a Constant Power audio crossfade at the cut between two clips on an audio track. Verified via QE getAudioTransitionByName + addTransition.',
+        description: 'Adds a Constant Power audio crossfade at the out-point of the given audio clip. The transition is proven by readback — QE transition enumeration first, the transition count in an FCP XML export as a fallback — and a crossfade that did not appear is reported as a failure with the reason, not as an unverified success.',
         inputSchema: z.object({
           sequenceId: z.string().optional(),
           audioTrackIndex: z.number().optional().describe('Audio track index, default 0'),
@@ -1733,7 +1753,7 @@ export class PremiereProTools {
       { name: 'api_surface_report', description: 'Returns a static report of the confirmed API surface: QE clip methods, QE sequence methods, confirmed DOM methods, and the honest wall of inaccessible features.', inputSchema: z.object({}) },
 
       // QE final tools
-      { name: 'apply_morph_cut', description: 'Applies a Morph Cut transition at a clip\'s out-point using QE. Triggers renderPreview() to initiate analysis. Confirmed: getVideoTransitionByName("Morph Cut") works on 26.3.2.', inputSchema: z.object({ trackIndex: z.number(), clipIndex: z.number(), sequenceId: z.string().optional() }) },
+      { name: 'apply_morph_cut', description: 'Applies a Morph Cut transition at a clip\'s out-point using QE, then verifies the transition by readback (QE transition enumeration, falling back to the transition count in an FCP XML export). Reports the transition as verified and the background frame ANALYSIS as separately unverified — until the analysis renders, the cut plays as a dissolve. Poll get_sequence_render_status.', inputSchema: z.object({ trackIndex: z.number(), clipIndex: z.number(), durationFrames: z.number().int().positive().optional().describe('Transition length in frames. Default: one second of the sequence timebase.'), sequenceId: z.string().optional() }) },
       { name: 'set_preview_quality', description: 'Sets sequence preview render quality: maxRenderQuality (bool), maxBitDepth (bool), previewWidth/Height. Uses QE sequence methods.', inputSchema: z.object({ maxRenderQuality: z.boolean().optional(), maxBitDepth: z.boolean().optional(), previewWidth: z.number().optional(), previewHeight: z.number().optional(), sequenceId: z.string().optional() }) },
       { name: 'get_ea_user_info', description: 'Returns the logged-in Adobe/Premiere account info via qe.ea: email, username, and login status.', inputSchema: z.object({}) },
       { name: 'import_project_items', description: 'Imports items from another .prproj file into the current project via QE importProject.', inputSchema: z.object({ projectPath: z.string().describe('Absolute path to .prproj file'), includeSequences: z.boolean().optional().default(true) }) },
@@ -4167,7 +4187,7 @@ export class PremiereProTools {
         case 'set_app_property': return await this.setAppProperty(args.key, args.value);
         case 'get_panel_visibility': return await this.getPanelVisibility(args.panels);
         case 'api_surface_report': return this.apiSurfaceReport();
-        case 'apply_morph_cut': return await this.applyMorphCut(args.trackIndex, args.clipIndex, args.sequenceId);
+        case 'apply_morph_cut': return await this.applyMorphCut(args.trackIndex, args.clipIndex, args.sequenceId, args.durationFrames);
         case 'set_preview_quality': return await this.setPreviewQuality(args.maxRenderQuality, args.maxBitDepth, args.previewWidth, args.previewHeight, args.sequenceId);
         case 'get_ea_user_info': return await this.getEaUserInfo();
         case 'import_project_items': return await this.importProjectItems(args.projectPath, args.includeSequences);
@@ -4654,6 +4674,22 @@ ${this.buildSequenceResolver(sequenceId)}
     };
   }
 
+  /**
+   * Count a capability set owned by another module, reporting `{ count, countedFrom }` on
+   * success and `{ count: null, error }` if it cannot be enumerated. Never a literal.
+   */
+  private countCapabilitySet(count: () => number, label: string): { count: number | null; countedFrom: string; error?: string } {
+    try {
+      return { count: count(), countedFrom: `enumerated at call time from the ${label} module` };
+    } catch (error) {
+      return {
+        count: null,
+        countedFrom: `enumeration of the ${label} module failed, so no number is published`,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
   private async getCapabilities(checkConnection = false, probeLocalTools = false): Promise<any> {
     const currentPlatform = platform();
     const cepExtensionPath = currentPlatform === 'darwin'
@@ -4768,8 +4804,11 @@ ${this.buildSequenceResolver(sequenceId)}
                 : `${exposed.length} tools advertised to save context; all ${reachable} implemented tools remain reachable via call_tool, and activate_tools promotes any of them into the advertised list on demand.`,
             };
           })(),
-          resources: 13,
-          prompts: 10
+          // Counted from the live objects, never stated. If either module cannot be
+          // enumerated the count is reported as null WITH the reason, because a stale
+          // integer is a lie the client cannot detect while a null is a gap it can.
+          resources: this.countCapabilitySet(() => new PremiereProResources(this.bridge).getAvailableResources().length, 'resources'),
+          prompts: this.countCapabilitySet(() => new PremiereProPrompts().getAvailablePrompts().length, 'prompts')
         };
       })(),
       liveConnection,
@@ -5839,10 +5878,21 @@ ${this.buildSequenceResolver(sequenceId)}
       if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
       var ticksPerFrame = Number(seq.timebase) || 10584000000;
       var before = String(clip.start.ticks);
-      var newStart = new Time(); newStart.ticks = String(Math.max(0, Math.round(Number(clip.start.ticks) + ${frames} * ticksPerFrame)));
+      var wantTicks = Math.max(0, Math.round(Number(before) + ${frames} * ticksPerFrame));
+      var newStart = new Time(); newStart.ticks = String(wantTicks);
       clip.move(newStart, ${trackIndex});
       var after = String(clip.start.ticks);
-      return JSON.stringify({success:true,verified:after !== before,frames:${frames},before:before,after:after});
+      // Enumerate the outcomes rather than shipping a bare inequality. A nudge of 0
+      // frames, a nudge clamped at 0, and a nudge Premiere refused all read back with
+      // before === after, and only the last of those is a failure.
+      var onTarget = Math.abs(Number(after) - wantTicks) < ticksPerFrame / 2;
+      var changed = after !== before;
+      if (onTarget) {
+        return JSON.stringify({success:true,verified:true,verifiedBy:'TrackItem.start readback',changed:changed,frames:${frames},before:before,after:after,
+          note: changed ? undefined : 'The clip was already at the requested position, so nothing moved.'});
+      }
+      return JSON.stringify({success:false,verified:true,verifiedBy:'TrackItem.start readback',changed:changed,frames:${frames},before:before,after:after,wantTicks:String(wantTicks),
+        error:'The clip did not land at the requested position. move() is blocked when the destination overlaps another clip on the same track, and it clamps at 0. Clear the destination or move to an empty track first.'});
     `);
   }
 
@@ -5859,10 +5909,26 @@ ${this.buildSequenceResolver(sequenceId)}
       if (!aClip) return JSON.stringify({success:false,error:'No linked audio clip found'});
       var ticksPerFrame = Number(seq.timebase) || 10584000000;
       var before = String(aClip.start.ticks);
-      var newAIn = new Time(); newAIn.ticks = String(Math.max(0, Math.round(Number(aClip.inPoint.ticks) - ${frames} * ticksPerFrame)));
+      var inBefore = String(aClip.inPoint.ticks);
+      var newAIn = new Time(); newAIn.ticks = String(Math.max(0, Math.round(Number(inBefore) - ${frames} * ticksPerFrame)));
       aClip.inPoint = newAIn;
       var after = String(aClip.start.ticks);
-      return JSON.stringify({success:true,verified:after !== before,frames:${frames},audioStartBefore:before,audioStartAfter:after,type:'j_cut'});
+      var inAfter = String(aClip.inPoint.ticks);
+      // A J-cut is two effects of one write: the source in-point moves AND the clip's
+      // timeline start pulls earlier. Reporting only "start changed" hid the half-applied
+      // case where the in-point moved and the clip did not, which is a silently trimmed
+      // clip rather than a J-cut.
+      var sourceMoved = inAfter !== inBefore;
+      var timelineMoved = after !== before;
+      if (sourceMoved && timelineMoved) {
+        return JSON.stringify({success:true,verified:true,verifiedBy:'TrackItem.inPoint and TrackItem.start readback',changed:true,frames:${frames},audioStartBefore:before,audioStartAfter:after,sourceInBefore:inBefore,sourceInAfter:inAfter,type:'j_cut'});
+      }
+      if (sourceMoved && !timelineMoved) {
+        return JSON.stringify({success:false,verified:true,verifiedBy:'TrackItem.inPoint and TrackItem.start readback',changed:true,partial:true,frames:${frames},audioStartBefore:before,audioStartAfter:after,sourceInBefore:inBefore,sourceInAfter:inAfter,type:'j_cut',
+          error:'HALF APPLIED: the audio source in-point moved but the clip did not extend earlier on the timeline, so the audio was trimmed instead of J-cut. The clip to its left is probably in the way. Undo, clear the space, and retry.'});
+      }
+      return JSON.stringify({success:false,verified:true,verifiedBy:'TrackItem.inPoint and TrackItem.start readback',changed:false,frames:${frames},audioStartBefore:before,audioStartAfter:after,sourceInBefore:inBefore,sourceInAfter:inAfter,type:'j_cut',
+        error:'Nothing moved. The linked audio has no source handle left before its in-point, so it cannot start earlier.'});
     `);
   }
 
@@ -5879,10 +5945,24 @@ ${this.buildSequenceResolver(sequenceId)}
       if (!aClip) return JSON.stringify({success:false,error:'No linked audio clip found'});
       var ticksPerFrame = Number(seq.timebase) || 10584000000;
       var before = String(aClip.end.ticks);
-      var newAOut = new Time(); newAOut.ticks = String(Math.round(Number(aClip.outPoint.ticks) + ${frames} * ticksPerFrame));
+      var outBefore = String(aClip.outPoint.ticks);
+      var newAOut = new Time(); newAOut.ticks = String(Math.round(Number(outBefore) + ${frames} * ticksPerFrame));
       aClip.outPoint = newAOut;
       var after = String(aClip.end.ticks);
-      return JSON.stringify({success:true,verified:after !== before,frames:${frames},audioEndBefore:before,audioEndAfter:after,type:'l_cut'});
+      var outAfter = String(aClip.outPoint.ticks);
+      // Same half-applied hazard as j_cut: the source out-point can move while the clip
+      // refuses to extend later on the timeline, which trims rather than L-cuts.
+      var sourceMoved = outAfter !== outBefore;
+      var timelineMoved = after !== before;
+      if (sourceMoved && timelineMoved) {
+        return JSON.stringify({success:true,verified:true,verifiedBy:'TrackItem.outPoint and TrackItem.end readback',changed:true,frames:${frames},audioEndBefore:before,audioEndAfter:after,sourceOutBefore:outBefore,sourceOutAfter:outAfter,type:'l_cut'});
+      }
+      if (sourceMoved && !timelineMoved) {
+        return JSON.stringify({success:false,verified:true,verifiedBy:'TrackItem.outPoint and TrackItem.end readback',changed:true,partial:true,frames:${frames},audioEndBefore:before,audioEndAfter:after,sourceOutBefore:outBefore,sourceOutAfter:outAfter,type:'l_cut',
+          error:'HALF APPLIED: the audio source out-point moved but the clip did not extend later on the timeline, so the audio was trimmed instead of L-cut. The clip to its right is probably in the way. Undo, clear the space, and retry.'});
+      }
+      return JSON.stringify({success:false,verified:true,verifiedBy:'TrackItem.outPoint and TrackItem.end readback',changed:false,frames:${frames},audioEndBefore:before,audioEndAfter:after,sourceOutBefore:outBefore,sourceOutAfter:outAfter,type:'l_cut',
+        error:'Nothing moved. The linked audio has no source handle left after its out-point, so it cannot run later.'});
     `);
   }
 
@@ -5898,14 +5978,35 @@ ${this.buildSequenceResolver(sequenceId)}
         ${sourceOut ? `app.enableQE(); qe.source.clip.setOutPoint(${JSON.stringify(sourceOut)});` : ''}
         var seq = app.project.activeSequence;
         ${sequenceTimecode ? `var t = new Time(); t.seconds = ${JSON.stringify(sequenceTimecode)}; seq.setPlayerPosition(String(t.ticks));` : ''}
-        var beforeCount = seq.videoTracks[${videoTrack}].clips.numItems;
+        var destTrack = seq.videoTracks[${videoTrack}];
+        if (!destTrack) return JSON.stringify({success:false,error:'Video track ${videoTrack} does not exist on this sequence'});
+        var beforeCount = destTrack.clips.numItems;
+        var landAtSeconds = Number(seq.getPlayerPosition().seconds);
         if (${JSON.stringify(mode)} === 'insert') {
-          seq.videoTracks[${videoTrack}].insertClip(item, seq.getPlayerPosition());
+          destTrack.insertClip(item, seq.getPlayerPosition());
         } else {
-          seq.videoTracks[${videoTrack}].overwriteClip(item, seq.getPlayerPosition());
+          destTrack.overwriteClip(item, seq.getPlayerPosition());
         }
-        var afterCount = seq.videoTracks[${videoTrack}].clips.numItems;
-        return JSON.stringify({success:true,verified:afterCount >= beforeCount,mode:${JSON.stringify(mode)},sourceItem:String(item.name),sourceIn:${JSON.stringify(sourceIn??null)},sourceOut:${JSON.stringify(sourceOut??null)}});
+        var afterCount = destTrack.clips.numItems;
+        // "afterCount >= beforeCount" was a check that could not fail: overwriteClip
+        // REPLACES rather than appends, so a flat count is the expected outcome, and the
+        // count can never fall. Verify the clip covering the playhead actually references
+        // the requested project item instead.
+        var landed = false, coveringName = null;
+        for (var vc = 0; vc < destTrack.clips.numItems; vc++) {
+          var cand = destTrack.clips[vc];
+          if (Number(cand.start.seconds) > landAtSeconds + 0.001) continue;
+          if (Number(cand.end.seconds) <= landAtSeconds + 0.001) continue;
+          coveringName = String(cand.name);
+          try { landed = String(cand.projectItem.nodeId) === String(item.nodeId); } catch (eL) {}
+          break;
+        }
+        if (!landed) {
+          return JSON.stringify({success:false,verified:true,verifiedBy:'clip covering the playhead compared by projectItem.nodeId',
+            error:'The edit did not land: the clip covering ' + landAtSeconds + 's on video track ${videoTrack} is ' + (coveringName === null ? 'absent' : '"' + coveringName + '"') + ', not "' + String(item.name) + '". A locked or targeted-off track, or an out-of-range source in/out, will make Premiere accept the call and place nothing.',
+            mode:${JSON.stringify(mode)},sourceItem:String(item.name),clipsBefore:beforeCount,clipsAfter:afterCount,atSeconds:landAtSeconds});
+        }
+        return JSON.stringify({success:true,verified:true,verifiedBy:'clip covering the playhead compared by projectItem.nodeId',changed:true,mode:${JSON.stringify(mode)},sourceItem:String(item.name),sourceIn:${JSON.stringify(sourceIn??null)},sourceOut:${JSON.stringify(sourceOut??null)},clipsBefore:beforeCount,clipsAfter:afterCount,atSeconds:landAtSeconds});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
@@ -5972,13 +6073,27 @@ ${this.buildSequenceResolver(sequenceId)}
       if (!seq) return JSON.stringify({success:false,error:'No sequence'});
       var clipList = ${clipsJson};
       var toSelect = [];
+      var unresolved = [];
       for (var i = 0; i < clipList.length; i++) {
         var track = seq.videoTracks[clipList[i].trackIndex] || seq.audioTracks[clipList[i].trackIndex];
         if (track && track.clips[clipList[i].clipIndex]) toSelect.push(track.clips[clipList[i].clipIndex]);
+        else unresolved.push('track ' + clipList[i].trackIndex + ' clip ' + clipList[i].clipIndex);
       }
       seq.setSelection(toSelect);
       var sel = seq.getSelection();
-      return JSON.stringify({success:true,verified:sel&&sel.length===toSelect.length,requested:clipList.length,selected:sel?sel.length:0});
+      var selCount = sel ? sel.length : 0;
+      // The old check compared the selection against what we MANAGED to resolve, so a
+      // request naming five clips of which two existed reported a verified success for
+      // two. Compare against what was ASKED for, and name what could not be found.
+      var allSelected = sel && selCount === clipList.length && unresolved.length === 0;
+      if (!allSelected) {
+        return JSON.stringify({success:false,verified:true,verifiedBy:'Sequence.getSelection() readback',
+          requested:clipList.length,resolved:toSelect.length,selected:selCount,unresolved:unresolved,
+          error: unresolved.length
+            ? ('Selected ' + selCount + ' of ' + clipList.length + ' requested clips. Not found on this sequence: ' + unresolved.join(', ') + '.')
+            : ('Premiere selected ' + selCount + ' clips after being handed ' + toSelect.length + '. Locked tracks are excluded from a selection.')});
+      }
+      return JSON.stringify({success:true,verified:true,verifiedBy:'Sequence.getSelection() readback',requested:clipList.length,resolved:toSelect.length,selected:selCount});
     `);
   }
 
@@ -6079,6 +6194,204 @@ ${this.buildSequenceResolver(sequenceId)}
           success: applied > 0 && applied === targets.length,
           verified: true, applied: applied, requested: targets.length, results: results,
           error: applied === targets.length ? null : (applied === 0 ? 'No Lumetri parameter could be applied; see results[].' : 'Only ' + applied + ' of ' + targets.length + ' parameters applied; see results[].')
+        });
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `;
+  }
+
+  /**
+   * The Motion component's counterpart to lumetriParamScript, and it exists for the same
+   * reason. Seven tools (reset_transform, match_transform, letterbox, pip_layout,
+   * grid_layout, reset_motion_to_defaults, set_clip_crop) wrote Motion properties by bare
+   * numeric index with EVERY assignment inside its own try/catch, then returned
+   * `verified: true` unconditionally — so a rejected write, a shifted parameter list and a
+   * successful edit were indistinguishable in the response. Same defect the colour family
+   * had, same fix: each target is an {index, name, value}, the index is only trusted when it
+   * holds the expected NAME, every write is read back and compared, and a partial
+   * application is reported as partial.
+   *
+   * The name guard matters more here than for Lumetri. Premiere's Motion component exposes
+   * Position/Scale/Rotation/Anchor Point/Anti-flicker Filter; Crop is a SEPARATE effect. The
+   * old code wrote crop values to Motion properties[7..10] on an assumption nobody had
+   * measured, and an unverified index writes a real value into the wrong parameter with no
+   * error at all. Refusing with the list of parameters actually present is the honest
+   * outcome when the name is not where it was expected.
+   */
+  /**
+   * ES3 fragment defining `__verifyKeyframes(prop, specs)`.
+   *
+   * Six tools wrote keyframes with addKey/setValueAtKey and then returned
+   * `verified: true` unconditionally — ken_burns, keyframe_zoom_in/out, fade_in_video,
+   * fade_out_video. Two of them called getKeys() and threw the answer away. A keyframe write
+   * fails quietly whenever setTimeVarying is refused or the value is out of the parameter's
+   * range, so "did not throw" says nothing about whether the animation exists.
+   *
+   * Presence is proven from getKeys() (a list of Time objects) rather than
+   * keyExistsAtTime(), because the argument type that accessor wants is not consistent
+   * across this API. The value is read with a Time object first and a seconds number second,
+   * and an unreadable value is reported as unreadable rather than assumed correct.
+   */
+  private keyframeVerifyFragment(): string {
+    return `
+      function __kfMatch(a, b) {
+        if (a === null || a === undefined) return false;
+        var bIsArr = Array.isArray ? Array.isArray(b) : (b && typeof b.length === 'number' && typeof b !== 'string');
+        var aIsArr = Array.isArray ? Array.isArray(a) : (a && typeof a.length === 'number' && typeof a !== 'string');
+        if (bIsArr) {
+          if (!aIsArr || a.length !== b.length) return false;
+          for (var vi=0; vi<b.length; vi++) { if (Math.abs(Number(a[vi]) - Number(b[vi])) > 0.001) return false; }
+          return true;
+        }
+        if (aIsArr) return false;
+        return Math.abs(Number(a) - Number(b)) < 0.001;
+      }
+      function __verifyKeyframes(prop, specs) {
+        var keyTicks = [], keysReadable = true;
+        try {
+          var kk = prop.getKeys();
+          if (!kk) keysReadable = false;
+          else { for (var ki=0; ki<kk.length; ki++) keyTicks.push(String(Math.round(Number(kk[ki].ticks)))); }
+        } catch (eK) { keysReadable = false; }
+        var out = [], landed = 0;
+        for (var s=0; s<specs.length; s++) {
+          var wantTicks = String(Math.round(Number(specs[s].ticks)));
+          var present = keysReadable ? (keyTicks.indexOf(wantTicks) >= 0) : null;
+          var val = null, valueReadable = false;
+          if (present !== false) {
+            var tObj = new Time(); tObj.ticks = wantTicks;
+            try { val = prop.getValueAtKey(tObj); valueReadable = val !== null && val !== undefined; } catch (eV1) {}
+            if (!valueReadable) {
+              try { val = prop.getValueAtKey(Number(wantTicks) / 254016000000); valueReadable = val !== null && val !== undefined; } catch (eV2) {}
+            }
+          }
+          var ok = present === true && valueReadable && __kfMatch(val, specs[s].value);
+          if (ok) landed++;
+          out.push({
+            label: specs[s].label, ticks: wantTicks, keyPresent: present, valueAtKey: val, valueRequested: specs[s].value, ok: ok,
+            error: ok ? null : (
+              present === false ? 'No keyframe exists at this time; addKey did not take.'
+              : (present === null ? 'getKeys() is not readable on this parameter, so the keyframe cannot be confirmed.'
+              : (!valueReadable ? 'The keyframe exists but its value is not readable, so the animation value is unconfirmed.'
+              : 'The keyframe exists but holds ' + String(val) + ' rather than the requested ' + String(specs[s].value) + '.')))
+          });
+        }
+        return { landed: landed, requested: specs.length, keys: out, keysReadable: keysReadable, keyCount: keyTicks.length };
+      }
+    `;
+  }
+
+  private motionParamScript(
+    seqId: string | undefined,
+    ti: number,
+    ci: number,
+    targets: MotionParamTarget[],
+    label: string,
+  ): string {
+    return this.motionParamBatchScript(seqId, [{ trackIndex: ti, clipIndex: ci, targets }], label);
+  }
+
+  /** Batch form: one round trip for a whole layout across several clips. */
+  private motionParamBatchScript(
+    seqId: string | undefined,
+    entries: Array<{ trackIndex: number; clipIndex: number; targets: MotionParamTarget[] }>,
+    label: string,
+  ): string {
+    return `
+      try {
+        var seq = ${seqId ? `(function(){var ss=app.project.sequences;for(var i=0;i<ss.numSequences;i++){if(ss[i].sequenceID===${JSON.stringify(seqId)})return ss[i];}return app.project.activeSequence;})()` : 'app.project.activeSequence'};
+        if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
+        function __valuesMatch(a, b) {
+          if (a === null || a === undefined) return false;
+          var aIsArr = Array.isArray ? Array.isArray(a) : (a && typeof a.length === 'number' && typeof a !== 'string');
+          var bIsArr = Array.isArray ? Array.isArray(b) : (b && typeof b.length === 'number' && typeof b !== 'string');
+          if (bIsArr) {
+            if (!aIsArr || a.length !== b.length) return false;
+            for (var vi=0; vi<b.length; vi++) { if (Math.abs(Number(a[vi]) - Number(b[vi])) > 0.001) return false; }
+            return true;
+          }
+          if (aIsArr) return false;
+          if (typeof b === 'boolean') return Boolean(a) === b;
+          return Math.abs(Number(a) - Number(b)) < 0.001;
+        }
+        var entries = ${JSON.stringify(entries)};
+        var clipReports = [];
+        var totalRequested = 0, totalApplied = 0, clipsFullyApplied = 0, clipsPartial = 0;
+        for (var ei=0; ei<entries.length; ei++) {
+          var entry = entries[ei];
+          var track = seq.videoTracks[entry.trackIndex];
+          var clip = track ? track.clips[entry.clipIndex] : null;
+          totalRequested += entry.targets.length;
+          if (!clip) {
+            clipReports.push({ trackIndex: entry.trackIndex, clipIndex: entry.clipIndex, ok: false, applied: 0,
+              requested: entry.targets.length, error: 'No clip at video track ' + entry.trackIndex + ' index ' + entry.clipIndex + '.' });
+            continue;
+          }
+          var motion = null;
+          for (var i=0;i<clip.components.numItems;i++) { if (String(clip.components[i].displayName)==='Motion') { motion=clip.components[i]; break; } }
+          if (!motion) {
+            clipReports.push({ trackIndex: entry.trackIndex, clipIndex: entry.clipIndex, clip: String(clip.name), ok: false, applied: 0,
+              requested: entry.targets.length, error: 'This clip has no Motion component, so position, scale, rotation and anchor point cannot be set on it.' });
+            continue;
+          }
+          var props = motion.properties;
+          var present = [];
+          for (var pn=0; pn<props.numItems; pn++) { var nmP=''; try{ nmP=String(props[pn].displayName); }catch(eP){} present.push(pn + ':' + nmP); }
+          var results = [], applied = 0;
+          for (var t=0;t<entry.targets.length;t++) {
+            var spec = entry.targets[t];
+            var accept = [spec.name];
+            if (spec.aliases) { for (var ai=0; ai<spec.aliases.length; ai++) accept.push(spec.aliases[ai]); }
+            var param = null, route = 'index';
+            if (spec.index < props.numItems) {
+              var candidate = props[spec.index];
+              var actualName = '';
+              try { actualName = String(candidate.displayName); } catch (eN) {}
+              if (accept.indexOf(actualName) >= 0) { param = candidate; route = 'index(' + actualName + ')'; }
+            }
+            if (!param) {
+              for (var pj=0; pj<props.numItems; pj++) {
+                var nm2 = '';
+                try { nm2 = String(props[pj].displayName); } catch (eN2) {}
+                if (accept.indexOf(nm2) >= 0) { param = props[pj]; route = 'name-fallback(index ' + pj + ')'; break; }
+              }
+            }
+            if (!param) {
+              results.push({ name: spec.name, expectedIndex: spec.index, acceptedNames: accept, ok: false, status: 'parameter_not_found',
+                error: 'Motion on this clip has no parameter named ' + accept.join(' or ') + ' at index ' + spec.index + ' or anywhere in its ' + props.numItems + ' parameters, so nothing was written. Parameters present: ' + present.join(', ') + '.' });
+              continue;
+            }
+            var before = null; try { before = param.getValue(); } catch (eB) {}
+            var setError = null;
+            try { param.setValue(spec.value, true); } catch (eS) { setError = eS.toString(); }
+            var after = null; try { after = param.getValue(); } catch (eA) {}
+            var landed = __valuesMatch(after, spec.value);
+            if (landed) applied++;
+            results.push({ name: spec.name, route: route, valueRequested: spec.value, valueBefore: before,
+              valueAfter: after, changed: !__valuesMatch(before, spec.value), ok: landed,
+              status: landed ? 'verified' : (setError ? 'set_threw' : 'not_applied'),
+              error: landed ? null : (setError || ('Value reads back as ' + String(after) + ' rather than ' + String(spec.value) + '.')) });
+          }
+          totalApplied += applied;
+          var full = applied === entry.targets.length && entry.targets.length > 0;
+          if (full) clipsFullyApplied++; else if (applied > 0) clipsPartial++;
+          clipReports.push({ trackIndex: entry.trackIndex, clipIndex: entry.clipIndex, clip: String(clip.name),
+            ok: full, applied: applied, requested: entry.targets.length, results: results });
+        }
+        var allFull = clipsFullyApplied === entries.length && entries.length > 0;
+        var singleClip = entries.length === 1;
+        return JSON.stringify({
+          success: allFull,
+          verified: true, verifiedBy: 'Motion parameter getValue() readback, index guarded by displayName',
+          operation: ${JSON.stringify(label)},
+          applied: totalApplied, requested: totalRequested,
+          clips: clipReports,
+          clipsFullyApplied: clipsFullyApplied, clipsPartiallyApplied: clipsPartial, clipsRequested: entries.length,
+          results: singleClip ? (clipReports[0] ? clipReports[0].results : []) : undefined,
+          error: allFull ? null : (
+            entries.length === 0 ? 'No clips were supplied, so nothing was changed.'
+            : (totalApplied === 0
+              ? ('No Motion parameter could be applied for ' + ${JSON.stringify(label)} + '; see clips[].')
+              : ('PARTIALLY APPLIED: ' + totalApplied + ' of ' + totalRequested + ' Motion parameters landed across ' + entries.length + ' clip(s); see clips[]. The affected clips are in a mixed state.')))
         });
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `;
@@ -6233,9 +6546,21 @@ ${this.buildSequenceResolver(sequenceId)}
   private async setLutInterpolation(method: number): Promise<any> {
     return await this.bridge.executeScript(`
       try {
+        var before = null;
+        try { before = Number(app.project.getLUTInterpolationMethod()); } catch(eB) {}
         app.project.setLUTInterpolationMethod(${method});
-        var after = app.project.getLUTInterpolationMethod();
-        return JSON.stringify({success:true,verified:Number(after)===Number(${method}),method:${method},readback:Number(after)});
+        var after = null;
+        try { after = Number(app.project.getLUTInterpolationMethod()); } catch(eA) {}
+        if (after === null) {
+          return JSON.stringify({success:true,verified:false,method:${method},before:before,
+            unverifiedReason:'setLUTInterpolationMethod() did not throw, but getLUTInterpolationMethod() is not readable on this build, so the value cannot be confirmed.'});
+        }
+        if (after !== Number(${method})) {
+          return JSON.stringify({success:false,verified:true,verifiedBy:'app.project.getLUTInterpolationMethod() readback',changed:after!==before,method:${method},before:before,readback:after,
+            error:'Premiere kept LUT interpolation at ' + after + ' instead of the requested ${method}. Only the methods this build supports are accepted.'});
+        }
+        return JSON.stringify({success:true,verified:true,verifiedBy:'app.project.getLUTInterpolationMethod() readback',changed:after!==before,method:${method},before:before,readback:after,
+          note: after === before ? 'LUT interpolation was already set to this method; nothing changed.' : undefined});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
@@ -6256,23 +6581,42 @@ ${this.buildSequenceResolver(sequenceId)}
         if (!effect) return JSON.stringify({success:false,error:'Transform effect not found'});
         qeClip.addVideoEffect(effect);
         var after = domClip.components.numItems;
-        if (after <= before) return JSON.stringify({success:false,error:'Transform effect could not be added'});
-        // Find the Transform component and set flip
+        if (after <= before) return JSON.stringify({success:false,verified:true,error:'The Transform effect was not added (component count did not rise), so no flip was applied.'});
+        // The flip parameter write used to sit inside try{}catch(e){} with no readback, so a
+        // clip that gained a Transform effect and no flip reported verified: true. That is a
+        // half-applied edit: the caller is left with an inert effect on the clip.
+        var flipComp = null;
         for (var i=0;i<domClip.components.numItems;i++) {
-          if (String(domClip.components[i].displayName) === 'Transform') {
-            var tComp = domClip.components[i];
-            // Horizontal flip is usually param named 'Flip Horizontal', vertical is 'Flip Vertical'
-            for (var pi=0;pi<tComp.properties.numItems;pi++) {
-              var pname = String(tComp.properties[pi].displayName).toLowerCase();
-              if ((${JSON.stringify(direction)} === 'horizontal' && (pname.indexOf('horizontal') >= 0 || pname.indexOf('horiz') >= 0)) ||
-                  (${JSON.stringify(direction)} === 'vertical' && pname.indexOf('vertical') >= 0)) {
-                try { tComp.properties[pi].setValue(true, true); } catch(e){}
-              }
-            }
-            break;
+          if (String(domClip.components[i].displayName) === 'Transform') { flipComp = domClip.components[i]; break; }
+        }
+        if (!flipComp) return JSON.stringify({success:false,verified:true,error:'The Transform effect was added but cannot be found on the clip by name, so its flip parameter could not be set. Remove it with remove_effect_by_name before retrying.'});
+        var flipParam = null, flipParamName = null, propsSeen = [];
+        for (var pi=0;pi<flipComp.properties.numItems;pi++) {
+          var rawName = String(flipComp.properties[pi].displayName);
+          propsSeen.push(rawName);
+          var pname = rawName.toLowerCase();
+          if ((${JSON.stringify(direction)} === 'horizontal' && (pname.indexOf('horizontal') >= 0 || pname.indexOf('horiz') >= 0)) ||
+              (${JSON.stringify(direction)} === 'vertical' && pname.indexOf('vertical') >= 0)) {
+            flipParam = flipComp.properties[pi]; flipParamName = rawName; break;
           }
         }
-        return JSON.stringify({success:true,verified:true,direction:${JSON.stringify(direction)}});
+        if (!flipParam) {
+          return JSON.stringify({success:false,verified:true,direction:${JSON.stringify(direction)},transformParameters:propsSeen,
+            error:'The Transform effect was ADDED to this clip but exposes no ${direction} flip parameter, so the clip now carries an inert effect and is not flipped. Parameters present are listed in transformParameters. Remove it with remove_effect_by_name.'});
+        }
+        var flipBefore = null; try { flipBefore = flipParam.getValue(); } catch(eFB) {}
+        var flipSetError = null;
+        try { flipParam.setValue(true, true); } catch(eFS) { flipSetError = eFS.toString(); }
+        var flipAfter = null; try { flipAfter = flipParam.getValue(); } catch(eFA) {}
+        if (flipAfter === null) {
+          return JSON.stringify({success:true,verified:false,direction:${JSON.stringify(direction)},effectAdded:true,parameter:flipParamName,
+            unverifiedReason:'The Transform effect was added and the ${direction} flip was written, but the parameter is not readable on this build, so the flip cannot be confirmed.',setError:flipSetError});
+        }
+        if (!Boolean(flipAfter)) {
+          return JSON.stringify({success:false,verified:true,verifiedBy:'Transform flip parameter getValue() readback',direction:${JSON.stringify(direction)},effectAdded:true,parameter:flipParamName,before:flipBefore,after:flipAfter,
+            error:'HALF APPLIED: the Transform effect was added to this clip but its ' + flipParamName + ' parameter still reads ' + String(flipAfter) + ', so the clip is not flipped.' + (flipSetError ? ' setValue threw: ' + flipSetError : '')});
+        }
+        return JSON.stringify({success:true,verified:true,verifiedBy:'Transform flip parameter getValue() readback',direction:${JSON.stringify(direction)},effectAdded:true,parameter:flipParamName,before:flipBefore,after:flipAfter,changed:Boolean(flipBefore)!==Boolean(flipAfter)});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
@@ -6283,46 +6627,58 @@ ${this.buildSequenceResolver(sequenceId)}
         var seq = app.project.activeSequence;
         var clip = seq.videoTracks[${ti}].clips[${ci}];
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
-        var opComp = clip.components[0]; // Opacity
-        var opProp = opComp.properties[0]; // Opacity param
-        opProp.setTimeVarying(true);
+        ${this.keyframeVerifyFragment()}
+        // Opacity was addressed as components[0].properties[0] with no name check. Confirm
+        // the parameter really is Opacity before animating it, or the fade lands on whatever
+        // parameter happens to sit at that slot.
+        var opComp = null;
+        for (var oc=0; oc<clip.components.numItems; oc++) { if (String(clip.components[oc].displayName)==='Opacity') { opComp = clip.components[oc]; break; } }
+        if (!opComp) return JSON.stringify({success:false,verified:false,error:'This clip has no Opacity component, so a video fade cannot be keyframed on it.'});
+        var opProp = null;
+        for (var op=0; op<opComp.properties.numItems; op++) { if (String(opComp.properties[op].displayName)==='Opacity') { opProp = opComp.properties[op]; break; } }
+        if (!opProp) return JSON.stringify({success:false,verified:false,error:'The Opacity component on this clip exposes no Opacity parameter, so a video fade cannot be keyframed.'});
+        var tvError = null;
+        try { opProp.setTimeVarying(true); } catch (eTV) { tvError = eTV.toString(); }
         var ticksPerFrame = Number(seq.timebase) || 10584000000;
         var fadeTicks = ${durationFrames} * ticksPerFrame;
         var t1 = new Time(); var t2 = new Time();
+        var v1 = 0, v2 = 100;
         if (${JSON.stringify(direction)} === 'in') {
           t1.ticks = String(Math.round(Number(clip.start.ticks)));
           t2.ticks = String(Math.round(Number(clip.start.ticks) + fadeTicks));
-          opProp.addKey(t1); opProp.setValueAtKey(t1, 0);
-          opProp.addKey(t2); opProp.setValueAtKey(t2, 100);
         } else {
           t1.ticks = String(Math.round(Number(clip.end.ticks) - fadeTicks));
           t2.ticks = String(Math.round(Number(clip.end.ticks)));
-          opProp.addKey(t1); opProp.setValueAtKey(t1, 100);
-          opProp.addKey(t2); opProp.setValueAtKey(t2, 0);
+          v1 = 100; v2 = 0;
         }
-        var kfs = opProp.getKeys();
-        return JSON.stringify({success:true,verified:true,keyframeCount:kfs?kfs.length:0,direction:${JSON.stringify(direction)},durationFrames:${durationFrames}});
+        opProp.addKey(t1); opProp.setValueAtKey(t1, v1);
+        opProp.addKey(t2); opProp.setValueAtKey(t2, v2);
+        var kf = __verifyKeyframes(opProp, [
+          { ticks: t1.ticks, value: v1, label: 'fade start' },
+          { ticks: t2.ticks, value: v2, label: 'fade end' }
+        ]);
+        var full = kf.landed === kf.requested;
+        return JSON.stringify({
+          success: full,
+          verified: kf.keysReadable,
+          verifiedBy: kf.keysReadable ? 'Opacity getKeys() and getValueAtKey() readback' : undefined,
+          unverifiedReason: kf.keysReadable ? undefined : 'getKeys() is not readable on this Opacity parameter, so the fade keyframes cannot be confirmed.',
+          direction:${JSON.stringify(direction)}, durationFrames:${durationFrames},
+          keyframeCount: kf.keyCount, keyframesLanded: kf.landed, keyframesRequested: kf.requested, keyframes: kf.keys,
+          setTimeVaryingError: tvError,
+          error: full ? null : ('The fade did not fully land: ' + kf.landed + ' of ' + kf.requested + ' keyframes are present at the requested values' + (tvError ? ', and setTimeVarying threw: ' + tvError : '') + '. See keyframes[].')
+        });
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
 
-  private async resetTransform(_sequenceId: string | undefined, ti: number, ci: number): Promise<any> {
-    return await this.bridge.executeScript(`
-      try {
-        var seq = app.project.activeSequence;
-        var clip = seq.videoTracks[${ti}].clips[${ci}];
-        if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
-        var motComp = null;
-        for (var i=0;i<clip.components.numItems;i++) { if (String(clip.components[i].displayName)==='Motion') { motComp=clip.components[i]; break; } }
-        if (!motComp) return JSON.stringify({success:false,error:'Motion component not found'});
-        // Reset: Position=0.5,0.5 Scale=100 Rotation=0 AnchorPoint=0.5,0.5
-        try{motComp.properties[0].setValue([0.5,0.5],true);}catch(e){}
-        try{motComp.properties[1].setValue(100,true);}catch(e){}
-        try{motComp.properties[4].setValue(0,true);}catch(e){}
-        try{motComp.properties[5].setValue([0.5,0.5],true);}catch(e){}
-        return JSON.stringify({success:true,verified:true});
-      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
-    `);
+  private async resetTransform(sequenceId: string | undefined, ti: number, ci: number): Promise<any> {
+    return await this.bridge.executeScript(this.motionParamScript(sequenceId, ti, ci, [
+      { index: 0, name: 'Position', value: [0.5, 0.5] },
+      { index: 1, name: 'Scale', value: 100 },
+      { index: 4, name: 'Rotation', value: 0 },
+      { index: 5, name: 'Anchor Point', value: [0.5, 0.5] },
+    ], 'reset_transform'));
   }
 
   private async matchTransform(_sequenceId: string | undefined, srcTi: number, srcCi: number, targets: Array<{trackIndex: number, clipIndex: number}>): Promise<any> {
@@ -6342,23 +6698,30 @@ ${this.buildSequenceResolver(sequenceId)}
     if (!src.success) return src;
     const results: any[] = [];
     for (const t of targets) {
-      const applyScript = `
-        try {
-          var seq = app.project.activeSequence;
-          var clip = seq.videoTracks[${t.trackIndex}].clips[${t.clipIndex}];
-          var mot=null; for(var i=0;i<clip.components.numItems;i++){if(String(clip.components[i].displayName)==='Motion'){mot=clip.components[i];break;}}
-          if (!mot) return JSON.stringify({success:false,error:'No Motion on target'});
-          try{mot.properties[0].setValue(${JSON.stringify(src.pos)},true);}catch(e){}
-          try{mot.properties[1].setValue(${src.scale},true);}catch(e){}
-          try{mot.properties[4].setValue(${src.rot},true);}catch(e){}
-          try{mot.properties[5].setValue(${JSON.stringify(src.anchor)},true);}catch(e){}
-          return JSON.stringify({success:true});
-        } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
-      `;
-      const r = await this.bridge.executeScript(applyScript);
-      results.push({ ...t, success: r.success });
+      const r = await this.bridge.executeScript(this.motionParamScript(_sequenceId, t.trackIndex, t.clipIndex, [
+        { index: 0, name: 'Position', value: src.pos },
+        { index: 1, name: 'Scale', value: src.scale },
+        { index: 4, name: 'Rotation', value: src.rot },
+        { index: 5, name: 'Anchor Point', value: src.anchor },
+      ], 'match_transform'));
+      results.push({ ...t, success: r.success, verified: r.verified === true, applied: r.applied ?? 0, requested: r.requested ?? 4, error: r.error ?? null, properties: r.results ?? null });
     }
-    return { success: true, matched: results.filter(r => r.success).length, results };
+    // "matched" used to count scripts that did not throw, and every individual write was
+    // swallowed, so a target that received nothing still counted. It now counts targets on
+    // which all four Motion parameters read back at the source values.
+    const matched = results.filter((r) => r.success).length;
+    const partial = results.filter((r) => !r.success && r.applied > 0).length;
+    return {
+      success: matched === targets.length && targets.length > 0,
+      verified: true,
+      verifiedBy: 'Motion parameter getValue() readback on every target',
+      matched, requested: targets.length, partiallyApplied: partial, results,
+      error: matched === targets.length
+        ? null
+        : (targets.length === 0
+          ? 'No target clips were supplied, so no transform was copied.'
+          : `Transform fully landed on ${matched} of ${targets.length} target clips${partial ? `, and PARTIALLY on ${partial} more (those clips are in a mixed state)` : ''}. See results[].`),
+    };
   }
 
   private async applyLetterbox(_sequenceId: string | undefined, ti: number, ci: number, aspect?: string, cropPercent?: number): Promise<any> {
@@ -6372,18 +6735,19 @@ ${this.buildSequenceResolver(sequenceId)}
       crop = Math.max(0, (1 - srcAspect / tgtAspect) / 2 * 100);
     }
     if (!crop) crop = 11.25; // 2.35:1 default
-    return await this.bridge.executeScript(`
-      try {
-        var seq = app.project.activeSequence;
-        var clip = seq.videoTracks[${ti}].clips[${ci}];
-        var mot = null;
-        for (var i=0;i<clip.components.numItems;i++){if(String(clip.components[i].displayName)==='Motion'){mot=clip.components[i];break;}}
-        if (!mot) return JSON.stringify({success:false,error:'No Motion component'});
-        try{mot.properties[8].setValue(${crop},true);}catch(e){} // CropTop
-        try{mot.properties[10].setValue(${crop},true);}catch(e){} // CropBottom
-        return JSON.stringify({success:true,verified:true,cropPercent:${crop},aspect:${JSON.stringify(aspect??null)}});
-      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
-    `);
+    // Motion properties[8] and [10] were assumed to be CropTop/CropBottom and each write was
+    // swallowed, so a clip that gained no letterbox at all reported verified: true. Route
+    // through the name-guarded helper: if this build's Motion has no top/bottom crop
+    // parameter, the tool now refuses and lists what Motion does expose, instead of writing
+    // 11.25 into whatever parameter happens to sit at index 8.
+    const r: any = await this.bridge.executeScript(this.motionParamScript(_sequenceId, ti, ci, [
+      { index: 8, name: 'Crop Top', aliases: ['Top', 'crop top'], value: crop },
+      { index: 10, name: 'Crop Bottom', aliases: ['Bottom', 'crop bottom'], value: crop },
+    ], 'letterbox'));
+    return { ...r, cropPercent: crop, aspect: aspect ?? null,
+      hint: r?.success === false && r?.applied === 0
+        ? 'Crop is a separate effect in Premiere, not part of Motion. Add the Crop effect with apply_effect, then set its parameters with set_effect_property.'
+        : undefined };
   }
 
   private async kenBurns(args: any): Promise<any> {
@@ -6395,18 +6759,46 @@ ${this.buildSequenceResolver(sequenceId)}
       try {
         var seq = app.project.activeSequence;
         var clip = seq.videoTracks[${ti}].clips[${ci}];
+        ${this.keyframeVerifyFragment()}
         var mot = null;
         for (var i=0;i<clip.components.numItems;i++){if(String(clip.components[i].displayName)==='Motion'){mot=clip.components[i];break;}}
-        if (!mot) return JSON.stringify({success:false,error:'No Motion component'});
-        var posProp = mot.properties[0]; var scaleProp = mot.properties[1];
-        posProp.setTimeVarying(true); scaleProp.setTimeVarying(true);
-        var t1 = new Time(); t1.ticks = String(Number(clip.start.ticks));
-        var t2 = new Time(); t2.ticks = String(Number(clip.end.ticks));
+        if (!mot) return JSON.stringify({success:false,verified:false,error:'This clip has no Motion component, so a Ken Burns move cannot be keyframed on it.'});
+        var posProp = null, scaleProp = null;
+        for (var mp=0; mp<mot.properties.numItems; mp++) {
+          var mpn = String(mot.properties[mp].displayName);
+          if (mpn === 'Position') posProp = mot.properties[mp];
+          else if (mpn === 'Scale') scaleProp = mot.properties[mp];
+        }
+        if (!posProp || !scaleProp) return JSON.stringify({success:false,verified:false,error:'Motion on this clip does not expose both a Position and a Scale parameter, so a Ken Burns move cannot be keyframed. Nothing was written.'});
+        var tvErrors = [];
+        try { posProp.setTimeVarying(true); } catch (eP) { tvErrors.push('Position: ' + eP.toString()); }
+        try { scaleProp.setTimeVarying(true); } catch (eS) { tvErrors.push('Scale: ' + eS.toString()); }
+        var t1 = new Time(); t1.ticks = String(Math.round(Number(clip.start.ticks)));
+        var t2 = new Time(); t2.ticks = String(Math.round(Number(clip.end.ticks)));
         posProp.addKey(t1); posProp.setValueAtKey(t1, [${sX},${sY}]);
         posProp.addKey(t2); posProp.setValueAtKey(t2, [${eX},${eY}]);
         scaleProp.addKey(t1); scaleProp.setValueAtKey(t1, ${sScale});
         scaleProp.addKey(t2); scaleProp.setValueAtKey(t2, ${eScale});
-        return JSON.stringify({success:true,verified:true,startScale:${sScale},endScale:${eScale}});
+        var posKf = __verifyKeyframes(posProp, [
+          { ticks: t1.ticks, value: [${sX},${sY}], label: 'position start' },
+          { ticks: t2.ticks, value: [${eX},${eY}], label: 'position end' }
+        ]);
+        var scaleKf = __verifyKeyframes(scaleProp, [
+          { ticks: t1.ticks, value: ${sScale}, label: 'scale start' },
+          { ticks: t2.ticks, value: ${eScale}, label: 'scale end' }
+        ]);
+        var landed = posKf.landed + scaleKf.landed;
+        var readable = posKf.keysReadable && scaleKf.keysReadable;
+        return JSON.stringify({
+          success: landed === 4,
+          verified: readable,
+          verifiedBy: readable ? 'Motion Position and Scale getKeys() and getValueAtKey() readback' : undefined,
+          unverifiedReason: readable ? undefined : 'getKeys() is not readable on the Motion Position or Scale parameter, so the move cannot be confirmed.',
+          startScale:${sScale}, endScale:${eScale}, startPosition:[${sX},${sY}], endPosition:[${eX},${eY}],
+          keyframesLanded: landed, keyframesRequested: 4,
+          position: posKf.keys, scale: scaleKf.keys, setTimeVaryingErrors: tvErrors.length ? tvErrors : undefined,
+          error: landed === 4 ? null : ('PARTIALLY APPLIED: only ' + landed + ' of the 4 Ken Burns keyframes are present at the requested values, so the clip holds an incomplete move. See position[] and scale[].')
+        });
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
@@ -6418,8 +6810,21 @@ ${this.buildSequenceResolver(sequenceId)}
         var seq = qe.project.getActiveSequence();
         var clip = seq.getVideoTrackAt(${ti}).getItemAt(${ci});
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
+        // scaleToFrameSize is one of the QE clip properties measured SAFE to read on 26.3.2,
+        // so there is no excuse for the unconditional verified: true this used to return.
+        var before = null; try { before = Boolean(clip.scaleToFrameSize); } catch(eB) {}
         clip.setScaleToFrameSize(${enabled});
-        return JSON.stringify({success:true,verified:true,enabled:${enabled}});
+        var after = null; try { after = Boolean(clip.scaleToFrameSize); } catch(eA) {}
+        if (after === null) {
+          return JSON.stringify({success:true,verified:false,enabled:${enabled},before:before,
+            unverifiedReason:'setScaleToFrameSize() did not throw, but qeClip.scaleToFrameSize is not readable on this build, so the flag cannot be confirmed.'});
+        }
+        if (after !== ${enabled}) {
+          return JSON.stringify({success:false,verified:true,verifiedBy:'qeClip.scaleToFrameSize readback',enabled:${enabled},before:before,after:after,changed:before!==after,
+            error:'Scale to frame size still reads ' + String(after) + ' after being set to ${enabled}.'});
+        }
+        return JSON.stringify({success:true,verified:true,verifiedBy:'qeClip.scaleToFrameSize readback',enabled:${enabled},before:before,after:after,changed:before!==after,
+          note: before === after ? 'The clip was already set this way; nothing changed.' : undefined});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
@@ -6480,28 +6885,81 @@ ${this.buildSequenceResolver(sequenceId)}
           if (gainProp) break;
         }
         if (!gainProp) return JSON.stringify({success:false,error:'Gain param not found',note:'Try set_clip_volume for rubber-band volume'});
-        var before = gainProp.getValue();
-        gainProp.setValue(${gainDb}, true);
-        var after = gainProp.getValue();
-        return JSON.stringify({success:true,verified:Math.abs(Number(after)-${gainDb})<0.1,before:before,after:after,gainDb:${gainDb}});
+        var before = null; try { before = gainProp.getValue(); } catch(eB) {}
+        var setError = null;
+        try { gainProp.setValue(${gainDb}, true); } catch(eS) { setError = eS.toString(); }
+        var after = null; try { after = gainProp.getValue(); } catch(eA) {}
+        if (after === null) {
+          return JSON.stringify({success:true,verified:false,before:before,gainDb:${gainDb},setError:setError,
+            unverifiedReason:'The gain parameter is not readable after the write on this clip, so the level cannot be confirmed.'});
+        }
+        var onTarget = Math.abs(Number(after)-${gainDb}) < 0.1;
+        if (!onTarget) {
+          return JSON.stringify({success:false,verified:true,verifiedBy:'clip gain parameter getValue() readback',changed:Number(before)!==Number(after),before:before,after:after,gainDb:${gainDb},setError:setError,
+            error:'Clip gain reads ' + String(after) + ' dB instead of the requested ${gainDb} dB. Premiere clamps clip gain to roughly -96..+96 dB.'});
+        }
+        return JSON.stringify({success:true,verified:true,verifiedBy:'clip gain parameter getValue() readback',changed:Number(before)!==Number(after),before:before,after:after,gainDb:${gainDb},
+          note: Number(before) === Number(after) ? 'The clip was already at this gain; nothing changed.' : undefined});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
 
-  private async audioCrossfadeAtCut(_sequenceId: string | undefined, ati: number, clipIndex: number, durationFrames: number): Promise<any> {
+  private async audioCrossfadeAtCut(sequenceId: string | undefined, ati: number, clipIndex: number, durationFrames: number): Promise<any> {
+    // Was "Invalid parameter" on every call, for two reasons in one line:
+    //
+    //   clip.addTransition(transition, 2, durTicks, false)
+    //
+    //   1. FOUR arguments. QE addTransition takes SEVEN on 26.3.2 — the signature the working
+    //      add_transition_to_clip uses is (transition, addAtEnd, frames, alignment, ratio,
+    //      forceReuse, allowRipple). A short call raises Invalid parameter.
+    //   2. Argument 2 was the integer 2 ("outgoing edge") where a BOOLEAN addAtEnd belongs,
+    //      and argument 3 was a tick count where a FRAME COUNT string belongs — and the tick
+    //      count was itself wrong, computed as durationFrames * videoFrameRate, which is a
+    //      frame RATE (about 24), not ticks per frame (10584000000).
+    //
+    // Now built like the two transition tools that are verified working, and proven by the
+    // shared transition readback rather than shipping verified:false with a hopeful note.
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = qe.project.getActiveSequence();
-        var track = seq.getAudioTrackAt(${ati});
+        var domSeq = ${this.buildSeqScript(sequenceId)};
+        if (!domSeq) return JSON.stringify({success:false,error:'No active sequence'});
+        var qeSeq = __qeSequenceFor(domSeq);
+        if (!qeSeq) return JSON.stringify({success:false,error:"Could not address sequence '" + String(domSeq.name) + "' through the QE API."});
+        var track = qeSeq.getAudioTrackAt(${ati});
         var clip = track ? track.getItemAt(${clipIndex}) : null;
-        if (!clip) return JSON.stringify({success:false,error:'Audio clip not found'});
+        if (!clip) return JSON.stringify({success:false,error:'No audio clip at audio track ${ati} index ${clipIndex}'});
+        var domTrack = domSeq.audioTracks[${ati}];
+        var domClip = domTrack ? domTrack.clips[${clipIndex}] : null;
         var transition = qe.project.getAudioTransitionByName('Constant Power');
-        if (!transition) return JSON.stringify({success:false,error:'Constant Power transition not found'});
-        var ticksPerFrame = Number(qe.project.getActiveSequence().videoFrameRate || '10584000000');
-        var durTicks = String(${durationFrames} * ticksPerFrame);
-        clip.addTransition(transition, 2, durTicks, false); // 2 = outgoing edge
-        return JSON.stringify({success:true,verified:false,note:'Transition added. Fingerprint verify by checking track transitions.',durationFrames:${durationFrames}});
+        if (!transition) return JSON.stringify({success:false,error:'The Constant Power audio transition is not present on this build. Use list_available_audio_transitions to see what is.'});
+        ${this.transitionVerificationScript()}
+        var before = __readQeTransitionState(clip);
+        var beforeXml = __transitionXmlCount(domSeq);
+        var addError = null;
+        try {
+          clip.addTransition(transition, true, String(${durationFrames}), "0", 0.5, true, true);
+        } catch (eAdd) { addError = eAdd.toString(); }
+        var afterClip = domClip ? __findQeClipByDomClip(track, domClip) : clip;
+        var after = __readQeTransitionState(afterClip || clip);
+        var afterXml = __transitionXmlCount(domSeq);
+        var qeVerified = __transitionWasVerified(before, after);
+        var xmlVerified = __transitionWasVerifiedByXml(beforeXml, afterXml);
+        if (qeVerified || xmlVerified) {
+          return JSON.stringify({success:true,verified:true,
+            verifiedBy: qeVerified ? 'QE clip transition enumeration' : 'transition count in the sequence FCP XML export',
+            durationFrames:${durationFrames}, edge:'end',
+            before:before, after:after, beforeXml:beforeXml, afterXml:afterXml});
+        }
+        var inspectable = (before.available && after.available) || (beforeXml.available && afterXml.available);
+        return JSON.stringify({success:false,verified:inspectable,
+          durationFrames:${durationFrames}, addError:addError,
+          before:before, after:after, beforeXml:beforeXml, afterXml:afterXml,
+          error: addError
+            ? ('addTransition() threw: ' + addError + '. A crossfade needs source handles on both sides of the cut and an adjacent clip on the same track.')
+            : (inspectable
+              ? 'The crossfade did not appear: neither the QE transition list nor the sequence XML gained a transition. A cut with no source handles on either side cannot take a crossfade.'
+              : 'The crossfade cannot be confirmed: neither the QE transition list nor the FCP XML export is readable on this build, so this reports failure rather than an unprovable success.')});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
@@ -6513,16 +6971,32 @@ ${this.buildSequenceResolver(sequenceId)}
         var vClip = seq.videoTracks[${ti}].clips[${ci}];
         if (!vClip) return JSON.stringify({success:false,error:'Video clip not found'});
         var linked = vClip.getLinkedItems();
-        var mutedCount = 0;
+        // This counted assignments, not effects, and returned verified: true. TrackItem.disabled
+        // is a real property here, so read it back per clip: the count of clips we WROTE to says
+        // nothing about the count Premiere actually muted, and a locked track silently refuses.
+        var attempted = 0, confirmed = 0, unreadable = 0, refused = [];
         for (var i=0;i<linked.numItems;i++) {
           var lc = linked[i];
           if (lc.mediaType === 'Audio' || String(lc.mediaType).toLowerCase().indexOf('audio') >= 0) {
-            lc.disabled = ${mute};
-            mutedCount++;
+            attempted++;
+            var lcBefore = null; try { lcBefore = Boolean(lc.disabled); } catch(eLB) {}
+            try { lc.disabled = ${mute}; } catch(eLS) {}
+            var lcAfter = null; try { lcAfter = Boolean(lc.disabled); } catch(eLA) {}
+            if (lcAfter === null) unreadable++;
+            else if (lcAfter === ${mute}) confirmed++;
+            else refused.push(String(lc.name) + ' (reads ' + String(lcAfter) + ', was ' + String(lcBefore) + ')');
           }
         }
-        if (mutedCount === 0) return JSON.stringify({success:false,error:'No linked audio clips found'});
-        return JSON.stringify({success:true,verified:true,muted:${mute},audioClipsMuted:mutedCount});
+        if (attempted === 0) return JSON.stringify({success:false,verified:true,error:'This clip has no linked audio, so there is nothing to mute. Check that video and audio are still linked with get_clip_links.'});
+        if (confirmed === attempted) {
+          return JSON.stringify({success:true,verified:true,verifiedBy:'TrackItem.disabled readback on each linked audio clip',muted:${mute},audioClipsMuted:confirmed,audioClipsFound:attempted});
+        }
+        if (unreadable === attempted) {
+          return JSON.stringify({success:true,verified:false,muted:${mute},audioClipsFound:attempted,
+            unverifiedReason:'TrackItem.disabled is not readable on the linked audio clips of this build, so the mute cannot be confirmed.'});
+        }
+        return JSON.stringify({success:false,verified:true,verifiedBy:'TrackItem.disabled readback on each linked audio clip',muted:${mute},audioClipsMuted:confirmed,audioClipsFound:attempted,unreadable:unreadable,refused:refused,
+          error:'PARTIALLY APPLIED: ' + confirmed + ' of ' + attempted + ' linked audio clips now read as ' + (${mute} ? 'muted' : 'unmuted') + '. A locked track will accept the write and keep its old state. See refused[].'});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
@@ -7244,7 +7718,11 @@ ${this.buildSequenceResolver(sequenceId)}
         if (!eff) return JSON.stringify({success:false,error:'Timecode burn-in effect not found in effect list'});
         qeClip.addVideoEffect(eff);
         var after = domClip.components.numItems;
-        return JSON.stringify({success:true,verified:after>before,added:after>before,componentCount:after});
+        if (after <= before) {
+          return JSON.stringify({success:false,verified:true,verifiedBy:'clip component count before and after',changed:false,componentsBefore:before,componentCount:after,
+            error:'addVideoEffect() ran but the clip component count did not rise, so the timecode burn-in was not applied. QE effect-add is inert on some builds; try apply_effect with the matchName instead.'});
+        }
+        return JSON.stringify({success:true,verified:true,verifiedBy:'clip component count before and after',changed:true,added:true,componentsBefore:before,componentCount:after});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
@@ -7280,9 +7758,19 @@ ${this.buildSequenceResolver(sequenceId)}
         var seq = qe.project.getActiveSequence();
         var track = ${trackType === 'audio' ? `seq.getAudioTrackAt(${trackIndex})` : `seq.getVideoTrackAt(${trackIndex})`};
         if (!track) return JSON.stringify({success:false,error:'Track not found'});
+        var before = null; try { before = Boolean(track.isSyncLocked()); } catch(eB) {}
         track.setSyncLock(${locked});
-        var after = track.isSyncLocked();
-        return JSON.stringify({success:true,verified:after===${locked},trackType:${JSON.stringify(trackType)},trackIndex:${trackIndex},locked:${locked},readback:after});
+        var after = null; try { after = Boolean(track.isSyncLocked()); } catch(eA) {}
+        if (after === null) {
+          return JSON.stringify({success:true,verified:false,trackType:${JSON.stringify(trackType)},trackIndex:${trackIndex},locked:${locked},before:before,
+            unverifiedReason:'setSyncLock() did not throw, but isSyncLocked() is not readable on this build, so the sync-lock state cannot be confirmed.'});
+        }
+        if (after !== ${locked}) {
+          return JSON.stringify({success:false,verified:true,verifiedBy:'qeTrack.isSyncLocked() readback',changed:before!==after,trackType:${JSON.stringify(trackType)},trackIndex:${trackIndex},locked:${locked},before:before,readback:after,
+            error:'Sync lock on ${trackType} track ${trackIndex} still reads ' + String(after) + ' after being set to ${locked}.'});
+        }
+        return JSON.stringify({success:true,verified:true,verifiedBy:'qeTrack.isSyncLocked() readback',changed:before!==after,trackType:${JSON.stringify(trackType)},trackIndex:${trackIndex},locked:${locked},before:before,readback:after,
+          note: before === after ? 'That track was already in this sync-lock state; nothing changed.' : undefined});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
@@ -7589,9 +8077,22 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(`
       app.enableQE(); ${this.qeClipScript(trackIndex, clipIndex, sequenceId)}
       if (!__clip) return JSON.stringify({success:false,error:'Clip not found'});
-      var before = __clip.name;
-      __clip.setName(${JSON.stringify(name)});
-      return JSON.stringify({success:true,verified:__clip.name===${JSON.stringify(name)},before:before,after:__clip.name});
+      var before = null;
+      try { before = String(__clip.name); } catch (eB) {}
+      var setError = null;
+      try { __clip.setName(${JSON.stringify(name)}); } catch (eS) { setError = eS.toString(); }
+      var after = null;
+      try { after = String(__clip.name); } catch (eA) {}
+      if (after === null) {
+        return JSON.stringify({success:true,verified:false,before:before,requested:${JSON.stringify(name)},setError:setError,
+          unverifiedReason:'qeClip.name is not readable after setName() on this build, so the rename cannot be confirmed. Read it with get_qe_clip_info.'});
+      }
+      if (after !== ${JSON.stringify(name)}) {
+        return JSON.stringify({success:false,verified:true,verifiedBy:'qeClip.name readback',changed:before!==after,before:before,after:after,requested:${JSON.stringify(name)},setError:setError,
+          error:'The timeline clip still reads "' + after + '" instead of the requested name. setName() on a QE clip is refused when the track is locked, and it renames only the TIMELINE instance — use rename_project_item for the master clip in the bin.'});
+      }
+      return JSON.stringify({success:true,verified:true,verifiedBy:'qeClip.name readback',changed:before!==after,before:before,after:after,
+        note: before === after ? 'The clip already had this name; nothing changed.' : undefined});
     `);
   }
 
@@ -7633,9 +8134,16 @@ ${this.buildSequenceResolver(sequenceId)}
       if (!comp) return JSON.stringify({success:false,error:'Component not found'});
       var name = '';
       try { var pl = comp.getParamList ? comp.getParamList() : ''; name = String(pl).split(',')[0]; } catch(e) {}
-      comp.remove();
+      var removeError = null;
+      try { comp.remove(); } catch (eRm) { removeError = eRm.toString(); }
       var after = domClip.components.numItems;
-      return JSON.stringify({success:true,verified:after<before,removed:${componentIndex},before:before,after:after});
+      if (after >= before) {
+        return JSON.stringify({success:false,verified:true,verifiedBy:'clip component count before and after',changed:false,removed:${componentIndex},componentName:name,before:before,after:after,
+          error: removeError
+            ? ('Component.remove() threw: ' + removeError)
+            : 'Component.remove() ran but the clip still has ' + after + ' components, so nothing was removed. Intrinsic components (Motion, Opacity, Time Remapping) cannot be removed — use enable_disable_effect to switch one off instead.'});
+      }
+      return JSON.stringify({success:true,verified:true,verifiedBy:'clip component count before and after',changed:true,removed:${componentIndex},componentName:name,before:before,after:after});
     `);
   }
 
@@ -7717,7 +8225,11 @@ ${this.buildSequenceResolver(sequenceId)}
         var before = domClip.components.numItems;
         clip.addAudioEffect(eff);
         var after = domClip.components.numItems;
-        return JSON.stringify({success:true,verified:after>before,effectName:exact,before:before,after:after});
+        if (after <= before) {
+          return JSON.stringify({success:false,verified:true,verifiedBy:'clip component count before and after',changed:false,effectName:exact,before:before,after:after,
+            error:'addAudioEffect() ran without throwing but the clip component count did not rise, so "' + exact + '" was not applied. QE effect-add is inert on some builds; try apply_audio_effect with the matchName instead.'});
+        }
+        return JSON.stringify({success:true,verified:true,verifiedBy:'clip component count before and after',changed:true,effectName:exact,before:before,after:after});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
 
@@ -8193,21 +8705,47 @@ ${this.buildSequenceResolver(sequenceId)}
         app.enableQE();
         var qseq = qe.project.getActiveSequence();
         var seq = ${this.buildSeqScript(sequenceId)};
+        if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
         var transition = qe.project.getAudioTransitionByName('Constant Power');
-        if (!transition) return JSON.stringify({success:false,error:'Constant Power transition not found'});
-        var added = 0;
+        if (!transition) return JSON.stringify({success:false,error:'The Constant Power audio transition is not present on this build. Use list_available_audio_transitions to see what is.'});
+        ${this.transitionVerificationScript()}
+        // Called addTransition with ONE argument (QE takes seven on 26.3.2) inside a bare
+        // catch, then counted the ATTEMPTS as "crossfadesAdded" — so a run that added nothing
+        // reported success with a non-zero count. Correct signature, and the count now comes
+        // from a per-cut readback.
+        var fps = seq.timebase ? (254016000000 / parseInt(String(seq.timebase), 10)) : 30;
+        var frames = Math.max(1, Math.round(${durationSeconds} * fps));
+        var added = 0, attempted = 0;
+        var failures = [];
+        var beforeXml = __transitionXmlCount(seq);
         for (var t=0; t<seq.audioTracks.numTracks; t++) {
           var qatrack = qseq.getAudioTrackAt(t);
           var numItems = qatrack ? qatrack.numItems : 0;
           for (var c=0; c<numItems-1; c++) {
-            try {
-              var clip = qatrack.getItemAt(c);
-              clip.addTransition(transition);
-              added++;
-            } catch(e2) {}
+            attempted++;
+            var clip = qatrack.getItemAt(c);
+            if (!clip) { failures.push('track ' + t + ' clip ' + c + ': QE clip not found'); continue; }
+            var cBefore = __readQeTransitionState(clip);
+            var addErr = null;
+            try { clip.addTransition(transition, true, String(frames), "0", 0.5, true, true); } catch(e2) { addErr = e2.toString(); }
+            var cAfter = __readQeTransitionState(qatrack.getItemAt(c) || clip);
+            if (__transitionWasVerified(cBefore, cAfter)) added++;
+            else failures.push('track ' + t + ' clip ' + c + ': ' + (addErr ? addErr : 'no transition appeared (the cut may have no source handles)'));
           }
         }
-        return JSON.stringify({success:true,crossfadesAdded:added,durationSeconds:${durationSeconds}});
+        var afterXml = __transitionXmlCount(seq);
+        var xmlDelta = (beforeXml.available && afterXml.available) ? (afterXml.count - beforeXml.count) : null;
+        if (attempted === 0) {
+          return JSON.stringify({success:true,verified:true,verifiedBy:'QE clip transition enumeration per cut',crossfadesAdded:0,cutsAttempted:0,durationSeconds:${durationSeconds},durationFrames:frames,
+            note:'This sequence has no audio cut with a clip on both sides, so there was nothing to crossfade.'});
+        }
+        if (added === attempted) {
+          return JSON.stringify({success:true,verified:true,verifiedBy:'QE clip transition enumeration per cut',crossfadesAdded:added,cutsAttempted:attempted,durationSeconds:${durationSeconds},durationFrames:frames,xmlTransitionDelta:xmlDelta});
+        }
+        return JSON.stringify({success:false,verified:true,verifiedBy:'QE clip transition enumeration per cut',crossfadesAdded:added,cutsAttempted:attempted,durationSeconds:${durationSeconds},durationFrames:frames,xmlTransitionDelta:xmlDelta,failures:failures,
+          error: added === 0
+            ? ('No crossfade could be added at any of the ' + attempted + ' audio cuts. See failures[].')
+            : ('PARTIALLY APPLIED: ' + added + ' of ' + attempted + ' audio cuts gained a crossfade. See failures[].')});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
@@ -8344,11 +8882,30 @@ ${this.buildSequenceResolver(sequenceId)}
         if (!eff) return JSON.stringify({success:false,error:'Gaussian Blur not found'});
         clip.addVideoEffect(eff);
         var after = domClip.components.numItems;
-        if (after > before) {
-          var qeComp = clip.getComponentAt(after-1);
-          if (qeComp) { try { qeComp.setParamValue('Amount', String(${amount})); } catch(e2){} }
+        if (after <= before) {
+          return JSON.stringify({success:false,verified:true,verifiedBy:'clip component count before and after',changed:false,amount:${amount},componentsBefore:before,componentsAfter:after,
+            error:'addVideoEffect() ran but the clip component count did not rise, so Gaussian Blur was not applied. Try apply_effect with matchName AE.Impact_Blur_FX instead.'});
         }
-        return JSON.stringify({success:true,verified:after>before,amount:${amount}});
+        // The blur AMOUNT write was swallowed in try{}catch(e2){}, so a clip that received an
+        // effect at its default blurriness reported verified:true for the requested amount.
+        // Read the parameter back off the DOM component and say which half landed.
+        var amountSet = null, amountError = null;
+        var qeComp = clip.getComponentAt(after-1);
+        if (!qeComp) amountError = 'The new component could not be addressed through QE, so Blurriness was left at its default.';
+        else { try { qeComp.setParamValue('Amount', String(${amount})); } catch(e2){ amountError = e2.toString(); } }
+        var newComp = domClip.components[after-1];
+        if (newComp) {
+          for (var bp=0; bp<newComp.properties.numItems; bp++) {
+            var bpn = String(newComp.properties[bp].displayName).toLowerCase();
+            if (bpn.indexOf('blurriness') >= 0 || bpn === 'amount') { try { amountSet = Number(newComp.properties[bp].getValue()); } catch(e3){} break; }
+          }
+        }
+        var amountLanded = amountSet !== null && Math.abs(amountSet - ${amount}) < 0.001;
+        if (amountLanded) {
+          return JSON.stringify({success:true,verified:true,verifiedBy:'clip component count plus Blurriness getValue() readback',changed:true,amount:${amount},amountReadback:amountSet,componentsBefore:before,componentsAfter:after});
+        }
+        return JSON.stringify({success:false,verified:true,verifiedBy:'clip component count plus Blurriness getValue() readback',changed:true,effectAdded:true,amount:${amount},amountReadback:amountSet,componentsBefore:before,componentsAfter:after,setError:amountError,
+          error:'HALF APPLIED: Gaussian Blur was added to the clip but its blurriness reads ' + String(amountSet) + ' rather than the requested ${amount}, so the clip is blurred by the wrong amount. Set it with set_effect_property, or remove the effect with remove_effect_by_name.'});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
@@ -8365,7 +8922,15 @@ ${this.buildSequenceResolver(sequenceId)}
         var eff = qe.project.getVideoEffectByName('Unsharp Mask');
         if (!eff) return JSON.stringify({success:false,error:'Unsharp Mask not found'});
         clip.addVideoEffect(eff);
-        return JSON.stringify({success:true,verified:domClip.components.numItems>before,amount:${amount}});
+        var after = domClip.components.numItems;
+        if (after <= before) {
+          return JSON.stringify({success:false,verified:true,verifiedBy:'clip component count before and after',changed:false,amount:${amount},componentsBefore:before,componentsAfter:after,
+            error:'addVideoEffect() ran but the clip component count did not rise, so Unsharp Mask was not applied. Try apply_effect with the matchName from list_available_effects instead.'});
+        }
+        // The amount argument was accepted and never written by this tool — the effect landed
+        // at its default. Saying so is the honest version of the old verified:true.
+        return JSON.stringify({success:true,verified:true,verifiedBy:'clip component count before and after',changed:true,componentsBefore:before,componentsAfter:after,amountRequested:${amount},amountApplied:false,
+          note:'Unsharp Mask was added at its DEFAULT settings. The amount argument was not applied: this tool only adds the effect. Set Amount with set_effect_property.'});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
@@ -8377,14 +8942,43 @@ ${this.buildSequenceResolver(sequenceId)}
         var clip = seq.videoTracks[${trackIndex}].clips[${clipIndex}];
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         var skip = ['Motion','Opacity','Time Remapping'];
-        var toggled = 0;
+        // This assigned component.enabled and counted the assignments. VideoComponent has NO
+        // enabled property on 26.3.2 — the assignment just creates a stray JS property on the
+        // ScriptObject and Premiere never sees it — so the tool reported success:true and a
+        // non-zero "toggled" count while changing nothing at all. Same defect that was found
+        // and fixed in enable_disable_effect; this sibling was missed. The real toggle is each
+        // component's own Active parameter, read back per component.
+        var toggled = [], notToggleable = [], considered = 0;
         for (var i=0; i<clip.components.numItems; i++) {
-          var name = String(clip.components[i].displayName);
+          var comp = clip.components[i];
+          var name = String(comp.displayName);
           var isBuiltin = false;
           for (var s=0; s<skip.length; s++) { if (name === skip[s]) { isBuiltin=true; break; } }
-          if (!isBuiltin) { clip.components[i].enabled = ${enabled}; toggled++; }
+          if (isBuiltin) continue;
+          considered++;
+          var active = null;
+          for (var pj=0; pj<comp.properties.numItems; pj++) {
+            if (String(comp.properties[pj].displayName).toLowerCase() === 'active') { active = comp.properties[pj]; break; }
+          }
+          if (!active) { notToggleable.push({ index: i, name: name, reason: 'no Active parameter, so this effect cannot be toggled by script' }); continue; }
+          var was = null; try { was = active.getValue(); } catch (eR) {}
+          var setErr = null;
+          try { active.setValue(${enabled}, true); } catch (eS) { setErr = eS.toString(); }
+          var now = null; try { now = active.getValue(); } catch (eR2) {}
+          if (now !== null && !!now === ${enabled}) toggled.push({ index: i, name: name, was: !!was, now: !!now, changed: !!was !== !!now });
+          else notToggleable.push({ index: i, name: name, reason: now === null ? 'the Active parameter is not readable, so the toggle cannot be confirmed' : ('the Active parameter still reads ' + String(now)), setError: setErr });
         }
-        return JSON.stringify({success:true,enabled:${enabled},toggled:toggled});
+        if (considered === 0) {
+          return JSON.stringify({success:true,verified:true,verifiedBy:'Active parameter readback per component',enabled:${enabled},toggled:0,considered:0,
+            note:'This clip carries no user effects (only intrinsic Motion/Opacity/Time Remapping), so there was nothing to toggle.'});
+        }
+        if (toggled.length === considered) {
+          return JSON.stringify({success:true,verified:true,verifiedBy:'Active parameter readback per component',enabled:${enabled},toggled:toggled.length,considered:considered,components:toggled});
+        }
+        return JSON.stringify({success:false,verified:true,verifiedBy:'Active parameter readback per component',enabled:${enabled},toggled:toggled.length,considered:considered,components:toggled,notToggleable:notToggleable,
+          error: toggled.length === 0
+            ? ('None of the ' + considered + ' user effect(s) on this clip could be toggled. On this build an effect is enabled/disabled through its Active parameter; effects without one cannot be toggled by script. See notToggleable[].')
+            : ('PARTIALLY APPLIED: ' + toggled.length + ' of ' + considered + ' user effects were toggled; the rest are unchanged, so the clip is in a mixed state. See notToggleable[].')});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
@@ -8398,9 +8992,18 @@ ${this.buildSequenceResolver(sequenceId)}
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         var domClip = app.project.activeSequence.videoTracks[${trackIndex}].clips[${clipIndex}];
         var before = domClip.components.numItems;
+        var names = [];
+        for (var ni=0; ni<domClip.components.numItems; ni++) names.push(String(domClip.components[ni].displayName));
         clip.removeEffects();
         var after = domClip.components.numItems;
-        return JSON.stringify({success:true,verified:after<before,removedCount:before-after});
+        // A bare "after < before" reported verified:false with no reason on a clip that had no
+        // removable effects in the first place, which is not a failure. Name the outcome.
+        if (after < before) {
+          return JSON.stringify({success:true,verified:true,verifiedBy:'clip component count before and after',changed:true,removedCount:before-after,componentsBefore:before,componentsAfter:after,
+            note:'QE removeEffects() strips ALL user effects at once. Intrinsic components (Motion, Opacity, Time Remapping) and Lumetri Color are preserved by the API and remain on the clip.'});
+        }
+        return JSON.stringify({success:true,verified:true,verifiedBy:'clip component count before and after',changed:false,removedCount:0,componentsBefore:before,componentsAfter:after,componentsPresent:names,
+          note:'Nothing was removed because this clip carries no removable user effects. QE removeEffects() preserves the intrinsic components (Motion, Opacity, Time Remapping) and Lumetri Color, which are what remain; see componentsPresent.'});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
@@ -12811,16 +13414,32 @@ ${this.buildSequenceResolver(sequenceId)}
         if (!sequence) return JSON.stringify({ success: false, error: "Sequence not found by id: " + ${JSON.stringify(sequenceId)} });
         var track = sequence.audioTracks[${trackIndex}];
         if (!track) return JSON.stringify({ success: false, error: "Audio track not found" });
+        var wasMuted = null; try { wasMuted = Boolean(track.isMuted()); } catch (ePre) {}
         track.setMute(${muted ? 1 : 0});
         var nowMuted = null; try { nowMuted = Boolean(track.isMuted()); } catch (eMute) {}
-        if (nowMuted !== null && nowMuted !== ${muted}) return JSON.stringify({ success: false, verified: false, error: "Premiere did not change the track mute state (still reads " + (nowMuted ? "muted" : "unmuted") + ")." });
+        if (nowMuted !== null && nowMuted !== ${muted}) return JSON.stringify({ success: false, verified: true, verifiedBy: "AudioTrack.isMuted() readback", before: wasMuted, after: nowMuted, changed: wasMuted !== nowMuted, error: "Premiere did not change the track mute state (still reads " + (nowMuted ? "muted" : "unmuted") + ")." });
+        // A readback cannot tell "changed it" from "was already correct", so report both, and
+        // when the readback is unavailable say what could not be confirmed instead of shipping
+        // a bare verified:false. The old message claimed the status "changed" either way.
+        if (nowMuted === null) {
+          return JSON.stringify({
+            success: true, verified: false,
+            unverifiedReason: "setMute() did not throw, but AudioTrack.isMuted() is not readable on this build, so the mute state cannot be confirmed.",
+            sequenceId: ${JSON.stringify(sequenceId)}, trackIndex: ${trackIndex}, muted: ${muted}, before: wasMuted
+          });
+        }
         return JSON.stringify({
           success: true,
-          verified: nowMuted !== null,
-          message: "Track mute status changed",
+          verified: true,
+          verifiedBy: "AudioTrack.isMuted() readback",
+          changed: wasMuted !== nowMuted,
+          message: wasMuted === nowMuted
+            ? ("Audio track ${trackIndex} was already " + (${muted} ? "muted" : "unmuted") + "; nothing changed.")
+            : ("Audio track ${trackIndex} is now " + (${muted} ? "muted" : "unmuted") + "."),
           sequenceId: ${JSON.stringify(sequenceId)},
           trackIndex: ${trackIndex},
-          muted: ${muted}
+          muted: ${muted},
+          before: wasMuted
         });
       } catch (e) {
         return JSON.stringify({ success: false, error: e.toString() });
@@ -14349,17 +14968,31 @@ ${this.buildSequenceResolver(sequenceId)}
         var tracks = ${trackType === 'video' ? 'sequence.videoTracks' : 'sequence.audioTracks'};
         if (${trackIndex} >= 0 && ${trackIndex} < tracks.numTracks) {
           var lockTarget = tracks[${trackIndex}];
-          lockTarget.setLocked(${locked ? 1 : 0});
           // isLocked is a property on this API, not a method. Read it back rather
           // than trusting the void setLocked() call.
+          var wasLocked = null; try { wasLocked = Boolean(lockTarget.isLocked); } catch (ePre) {}
+          lockTarget.setLocked(${locked ? 1 : 0});
           var nowLocked = null; try { nowLocked = Boolean(lockTarget.isLocked); } catch (eLock) {}
-          if (nowLocked !== null && nowLocked !== ${locked}) return JSON.stringify({ success: false, verified: false, error: "Premiere did not change the track lock state (still reads " + (nowLocked ? "locked" : "unlocked") + ")." });
+          if (nowLocked !== null && nowLocked !== ${locked}) return JSON.stringify({ success: false, verified: true, verifiedBy: "Track.isLocked readback", before: wasLocked, after: nowLocked, changed: wasLocked !== nowLocked, error: "Premiere did not change the track lock state (still reads " + (nowLocked ? "locked" : "unlocked") + ")." });
+          if (nowLocked === null) {
+            return JSON.stringify({
+              success: true, verified: false,
+              unverifiedReason: "setLocked() did not throw, but Track.isLocked is not readable on this build, so the lock state cannot be confirmed.",
+              sequenceId: sequence.sequenceID, sequenceName: sequence.name, before: wasLocked, locked: ${locked}
+            });
+          }
           return JSON.stringify({
             success: true,
-            verified: nowLocked !== null,
+            verified: true,
+            verifiedBy: "Track.isLocked readback",
+            changed: wasLocked !== nowLocked,
             sequenceId: sequence.sequenceID,
             sequenceName: sequence.name,
-            message: "Track " + (${locked} ? "locked" : "unlocked")
+            before: wasLocked,
+            locked: ${locked},
+            message: wasLocked === nowLocked
+              ? ("Track was already " + (${locked} ? "locked" : "unlocked") + "; nothing changed.")
+              : ("Track " + (${locked} ? "locked" : "unlocked"))
           });
         } else {
           return JSON.stringify({
@@ -15088,19 +15721,13 @@ ${this.buildSequenceResolver(sequenceId)}
     const positions: Record<string, [number,number]> = {'top-left':[0.125,0.125],'top-right':[0.875,0.125],'bottom-left':[0.125,0.875],'bottom-right':[0.875,0.875]};
     const [px,py] = positions[corner] ?? [0.875,0.125];
     const scale = sizePercent;
-    return await this.bridge.executeScript(`
-      try {
-        var seq=${this.buildSeqRes(seqId)};
-        var clip=seq.videoTracks[${trackIndex}].clips[${clipIndex}];
-        if(!clip)return JSON.stringify({success:false,error:'Clip not found'});
-        var motion=clip.components[1];
-        motion.properties[0].setValue([${px},${py}],true);
-        motion.properties[1].setValue(${scale},true);
-        var posBack=motion.properties[0].getValue();
-        var scaleBack=motion.properties[1].getValue();
-        return JSON.stringify({success:true,verified:true,corner:${JSON.stringify(corner)},sizePercent:${scale},position:posBack,scale:scaleBack});
-      }catch(e){return JSON.stringify({success:false,error:e.toString()});}
-    `);
+    // This tool already read Position and Scale back and then ignored both, returning
+    // verified: true whatever they said. The helper compares them.
+    const r: any = await this.bridge.executeScript(this.motionParamScript(seqId, trackIndex, clipIndex, [
+      { index: 0, name: 'Position', value: [px, py] },
+      { index: 1, name: 'Scale', value: scale },
+    ], 'pip_layout'));
+    return { ...r, corner, sizePercent: scale };
   }
 
   private async gridLayout(clips: Array<{trackIndex:number,clipIndex:number}>, cols: number, seqId?: string): Promise<any> {
@@ -15110,23 +15737,19 @@ ${this.buildSequenceResolver(sequenceId)}
       const col = i % cols, row = Math.floor(i / cols);
       return [(col + 0.5) / cols, (row + 0.5) / rows];
     });
-    const posJson = JSON.stringify(positions);
-    return await this.bridge.executeScript(`
-      try {
-        var seq=${this.buildSeqRes(seqId)};
-        var clips=${JSON.stringify(clips)};
-        var pos=${posJson};
-        var scale=${scale};
-        for(var i=0;i<clips.length;i++){
-          var clip=seq.videoTracks[clips[i].trackIndex].clips[clips[i].clipIndex];
-          if(!clip)continue;
-          var motion=clip.components[1];
-          motion.properties[0].setValue([pos[i][0],pos[i][1]],true);
-          motion.properties[1].setValue(scale,true);
-        }
-        return JSON.stringify({success:true,verified:true,clipCount:clips.length,cols:${cols},scale:scale});
-      }catch(e){return JSON.stringify({success:false,error:e.toString()});}
-    `);
+    // The old script skipped a missing clip with `continue`, swallowed every write, and
+    // still returned verified: true with clipCount = the number REQUESTED — so a grid that
+    // landed on nothing reported a verified success for every tile.
+    const r: any = await this.bridge.executeScript(this.motionParamBatchScript(seqId,
+      clips.map((c, i) => ({
+        trackIndex: c.trackIndex,
+        clipIndex: c.clipIndex,
+        targets: [
+          { index: 0, name: 'Position', value: [positions[i]![0]!, positions[i]![1]!] },
+          { index: 1, name: 'Scale', value: scale },
+        ] as MotionParamTarget[],
+      })), 'grid_layout'));
+    return { ...r, cols, rows, scale, clipsRequested: clips.length };
   }
 
   private async splitScreenLayout(clips: Array<{trackIndex:number,clipIndex:number}>, orientation: string, seqId?: string): Promise<any> {
@@ -15134,63 +15757,91 @@ ${this.buildSequenceResolver(sequenceId)}
     const positions = orientation === 'horizontal'
       ? clips.map((_, i) => ({ x: (i + 0.5) / n, y: 0.5, cropLeft: i / n * 100, cropRight: (n - i - 1) / n * 100 }))
       : clips.map((_, i) => ({ x: 0.5, y: (i + 0.5) / n, cropTop: i / n * 100, cropBottom: (n - i - 1) / n * 100 }));
-    return await this.bridge.executeScript(`
-      try {
-        var seq=${this.buildSeqRes(seqId)};
-        var clips=${JSON.stringify(clips)};
-        var positions=${JSON.stringify(positions)};
-        for(var i=0;i<clips.length;i++){
-          var clip=seq.videoTracks[clips[i].trackIndex].clips[clips[i].clipIndex];
-          if(!clip)continue;
-          var motion=clip.components[1];
-          motion.properties[0].setValue([positions[i].x,positions[i].y],true);
-          motion.properties[1].setValue(${Math.floor(100/n)},true);
-        }
-        return JSON.stringify({success:true,clipCount:clips.length,orientation:${JSON.stringify(orientation)}});
-      }catch(e){return JSON.stringify({success:false,error:e.toString()});}
-    `);
+    const splitScale = Math.floor(100 / n);
+    const r: any = await this.bridge.executeScript(this.motionParamBatchScript(seqId,
+      clips.map((c, i) => ({
+        trackIndex: c.trackIndex,
+        clipIndex: c.clipIndex,
+        targets: [
+          { index: 0, name: 'Position', value: [positions[i]!.x, positions[i]!.y] },
+          { index: 1, name: 'Scale', value: splitScale },
+        ] as MotionParamTarget[],
+      })), 'split_screen_layout'));
+    // The crop halves of the layout are computed but Motion has no crop parameter to write
+    // them to, so they are returned as data rather than implied to have been applied.
+    return { ...r, orientation, scale: splitScale, clipsRequested: clips.length,
+      cropsNotApplied: positions,
+      note: 'Position and Scale were applied. The per-clip crop values are returned but NOT applied: crop is a separate effect in Premiere, not a Motion parameter. Add the Crop effect with apply_effect and set them with set_effect_property.' };
   }
 
   private async resetMotionToDefaults(trackIndex: number, clipIndex: number, seqId?: string): Promise<any> {
-    return await this.bridge.executeScript(`
-      try {
-        var seq=${this.buildSeqRes(seqId)};
-        var clip=seq.videoTracks[${trackIndex}].clips[${clipIndex}];
-        var motion=clip.components[1];
-        motion.properties[0].setValue([0.5,0.5],true);
-        motion.properties[1].setValue(100,true);
-        motion.properties[2].setValue(100,true);
-        motion.properties[3].setValue(true,true);
-        motion.properties[4].setValue(0,true);
-        motion.properties[5].setValue([0.5,0.5],true);
-        motion.properties[6].setValue(0,true);
-        motion.properties[7].setValue(0,true);motion.properties[8].setValue(0,true);motion.properties[9].setValue(0,true);motion.properties[10].setValue(0,true);
-        return JSON.stringify({success:true,verified:true});
-      }catch(e){return JSON.stringify({success:false,error:e.toString()});}
-    `);
+    // Eleven bare-index writes, no readback, unconditional verified: true. Indices 7..10 were
+    // assumed to be crop; each target now carries the name it must be, and a parameter that is
+    // not where it was expected is reported instead of written blind.
+    return await this.bridge.executeScript(this.motionParamScript(seqId, trackIndex, clipIndex, [
+      { index: 0, name: 'Position', value: [0.5, 0.5] },
+      { index: 1, name: 'Scale', value: 100 },
+      { index: 2, name: 'Scale Width', aliases: ['Scale Height'], value: 100 },
+      { index: 3, name: 'Uniform Scale', value: true },
+      { index: 4, name: 'Rotation', value: 0 },
+      { index: 5, name: 'Anchor Point', value: [0.5, 0.5] },
+      { index: 6, name: 'Anti-flicker Filter', aliases: ['Anti-flicker filter'], value: 0 },
+    ], 'reset_motion_to_defaults'));
   }
 
   private async alignClipsSpatial(clips: Array<{trackIndex:number,clipIndex:number}>, alignment: string, seqId?: string): Promise<any> {
-    return await this.bridge.executeScript(`
+    const axis: Record<string, [0 | 1, number]> = {
+      left: [0, 0.1], center: [0, 0.5], right: [0, 0.9],
+      top: [1, 0.1], middle: [1, 0.5], bottom: [1, 0.9],
+    };
+    const target = axis[alignment];
+    if (!target) {
+      return { success: false, verified: false, error: `Unrecognised alignment "${alignment}". Use one of: ${Object.keys(axis).join(', ')}.` };
+    }
+    // Read the current Position of each clip first: alignment overrides one axis and keeps
+    // the other, so the write target is not known until the current value is in hand. The
+    // old version did the read on the host, then swallowed the write and reported
+    // count = the number requested regardless of what landed.
+    const read: any = await this.bridge.executeScript(`
       try {
         var seq=${this.buildSeqRes(seqId)};
+        if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
         var clips=${JSON.stringify(clips)};
-        var al=${JSON.stringify(alignment)};
+        var out=[];
         for(var i=0;i<clips.length;i++){
-          var clip=seq.videoTracks[clips[i].trackIndex].clips[clips[i].clipIndex];
-          if(!clip)continue;
-          var pos=clip.components[1].properties[0].getValue();
-          if(al==='left')pos=[0.1,pos[1]];
-          else if(al==='center')pos=[0.5,pos[1]];
-          else if(al==='right')pos=[0.9,pos[1]];
-          else if(al==='top')pos=[pos[0],0.1];
-          else if(al==='middle')pos=[pos[0],0.5];
-          else if(al==='bottom')pos=[pos[0],0.9];
-          clip.components[1].properties[0].setValue(pos,true);
+          var track=seq.videoTracks[clips[i].trackIndex];
+          var clip=track?track.clips[clips[i].clipIndex]:null;
+          if(!clip){ out.push({trackIndex:clips[i].trackIndex,clipIndex:clips[i].clipIndex,position:null,error:'Clip not found'}); continue; }
+          var motion=null;
+          for(var c=0;c<clip.components.numItems;c++){ if(String(clip.components[c].displayName)==='Motion'){motion=clip.components[c];break;} }
+          if(!motion){ out.push({trackIndex:clips[i].trackIndex,clipIndex:clips[i].clipIndex,position:null,error:'No Motion component'}); continue; }
+          var pos=null;
+          for(var p=0;p<motion.properties.numItems;p++){ if(String(motion.properties[p].displayName)==='Position'){ try{pos=motion.properties[p].getValue();}catch(eG){} break; } }
+          out.push({trackIndex:clips[i].trackIndex,clipIndex:clips[i].clipIndex,position:pos,error:pos===null?'Motion has no readable Position parameter':null});
         }
-        return JSON.stringify({success:true,alignment:al,count:clips.length});
+        return JSON.stringify({success:true,positions:out});
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
     `);
+    if (!read?.success) return { ...read, verified: false };
+    const entries: Array<{ trackIndex: number; clipIndex: number; targets: MotionParamTarget[] }> = [];
+    const unreadable: any[] = [];
+    for (const p of read.positions ?? []) {
+      if (!p.position) { unreadable.push(p); continue; }
+      const next = [Number(p.position[0]), Number(p.position[1])];
+      next[target[0]] = target[1];
+      entries.push({ trackIndex: p.trackIndex, clipIndex: p.clipIndex, targets: [{ index: 0, name: 'Position', value: next }] });
+    }
+    if (!entries.length) {
+      return { success: false, verified: true, alignment, requested: clips.length, aligned: 0, unreadable,
+        error: 'None of the requested clips exposed a readable Motion Position parameter, so nothing was aligned. See unreadable[].' };
+    }
+    const r: any = await this.bridge.executeScript(this.motionParamBatchScript(seqId, entries, 'align_clips_spatial'));
+    const aligned = r?.clipsFullyApplied ?? 0;
+    return { ...r, alignment, requested: clips.length, aligned, unreadable,
+      success: r?.success === true && unreadable.length === 0,
+      error: r?.success === true && unreadable.length === 0
+        ? null
+        : (r?.error ?? `Aligned ${aligned} of ${clips.length} requested clips; ${unreadable.length} had no readable Motion Position. See clips[] and unreadable[].`) };
   }
 
   private async safeAreaCheck(seqId?: string): Promise<any> {
@@ -15202,39 +15853,69 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   private async setClipCrop(trackIndex: number, clipIndex: number, left: number, top: number, right: number, bottom: number, seqId?: string): Promise<any> {
-    return await this.bridge.executeScript(`
-      try {
-        var clip=${this.buildSeqRes(seqId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
-        var m=clip.components[1];
-        m.properties[7].setValue(${left},true);m.properties[8].setValue(${top},true);m.properties[9].setValue(${right},true);m.properties[10].setValue(${bottom},true);
-        return JSON.stringify({success:true,verified:true,left:${left},top:${top},right:${right},bottom:${bottom}});
-      }catch(e){return JSON.stringify({success:false,error:e.toString()});}
-    `);
+    const r: any = await this.bridge.executeScript(this.motionParamScript(seqId, trackIndex, clipIndex, [
+      { index: 7, name: 'Crop Left', aliases: ['Left'], value: left },
+      { index: 8, name: 'Crop Top', aliases: ['Top'], value: top },
+      { index: 9, name: 'Crop Right', aliases: ['Right'], value: right },
+      { index: 10, name: 'Crop Bottom', aliases: ['Bottom'], value: bottom },
+    ], 'set_clip_crop'));
+    return { ...r, left, top, right, bottom,
+      hint: r?.success === false && r?.applied === 0
+        ? 'Crop is a separate effect in Premiere, not part of Motion. Add the Crop effect with apply_effect, then set Left/Top/Right/Bottom with set_effect_property.'
+        : undefined };
   }
 
   private async keyframeZoom(trackIndex: number, clipIndex: number, startScale: number, endScale: number, seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var clip=${this.buildSeqRes(seqId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
-        var scaleProp=clip.components[1].properties[1];
-        scaleProp.setTimeVarying(true);
-        var t1=new Time();t1.ticks=String(clip.start.ticks);
-        var t2=new Time();t2.ticks=String(clip.end.ticks);
+        ${this.keyframeVerifyFragment()}
+        var seq=${this.buildSeqRes(seqId)};
+        if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
+        var track=seq.videoTracks[${trackIndex}];
+        var clip=track?track.clips[${clipIndex}]:null;
+        if(!clip)return JSON.stringify({success:false,error:'No clip at video track ${trackIndex} index ${clipIndex}'});
+        // components[1].properties[1] was assumed to be Motion > Scale. Resolve it by name:
+        // an unverified index animates whatever is in that slot, silently.
+        var mot=null;
+        for(var mi=0;mi<clip.components.numItems;mi++){if(String(clip.components[mi].displayName)==='Motion'){mot=clip.components[mi];break;}}
+        if(!mot)return JSON.stringify({success:false,verified:false,error:'This clip has no Motion component, so a scale animation cannot be keyframed on it.'});
+        var scaleProp=null;
+        for(var sp=0;sp<mot.properties.numItems;sp++){if(String(mot.properties[sp].displayName)==='Scale'){scaleProp=mot.properties[sp];break;}}
+        if(!scaleProp)return JSON.stringify({success:false,verified:false,error:'Motion on this clip exposes no Scale parameter, so a scale animation cannot be keyframed. Nothing was written.'});
+        var tvError=null;
+        try{scaleProp.setTimeVarying(true);}catch(eTV){tvError=eTV.toString();}
+        var t1=new Time();t1.ticks=String(Math.round(Number(clip.start.ticks)));
+        var t2=new Time();t2.ticks=String(Math.round(Number(clip.end.ticks)));
         scaleProp.addKey(t1);scaleProp.setValueAtKey(t1,${startScale});
         scaleProp.addKey(t2);scaleProp.setValueAtKey(t2,${endScale});
-        return JSON.stringify({success:true,verified:true,startScale:${startScale},endScale:${endScale},keyframeCount:scaleProp.getKeys().length});
+        var kf=__verifyKeyframes(scaleProp,[
+          { ticks: t1.ticks, value: ${startScale}, label: 'zoom start' },
+          { ticks: t2.ticks, value: ${endScale}, label: 'zoom end' }
+        ]);
+        var full=kf.landed===kf.requested;
+        return JSON.stringify({
+          success: full,
+          verified: kf.keysReadable,
+          verifiedBy: kf.keysReadable ? 'Motion Scale getKeys() and getValueAtKey() readback' : undefined,
+          unverifiedReason: kf.keysReadable ? undefined : 'getKeys() is not readable on the Motion Scale parameter, so the zoom cannot be confirmed.',
+          startScale:${startScale},endScale:${endScale},
+          keyframeCount:kf.keyCount,keyframesLanded:kf.landed,keyframesRequested:kf.requested,keyframes:kf.keys,
+          setTimeVaryingError:tvError,
+          error: full ? null : ('The zoom did not fully land: ' + kf.landed + ' of ' + kf.requested + ' keyframes are present at the requested scale values' + (tvError ? ', and setTimeVarying threw: ' + tvError : '') + '. See keyframes[].')
+        });
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
     `);
   }
 
   private async toggleUniformScale(trackIndex: number, clipIndex: number, uniformScale: boolean, seqId?: string): Promise<any> {
-    return await this.bridge.executeScript(`
-      try {
-        var m=${this.buildSeqRes(seqId)}.videoTracks[${trackIndex}].clips[${clipIndex}].components[1];
-        m.properties[3].setValue(${uniformScale},true);
-        return JSON.stringify({success:true,verified:m.properties[3].getValue()===${uniformScale},uniformScale:${uniformScale}});
-      }catch(e){return JSON.stringify({success:false,error:e.toString()});}
-    `);
+    // Was a bare `getValue() === uniformScale` with no `before`, so an already-correct clip
+    // and a successful write were indistinguishable, and a failed write reported
+    // verified: false with no reason at all.
+    const r: any = await this.bridge.executeScript(this.motionParamScript(seqId, trackIndex, clipIndex, [
+      { index: 3, name: 'Uniform Scale', value: uniformScale },
+    ], 'toggle_uniform_scale'));
+    const first = r?.results?.[0];
+    return { ...r, uniformScale, changed: first ? first.changed === true : undefined };
   }
 
   private async distributeClipsEvenly(trackIndex: number, clipIndices: number[], startSecs: number, endSecs: number, seqId?: string): Promise<any> {
@@ -15273,10 +15954,28 @@ ${this.buildSequenceResolver(sequenceId)}
         }
         var ratio=currentDur/targetDur;
         var qeClip=seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
-        var oldSpeed=clip.getSpeed();
-        qeClip.setSpeed(ratio,'00:00:00:00',false,true,false);
-        var newSpeed=clip.getSpeed();
-        return JSON.stringify({success:true,verified:Math.abs(newSpeed-ratio)<0.05,ratio:ratio,targetDurationSecs:targetDur,oldSpeedRatio:oldSpeed,newSpeedRatio:newSpeed});
+        var oldSpeed=null; try{ oldSpeed=Number(clip.getSpeed()); }catch(eB){}
+        var oldDur=Number(clip.duration.seconds);
+        var setError=null;
+        try{ qeClip.setSpeed(ratio,'00:00:00:00',false,true,false); }catch(eS){ setError=eS.toString(); }
+        var newSpeed=null; try{ newSpeed=Number(clip.getSpeed()); }catch(eA){}
+        var newDur=Number(clip.duration.seconds);
+        if(newSpeed===null||isNaN(newSpeed)){
+          return JSON.stringify({success:true,verified:false,ratio:ratio,targetDurationSecs:targetDur,oldSpeedRatio:oldSpeed,durationBefore:oldDur,durationAfter:newDur,setError:setError,
+            unverifiedReason:'TrackItem.getSpeed() is not readable after the write, so the rate stretch cannot be confirmed. Read it with get_clip_speed.'});
+        }
+        var onTarget=Math.abs(newSpeed-ratio)<0.05;
+        var durOnTarget=Math.abs(newDur-targetDur)<0.05;
+        if(onTarget&&durOnTarget){
+          return JSON.stringify({success:true,verified:true,verifiedBy:'TrackItem.getSpeed() and TrackItem.duration readback',changed:oldSpeed!==newSpeed,ratio:ratio,targetDurationSecs:targetDur,oldSpeedRatio:oldSpeed,newSpeedRatio:newSpeed,durationBefore:oldDur,durationAfter:newDur});
+        }
+        // Speed and duration are two separate readbacks and they can disagree: a speed change
+        // that Premiere applies without re-timing the clip leaves the gap this tool exists to
+        // fill still open. Reporting only the speed hid that.
+        return JSON.stringify({success:false,verified:true,verifiedBy:'TrackItem.getSpeed() and TrackItem.duration readback',changed:oldSpeed!==newSpeed,ratio:ratio,targetDurationSecs:targetDur,oldSpeedRatio:oldSpeed,newSpeedRatio:newSpeed,durationBefore:oldDur,durationAfter:newDur,setError:setError,
+          error: !onTarget
+            ? ('Clip speed reads ' + newSpeed + ' instead of the requested ' + ratio + ', so the clip was not rate stretched to fill ' + targetDur + 's.')
+            : ('The speed landed at ' + newSpeed + ' but the clip duration reads ' + newDur + 's instead of ' + targetDur + 's, so the gap it was meant to fill is still open. setSpeed changes the rate without necessarily re-timing the clip on the timeline.')});
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
     `);
   }
@@ -15324,10 +16023,24 @@ ${this.buildSequenceResolver(sequenceId)}
         app.enableQE();
         var qeClip=qe.project.getActiveSequence().getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
         if(!qeClip)return JSON.stringify({success:false,error:'Clip not found'});
-        qeClip.setSpeed(1.0,'00:00:00:00',false,false,false);
         var clip=${this.buildSeqRes(seqId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
-        var newSpeed=clip.getSpeed?clip.getSpeed():1;
-        return JSON.stringify({success:true,verified:Math.abs(newSpeed-1)<0.02,newSpeed:newSpeed});
+        if(!clip)return JSON.stringify({success:false,error:'Clip not found on the DOM sequence at video track ${trackIndex} index ${clipIndex}'});
+        var oldSpeed=null; try{ oldSpeed=Number(clip.getSpeed()); }catch(eB){}
+        var setError=null;
+        try{ qeClip.setSpeed(1.0,'00:00:00:00',false,false,false); }catch(eS){ setError=eS.toString(); }
+        var newSpeed=null; try{ newSpeed=Number(clip.getSpeed()); }catch(eA){}
+        if(newSpeed===null||isNaN(newSpeed)){
+          return JSON.stringify({success:true,verified:false,oldSpeed:oldSpeed,setError:setError,
+            unverifiedReason:'TrackItem.getSpeed() is not readable after the write, so the speed reset cannot be confirmed. Read it with get_clip_speed.'});
+        }
+        if(Math.abs(newSpeed-1)>=0.02){
+          return JSON.stringify({success:false,verified:true,verifiedBy:'TrackItem.getSpeed() readback',changed:oldSpeed!==newSpeed,oldSpeed:oldSpeed,newSpeed:newSpeed,setError:setError,
+            error:'The clip speed still reads ' + newSpeed + ' rather than 1.0, so the time remap was not removed.'});
+        }
+        // A clip that was never remapped reads 1.0 both before and after, which is a no-op
+        // rather than a removal. The old bare comparison called both of those verified.
+        return JSON.stringify({success:true,verified:true,verifiedBy:'TrackItem.getSpeed() readback',changed:oldSpeed!==newSpeed,oldSpeed:oldSpeed,newSpeed:newSpeed,
+          note: (oldSpeed !== null && Math.abs(oldSpeed-1) < 0.02) ? 'This clip was already at 1.0x, so there was no time remap to remove. Note that setSpeed resets the RATE; keyframed Time Remapping keyframes are not cleared by it — use remove_keyframe_range on the Time Remapping parameter for those.' : 'Speed reset to 1.0x. Keyframed Time Remapping keyframes are not cleared by this call — use remove_keyframe_range on the Time Remapping parameter if the clip carries any.'});
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
     `);
   }
@@ -15406,9 +16119,20 @@ ${this.buildSequenceResolver(sequenceId)}
         if(!item)return JSON.stringify({success:false,error:'Item not found'});
         var valid=item.isValidOverrideColorSpace?item.isValidOverrideColorSpace(${JSON.stringify(colorSpaceName)}):true;
         if(!valid)return JSON.stringify({success:false,error:'Invalid color space: '+${JSON.stringify(colorSpaceName)}});
-        item.setOverrideColorSpace(${JSON.stringify(colorSpaceName)});
-        var back=String(item.getOverrideColorSpace());
-        return JSON.stringify({success:true,verified:back.indexOf(${JSON.stringify(colorSpaceName)})>=0,colorSpace:${JSON.stringify(colorSpaceName)},readback:back});
+        var before=null; try{ before=String(item.getOverrideColorSpace()); }catch(eB){}
+        var setError=null;
+        try{ item.setOverrideColorSpace(${JSON.stringify(colorSpaceName)}); }catch(eS){ setError=eS.toString(); }
+        var back=null; try{ back=String(item.getOverrideColorSpace()); }catch(eA){}
+        if(back===null){
+          return JSON.stringify({success:true,verified:false,colorSpace:${JSON.stringify(colorSpaceName)},before:before,setError:setError,
+            unverifiedReason:'getOverrideColorSpace() is not readable for this item, so the override cannot be confirmed.'});
+        }
+        if(back.indexOf(${JSON.stringify(colorSpaceName)})<0){
+          return JSON.stringify({success:false,verified:true,verifiedBy:'getOverrideColorSpace() readback',changed:back!==before,colorSpace:${JSON.stringify(colorSpaceName)},before:before,readback:back,setError:setError,
+            error:'The item colour space reads "' + back + '", which does not contain the requested ' + ${JSON.stringify(colorSpaceName)} + '. isValidOverrideColorSpace accepted the name, so the override was refused at write time.'});
+        }
+        return JSON.stringify({success:true,verified:true,verifiedBy:'getOverrideColorSpace() readback',changed:back!==before,colorSpace:${JSON.stringify(colorSpaceName)},before:before,readback:back,
+          note: back === before ? 'The item was already overridden to this colour space; nothing changed.' : undefined});
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
     `);
   }
@@ -15477,12 +16201,30 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(`
       try {
         var seq=${this.buildSeqRes(seqId)};
+        if(!seq)return JSON.stringify({success:false,error:'No active sequence'});
         var m=seq.markers.createMarker(${startSecs});
+        if(!m)return JSON.stringify({success:false,verified:true,error:'createMarker() returned nothing, so no marker was added at ${startSecs}s.'});
         ${name ? `m.name=${JSON.stringify(name)};` : ''}
         ${comment ? `m.comments=${JSON.stringify(comment)};` : ''}
         ${type ? `m.type=${JSON.stringify(type)};` : ''}
-        try{var et=new Time();et.seconds=${startSecs+durationSecs};m.end=et;}catch(ee){}
-        return JSON.stringify({success:true,verified:true,startSecs:${startSecs},durationSecs:${durationSecs},name:String(m.name),type:String(m.type)});
+        // The DURATION is the whole point of this tool and its write was swallowed in
+        // try{}catch(ee){} while the response claimed verified:true — so a zero-length marker
+        // was indistinguishable from a duration marker. Read the end back and compare.
+        var endError=null;
+        try{var et=new Time();et.seconds=${startSecs+durationSecs};m.end=et;}catch(ee){endError=ee.toString();}
+        var endBack=null; try{ endBack=Number(m.end.seconds); }catch(eE){}
+        var startBack=null; try{ startBack=Number(m.start.seconds); }catch(eS){}
+        var wantEnd=${startSecs+durationSecs};
+        var base={startSecs:${startSecs},durationSecs:${durationSecs},name:String(m.name),type:String(m.type),startReadback:startBack,endReadback:endBack};
+        if(endBack===null){
+          return JSON.stringify({success:true,verified:false,markerCreated:true,startSecs:base.startSecs,durationSecs:base.durationSecs,name:base.name,type:base.type,startReadback:base.startReadback,
+            unverifiedReason:'The marker was created but Marker.end is not readable on this build, so its duration cannot be confirmed.',setError:endError});
+        }
+        if(Math.abs(endBack-wantEnd)>0.001){
+          return JSON.stringify({success:false,verified:true,verifiedBy:'Marker.start and Marker.end readback',markerCreated:true,startSecs:base.startSecs,durationSecs:base.durationSecs,name:base.name,type:base.type,startReadback:base.startReadback,endReadback:base.endReadback,setError:endError,
+            error:'HALF APPLIED: the marker was created at ' + startBack + 's but its end reads ' + endBack + 's instead of ' + wantEnd + 's, so it has duration ' + (endBack-Number(startBack)) + 's rather than the requested ${durationSecs}s. Delete it with delete_marker or adjust it with update_marker.'});
+        }
+        return JSON.stringify({success:true,verified:true,verifiedBy:'Marker.start and Marker.end readback',markerCreated:true,startSecs:base.startSecs,durationSecs:base.durationSecs,name:base.name,type:base.type,startReadback:base.startReadback,endReadback:base.endReadback});
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
     `);
   }
@@ -15494,8 +16236,19 @@ ${this.buildSequenceResolver(sequenceId)}
         var m=seq.markers.getFirstMarker();var found=null;
         while(m){if(Math.abs(m.start.seconds-${timeSecs})<${toleranceSecs}){found=m;break;}m=seq.markers.getNextMarker(m);}
         if(!found)return JSON.stringify({success:false,error:'No marker near '+${timeSecs}+'s'});
+        var before=null; try{ before=String(found.type); }catch(eB){}
         found.type=${JSON.stringify(type)};
-        return JSON.stringify({success:true,verified:String(found.type)===${JSON.stringify(type)},name:String(found.name),type:String(found.type)});
+        var after=null; try{ after=String(found.type); }catch(eA){}
+        if(after===null){
+          return JSON.stringify({success:true,verified:false,name:String(found.name),requestedType:${JSON.stringify(type)},before:before,
+            unverifiedReason:'Marker.type is not readable on this build, so the type change cannot be confirmed.'});
+        }
+        if(after!==${JSON.stringify(type)}){
+          return JSON.stringify({success:false,verified:true,verifiedBy:'Marker.type readback',changed:before!==after,name:String(found.name),requestedType:${JSON.stringify(type)},before:before,type:after,
+            error:'The marker still reads type "' + after + '" instead of the requested ' + ${JSON.stringify(type)} + '. Premiere accepts only Comment, Chapter, Segmentation and WebLink.'});
+        }
+        return JSON.stringify({success:true,verified:true,verifiedBy:'Marker.type readback',changed:before!==after,name:String(found.name),type:after,before:before,
+          note: before === after ? 'The marker was already this type; nothing changed.' : undefined});
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
     `);
   }
@@ -16210,8 +16963,21 @@ ${this.buildSequenceResolver(sequenceId)}
       try {
         var item=${this.findItemById(projectItemId)};
         if(!item)return JSON.stringify({success:false,error:'Item not found'});
+        var before = null;
+        try { before = Number(item.getFootageInterpretation().frameRate); } catch(eB) {}
         item.setOverrideFrameRate(${frameRate});
-        return JSON.stringify({success:true,verified:true,frameRate:${frameRate},itemName:String(item.name)});
+        var after = null;
+        try { after = Number(item.getFootageInterpretation().frameRate); } catch(eA) {}
+        if (after === null || isNaN(after)) {
+          return JSON.stringify({success:true,verified:false,frameRate:${frameRate},before:before,itemName:String(item.name),
+            unverifiedReason:'setOverrideFrameRate() did not throw, but getFootageInterpretation().frameRate is not readable for this item, so the override cannot be confirmed. Read it with get_footage_interpretation.'});
+        }
+        if (Math.abs(after - ${frameRate}) > 0.001) {
+          return JSON.stringify({success:false,verified:true,verifiedBy:'getFootageInterpretation().frameRate readback',changed:before!==after,frameRate:${frameRate},before:before,after:after,itemName:String(item.name),
+            error:'The item still interprets at ' + after + ' fps instead of the requested ${frameRate}. Premiere refuses a frame-rate override on media whose native rate it cannot reinterpret, and on sequences.'});
+        }
+        return JSON.stringify({success:true,verified:true,verifiedBy:'getFootageInterpretation().frameRate readback',changed:before!==after,frameRate:${frameRate},before:before,after:after,itemName:String(item.name),
+          note: before === after ? 'The item already interpreted at this frame rate; nothing changed.' : undefined});
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
     `);
   }
@@ -16350,7 +17116,19 @@ ${this.buildSequenceResolver(sequenceId)}
         }
         var after = app.getProjectViewSelection(usedView);
         var afterCount = after ? after.length : 0;
-        return JSON.stringify({ success: true, verified: afterCount === found.length,
+        // The old comparison was against what we managed to RESOLVE, so a request naming five
+        // items of which two existed reported a verified success for two. Compare against what
+        // was asked for, and name the ids that were not found.
+        var full = afterCount === wanted.length && missing.length === 0;
+        if (!full) {
+          return JSON.stringify({ success: false, verified: true, verifiedBy: 'app.getProjectViewSelection() readback',
+            requested: wanted.length, resolved: found.length, selectedAfter: afterCount,
+            missing: missing, viewId: usedView,
+            error: missing.length
+              ? ('Selected ' + afterCount + ' of ' + wanted.length + ' requested items. These nodeIds are not in this project: ' + missing.join(', ') + '.')
+              : ('The project view reports ' + afterCount + ' items selected after being handed ' + found.length + '. A view that is not showing an item cannot select it — try a different viewId from get_all_project_paths.') });
+        }
+        return JSON.stringify({ success: true, verified: true, verifiedBy: 'app.getProjectViewSelection() readback',
           requested: wanted.length, resolved: found.length, selectedAfter: afterCount,
           missing: missing, viewId: usedView });
       } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
@@ -16869,10 +17647,24 @@ ${this.buildSequenceResolver(sequenceId)}
         if (!clip) return JSON.stringify({ success: false, error: 'QE clip not found' });
         var pi = clip.getProjectItem();
         if (!pi) return JSON.stringify({ success: false, error: 'getProjectItem() returned nothing' });
+        var wantedName = String(pi.name);
+        var wantedId = null; try { wantedId = String(pi.nodeId); } catch(eI) {}
         pi.openInSource();
-        var loaded = null;
-        try { var li = app.sourceMonitor.getProjectItem(); loaded = li ? String(li.name) : null; } catch(x) {}
-        return JSON.stringify({ success: true, verified: loaded !== null, loadedInSource: loaded });
+        // "loaded !== null" only proved the Source Monitor had SOMETHING in it — including the
+        // clip that was already there when openInSource did nothing. Compare identity.
+        var loaded = null, loadedId = null;
+        try { var li = app.sourceMonitor.getProjectItem(); if (li) { loaded = String(li.name); try { loadedId = String(li.nodeId); } catch(eL) {} } } catch(x) {}
+        if (loaded === null) {
+          return JSON.stringify({ success: false, verified: true, verifiedBy: 'app.sourceMonitor.getProjectItem() identity comparison', requested: wantedName,
+            error: 'The Source Monitor reports no loaded item after openInSource(), so the clip was not opened.' });
+        }
+        var isOurs = wantedId !== null && loadedId !== null ? loadedId === wantedId : loaded === wantedName;
+        if (!isOurs) {
+          return JSON.stringify({ success: false, verified: true, verifiedBy: 'app.sourceMonitor.getProjectItem() identity comparison',
+            requested: wantedName, loadedInSource: loaded,
+            error: 'The Source Monitor holds "' + loaded + '", not the requested "' + wantedName + '", so openInSource() did not take.' });
+        }
+        return JSON.stringify({ success: true, verified: true, verifiedBy: 'app.sourceMonitor.getProjectItem() identity comparison', loadedInSource: loaded, requested: wantedName });
       } catch(e) { return JSON.stringify({ success: false, error: e.toString() }); }
     `);
   }
@@ -17082,9 +17874,20 @@ ${this.buildSequenceResolver(sequenceId)}
   private async setAppProperty(key: string, value: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        app.properties.setProperty(${JSON.stringify(key)},${JSON.stringify(value)});
-        var back=app.properties.getProperty(${JSON.stringify(key)});
-        return JSON.stringify({success:true,verified:String(back)===${JSON.stringify(value)},key:${JSON.stringify(key)},value:${JSON.stringify(value)}});
+        var before=null; try{ before=String(app.properties.getProperty(${JSON.stringify(key)})); }catch(eB){}
+        var setError=null;
+        try{ app.properties.setProperty(${JSON.stringify(key)},${JSON.stringify(value)}); }catch(eS){ setError=eS.toString(); }
+        var back=null; try{ back=String(app.properties.getProperty(${JSON.stringify(key)})); }catch(eA){}
+        if(back===null){
+          return JSON.stringify({success:true,verified:false,key:${JSON.stringify(key)},value:${JSON.stringify(value)},before:before,setError:setError,
+            unverifiedReason:'app.properties.getProperty() did not return a value for this key after the write, so the property cannot be confirmed.'});
+        }
+        if(back!==${JSON.stringify(value)}){
+          return JSON.stringify({success:false,verified:true,verifiedBy:'app.properties.getProperty() readback',changed:back!==before,key:${JSON.stringify(key)},value:${JSON.stringify(value)},before:before,readback:back,setError:setError,
+            error:'The property reads back as "' + back + '" rather than the requested value. Many app properties are read-only or coerce the value they are given.'});
+        }
+        return JSON.stringify({success:true,verified:true,verifiedBy:'app.properties.getProperty() readback',changed:back!==before,key:${JSON.stringify(key)},value:${JSON.stringify(value)},before:before,readback:back,
+          note: back === before ? 'The property already held this value; nothing changed.' : undefined});
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
     `);
   }
@@ -17133,18 +17936,65 @@ ${this.buildSequenceResolver(sequenceId)}
     };
   }
 
-  private async applyMorphCut(trackIndex: number, clipIndex: number, _seqId?: string): Promise<any> {
+  private async applyMorphCut(trackIndex: number, clipIndex: number, seqId?: string, durationFrames?: number): Promise<any> {
+    // Was "Invalid parameter" on every call:
+    //
+    //   clip.addTransition(mc, 2, 0)
+    //
+    // THREE arguments where QE addTransition takes seven on 26.3.2, the integer 2 where a
+    // boolean addAtEnd belongs, and a duration of 0 — a zero-length Morph Cut is nothing to
+    // apply even if the call were shaped right. Rebuilt on the same seven-argument form the
+    // two working transition tools use, with the duration defaulting to one second of the
+    // sequence's own timebase rather than zero.
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq=qe.project.getActiveSequence();
-        var clip=seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
-        if(!clip)return JSON.stringify({success:false,error:'Clip not found'});
+        var domSeq=${this.buildSeqScript(seqId)};
+        if(!domSeq)return JSON.stringify({success:false,error:'No active sequence'});
+        var qeSeq=__qeSequenceFor(domSeq);
+        if(!qeSeq)return JSON.stringify({success:false,error:"Could not address sequence '" + String(domSeq.name) + "' through the QE API."});
+        var qeTrack=qeSeq.getVideoTrackAt(${trackIndex});
+        var clip=qeTrack?qeTrack.getItemAt(${clipIndex}):null;
+        if(!clip)return JSON.stringify({success:false,error:'No clip at video track ${trackIndex} index ${clipIndex}'});
+        var domTrack=domSeq.videoTracks[${trackIndex}];
+        var domClip=domTrack?domTrack.clips[${clipIndex}]:null;
         var mc=qe.project.getVideoTransitionByName('Morph Cut');
-        if(!mc)return JSON.stringify({success:false,error:'Morph Cut transition not found on this build'});
-        clip.addTransition(mc,2,0);
-        seq.renderPreview();
-        return JSON.stringify({success:true,verified:false,note:'Morph Cut applied. renderPreview() called to trigger analysis. Check render status with get_sequence_render_status.'});
+        if(!mc)return JSON.stringify({success:false,error:'The Morph Cut transition is not present on this build. Use list_available_transitions to see what is.'});
+        var fps=domSeq.timebase?(254016000000/parseInt(String(domSeq.timebase),10)):30;
+        var frames=${durationFrames !== undefined ? `${Math.max(1, Math.round(durationFrames))}` : 'Math.max(1, Math.round(fps))'};
+        ${this.transitionVerificationScript()}
+        var before=__readQeTransitionState(clip);
+        var beforeXml=__transitionXmlCount(domSeq);
+        var addError=null;
+        try { clip.addTransition(mc, true, String(frames), "0", 0.5, true, true); } catch(eAdd) { addError=eAdd.toString(); }
+        var afterClip=domClip?__findQeClipByDomClip(qeTrack, domClip):clip;
+        var after=__readQeTransitionState(afterClip||clip);
+        var afterXml=__transitionXmlCount(domSeq);
+        var qeVerified=__transitionWasVerified(before, after);
+        var xmlVerified=__transitionWasVerifiedByXml(beforeXml, afterXml);
+        if(qeVerified||xmlVerified){
+          // The TRANSITION is proven present. The Morph Cut ANALYSIS is a background render
+          // that this call cannot wait for, so it is reported separately instead of being
+          // folded into verified.
+          var renderError=null;
+          try { qeSeq.renderPreview(); } catch(eR) { renderError=eR.toString(); }
+          return JSON.stringify({success:true,verified:true,
+            verifiedBy: qeVerified ? 'QE clip transition enumeration' : 'transition count in the sequence FCP XML export',
+            durationFrames:frames, fps:fps, edge:'end',
+            analysisVerified:false,
+            analysisNote:'The Morph Cut transition is present and proven. Its frame ANALYSIS runs as a background render and is NOT verified by this call — until it finishes the cut plays as a straight dissolve. Poll get_sequence_render_status, and inspect the result with capture_program_output.',
+            renderPreviewError:renderError,
+            before:before, after:after, beforeXml:beforeXml, afterXml:afterXml});
+        }
+        var inspectable=(before.available&&after.available)||(beforeXml.available&&afterXml.available);
+        return JSON.stringify({success:false,verified:inspectable,
+          durationFrames:frames, fps:fps, addError:addError,
+          before:before, after:after, beforeXml:beforeXml, afterXml:afterXml,
+          error: addError
+            ? ('addTransition() threw: ' + addError + '. Morph Cut needs source handles on the outgoing side of the cut and an adjacent clip on the same track.')
+            : (inspectable
+              ? 'The Morph Cut did not appear: neither the QE transition list nor the sequence XML gained a transition. A clip with no source handle past its out-point cannot take one.'
+              : 'The Morph Cut cannot be confirmed: neither the QE transition list nor the FCP XML export is readable on this build, so this reports failure rather than an unprovable success.')});
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
     `);
   }
@@ -17154,10 +18004,24 @@ ${this.buildSequenceResolver(sequenceId)}
       try {
         app.enableQE();
         var seq=qe.project.getActiveSequence();
-        ${maxRenderQuality !== undefined ? `seq.setUseMaxRenderQuality(${maxRenderQuality});` : ''}
-        ${maxBitDepth !== undefined ? `seq.setUseMaxBitDepth(${maxBitDepth});` : ''}
-        ${previewWidth !== undefined && previewHeight !== undefined ? `seq.setPreviewFrameSize(${previewWidth},${previewHeight});` : ''}
-        return JSON.stringify({success:true,maxRenderQuality:${maxRenderQuality??'null'},maxBitDepth:${maxBitDepth??'null'},previewSize:${previewWidth !== undefined ? `[${previewWidth},${previewHeight}]` : 'null'}});
+        if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
+        // Three fire-and-forget QE calls with no readback and no verified field at all. QE
+        // exposes no getters for these three, so the honest report is "dispatched, and here is
+        // exactly why it is not verified" rather than a bare success.
+        var calls = [], failures = [];
+        ${maxRenderQuality !== undefined ? `try { seq.setUseMaxRenderQuality(${maxRenderQuality}); calls.push('setUseMaxRenderQuality(${maxRenderQuality})'); } catch(e1) { failures.push('setUseMaxRenderQuality: ' + e1.toString()); }` : ''}
+        ${maxBitDepth !== undefined ? `try { seq.setUseMaxBitDepth(${maxBitDepth}); calls.push('setUseMaxBitDepth(${maxBitDepth})'); } catch(e2) { failures.push('setUseMaxBitDepth: ' + e2.toString()); }` : ''}
+        ${previewWidth !== undefined && previewHeight !== undefined ? `try { seq.setPreviewFrameSize(${previewWidth},${previewHeight}); calls.push('setPreviewFrameSize(${previewWidth},${previewHeight})'); } catch(e3) { failures.push('setPreviewFrameSize: ' + e3.toString()); }` : ''}
+        if (!calls.length && !failures.length) {
+          return JSON.stringify({success:false,verified:false,error:'No preview settings were supplied, so nothing was changed. Pass maxRenderQuality, maxBitDepth, or both previewWidth and previewHeight.'});
+        }
+        if (failures.length) {
+          return JSON.stringify({success:false,verified:false,dispatched:calls,failures:failures,
+            error:'Some preview settings were rejected by the host: ' + failures.join(' | ') + '.'});
+        }
+        return JSON.stringify({success:true,verified:false,dispatched:calls,
+          maxRenderQuality:${maxRenderQuality??'null'},maxBitDepth:${maxBitDepth??'null'},previewSize:${previewWidth !== undefined ? `[${previewWidth},${previewHeight}]` : 'null'},
+          unverifiedReason:'The QE sequence object exposes no getters for max render quality, max bit depth or preview frame size, so these writes are reported as dispatched without throwing rather than as verified. Confirm them in Sequence Settings, or read the whole settings block with get_qe_sequence_settings.'});
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
     `);
   }
@@ -17387,14 +18251,25 @@ ${this.buildSequenceResolver(sequenceId)}
         var sequence = __findSequence(${JSON.stringify(sequenceId)});
         if (!sequence) return JSON.stringify({ success: false, error: "Sequence not found by id: " + ${JSON.stringify(sequenceId)} });
         var ticks = __secondsToTicks(${time});
+        var beforeSeconds = null; try { beforeSeconds = sequence.getPlayerPosition().seconds; } catch (ePre) {}
         sequence.setPlayerPosition(ticks);
         var nowSeconds = null; try { nowSeconds = sequence.getPlayerPosition().seconds; } catch (ePlay) {}
-        if (nowSeconds !== null && Math.abs(nowSeconds - ${time}) > 0.04) return JSON.stringify({ success: false, verified: false, error: "Premiere did not move the playhead to ${time}s (reads back at " + nowSeconds + "s).", requested: ${time}, actual: nowSeconds });
+        if (nowSeconds !== null && Math.abs(nowSeconds - ${time}) > 0.04) return JSON.stringify({ success: false, verified: true, verifiedBy: "Sequence.getPlayerPosition() readback", before: beforeSeconds, changed: beforeSeconds !== nowSeconds, error: "Premiere did not move the playhead to ${time}s (reads back at " + nowSeconds + "s). A target beyond the end of the sequence is clamped.", requested: ${time}, actual: nowSeconds });
+        if (nowSeconds === null) {
+          return JSON.stringify({
+            success: true, verified: false,
+            unverifiedReason: "setPlayerPosition() did not throw, but getPlayerPosition() is not readable, so the playhead cannot be confirmed at ${time}s.",
+            time: ${time}, before: beforeSeconds
+          });
+        }
         return JSON.stringify({
           success: true,
-          verified: nowSeconds !== null,
-          message: "Playhead position set",
+          verified: true,
+          verifiedBy: "Sequence.getPlayerPosition() readback",
+          changed: beforeSeconds !== nowSeconds,
+          message: beforeSeconds === nowSeconds ? "The playhead was already at ${time}s; nothing moved." : "Playhead position set",
           time: ${time},
+          before: beforeSeconds,
           actualTime: nowSeconds
         });
       } catch (e) {
@@ -17530,10 +18405,19 @@ ${this.buildSequenceResolver(sequenceId)}
         var keyThere = null; try { keyThere = param.keyExistsAtTime(${time}); } catch (eKey) {}
         if (keyThere === false) return JSON.stringify({ success: false, verified: false, error: "Premiere did not add a keyframe at ${time}s (no key present after addKey)." });
         var keyVal = null; try { keyVal = param.getValueAtKey(${time}); } catch (eVal) {}
-        if (keyVal !== null && typeof keyVal === "number" && Math.abs(Number(keyVal) - ${value}) > 0.01) return JSON.stringify({ success: false, verified: false, error: "Keyframe was created but holds " + keyVal + " instead of the requested ${value}.", actual: keyVal, requested: ${value} });
+        if (keyVal !== null && typeof keyVal === "number" && Math.abs(Number(keyVal) - ${value}) > 0.01) return JSON.stringify({ success: false, verified: true, verifiedBy: "keyExistsAtTime() plus getValueAtKey() readback", error: "Keyframe was created but holds " + keyVal + " instead of the requested ${value}.", actual: keyVal, requested: ${value} });
+        if (keyThere !== true) {
+          return JSON.stringify({
+            success: true, verified: false,
+            unverifiedReason: "addKey() and setValueAtKey() did not throw, but keyExistsAtTime() is not readable on this parameter, so the keyframe cannot be confirmed. Read the keys back with get_keyframes.",
+            componentName: ${JSON.stringify(componentName)}, paramName: ${JSON.stringify(paramName)}, time: ${time}, value: ${value}, valueAtKey: keyVal
+          });
+        }
         return JSON.stringify({
           success: true,
-          verified: keyThere === true,
+          verified: true,
+          verifiedBy: "keyExistsAtTime() plus getValueAtKey() readback",
+          valueAtKey: keyVal,
           message: "Keyframe added",
           componentName: ${JSON.stringify(componentName)},
           paramName: ${JSON.stringify(paramName)},
@@ -17570,10 +18454,19 @@ ${this.buildSequenceResolver(sequenceId)}
         var hadKey = null; try { hadKey = param.keyExistsAtTime(${time}); } catch (ePre) {}
         param.removeKey(${time});
         var stillThere = null; try { stillThere = param.keyExistsAtTime(${time}); } catch (ePost) {}
-        if (stillThere === true) return JSON.stringify({ success: false, verified: false, error: "Premiere did not remove the keyframe at ${time}s (still present)." });
+        if (stillThere === true) return JSON.stringify({ success: false, verified: true, verifiedBy: "keyExistsAtTime() readback", hadKey: hadKey, changed: false, error: "Premiere did not remove the keyframe at ${time}s (still present)." });
+        if (stillThere !== false) {
+          return JSON.stringify({
+            success: true, verified: false,
+            unverifiedReason: "removeKey() did not throw, but keyExistsAtTime() is not readable on this parameter, so the removal cannot be confirmed. Read the keys back with get_keyframes.",
+            hadKey: hadKey, time: ${time}
+          });
+        }
         return JSON.stringify({
           success: true,
-          verified: stillThere === false,
+          verified: true,
+          verifiedBy: "keyExistsAtTime() readback",
+          changed: hadKey === true,
           message: hadKey === false ? "No keyframe existed at ${time}s; nothing to remove." : "Keyframe removed",
           hadKey: hadKey,
           time: ${time}
@@ -17793,9 +18686,12 @@ ${this.buildSequenceResolver(sequenceId)}
         return JSON.stringify({
           success: true,
           verified: inNow !== null && outNow !== null,
+          verifiedBy: (inNow !== null && outNow !== null) ? "getWorkAreaInPointAsTime()/getWorkAreaOutPointAsTime() readback" : undefined,
+          unverifiedReason: (inNow !== null && outNow !== null) ? undefined : "Only one of the two work-area points is readable on this build, so the range is half confirmed at best.",
           message: "Work area set",
           inPoint: ${inPoint},
-          outPoint: ${outPoint}
+          outPoint: ${outPoint},
+          actual: { inPoint: inNow, outPoint: outNow }
         });
       } catch (e) {
         return JSON.stringify({ success: false, error: e.toString() });
@@ -18277,15 +19173,26 @@ ${this.buildSequenceResolver(sequenceId)}
       try {
         var item = __findProjectItem(${JSON.stringify(projectItemId)});
         if (!item) return JSON.stringify({ success: false, error: "Project item not found" });
+        var beforeColor = null; try { beforeColor = Number(item.getColorLabel()); } catch (ePre) {}
         item.setColorLabel(${colorIndex});
         var nowColor = null; try { nowColor = item.getColorLabel(); } catch (eColor) {}
-        if (nowColor !== null && Number(nowColor) !== ${colorIndex}) return JSON.stringify({ success: false, verified: false, error: "Premiere did not set the color label (reads back as " + nowColor + ", requested ${colorIndex}).", actual: nowColor });
+        if (nowColor !== null && Number(nowColor) !== ${colorIndex}) return JSON.stringify({ success: false, verified: true, verifiedBy: "ProjectItem.getColorLabel() readback", before: beforeColor, changed: beforeColor !== Number(nowColor), error: "Premiere did not set the color label (reads back as " + nowColor + ", requested ${colorIndex}).", actual: nowColor });
+        if (nowColor === null) {
+          return JSON.stringify({
+            success: true, verified: false,
+            unverifiedReason: "setColorLabel() did not throw, but getColorLabel() is not readable for this item, so the label cannot be confirmed.",
+            projectItemId: ${JSON.stringify(projectItemId)}, colorIndex: ${colorIndex}, before: beforeColor
+          });
+        }
         return JSON.stringify({
           success: true,
-          verified: nowColor !== null,
-          message: "Color label set",
+          verified: true,
+          verifiedBy: "ProjectItem.getColorLabel() readback",
+          changed: beforeColor !== Number(nowColor),
+          message: beforeColor === Number(nowColor) ? "The item already carried colour label ${colorIndex}; nothing changed." : "Color label set",
           projectItemId: ${JSON.stringify(projectItemId)},
-          colorIndex: ${colorIndex}
+          colorIndex: ${colorIndex},
+          before: beforeColor
         });
       } catch (e) {
         return JSON.stringify({ success: false, error: e.toString() });
@@ -18864,7 +19771,12 @@ ${this.buildSequenceResolver(sequenceId)}
         var before = domClip.components.numItems;
         clip.addAudioEffect(eff);
         var after = domClip.components.numItems;
-        return JSON.stringify({success:true,verified:after>before,effectAdded:after>before,amount:${amount}});
+        if (after <= before) {
+          return JSON.stringify({success:false,verified:true,verifiedBy:'clip component count before and after',changed:false,amount:${amount},componentsBefore:before,componentsAfter:after,
+            error:'addAudioEffect() ran but the clip component count did not rise, so DeReverb was not applied. Try apply_audio_effect with the matchName from list_available_audio_effects instead.'});
+        }
+        return JSON.stringify({success:true,verified:true,verifiedBy:'clip component count before and after',changed:true,effectAdded:true,componentsBefore:before,componentsAfter:after,amountRequested:${amount},amountApplied:false,
+          note:'DeReverb was added at its DEFAULT settings. The amount argument was not applied: this tool only adds the effect. Set its parameters with set_effect_property.'});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
@@ -18955,9 +19867,21 @@ ${this.buildSequenceResolver(sequenceId)}
         var clip = seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         var canDo = clip.canDoMulticam();
-        if (!canDo && ${enabled}) return JSON.stringify({success:false,error:'canDoMulticam() returned false for this clip'});
+        if (!canDo && ${enabled}) return JSON.stringify({success:false,verified:true,error:'canDoMulticam() returned false for this clip, so multicam cannot be enabled on it. Only a clip whose source is a multicam source sequence can be switched to multicam.'});
+        // multicamEnabled is one of the QE clip properties measured SAFE to read on 26.3.2.
+        var before = null; try { before = Boolean(clip.multicamEnabled); } catch(eB) {}
         clip.setMulticam(${enabled});
-        return JSON.stringify({success:true,verified:true,enabled:${enabled},canDoMulticam:canDo});
+        var after = null; try { after = Boolean(clip.multicamEnabled); } catch(eA) {}
+        if (after === null) {
+          return JSON.stringify({success:true,verified:false,enabled:${enabled},canDoMulticam:canDo,before:before,
+            unverifiedReason:'setMulticam() did not throw, but qeClip.multicamEnabled is not readable on this build, so the flag cannot be confirmed.'});
+        }
+        if (after !== ${enabled}) {
+          return JSON.stringify({success:false,verified:true,verifiedBy:'qeClip.multicamEnabled readback',enabled:${enabled},canDoMulticam:canDo,before:before,after:after,changed:before!==after,
+            error:'Multicam still reads ' + String(after) + ' after being set to ${enabled}.'});
+        }
+        return JSON.stringify({success:true,verified:true,verifiedBy:'qeClip.multicamEnabled readback',enabled:${enabled},canDoMulticam:canDo,before:before,after:after,changed:before!==after,
+          note: before === after ? 'The clip was already in this multicam state; nothing changed.' : undefined});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
@@ -20006,8 +20930,12 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(`
       try {
         var newItem = __findProjectItem(${JSON.stringify(newItemId)});
-        if (!newItem) return JSON.stringify({success:false,error:'New item not found'});
+        if (!newItem) return JSON.stringify({success:false,error:'New item not found: ' + ${JSON.stringify(newItemId)}});
+        var oldItem = __findProjectItem(${JSON.stringify(oldItemId)});
+        if (!oldItem) return JSON.stringify({success:false,verified:true,error:'The item to replace is not in this project: ' + ${JSON.stringify(oldItemId)} + '. Nothing was changed. Find the right nodeId with find_project_item_by_name.'});
+        if (String(oldItem.nodeId) === String(newItem.nodeId)) return JSON.stringify({success:false,verified:true,error:'oldProjectItemId and newProjectItemId are the same item, so there is nothing to replace.'});
         var replaced = 0;
+        var targetsFound = 0;
         var failures = [];
         var seqs = ${seqId ? `(function(){ var arr=[]; var ss=app.project.sequences; for(var i=0;i<ss.numSequences;i++){if(ss[i].sequenceID===${JSON.stringify(seqId)})arr.push(ss[i]);} return arr; })()` : `(function(){ var arr=[]; var ss=app.project.sequences; for(var i=0;i<ss.numSequences;i++) arr.push(ss[i]); return arr; })()`};
         for (var s=0;s<seqs.length;s++) {
@@ -20027,6 +20955,7 @@ ${this.buildSequenceResolver(sequenceId)}
                 targets.push(String(clip.start.ticks));
               }
             }
+            targetsFound += targets.length;
             for (var ti2=0; ti2<targets.length; ti2++) {
               var atTicks = targets[ti2];
               // Re-find by start time, because the previous iteration shifted the collection.
@@ -20035,10 +20964,14 @@ ${this.buildSequenceResolver(sequenceId)}
                 if (String(track.clips[c2].start.ticks) === atTicks) { victim = track.clips[c2]; break; }
               }
               if (!victim) { failures.push('no clip at ' + atTicks); continue; }
-              var t = new Time(); t.ticks = atTicks;
+              // NAME COLLISION BUG: this Time object was declared as "var t", which is the
+              // enclosing TRACK loop counter. Assigning a Time to it made the next "t++" NaN,
+              // so the track loop terminated after the first track that had any target — every
+              // later track was silently skipped while the tool reported success.
+              var atTime = new Time(); atTime.ticks = atTicks;
               try {
                 victim.remove(false, false);
-                track.overwriteClip(newItem, t);
+                track.overwriteClip(newItem, atTime);
               } catch (eRep) { failures.push(atTicks + ': ' + eRep.toString()); continue; }
               // Verify the replacement is actually there and references the NEW item.
               var ok = false;
@@ -20052,12 +20985,25 @@ ${this.buildSequenceResolver(sequenceId)}
             }
           }
         }
+        // "replaced > 0 || failures.length === 0" reported a verified SUCCESS when the old item
+        // appeared on no timeline at all: zero targets, zero failures, zero work. Report the
+        // number of targets found separately from the number replaced.
+        if (targetsFound === 0) {
+          return JSON.stringify({
+            success: false, verified: true, verifiedBy: 'walked every video track comparing clip.projectItem.nodeId',
+            replaced: 0, targetsFound: 0, failures: [],
+            oldItemId:${JSON.stringify(oldItemId)}, newItemId:${JSON.stringify(newItemId)},
+            error: 'The item "' + String(oldItem.name) + '" is in the project but is not used on any video track of ' + ${JSON.stringify(seqId ? 'the requested sequence' : 'any sequence')} + ', so nothing was replaced. This tool only replaces TIMELINE clips; to relink the master item itself use relink_media or replace_clip_media.'
+          });
+        }
         return JSON.stringify({
-          success: replaced > 0 || failures.length === 0,
-          verified: true,
-          replaced: replaced, failures: failures,
+          success: replaced === targetsFound,
+          verified: true, verifiedBy: 'each replacement re-read and compared by projectItem.nodeId',
+          replaced: replaced, targetsFound: targetsFound, failures: failures,
           oldItemId:${JSON.stringify(oldItemId)}, newItemId:${JSON.stringify(newItemId)},
-          error: failures.length ? ('Some clips could not be replaced: ' + failures.join(' | ')) : null
+          error: replaced === targetsFound ? null : (replaced === 0
+            ? ('None of the ' + targetsFound + ' clips referencing "' + String(oldItem.name) + '" could be replaced: ' + failures.join(' | '))
+            : ('PARTIALLY APPLIED: ' + replaced + ' of ' + targetsFound + ' clips were replaced. The rest were REMOVED but not overwritten, so those positions are now gaps — undo, or fill them from the source. Details: ' + failures.join(' | ')))
         });
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
@@ -20117,8 +21063,22 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(`
       try {
         var seq = app.project.activeSequence;
-        seq.setZeroPoint(${JSON.stringify(timecode)});
-        return JSON.stringify({success:true,timecode:${JSON.stringify(timecode)},sequenceName:String(seq.name)});
+        if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
+        // Reported success with no readback of any kind. setZeroPoint takes TICKS as a string;
+        // a timecode string is not a tick count, so this call was very likely inert.
+        var before = null; try { before = String(seq.zeroPoint); } catch(eB) {}
+        var setError = null;
+        try { seq.setZeroPoint(${JSON.stringify(timecode)}); } catch(eS) { setError = eS.toString(); }
+        var after = null; try { after = String(seq.zeroPoint); } catch(eA) {}
+        if (after === null) {
+          return JSON.stringify({success:true,verified:false,timecode:${JSON.stringify(timecode)},sequenceName:String(seq.name),before:before,setError:setError,
+            unverifiedReason:'Sequence.zeroPoint is not readable on this build, so the start timecode cannot be confirmed.'});
+        }
+        if (after === before) {
+          return JSON.stringify({success:false,verified:true,verifiedBy:'Sequence.zeroPoint readback',changed:false,timecode:${JSON.stringify(timecode)},sequenceName:String(seq.name),before:before,after:after,setError:setError,
+            error:'The sequence zero point did not move: it still reads ' + after + ' ticks. setZeroPoint() expects a TICK COUNT as a string, not a timecode. Convert with timecode_to_frames and pass ticks, or set the start timecode in the Sequence Settings dialog.'});
+        }
+        return JSON.stringify({success:true,verified:true,verifiedBy:'Sequence.zeroPoint readback',changed:true,timecode:${JSON.stringify(timecode)},sequenceName:String(seq.name),before:before,after:after});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
@@ -20136,7 +21096,16 @@ ${this.buildSequenceResolver(sequenceId)}
         }
         seq.setSelection(toSelect);
         var sel = seq.getSelection();
-        return JSON.stringify({success:true,selected:toSelect.length,verified:sel&&sel.length===toSelect.length});
+        var selCount = sel ? sel.length : 0;
+        if (toSelect.length === 0) {
+          return JSON.stringify({success:true,verified:true,verifiedBy:'Sequence.getSelection() readback',selected:0,matched:0,clipsOnTrack:track.clips.numItems,
+            note:'No clip on video track ${trackIndex} matched the requested range, so the selection was cleared rather than set.'});
+        }
+        if (selCount !== toSelect.length) {
+          return JSON.stringify({success:false,verified:true,verifiedBy:'Sequence.getSelection() readback',matched:toSelect.length,selected:selCount,clipsOnTrack:track.clips.numItems,
+            error:'Premiere reports ' + selCount + ' clips selected after being handed ' + toSelect.length + '. Clips on a locked track are excluded from a selection.'});
+        }
+        return JSON.stringify({success:true,verified:true,verifiedBy:'Sequence.getSelection() readback',selected:selCount,matched:toSelect.length,clipsOnTrack:track.clips.numItems});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }

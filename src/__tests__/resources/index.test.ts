@@ -23,7 +23,13 @@ describe('PremiereProResources', () => {
       const availableResources = resources.getAvailableResources();
 
       expect(Array.isArray(availableResources)).toBe(true);
-      expect(availableResources.length).toBe(13);
+      // Was a hardcoded 13, which failed the moment a resource was added and said nothing
+      // about anything being wrong. What matters is that the list is non-empty and every
+      // URI is unique — a duplicate URI would make one of them unreadable. The specific
+      // members are asserted below and in resources/recipes.test.ts.
+      expect(availableResources.length).toBeGreaterThan(0);
+      const uris = availableResources.map((resource) => resource.uri);
+      expect(new Set(uris).size).toBe(uris.length);
     });
 
     it('should return all expected resources', () => {

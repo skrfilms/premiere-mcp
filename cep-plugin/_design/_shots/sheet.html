@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>state sheet</title>
+<style>
+  html,body{margin:0;background:#000;color:#fff;font:11px/1.3 system-ui,sans-serif}
+  .row{display:grid;align-items:flex-start;gap:10px;padding:10px;justify-content:start}
+  .cellwrap{flex:0 0 auto}
+  .cap{padding:3px 4px 5px;color:#c3c2b7;font:600 11px/1 system-ui;letter-spacing:.02em}
+  iframe{display:block;border:1px solid #555;background:#1a1a19}
+</style>
+</head>
+<body>
+<div class="row" id="row"></div>
+<script>
+var q=new URLSearchParams(location.search);
+var dir=q.get('dir')||'a';
+var W=parseInt(q.get('w')||'300',10);
+var H=parseInt(q.get('h')||'620',10);
+var FILES={a:'../direction-a-stack.html',b:'../direction-b-strip.html',c:'../direction-c-instrument.html'};
+var STATES=['disconnected','starting','connected-idle','processing','error','premiere-not-ready','temp-dir-unset'];
+var COLS=parseInt(q.get('cols')||'7',10);
+var row=document.getElementById('row');
+row.style.gridTemplateColumns='repeat('+COLS+', '+W+'px)';
+STATES.forEach(function(s){
+  var wrap=document.createElement('div'); wrap.className='cellwrap';
+  var cap=document.createElement('div'); cap.className='cap'; cap.textContent=s+'  ·  '+W+'px';
+  var f=document.createElement('iframe');
+  f.width=W; f.height=H; f.src=FILES[dir]+'?bare=1&state='+s;
+  wrap.appendChild(cap); wrap.appendChild(f); row.appendChild(wrap);
+});
+</script>
+</body>
+</html>

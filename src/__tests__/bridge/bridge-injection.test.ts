@@ -47,6 +47,13 @@ const NOT_SCRIPT_BUILDERS = new Set([
   'getTempDir', 'runDiagnostics',
   // CEP JavaScript and Node-side clipboard helpers — not ExtendScript builders
   'executeCepJs', 'readClipboard', 'writeClipboard',
+  // Transport, same category as executeScript/waitForResponse above: these RECEIVE a script and
+  // publish it over one channel or the other. They never build one, so a caller string reaching
+  // them is the script by definition and holding it to the ES3-parse contract would assert that a
+  // transport rejects the payload it was handed. startSocketTransport is excluded for a second
+  // reason as well — it binds a loopback listener, and the sweep would open one per call.
+  'startSocketTransport', 'chooseChannel', 'publishCommand', 'publishOverFileIpc',
+  'getTransportStatus',
 ]);
 
 function payloadRuns(script: string): boolean {

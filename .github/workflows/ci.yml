@@ -1,4 +1,22 @@
-name: CI
+# WHAT THIS WORKFLOW PROVES, AND WHAT IT DOES NOT
+#
+# Proves: the TypeScript compiles, eslint reports no errors, and the
+# host-independent unit suite passes on Node 20 and 22 on Linux. (The lint step is
+# red at time of writing — see the comment above it; that is a real bug in the tree,
+# not a broken workflow.)
+#
+# Does NOT prove: that any tool works against Adobe Premiere Pro. There is no
+# Premiere and no CEP bridge on a GitHub runner. Every suite here uses a stub
+# transport or pure functions; the tools that shell out to ffmpeg/ffprobe/whisper
+# are exercised on their binary-absent error path, which is portable, and the one
+# test that needs a real ffprobe (`footage-index`) skips itself when it is missing.
+# Live verification happens only through scripts/coverage-sweep.mjs against a real
+# host, and its results are not produced or consumed here.
+#
+# The job and step names below are worded to keep that distinction visible in the
+# PR checks list, because "CI passed" on a server whose whole selling point is
+# honest verification must not be readable as "verified against Premiere".
+name: Build & unit tests (no Premiere)
 
 on:
   pull_request:
@@ -13,12 +31,20 @@ concurrency:
 
 jobs:
   build-lint-test:
-    name: Build, lint & test (Node ${{ matrix.node }})
+    name: Build, lint & unit-test — host-independent (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
+    # The suite is single-process by design (--runInBand: several suites write to the
+    # same temp bridge directory) and takes 15-30 minutes.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         node: [20, 22]
+
+    env:
+      # Jest colour codes would land in the log we parse the summary out of.
+      NO_COLOR: '1'
+      FORCE_COLOR: '0'
 
     steps:
       - uses: actions/checkout@v4
@@ -34,12 +60,130 @@ jobs:
       - name: Build (tsc)
         run: npm run build
 
+      # KNOWN RED AS OF 2026-08-25, and deliberately left gating.
+      #
+      # eslint reports two `no-useless-escape` errors in src/tools/index.ts, and they
+      # are not cosmetic. `versionUpSequence` builds ExtendScript in a template literal
+      # containing /(.*[_\-v])(\d+)$/i — but `\d` inside a template literal evaluates to
+      # a bare `d`, so the string handed to Premiere is /(.*[_-v])(d+)$/i. The version
+      # regex matches a literal "d" instead of digits, "SEQ_v001" never matches, and
+      # version_up_sequence appends "_v002" every time instead of incrementing. The fix
+      # is one character (`\\d`), in a file this branch has three people editing.
+      #
+      # This step has been red since the workflow was first added on 2026-08-21, which
+      # is itself the finding: the gate was never actually run. Suppressing the rule to
+      # get a green tick would delete a real bug report, so it stays.
       - name: Lint (eslint)
         run: npm run lint
 
-      # Formatting is not yet enforced tree-wide (53 legacy files predate the
-      # prettier config). New/edited files should pass `npm run format`; a
-      # tree-wide --check gate will be added once the backlog is reformatted.
+      # A REPORT, NOT A GATE. Prettier disagrees with most of the tree (measured
+      # 2026-08-25: 90 of 101 files under src/, ~21,000 changed lines, three quarters
+      # of it in src/tools/index.ts and src/tools/expanded-schemas.ts). Gating on it
+      # would mean landing a 21k-line reformat first, which would bury every real
+      # change in review and invalidate every open branch. So the number is
+      # published on every run and the decision stays with a human. Flip this to
+      # `npm run format:check` once the backlog is cleared.
+      - name: Formatting backlog (report only — does not fail the build)
+        if: always()
+        run: |
+          COUNT=$(npm run --silent format:report | grep -c . || true)
+          TOTAL=$(find src -name '*.ts' | wc -l | tr -d ' ')
+          echo "prettier would rewrite ${COUNT} of ${TOTAL} .ts files under src/"
+          {
+            echo "### Formatting backlog"
+            echo ""
+            echo "prettier would rewrite **${COUNT} of ${TOTAL}** \`.ts\` files under \`src/\`."
+            echo "Not a gate — see the comment in \`.github/workflows/ci.yml\`."
+          } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Test (jest)
-        run: npm test -- --runInBand --ci --testTimeout=60000
+      # THE JEST EXIT CODE IS NOT TRUSTED HERE.
+      #
+      # A commit landed on this branch with red tests while the run that produced it
+      # reported success. Whatever the cause (a wrapper swallowing the status, a
+      # reporter crash after the failures were printed), the lesson is that the exit
+      # code is one signal and the printed summary is another, and they have already
+      # disagreed once. This step requires BOTH, and additionally requires the run to
+      # be non-vacuous: a green "0 tests ran" is the same lie in a different costume.
+      #
+      # Expected suite count is derived from the filesystem, never hardcoded — a
+      # hardcoded total is precisely how `total_tools: 600` outlived a 638-tool build.
+      - name: Unit tests (stub transport — no Premiere, no CEP bridge)
+        shell: bash
+        run: |
+          # errexit OFF on purpose: a non-zero jest must reach the parser below rather
+          # than aborting the step, or we are back to trusting the exit code alone.
+          set +e
+          set -uo pipefail
+
+          EXPECTED_SUITES=$(find src -name '*.test.ts' | wc -l | tr -d ' ')
+          echo "expecting $EXPECTED_SUITES test suites on disk"
+
+          npm test -- --runInBand --ci --testTimeout=60000 > jest.log 2>&1
+          JEST_EXIT=$?
+
+          echo "----- last 120 lines of jest output -----"
+          tail -n 120 jest.log
+
+          fail() {
+            echo "::error::$1"
+            echo "----- FAIL lines -----"
+            grep -aE '^[[:space:]]*(FAIL |●)' jest.log | head -n 60
+            exit 1
+          }
+
+          SUITES_LINE=$(grep -aoE 'Test Suites:.*' jest.log | tail -n 1 || true)
+          TESTS_LINE=$(grep -aoE 'Tests:[[:space:]]+[0-9].*' jest.log | tail -n 1 || true)
+
+          echo "jest exit code : $JEST_EXIT"
+          echo "summary        : ${SUITES_LINE:-<none>} | ${TESTS_LINE:-<none>}"
+
+          # 1. The summary must exist. No summary means jest died mid-run, and a
+          #    truncated run with a zero exit is exactly the failure mode this guards.
+          [ -n "$SUITES_LINE" ] || fail "jest printed no 'Test Suites:' summary — the run did not finish"
+          [ -n "$TESTS_LINE" ] || fail "jest printed no 'Tests:' summary — the run did not finish"
+
+          # 2. Neither summary line may mention a failure, and no suite may print FAIL.
+          case "$SUITES_LINE" in *failed*) fail "failing test suites: $SUITES_LINE" ;; esac
+          case "$TESTS_LINE" in *failed*) fail "failing tests: $TESTS_LINE" ;; esac
+          if grep -aqE '^[[:space:]]*FAIL ' jest.log; then fail "jest printed at least one FAIL line"; fi
+
+          # 3. Every suite on disk must have run and passed. Catches a suite that
+          #    fails to load (jest reports it, but a filtered run would not).
+          SUITES_PASSED=$(printf '%s' "$SUITES_LINE" | sed -nE 's/.*[^0-9]([0-9]+) passed.*/\1/p')
+          SUITES_TOTAL=$(printf '%s' "$SUITES_LINE" | sed -nE 's/.*[^0-9]([0-9]+) total.*/\1/p')
+          TESTS_PASSED=$(printf '%s' "$TESTS_LINE" | sed -nE 's/.*[^0-9]([0-9]+) passed.*/\1/p')
+
+          [ "${SUITES_TOTAL:-0}" = "$EXPECTED_SUITES" ] \
+            || fail "jest ran ${SUITES_TOTAL:-0} suites but $EXPECTED_SUITES *.test.ts files exist on disk"
+          [ "${SUITES_PASSED:-0}" = "${SUITES_TOTAL:-0}" ] \
+            || fail "only ${SUITES_PASSED:-0} of ${SUITES_TOTAL:-0} suites passed"
+
+          # 4. Non-vacuous. `skipped` is allowed (footage-index skips without ffprobe);
+          #    zero passing tests is not.
+          [ "${TESTS_PASSED:-0}" -gt 0 ] \
+            || fail "0 tests passed — a green run that asserted nothing"
+
+          # 5. Only now is the exit code allowed to have an opinion.
+          [ "$JEST_EXIT" -eq 0 ] \
+            || fail "summary looks clean but jest exited $JEST_EXIT — trust the exit code and investigate"
+
+          {
+            echo "### Unit tests (Node ${{ matrix.node }}) — no Premiere involved"
+            echo ""
+            echo "- \`$SUITES_LINE\`"
+            echo "- \`$TESTS_LINE\`"
+            echo "- suites on disk: $EXPECTED_SUITES (all ran)"
+            echo "- jest exit code: $JEST_EXIT"
+            echo ""
+            echo "Proves the build compiles and the host-independent suites pass."
+            echo "Proves **nothing** about behaviour against a live Adobe Premiere Pro."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload jest log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jest-log-node${{ matrix.node }}
+          path: jest.log
+          if-no-files-found: warn
+          retention-days: 14

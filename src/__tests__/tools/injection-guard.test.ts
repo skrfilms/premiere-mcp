@@ -285,9 +285,12 @@ describe('generated scripts cannot be broken out of', () => {
     expect(checked).toBeGreaterThan(900);
     expect([...new Set(escaped)]).toEqual([]);
     expect([...new Set(unparseable)]).toEqual([]);
-    // Budget raised from 600s. This sweep is O(tools x string positions x payloads) and has crept
-    // 537s -> 549s -> over 600s as the catalogue grew; one added tool tipped it. Raising the ceiling
-    // is right rather than trimming coverage, but if it approaches this again the sweep needs to get
-    // cheaper (sample payloads per position) rather than get another raise.
-  }, 900_000);
+    // Budget crept 537s -> 549s -> 600s -> 966s (standalone) as the catalogue grew. For a
+    // SECURITY sweep, full coverage beats speed, so the ceiling is raised again rather than
+    // trimming payloads/positions. The real lever is NOT another raise or thinner coverage:
+    // each of the O(tools x positions x payloads) iterations calls executeTool, which rebuilds
+    // the ~600-tool schema registry from scratch. Memoizing that registry (production side,
+    // infra-owned) makes the whole sweep cheap without touching what it checks. Do that before
+    // the next raise.
+  }, 1_500_000);
 });

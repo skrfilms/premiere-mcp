@@ -12,6 +12,13 @@ import { promises as fs } from 'fs';
 import { extname, join } from 'path';
 import { createSecureTempDir, validateFilePath } from '../utils/security.js';
 import type { PremiereProTransport } from './types.js';
+import {
+  BridgeSocketTransport,
+  BRIDGE_PROTOCOL_VERSION,
+  type LatencyStats,
+  type PanelHandshake,
+  type SocketCommandType,
+} from './socket-transport.js';
 
 const UNSUPPORTED_MODAL_PRONE_IMPORT_EXTENSIONS = new Set([
   '.ass',
@@ -646,11 +653,34 @@ export class PremiereProBridge implements PremiereProTransport {
   private sessionId: string;
   /** Per-session token the panel must echo on every command. Null when it could not be written. */
   private authToken: string | null = null;
+  /**
+   * Push channel to the panel. Null until initialize() binds it, and null forever when the
+   * operator pinned the transport to file IPC or the listener could not be bound.
+   */
+  private socket: BridgeSocketTransport | null = null;
+  /**
+   * Operator override, from PREMIERE_MCP_TRANSPORT:
+   *   auto (default)  socket when a panel is connected, file IPC otherwise
+   *   file            never bind a listener (no port, no firewall prompt)
+   *   socket          refuse to publish over file IPC at all, and say so
+   * Configurable rather than hardcoded because a peer bridge reports Premiere dying on the first
+   * inbound socket command on some Windows builds (docs/INTERNAL-PLAN.md, Tier 0 risks). That report
+   * is unverified, which is a reason to leave an escape hatch, not a reason to default to file.
+   */
+  private readonly transportPreference: 'auto' | 'file' | 'socket';
+  /**
+   * Publication counters. These exist so the exactly-one-channel invariant is OBSERVABLE rather
+   * than asserted in a comment: every command increments exactly one of the first two.
+   */
+  private readonly publications = { socket: 0, file: 0, refusedAfterPublish: 0 };
 
   constructor() {
     this.logger = new Logger('PremiereProBridge');
     this.communicationMethod = 'file'; // Default to file-based communication
     this.sessionId = randomUUID();
+    const preference = (process.env.PREMIERE_MCP_TRANSPORT || 'auto').trim().toLowerCase();
+    this.transportPreference =
+      preference === 'file' || preference === 'socket' ? preference : 'auto';
     // Use PREMIERE_TEMP_DIR if set (same path as UXP plugin "Temp Directory"), else session-specific
     const envDir = process.env.PREMIERE_TEMP_DIR;
     this.usesExternalTempDir = Boolean(envDir);
@@ -716,6 +746,9 @@ export class PremiereProBridge implements PremiereProTransport {
 
       await this.sweepStaleCommands();
       await this.writeAuthToken();
+      // After the token, never before: the socket publishes that same token in its endpoint file,
+      // so binding first would advertise a port with a null token and force the panel to reconnect.
+      await this.startSocketTransport();
       this.logger.debug(`Secure temp directory ready: ${this.tempDir}`);
     } catch (error) {
       this.logger.error('Failed to create temp directory:', error);
@@ -784,6 +817,237 @@ export class PremiereProBridge implements PremiereProTransport {
       this.logger.warn(`Could not write auth token, continuing without it: ${error}`);
       this.authToken = null;
     }
+  }
+
+  /**
+   * Bind the loopback push channel, unless the operator pinned the transport to file IPC.
+   *
+   * Failure here is never fatal. A machine that will not give us a loopback listener still gets a
+   * working bridge over the 250ms file poll — trading a latency improvement for a total outage
+   * would be a poor bargain, and an unavailable socket is reported rather than hidden
+   * (see getTransportStatus).
+   */
+  private async startSocketTransport(): Promise<void> {
+    if (this.transportPreference === 'file') {
+      this.logger.info('PREMIERE_MCP_TRANSPORT=file: not binding a WebSocket listener');
+      return;
+    }
+    const transport = new BridgeSocketTransport({
+      tempDir: this.tempDir,
+      token: this.authToken,
+      sessionId: this.sessionId,
+      logger: this.logger,
+    });
+    const started = await transport.start();
+    if (started === null) {
+      if (this.transportPreference === 'socket') {
+        // Pinned to socket and the listener would not bind. Refuse loudly rather than quietly
+        // using the channel the operator ruled out.
+        throw new Error(
+          'PREMIERE_MCP_TRANSPORT=socket was requested but the loopback WebSocket listener could ' +
+          'not be bound, and file IPC was ruled out by that setting. Unset PREMIERE_MCP_TRANSPORT ' +
+          'to allow the file fallback.',
+        );
+      }
+      return;
+    }
+    this.socket = transport;
+  }
+
+  /**
+   * Pick the ONE channel this command will be published to.
+   *
+   * Publishing a command to both channels would hand the panel two copies of the same work, and a
+   * second `insertClip` is not a slow edit, it is a wrong one. So this returns a single channel and
+   * the callers below publish to exactly that.
+   *
+   * `not-published` from the socket is the one case where a second attempt is legitimate: it means
+   * nothing reached the wire, so the command has still been published exactly once when it goes out
+   * over file IPC.
+   */
+  private chooseChannel(commandType: SocketCommandType): { channel: 'socket' | 'file'; reason: string } {
+    if (this.transportPreference === 'file') return { channel: 'file', reason: 'PREMIERE_MCP_TRANSPORT=file' };
+    if (this.socket === null) return { channel: 'file', reason: 'no socket listener is bound' };
+    if (!this.socket.isPanelReady()) return { channel: 'file', reason: 'no panel is connected to the socket' };
+    if (!this.socket.supportsFeature(commandType)) {
+      return {
+        channel: 'file',
+        reason: `the connected panel did not announce the "${commandType}" feature`,
+      };
+    }
+    return { channel: 'socket', reason: 'a handshaken panel is connected' };
+  }
+
+  /**
+   * Publish one command and wait for its result, over exactly one channel.
+   *
+   * Returns the panel's result, or throws. The throw from a PUBLISHED socket command is never
+   * followed by a file-IPC retry: see the socket-transport module header for why that matters more
+   * than the latency this whole channel exists to save.
+   */
+  private async publishCommand(
+    commandId: string,
+    commandType: SocketCommandType,
+    script: string,
+    timeoutMs: number | undefined,
+    mutating: boolean,
+  ): Promise<any> {
+    const effectiveTimeout = timeoutMs ?? 60000;
+    const decision = this.chooseChannel(commandType);
+
+    if (decision.channel === 'socket' && this.socket !== null) {
+      const outcome = await this.socket.publish(
+        { id: commandId, commandType, script, timeoutMs, mutating },
+        effectiveTimeout,
+      );
+
+      if (outcome.status === 'ok') {
+        this.publications.socket += 1;
+        return outcome.result;
+      }
+
+      if (outcome.status === 'failed') {
+        // Published. The command is finished as far as this server is concerned, whatever state the
+        // project is in — and the error text says so.
+        this.publications.socket += 1;
+        if (outcome.mayHavePartiallyApplied) this.publications.refusedAfterPublish += 1;
+        throw outcome.error;
+      }
+
+      // not-published: the panel vanished between the decision and the send, so nothing reached the
+      // wire. This is the ONLY path that continues to a second channel.
+      this.logger.warn(
+        `Socket publish declined (${outcome.reason}); publishing over file IPC instead. ` +
+        'Nothing was sent over the socket, so this command is still published exactly once.',
+      );
+      if (this.transportPreference === 'socket') {
+        throw new Error(
+          `PREMIERE_MCP_TRANSPORT=socket was requested but the command could not be published over ` +
+          `the socket (${outcome.reason}), and that setting rules out file IPC. Nothing was sent. ` +
+          'Open the MCP Bridge (CEP) panel and start it, or unset PREMIERE_MCP_TRANSPORT.',
+        );
+      }
+    } else if (this.transportPreference === 'socket') {
+      throw new Error(
+        `PREMIERE_MCP_TRANSPORT=socket was requested but ${decision.reason}, and that setting rules ` +
+        'out file IPC. Nothing was sent. Open the MCP Bridge (CEP) panel and start it, or unset ' +
+        'PREMIERE_MCP_TRANSPORT.',
+      );
+    }
+
+    this.publications.file += 1;
+    return await this.publishOverFileIpc(commandId, commandType, script, timeoutMs, effectiveTimeout);
+  }
+
+  /**
+   * The original transport: write `command-<uuid>.json`, wait for `response-<uuid>.json`.
+   *
+   * Unchanged in behaviour — the atomic write-then-rename, the token, and the cleanup on every exit
+   * path are all load-bearing and documented where they happen.
+   */
+  private async publishOverFileIpc(
+    commandId: string,
+    commandType: SocketCommandType,
+    script: string,
+    timeoutMs: number | undefined,
+    effectiveTimeout: number,
+  ): Promise<any> {
+    const commandFile = join(this.tempDir, `command-${commandId}.json`);
+    const responseFile = join(this.tempDir, `response-${commandId}.json`);
+    // Declared out here so the finally below can remove it: if rename() fails the
+    // scratch file is still on disk, and nothing else ever matches that name.
+    const commandStaging = join(this.tempDir, `.tmp-${commandId}.json`);
+
+    try {
+      // Write command to file. Include timeoutMs so the CEP/UXP panel can extend its own
+      // execution watchdog to match — otherwise the panel's default (45s) kills long batch
+      // scripts well before the server's own timeout elapses.
+      //
+      // Written to a scratch name and renamed into place, because the panel polls this
+      // directory and picks up anything matching command-*.json the moment it appears. A
+      // plain write publishes the filename before the content is complete, so the panel
+      // can read a truncated command, fail to parse it, and — since its parse failure path
+      // writes an error response and deletes the command — turn a transient race into a
+      // permanent spurious failure with no retry. rename() within one directory is atomic,
+      // so the file becomes visible only once it is whole.
+      //
+      // The scratch name must not itself look like a command to the panel, which matches on
+      // a "command-" prefix; a leading dot keeps it out of that test.
+      const payload: Record<string, unknown> = {
+        id: commandId,
+        script,
+        timeoutMs: timeoutMs,
+        // Echoed from auth-token.json. The panel rejects a mismatched token when that file exists,
+        // so a process that can write to this directory but has not read the token cannot inject a
+        // command. See setupTempDirectory for the honest limits of that guarantee.
+        token: this.authToken,
+        timestamp: new Date().toISOString(),
+      };
+      // The panel branches on `type` and only knows one value for it; an ExtendScript command has
+      // carried no type since the beginning, so adding one now would be a wire change for nothing.
+      if (commandType === 'cep_js') payload['type'] = 'cep_js';
+      await fs.writeFile(commandStaging, JSON.stringify(payload));
+      await fs.rename(commandStaging, commandFile);
+
+      // Wait for response (in a real implementation, this would be handled by the UXP plugin).
+      // Batch operations pass a larger timeout because a single round-trip does the work of
+      // dozens of individual calls inside one ExtendScript pass.
+      return await this.waitForResponse(responseFile, effectiveTimeout, commandId);
+    } finally {
+      // Cleanup has to run on the failure path too. Previously it sat after the await, so a
+      // timeout skipped it entirely and left the command file behind for the panel to pick
+      // up and execute long after the caller had given up on it.
+      //
+      // One case this does not close: when the panel is merely slow, the response file is
+      // written after this has already run, so it stays until the directory is cleaned. The
+      // command file is the one that matters here, because a stale command still executes.
+      await fs.unlink(commandStaging).catch(() => {});
+      await fs.unlink(commandFile).catch(() => {});
+      await fs.unlink(responseFile).catch(() => {});
+    }
+  }
+
+  /**
+   * What the transport is actually doing, with measured numbers rather than claims.
+   *
+   * `latency` is real round-trip timing (publish -> response) taken from a monotonic clock on this
+   * side and including the panel's own execution time, because that is what a caller waits for. When
+   * no command has completed over the socket, every field is null — an unmeasured latency is
+   * reported as unmeasured, not as zero.
+   */
+  getTransportStatus(): {
+    preference: 'auto' | 'file' | 'socket';
+    activeChannel: 'socket' | 'file';
+    activeChannelReason: string;
+    protocolVersion: string;
+    socket: {
+      listening: boolean;
+      port: number | null;
+      endpointFile: string | null;
+      panelConnected: boolean;
+      handshake: PanelHandshake | null;
+      inFlight: number;
+      latency: LatencyStats | null;
+    };
+    publications: { socket: number; file: number; refusedAfterPublish: number };
+  } {
+    const decision = this.chooseChannel('extendscript');
+    return {
+      preference: this.transportPreference,
+      activeChannel: decision.channel,
+      activeChannelReason: decision.reason,
+      protocolVersion: BRIDGE_PROTOCOL_VERSION,
+      socket: {
+        listening: this.socket !== null && this.socket.listeningPort() !== null,
+        port: this.socket ? this.socket.listeningPort() : null,
+        endpointFile: this.socket ? join(this.tempDir, 'bridge-endpoint.json') : null,
+        panelConnected: this.socket ? this.socket.isPanelReady() : false,
+        handshake: this.socket ? this.socket.handshake() : null,
+        inFlight: this.socket ? this.socket.inFlight() : 0,
+        latency: this.socket ? this.socket.latency() : null,
+      },
+      publications: { ...this.publications },
+    };
   }
 
   private async detectPremiereProInstallation(): Promise<void> {
@@ -910,28 +1174,18 @@ export class PremiereProBridge implements PremiereProTransport {
       throw new Error('Bridge not initialized. Call initialize() first.');
     }
     const commandId = randomUUID();
-    const commandFile = join(this.tempDir, `command-${commandId}.json`);
-    const responseFile = join(this.tempDir, `response-${commandId}.json`);
-    const commandStaging = join(this.tempDir, `.tmp-${commandId}.json`);
     try {
-      await fs.writeFile(commandStaging, JSON.stringify({
-        id: commandId,
-        type: 'cep_js',
-        script,
-        timeoutMs,
-        // The cep_js path needs the token as much as the ExtendScript one — arguably more, since it
-        // runs in the panel's own JS context with window and filesystem reach. An authenticated
-        // ExtendScript channel beside an unauthenticated CEP one would be no protection at all.
-        token: this.authToken,
-        timestamp: new Date().toISOString()
-      }));
-      await fs.rename(commandStaging, commandFile);
-      return await this.waitForResponse(responseFile, timeoutMs, commandId);
+      // The cep_js path needs the token as much as the ExtendScript one — arguably more, since it
+      // runs in the panel's own JS context with window and filesystem reach. An authenticated
+      // ExtendScript channel beside an unauthenticated CEP one would be no protection at all. Both
+      // channels carry it: the socket in its hello, the file in the command payload.
+      //
+      // Treated as mutating: panel-context JavaScript can do anything, so its half-applied state is
+      // not something this server can reason about.
+      return await this.publishCommand(commandId, 'cep_js', script, timeoutMs, true);
     } catch (error) {
       this.logger.error(`Failed to execute CEP JS: ${error}`);
       throw error;
-    } finally {
-      await fs.unlink(commandFile).catch(() => {});
     }
   }
 
@@ -941,59 +1195,17 @@ export class PremiereProBridge implements PremiereProTransport {
     }
 
     const commandId = randomUUID();
-    const commandFile = join(this.tempDir, `command-${commandId}.json`);
-    const responseFile = join(this.tempDir, `response-${commandId}.json`);
-    // Declared out here so the finally below can remove it: if rename() fails the
-    // scratch file is still on disk, and nothing else ever matches that name.
-    const commandStaging = join(this.tempDir, `.tmp-${commandId}.json`);
 
     try {
       const fullScript = this.buildExecutableScript(script, callerAuthored);
-
-      // Write command to file. Include timeoutMs so the CEP/UXP panel can extend its own
-      // execution watchdog to match — otherwise the panel's default (45s) kills long batch
-      // scripts well before the server's own timeout elapses.
-      //
-      // Written to a scratch name and renamed into place, because the panel polls this
-      // directory and picks up anything matching command-*.json the moment it appears. A
-      // plain write publishes the filename before the content is complete, so the panel
-      // can read a truncated command, fail to parse it, and — since its parse failure path
-      // writes an error response and deletes the command — turn a transient race into a
-      // permanent spurious failure with no retry. rename() within one directory is atomic,
-      // so the file becomes visible only once it is whole.
-      //
-      // The scratch name must not itself look like a command to the panel, which matches on
-      // a "command-" prefix; a leading dot keeps it out of that test.
-      await fs.writeFile(commandStaging, JSON.stringify({
-        id: commandId,
-        script: fullScript,
-        timeoutMs: timeoutMs,
-        // Echoed from auth-token.json. The panel rejects a mismatched token when that file exists,
-        // so a process that can write to this directory but has not read the token cannot inject a
-        // command. See setupTempDirectory for the honest limits of that guarantee.
-        token: this.authToken,
-        timestamp: new Date().toISOString()
-      }));
-      await fs.rename(commandStaging, commandFile);
-
-      // Wait for response (in a real implementation, this would be handled by the UXP plugin).
-      // Batch operations pass a larger timeout because a single round-trip does the work of
-      // dozens of individual calls inside one ExtendScript pass.
-      return await this.waitForResponse(responseFile, timeoutMs, commandId);
+      // Every generated script in this catalogue is treated as potentially mutating. There is no
+      // reliable way to prove a given ExtendScript body is read-only by inspecting it, and guessing
+      // wrong in the permissive direction would downgrade a "may have partially applied" warning on
+      // a real edit into a shrug about a read.
+      return await this.publishCommand(commandId, 'extendscript', fullScript, timeoutMs, true);
     } catch (error) {
       this.logger.error(`Failed to execute script: ${error}`);
       throw error;
-    } finally {
-      // Cleanup has to run on the failure path too. Previously it sat after the await, so a
-      // timeout skipped it entirely and left the command file behind for the panel to pick
-      // up and execute long after the caller had given up on it.
-      //
-      // One case this does not close: when the panel is merely slow, the response file is
-      // written after this has already run, so it stays until the directory is cleaned. The
-      // command file is the one that matters here, because a stale command still executes.
-      await fs.unlink(commandStaging).catch(() => {});
-      await fs.unlink(commandFile).catch(() => {});
-      await fs.unlink(responseFile).catch(() => {});
     }
   }
 
@@ -2112,7 +2324,18 @@ export class PremiereProBridge implements PremiereProTransport {
     if (this.uxpProcess) {
       this.uxpProcess.kill();
     }
-    
+
+    // Before the directory goes, so the endpoint file is retired and anything still in flight is
+    // answered with the truth rather than left hanging on a listener that no longer exists.
+    if (this.socket) {
+      try {
+        await this.socket.stop();
+      } catch (error) {
+        this.logger.warn('Failed to stop the WebSocket transport:', error);
+      }
+      this.socket = null;
+    }
+
     // Only remove temp dirs created by this server. The shared bridge directory is
     // configured externally and should persist across restarts.
     try {

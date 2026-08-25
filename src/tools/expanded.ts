@@ -2031,10 +2031,12 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           var targetTrack = targetCollection[Number(args.track_index || args.trackIndex || 0)];
           if (!targetTrack || !targetTrack.setTargeted) return fail("Track targeting API unavailable");
           var wantTargeted = Boolean(args.targeted !== false);
+          var wasTargeted = null; try { wasTargeted = Boolean(targetTrack.isTargeted()); } catch (eTgPre) {}
           targetTrack.setTargeted(wantTargeted, true);
           var gotTargeted = null; try { gotTargeted = targetTrack.isTargeted(); } catch (eTg) {}
-          if (gotTargeted !== null && Boolean(gotTargeted) !== wantTargeted) return fail("Premiere did not change the track targeting.", { requested: wantTargeted, actual: Boolean(gotTargeted) });
-          return ok({ targeted: wantTargeted, verified: gotTargeted !== null });
+          if (gotTargeted !== null && Boolean(gotTargeted) !== wantTargeted) return fail("Premiere did not change the track targeting.", { requested: wantTargeted, actual: Boolean(gotTargeted), before: wasTargeted, verified: true });
+          if (gotTargeted === null) return ok({ targeted: wantTargeted, before: wasTargeted, verified: false, unverifiedReason: "setTargeted() did not throw, but isTargeted() is not readable on this build, so the targeting cannot be confirmed." });
+          return ok({ targeted: wantTargeted, before: wasTargeted, changed: wasTargeted !== Boolean(gotTargeted), verified: true, verifiedBy: "Track.isTargeted() readback" });
 
         case "rename_track":
           var seqErr = sequenceRequestError();
@@ -2168,17 +2170,28 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
         case "set_scratch_disk_path":
         case "set_project_scratch_disk":
           if (!app.project || !app.project.setScratchDiskPath) return fail("app.project.setScratchDiskPath is unavailable");
-          app.project.setScratchDiskPath(String(args.type || args.scratchDiskType || "Video Preview"), String(args.path || args.directory || ""));
-          return ok({ type: String(args.type || args.scratchDiskType || "Video Preview"), path: String(args.path || args.directory || "") });
+          var scratchType = String(args.type || args.scratchDiskType || "Video Preview");
+          var scratchPath = String(args.path || args.directory || "");
+          if (!scratchPath) return fail("No scratch disk path was supplied, so nothing was changed.");
+          var scratchDir = new Folder(scratchPath);
+          if (!scratchDir.exists) return fail("The scratch disk path does not exist: " + scratchPath + ". Premiere silently ignores a scratch path it cannot reach, so this refuses before writing rather than reporting a success it cannot prove.", { path: scratchPath });
+          var scratchBefore = null; try { scratchBefore = String(app.project.getScratchDiskPath(scratchType)); } catch (eScrPre) {}
+          app.project.setScratchDiskPath(scratchType, scratchPath);
+          var scratchAfter = null; try { scratchAfter = String(app.project.getScratchDiskPath(scratchType)); } catch (eScrPost) {}
+          if (scratchAfter === null) return ok({ type: scratchType, path: scratchPath, before: scratchBefore, verified: false, unverifiedReason: "setScratchDiskPath() did not throw, but getScratchDiskPath() is not readable on this build, so the path cannot be confirmed." });
+          if (scratchAfter !== scratchPath) return fail("The scratch disk for " + scratchType + " still reads " + scratchAfter + " rather than the requested path.", { type: scratchType, requested: scratchPath, actual: scratchAfter, before: scratchBefore, verified: true });
+          return ok({ type: scratchType, path: scratchPath, before: scratchBefore, changed: scratchBefore !== scratchAfter, verified: true, verifiedBy: "app.project.getScratchDiskPath() readback" });
 
         case "set_offline":
           var offlineItem = findItem(args.projectItemId || args.itemId || args.item_id);
           if (!offlineItem) return fail("Project item not found");
+          var offlineWas = null; try { offlineWas = Boolean(offlineItem.isOffline()); } catch (eOffPre) {}
           var offlineResult = tryCall(offlineItem, ["setOffline", "makeOffline"], []);
           if (!offlineResult.called) return fail(offlineResult.error, { available: false });
           var offlineNow = null; try { offlineNow = offlineItem.isOffline(); } catch (eOff) {}
-          if (offlineNow !== null && Boolean(offlineNow) !== true) return fail("Premiere did not take '" + offlineItem.name + "' offline (still reads online).", { requested: true, actual: Boolean(offlineNow) });
-          return ok({ offline: true, verified: offlineNow !== null, item: offlineItem.name, method: offlineResult.method });
+          if (offlineNow !== null && Boolean(offlineNow) !== true) return fail("Premiere did not take '" + offlineItem.name + "' offline (still reads online).", { requested: true, actual: Boolean(offlineNow), before: offlineWas, verified: true });
+          if (offlineNow === null) return ok({ offline: true, item: offlineItem.name, method: offlineResult.method, before: offlineWas, verified: false, unverifiedReason: "The offline call did not throw, but isOffline() is not readable for this item, so the offline state cannot be confirmed." });
+          return ok({ offline: true, item: offlineItem.name, method: offlineResult.method, before: offlineWas, changed: offlineWas !== true, verified: true, verifiedBy: "ProjectItem.isOffline() readback", note: offlineWas === true ? "This item was already offline; nothing changed." : undefined });
 
         case "has_proxy":
           var proxyCheckItem = findItem(args.projectItemId || args.itemId || args.item_id);
@@ -2189,14 +2202,16 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
         case "detach_proxy":
           var proxyItem = findItem(args.projectItemId || args.itemId || args.item_id);
           if (!proxyItem) return fail("Project item not found");
+          var proxyHadBefore = null; try { if (proxyItem.hasProxy) proxyHadBefore = Boolean(proxyItem.hasProxy()); } catch (eProxPre) {}
           var detachResult = tryCall(proxyItem, ["detachProxy", "clearProxy"], []);
           if (!detachResult.called && proxyItem.attachProxy) {
             try { proxyItem.attachProxy("", 0); detachResult = { called: true, method: "attachProxy(empty)" }; } catch (proxyError) { detachResult = { called: false, error: proxyError.toString() }; }
           }
           if (!detachResult.called) return fail(detachResult.error, { available: false });
           var proxyStillThere = null; try { if (proxyItem.hasProxy) proxyStillThere = proxyItem.hasProxy(); } catch (eProx) {}
-          if (proxyStillThere === true) return fail("Premiere did not detach the proxy from '" + proxyItem.name + "' (still reports a proxy).", { hasProxy: true });
-          return ok({ detached: true, verified: proxyStillThere === false, item: proxyItem.name, method: detachResult.method });
+          if (proxyStillThere === true) return fail("Premiere did not detach the proxy from '" + proxyItem.name + "' (still reports a proxy).", { hasProxy: true, before: proxyHadBefore, verified: true });
+          if (proxyStillThere === null) return ok({ detached: true, item: proxyItem.name, method: detachResult.method, before: proxyHadBefore, verified: false, unverifiedReason: "The detach call did not throw, but hasProxy() is not available on this item, so the detach cannot be confirmed." });
+          return ok({ detached: true, item: proxyItem.name, method: detachResult.method, before: proxyHadBefore, changed: proxyHadBefore === true, verified: true, verifiedBy: "ProjectItem.hasProxy() readback", note: proxyHadBefore === false ? "This item had no proxy attached, so there was nothing to detach." : undefined });
 
         case "set_override_frame_rate":
         case "set_override_pixel_aspect_ratio":
@@ -2468,8 +2483,9 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
               }
             }
           }
-          if (owTrack && !owPlaced) return fail("Premiere reported overwriteClip() but '" + overwriteItem.name + "' is not the clip covering " + owTargetTime + "s on the target track.", { verified: false });
-          return ok({ overwritten: true, verified: owTrack ? true : false, item: overwriteItem.name, time: owTargetTime });
+          if (owTrack && !owPlaced) return fail("Premiere reported overwriteClip() but '" + overwriteItem.name + "' is not the clip covering " + owTargetTime + "s on the target track.", { verified: true });
+          if (!owTrack) return ok({ overwritten: true, item: overwriteItem.name, time: owTargetTime, verified: false, unverifiedReason: "Video track " + owVideoIdx + " is outside this sequence's track count, so the placed clip could not be read back. overwriteClip() may have created the track, or done nothing." });
+          return ok({ overwritten: true, item: overwriteItem.name, time: owTargetTime, verified: true, verifiedBy: "clip covering the target time compared by projectItem.nodeId" });
 
         case "create_sequence_from_clips":
           if (!app.project || !app.project.createNewSequenceFromClips) return fail("app.project.createNewSequenceFromClips is unavailable");
@@ -2519,14 +2535,16 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           var zeroSeq = targetSequence();
           if (!zeroSeq) return fail("No sequence found");
           var zeroTicks = secondsToTicks(args.time || args.seconds || 0);
+          var zeroBefore = null; try { zeroBefore = ticksToSeconds(zeroSeq.zeroPoint); } catch (eZeroPre) {}
           var zeroResult = tryCall(zeroSeq, ["setZeroPoint"], [zeroTicks]);
           if (!zeroResult.called) {
             try { zeroSeq.zeroPoint = zeroTicks; zeroResult = { called: true, method: "zeroPoint" }; } catch (zeroError) { zeroResult = { called: false, error: zeroError.toString() }; }
           }
           if (!zeroResult.called) return fail(zeroResult.error, { available: false });
           var zeroReadback = null; try { zeroReadback = ticksToSeconds(zeroSeq.zeroPoint); } catch (eZero) {}
-          if (zeroReadback !== null && Math.abs(zeroReadback - Number(args.time || args.seconds || 0)) > 0.01) return fail("Premiere did not move the zero point (reads back as " + zeroReadback + "s, requested " + Number(args.time || args.seconds || 0) + "s).", { actual: zeroReadback, requested: Number(args.time || args.seconds || 0) });
-          return ok({ zeroPointSeconds: Number(args.time || args.seconds || 0), verified: zeroReadback !== null, method: zeroResult.method });
+          if (zeroReadback !== null && Math.abs(zeroReadback - Number(args.time || args.seconds || 0)) > 0.01) return fail("Premiere did not move the zero point (reads back as " + zeroReadback + "s, requested " + Number(args.time || args.seconds || 0) + "s).", { actual: zeroReadback, requested: Number(args.time || args.seconds || 0), before: zeroBefore, verified: true });
+          if (zeroReadback === null) return ok({ zeroPointSeconds: Number(args.time || args.seconds || 0), method: zeroResult.method, before: zeroBefore, verified: false, unverifiedReason: "The zero-point write did not throw, but Sequence.zeroPoint is not readable on this build, so it cannot be confirmed." });
+          return ok({ zeroPointSeconds: Number(args.time || args.seconds || 0), method: zeroResult.method, before: zeroBefore, changed: zeroBefore !== zeroReadback, verified: true, verifiedBy: "Sequence.zeroPoint readback", note: zeroBefore === zeroReadback ? "The zero point was already here; nothing changed." : undefined });
 
         case "scene_edit_detection":
           var seqErr = sequenceRequestError();
@@ -2757,8 +2775,11 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
             try { allTargetSeq.audioTracks[ata].setTargeted(wantAllTargeted, true); } catch (e) {}
             try { if (Boolean(allTargetSeq.audioTracks[ata].isTargeted()) === wantAllTargeted) atMatched++; else atMismatched++; } catch (e) {}
           }
-          if (atMatched === 0 && atMismatched > 0) return fail("Premiere did not change targeting on any track.", { requested: wantAllTargeted, mismatched: atMismatched });
-          return ok({ targeted: wantAllTargeted, verified: atMismatched === 0, matched: atMatched, mismatched: atMismatched, videoTracks: allTargetSeq.videoTracks.numTracks, audioTracks: allTargetSeq.audioTracks.numTracks });
+          if (atMatched === 0 && atMismatched > 0) return fail("Premiere did not change targeting on any track.", { requested: wantAllTargeted, mismatched: atMismatched, verified: true });
+          var atTotal = allTargetSeq.videoTracks.numTracks + allTargetSeq.audioTracks.numTracks;
+          if (atMatched + atMismatched === 0) return ok({ targeted: wantAllTargeted, matched: 0, mismatched: 0, videoTracks: allTargetSeq.videoTracks.numTracks, audioTracks: allTargetSeq.audioTracks.numTracks, verified: false, unverifiedReason: atTotal === 0 ? "This sequence has no tracks, so there was nothing to target." : "isTargeted() threw on every track, so the targeting cannot be confirmed on any of them." });
+          if (atMismatched > 0) return fail("PARTIALLY APPLIED: " + atMatched + " of " + (atMatched + atMismatched) + " tracks now read as " + (wantAllTargeted ? "targeted" : "untargeted") + "; the rest are unchanged. A locked track keeps its targeting.", { requested: wantAllTargeted, matched: atMatched, mismatched: atMismatched, verified: true });
+          return ok({ targeted: wantAllTargeted, matched: atMatched, mismatched: 0, videoTracks: allTargetSeq.videoTracks.numTracks, audioTracks: allTargetSeq.audioTracks.numTracks, verified: true, verifiedBy: "Track.isTargeted() readback on every track" });
 
         case "razor_all_tracks":
           app.enableQE();
@@ -2967,26 +2988,104 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
               if (qeParSeq && Number(qeParSeq.par) === requestedPar) return ok({ sequenceId: settingsSeq.sequenceID, changed: false, par: Number(qeParSeq.par), method: "qe.par readback" });
             } catch (parReadError) {}
           }
-          if (toolName === "set_sequence_field_type") {
+          // Every tool in this family used to return the settings object it had just WRITTEN,
+          // with no re-read — the textbook "verify against your own write". They now snapshot
+          // the fields they touch before and after, and compare against Premiere.
+          function settingsSnapshot(seq) {
+            var snap = {};
             try {
-              app.enableQE();
-              var qeFieldSeq = qeSequenceFor(settingsSeq);
-              var requestedField = args.fieldType || args.value;
-              if (qeFieldSeq && (String(requestedField).toLowerCase() === "no fields" || String(requestedField) === String(qeFieldSeq.fieldType))) return ok({ sequenceId: settingsSeq.sequenceID, changed: false, fieldType: Number(qeFieldSeq.fieldType), method: "qe.fieldType readback" });
-            } catch (fieldReadError) {}
+              var g = seq.getSettings();
+              if (!g) return snap;
+              try { snap.videoFrameWidth = Number(g.videoFrameWidth); } catch (e1) {}
+              try { snap.videoFrameHeight = Number(g.videoFrameHeight); } catch (e2) {}
+              try { snap.videoFrameRateTicks = String(g.videoFrameRate.ticks !== undefined ? g.videoFrameRate.ticks : g.videoFrameRate); } catch (e3) {}
+              try { snap.videoPixelAspectRatio = String(g.videoPixelAspectRatio); } catch (e4) {}
+              try { snap.videoFieldType = g.videoFieldType === null || g.videoFieldType === undefined ? null : Number(g.videoFieldType); } catch (e5) {}
+              try { snap.videoDisplayFormat = g.videoDisplayFormat === null || g.videoDisplayFormat === undefined ? null : Number(g.videoDisplayFormat); } catch (e6) {}
+              try { snap.audioSampleRate = Number(g.audioSampleRate.ticks !== undefined ? g.audioSampleRate.ticks : g.audioSampleRate); } catch (e7) {}
+              try { snap.audioChannelType = g.audioChannelType === null || g.audioChannelType === undefined ? null : Number(g.audioChannelType); } catch (e8) {}
+            } catch (eSnap) {}
+            return snap;
           }
-          if (toolName === "set_sequence_frame_rate") seqSettings.videoFrameRate = secondsToTicks(1 / Number(args.frameRate || args.value || 30));
+          var settingsBefore = settingsSnapshot(settingsSeq);
+          var settingsField = null, settingsExpected = null;
+
+          if (toolName === "set_sequence_field_type") {
+            // Two defects in one branch.
+            //
+            // 1. It assigned a STRING ("No Fields") to seqSettings.videoFieldType, which is a
+            //    NUMERIC field on this API — hence the "Illegal Parameter type" the live sweep
+            //    recorded. Same family as videoFrameRate (a ticks string) and
+            //    videoPixelAspectRatio (an "N:M" string): each of these fields wants one exact
+            //    type and rejects everything else.
+            // 2. The early return above it treated the literal request "no fields" as an
+            //    already-satisfied no-op WITHOUT comparing it to the sequence's actual field
+            //    type, so asking for progressive on an interlaced sequence returned success
+            //    with changed:false and left the sequence interlaced.
+            //
+            // A name-to-index table is deliberately NOT invented here: the ordering is
+            // undocumented and an unverified mapping would silently set the WRONG field type,
+            // which is worse than refusing. This mirrors set_blend_mode, which takes a numeric
+            // index for the same reason.
+            var rawField = args.fieldType !== undefined ? args.fieldType : args.value;
+            if (rawField === undefined || rawField === null || String(rawField) === "") {
+              return fail("set_sequence_field_type needs a numeric fieldType. This sequence currently reads " +
+                String(settingsBefore.videoFieldType) + ".", { currentFieldType: settingsBefore.videoFieldType, expected: "integer" });
+            }
+            var fieldNumber = Number(rawField);
+            if (!isFinite(fieldNumber) || String(rawField).replace(/^\\s+|\\s+$/g, "") === "" || fieldNumber !== Math.floor(fieldNumber)) {
+              return fail("set_sequence_field_type takes a numeric field-type INDEX, not a name like " + String(rawField) +
+                ". SequenceSettings.videoFieldType is a number on this API and a string raises Illegal Parameter type. " +
+                "No name-to-index table is offered because the ordering is undocumented and an unverified guess would set the wrong field type silently. " +
+                "This sequence currently reads " + String(settingsBefore.videoFieldType) + " — read a known-good sequence with get_sequence_settings or get_qe_sequence_props to find the index you want.",
+                { currentFieldType: settingsBefore.videoFieldType, requested: String(rawField), expected: "integer" });
+            }
+            seqSettings.videoFieldType = fieldNumber;
+            settingsField = "videoFieldType";
+            settingsExpected = fieldNumber;
+          }
+          if (toolName === "set_sequence_frame_rate") {
+            seqSettings.videoFrameRate = secondsToTicks(1 / Number(args.frameRate || args.value || 30));
+            settingsField = "videoFrameRateTicks";
+            settingsExpected = secondsToTicks(1 / Number(args.frameRate || args.value || 30));
+          }
           if (toolName === "set_sequence_resolution") { seqSettings.videoFrameWidth = Number(args.width || 1920); seqSettings.videoFrameHeight = Number(args.height || 1080); }
           if (toolName === "set_sequence_audio_settings") { seqSettings.audioSampleRate = Number(args.sampleRate || 48000); seqSettings.audioChannelType = args.channelType || seqSettings.audioChannelType; }
           if (toolName === "set_sequence_pixel_aspect_ratio") {
             var parText = parRatioString(args.pixelAspectRatio !== undefined ? args.pixelAspectRatio : (args.value !== undefined ? args.value : 1));
             if (!parText) return fail("pixelAspectRatio must be a positive number or an 'N:M' ratio string.");
             seqSettings.videoPixelAspectRatio = parText;
+            settingsField = "videoPixelAspectRatio";
+            settingsExpected = parText;
           }
-          if (toolName === "set_sequence_field_type") seqSettings.videoFieldType = String(args.fieldType || args.value || "No Fields");
-          if (toolName === "set_sequence_display_format") seqSettings.videoDisplayFormat = args.displayFormat || args.value || seqSettings.videoDisplayFormat;
-          settingsSeq.setSettings(seqSettings);
-          return ok({ sequenceId: settingsSeq.sequenceID, settings: seqSettings });
+          if (toolName === "set_sequence_display_format") {
+            var wantFormat = args.displayFormat !== undefined ? args.displayFormat : args.value;
+            if (wantFormat === undefined || wantFormat === null || String(wantFormat) === "") return fail("set_sequence_display_format needs a numeric displayFormat. The sequence currently reads " + String(settingsBefore.videoDisplayFormat) + ".", { currentDisplayFormat: settingsBefore.videoDisplayFormat });
+            var formatNumber = Number(wantFormat);
+            if (!isFinite(formatNumber) || formatNumber !== Math.floor(formatNumber)) return fail("set_sequence_display_format takes a numeric display-format index, not " + String(wantFormat) + ". SequenceSettings.videoDisplayFormat is a number on this API.", { currentDisplayFormat: settingsBefore.videoDisplayFormat, requested: String(wantFormat) });
+            seqSettings.videoDisplayFormat = formatNumber;
+            settingsField = "videoDisplayFormat";
+            settingsExpected = formatNumber;
+          }
+          var applyError = null;
+          try { settingsSeq.setSettings(seqSettings); } catch (eApply) { applyError = eApply.toString(); }
+          var settingsAfter = settingsSnapshot(settingsSeq);
+          if (applyError) {
+            return fail("Premiere rejected the sequence settings: " + applyError, { sequenceId: settingsSeq.sequenceID, before: settingsBefore, after: settingsAfter, verified: true });
+          }
+          if (settingsField === null) {
+            // Multi-field tools (resolution, audio) have no single comparison key; hand back
+            // both snapshots so the caller can see exactly what Premiere kept.
+            return ok({ sequenceId: settingsSeq.sequenceID, before: settingsBefore, after: settingsAfter, settings: settingsAfter, verified: true, verifiedBy: "Sequence.getSettings() re-read after setSettings()" });
+          }
+          var settingsActual = settingsAfter[settingsField];
+          if (settingsActual === null || settingsActual === undefined) {
+            return ok({ sequenceId: settingsSeq.sequenceID, before: settingsBefore, after: settingsAfter, requested: settingsExpected, verified: false, unverifiedReason: "setSettings() did not throw, but " + settingsField + " is not readable back through getSettings() on this build, so the change cannot be confirmed." });
+          }
+          if (String(settingsActual) !== String(settingsExpected)) {
+            return fail("setSettings() ran but " + settingsField + " reads back as " + String(settingsActual) + " instead of the requested " + String(settingsExpected) + ", so the sequence was not changed.", { sequenceId: settingsSeq.sequenceID, before: settingsBefore, after: settingsAfter, requested: settingsExpected, actual: settingsActual, verified: true });
+          }
+          return ok({ sequenceId: settingsSeq.sequenceID, before: settingsBefore, after: settingsAfter, settings: settingsAfter, requested: settingsExpected, changed: String(settingsBefore[settingsField]) !== String(settingsActual), verified: true, verifiedBy: "Sequence.getSettings() re-read after setSettings()", note: String(settingsBefore[settingsField]) === String(settingsActual) ? "The sequence already had this value; nothing changed." : undefined });
 
         case "add_marker_to_project_item":
           var markerItemTarget = findItem(args.projectItemId || args.itemId || args.item_id);

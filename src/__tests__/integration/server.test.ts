@@ -25,8 +25,10 @@ describe('MCP Adobe Premiere Pro Integration', () => {
 
   it('exposes a healthy tool, resource, and prompt catalog', () => {
     expect(tools.getAvailableTools().length).toBeGreaterThan(50);
-    expect(resources.getAvailableResources().length).toBe(13);
-    expect(prompts.getAvailablePrompts().length).toBe(10);
+    // Floors, not exact counts — matches the tool assertion above. Adding a resource or
+    // prompt must not break this; dropping one below the current catalogue (21 / 16) must.
+    expect(resources.getAvailableResources().length).toBeGreaterThanOrEqual(21);
+    expect(prompts.getAvailablePrompts().length).toBeGreaterThanOrEqual(16);
   });
 
   it('executes a read-only tool through the shared bridge', async () => {
