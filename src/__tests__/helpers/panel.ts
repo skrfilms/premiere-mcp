@@ -30,6 +30,10 @@ export interface LoadedPanel {
   bridge: Record<string, any>;
   /** Whatever the panel last handed to evalScript. */
   handedToEvalScript: () => string;
+  /** How many times the panel called evalScript — proves a probe was or was not dispatched. */
+  evalScriptCalls: () => number;
+  /** The fake elements created for `options.elements`, keyed by id. */
+  elements: Record<string, FakeElement>;
 }
 
 export interface LoadPanelOptions {
@@ -39,6 +43,27 @@ export interface LoadPanelOptions {
    * methods a test needs must be supplied; the rest keep their no-op defaults.
    */
   fs?: Record<string, unknown>;
+  /**
+   * Ids the panel's `document.getElementById` should resolve, so a test can assert
+   * what the panel actually PUT ON SCREEN. Without this every lookup returns null and
+   * the panel's null guards make its whole rendering path silently unobservable —
+   * which is why the status-light behaviour went untested long enough to ship a green
+   * light that proved nothing. Unlisted ids still return null, matching a partial DOM.
+   */
+  elements?: string[];
+}
+
+/** The element surface the panel touches: className, textContent, innerHTML, value, disabled. */
+export interface FakeElement {
+  className: string;
+  textContent: string;
+  innerHTML: string;
+  value: string;
+  disabled: boolean;
+}
+
+function fakeElement(): FakeElement {
+  return { className: '', textContent: '', innerHTML: '', value: '', disabled: false };
 }
 
 /** Minimal stand-ins for what the panel pulls in at load time. */
@@ -65,10 +90,17 @@ function nodeStub(name: string, options: LoadPanelOptions): unknown {
 export function loadPanel(options: LoadPanelOptions = {}): LoadedPanel {
   const source = realFs.readFileSync(PANEL_PATH, 'utf8');
   let handed = '';
+  let evalCalls = 0;
+  const elements: Record<string, FakeElement> = {};
+  for (const id of options.elements ?? []) elements[id] = fakeElement();
 
   const sandbox: Record<string, unknown> = {
     window: {} as Record<string, unknown>,
-    document: { addEventListener() {}, getElementById: () => null, readyState: 'complete' },
+    document: {
+      addEventListener() {},
+      getElementById: (id: string) => elements[id] ?? null,
+      readyState: 'complete',
+    },
     navigator: { userAgent: 'test' },
     setTimeout: () => 0,
     clearTimeout: () => {},
@@ -79,7 +111,7 @@ export function loadPanel(options: LoadPanelOptions = {}): LoadedPanel {
     CSInterface: function () {
       return {
         getHostEnvironment: () => ({ appName: 'PPRO', appVersion: '26.0.0' }),
-        evalScript: (script: string) => { handed = script; },
+        evalScript: (script: string) => { handed = script; evalCalls += 1; },
         addEventListener() {},
       };
     },
@@ -96,5 +128,5 @@ export function loadPanel(options: LoadPanelOptions = {}): LoadedPanel {
   bridge.normalizeHostEnvironment = (value: unknown) => value;
   bridge.log = () => {};
 
-  return { bridge, handedToEvalScript: () => handed };
+  return { bridge, handedToEvalScript: () => handed, evalScriptCalls: () => evalCalls, elements };
 }
