@@ -699,6 +699,19 @@
         this.updateCommandQueueUI();
     };
 
+    /**
+     * Minimal HTML escaper for text that reaches innerHTML. ES3-safe (no String.raw, no
+     * replaceAll, no arrow). Ampersand first, or the other replacements get double-escaped.
+     */
+    function escapeHtml(value) {
+        return String(value === null || value === undefined ? '' : value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
     MCPPremiereBridge.prototype.updateCommandQueueUI = function() {
         var el = document.getElementById('commandQueue');
         if (!el) return;
@@ -707,7 +720,12 @@
             return;
         }
         var html = this.commandQueue.slice(-5).map(function(cmd) {
-            return '<div class="command-item"><span class="command-label">' + cmd.script + '</span><span class="command-status ' + cmd.status + '">' + cmd.status + '</span></div>';
+            // cmd.script is the first 50 characters of SERVER-SUPPLIED script text, so it
+            // routinely contains < and & (a comparison, an ExtendScript &&). Interpolated raw,
+            // those corrupt the queue markup and can inject elements. Escaped here because
+            // this is the only place that text reaches innerHTML.
+            return '<div class="command-item"><span class="command-label">' + escapeHtml(cmd.script) +
+                '</span><span class="command-status ' + escapeHtml(cmd.status) + '">' + escapeHtml(cmd.status) + '</span></div>';
         }).join('');
         el.innerHTML = html;
     };
@@ -773,7 +791,22 @@
 
     MCPPremiereBridge.prototype.startBridge = function() {
         this.log('Starting MCP Bridge...', 'info');
-        this.isProcessing = false;
+        // Clearing the in-flight guard unconditionally was a real concurrency bug: a
+        // Stop -> Start during a long host script freed the poller to dispatch a SECOND
+        // command, and then the first command's completion callback cleared
+        // isProcessing/currentCommandId out from under the second. An outstanding
+        // evalScript cannot be cancelled, so the honest move is to leave the guard set
+        // and say so, rather than pretend the panel is idle.
+        if (this.isProcessing && this.currentCommandId) {
+            var outstandingFor = this.currentCommandStartedAt
+                ? ' (' + Math.round((Date.now() - this.currentCommandStartedAt) / 1000) + 's so far)'
+                : '';
+            this.log('A host command is still outstanding: ' + this.currentCommandId + outstandingFor +
+                '. Keeping the in-flight guard so a second command cannot run concurrently; ' +
+                'the queue resumes when it finishes or its watchdog fires.', 'warning');
+        } else {
+            this.isProcessing = false;
+        }
         this.isConnected = true;
         this.updateUI();
         var tempPath = this.getTempDirectory();
@@ -784,14 +817,34 @@
             return;
         }
         this.log('Watching: ' + tempPath + ' (must match your MCP client PREMIERE_TEMP_DIR)', 'info');
-        this.updateServerStatus(true);
-        this.log('Bridge ready. Connect from Codex, Claude, or another MCP client using this same temp directory.', 'info');
+        // The Premiere light used to turn green HERE, on the strength of the temp directory
+        // existing — which proves nothing about the host. testPremiereConnection() was
+        // written to prove it and was never called from anywhere in the panel. A server that
+        // refuses to report an unverified edit as done cannot ship a status light that
+        // reports an unverified host as ready, so the claim now waits for the round trip.
+        if (this.isProcessing && this.currentCommandId) {
+            // Do not dispatch a probe alongside an outstanding host script — that is the
+            // very thing the guard above exists to prevent. The next completed command
+            // proves the host answers anyway.
+            this.log('Bridge watching for commands. Host check deferred until the outstanding command finishes.', 'info');
+        } else {
+            this.updateServerStatus('verifying');
+            this.testPremiereConnection();
+            this.log('Bridge watching for commands. Verifying the Premiere host responds...', 'info');
+        }
     };
 
     MCPPremiereBridge.prototype.stopBridge = function() {
         this.log('Stopping MCP Bridge...', 'info');
         this.isConnected = false;
-        this.isProcessing = false;
+        if (this.isProcessing && this.currentCommandId) {
+            // Same reason as startBridge: stopping the bridge stops us picking up NEW
+            // commands. It cannot recall a script already handed to the host.
+            this.log('Stopped watching for new commands, but host command ' + this.currentCommandId +
+                ' is already running inside Premiere and cannot be cancelled.', 'warning');
+        } else {
+            this.isProcessing = false;
+        }
         this.updateUI();
         this.updateServerStatus(false);
     };
@@ -935,17 +988,26 @@
         if (tempEl && !tempEl.value && this.getTempDirectory()) tempEl.value = this.getTempDirectory();
     };
 
-    MCPPremiereBridge.prototype.updateServerStatus = function(isRunning) {
+    /**
+     * Three states, not two. `true` means the host actually answered an ExtendScript round
+     * trip; 'verifying' means we have asked and do not know yet; anything falsy means not
+     * proven. 'verifying' deliberately keeps the un-proven dot styling and carries its
+     * meaning in the LABEL — a status must never rest on colour alone, and inventing a third
+     * dot colour would also need CSS that does not exist yet.
+     */
+    MCPPremiereBridge.prototype.updateServerStatus = function(state) {
         var serverStatus = document.getElementById('serverStatus');
         var serverText = document.getElementById('serverText');
-        if (serverStatus && serverText) {
-            if (isRunning) {
-                serverStatus.className = 'status-dot connected';
-                serverText.textContent = 'Premiere Pro: Ready';
-            } else {
-                serverStatus.className = 'status-dot disconnected';
-                serverText.textContent = 'Premiere Pro: Start Bridge to enable';
-            }
+        if (!serverStatus || !serverText) return;
+        if (state === true) {
+            serverStatus.className = 'status-dot connected';
+            serverText.textContent = 'Premiere Pro: Ready';
+        } else if (state === 'verifying') {
+            serverStatus.className = 'status-dot disconnected';
+            serverText.textContent = 'Premiere Pro: verifying host...';
+        } else {
+            serverStatus.className = 'status-dot disconnected';
+            serverText.textContent = 'Premiere Pro: Start Bridge to enable';
         }
     };
 
