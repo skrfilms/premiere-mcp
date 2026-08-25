@@ -20,6 +20,7 @@ import { Logger } from '../utils/logger.js';
 import { createMotionDemoAssets } from '../utils/demoAssets.js';
 import { executeExpandedTool, getExpandedTools, isExpandedTool } from './expanded.js';
 import { applyProfile, resolveProfile, PROFILES } from './profiles.js';
+import { classifySelection, resolvePageSize, routerVerdict, type RouterVerdict } from './router.js';
 import { findTools, type SearchableTool } from './search.js';
 import { generateToolTypings, type TypingsTool, type JsonSchemaNode } from './typings.js';
 import { annotationsFor } from './annotations.js';
@@ -350,10 +351,42 @@ export class PremiereProTools {
   private logger: Logger;
   /** TTL cache for the capture-tap capability probe (speed mandate: don't re-probe every call). */
   private captureTapsCache?: { at: number; taps: CaptureTapReport[] };
+  /**
+   * Tools promoted into the advertised list at runtime by `activate_tools`.
+   *
+   * Session state, deliberately not persisted: an operator who restarts the server
+   * should get exactly the profile they configured, not a surface some earlier agent
+   * grew. Everything in here passed the same authority gate `call_tool` uses.
+   */
+  private activatedTools = new Set<string>();
+  /** Notified when the advertised tool list changes, so the server can emit tools/list_changed. */
+  private exposureListeners: Array<() => void> = [];
 
   constructor(bridge: PremiereProTransport) {
     this.bridge = bridge;
     this.logger = new Logger('PremiereProTools');
+  }
+
+  /**
+   * Subscribe to changes in the advertised tool list.
+   *
+   * A client that cached `tools/list` has no way to learn about an activation unless it
+   * is told, so activation without this notification would produce tools the agent can
+   * see in a result and still not call — the exact confusion the router exists to end.
+   */
+  onExposureChanged(listener: () => void): void {
+    this.exposureListeners.push(listener);
+  }
+
+  private notifyExposureChanged(): void {
+    for (const listener of this.exposureListeners) {
+      try {
+        listener();
+      } catch (error) {
+        // A notification failure must never fail the tool call that triggered it.
+        this.logger.error('tools/list_changed listener threw:', error);
+      }
+    }
   }
 
   private getLocalTools(): MCPTool[] {
@@ -3096,6 +3129,12 @@ export class PremiereProTools {
       // liability for tool-selection accuracy unless the model can search rather
       // than scan. Host-independent: no Premiere request, works with Premiere closed.
       { name: 'find_tool', description: 'Searches THIS server\'s own tool catalogue by keyword and returns the best-matching tool names with their descriptions, ranked. Use it FIRST whenever you are unsure which tool does a job, instead of guessing a name and getting "Tool not found" -- this catalogue has hundreds of tools and searching it is far more reliable than scanning it. Matches against tool names and descriptions (lexical, not semantic, so prefer a domain noun like "marker", "proxy", "lumetri", "caption", "keyframe" over a full sentence). Reports how many tools were searched, and honestly flags any match that exists in this build but is hidden by the active tool profile as exposed:false rather than omitting it, so a curated deployment cannot look like a missing capability. Read-only: makes no Premiere request and changes nothing.', inputSchema: z.object({ query: z.string().describe('Keyword(s) describing the job, e.g. "marker", "audio fade", "export preset", "offline media"'), limit: z.number().optional().describe('Max matches to return (default 15, max 100)'), readOnly: z.boolean().optional().describe('Only return inspection tools (name begins with get/list/read/find/search/inspect/is/check/detect/probe/validate/verify/lint/diff). Naming heuristic, not a capability guarantee.'), includeParameters: z.boolean().optional().describe('Include each match\'s parameter names (default false, to keep the response small)'), includeHidden: z.boolean().optional().describe('Include matches hidden by the active tool profile, flagged exposed:false (default true)') }) },
+      // Schema-on-demand: the whole catalogue, reachable through three tool definitions
+      // instead of 639. find_tool (search) -> get_tool_typings (signature) -> call_tool
+      // (invoke). Host-independent gate; the target tool does whatever it normally does.
+      { name: 'call_tool', description: 'Invokes ANY tool this build implements, including tools the active profile does not advertise, by name. Use this when find_tool showed you a tool marked exposed:false -- it is the call path for the rest of the catalogue, so a curated tool list costs you context, not capability. Call get_tool_typings({ only: ["<name>"] }) first to get the exact argument shape. Arguments are validated against that tool\'s real schema before anything runs, and the result is that tool\'s own result, unchanged. dryRun validates the arguments and returns the resolved schema WITHOUT running anything. It will refuse, naming the setting responsible, when the deployment sets an authority boundary rather than a context-cost profile (PREMIERE_MCP_PROFILE=read-only, an explicit PREMIERE_MCP_TOOLS allowlist, or a PREMIERE_MCP_EXCLUDE veto).', inputSchema: z.object({ name: z.string().describe('Exact tool name to invoke, e.g. "apply_lumetri_preset". Use find_tool to search for it.'), args: z.record(z.string(), z.any()).optional().describe('Arguments for the target tool, exactly as that tool documents them. Omit for a tool that takes none.'), dryRun: z.boolean().optional().describe('Validate the arguments against the target\'s schema and return the resolved JSON Schema without invoking it (default false)') }) },
+      { name: 'activate_tools', description: 'Promotes hidden tools into the advertised tool list for the rest of this session, so the client sees their real typed schemas instead of routing through call_tool. Pass explicit names, or a query to activate the top matches of a catalogue search. Emits a tools/list_changed notification, so a client that follows the MCP spec re-lists automatically. Returns the measured context cost of the new list, because growing the menu is a real cost and should be visible rather than silent. Refuses any tool an authority boundary excludes (read-only profile, explicit allowlist, or exclusion veto) and says which. Activation is session state and is never persisted -- restarting the server returns exactly the configured profile.', inputSchema: z.object({ names: z.array(z.string()).optional().describe('Exact tool names to advertise, e.g. ["normalize_loudness","loudness_report"]'), query: z.string().optional().describe('Instead of names: activate the best catalogue matches for this keyword (same ranking as find_tool)'), limit: z.number().optional().describe('With query: how many matches to activate (default 8, max 50)') }) },
+      { name: 'deactivate_tools', description: 'Removes tools previously added by activate_tools from the advertised list, shrinking the context cost back down. Pass names, or all:true to return to exactly the configured profile. Emits tools/list_changed. Cannot remove a tool the configured profile itself advertises -- change PREMIERE_MCP_PROFILE for that.', inputSchema: z.object({ names: z.array(z.string()).optional().describe('Activated tool names to stop advertising'), all: z.boolean().optional().describe('Deactivate everything activate_tools added this session (default false)') }) },
       { name: 'get_tool_typings', description: 'Returns TypeScript declarations (.d.ts) for this server\'s tools: an argument interface per tool, a ToolName union, and one overloaded callTool signature per callable tool. Fetch this BEFORE authoring a script or a multi-step plan against these tools -- it turns a wrong argument shape into a compile-time error instead of a runtime tool failure you have to decode from an error string. Generated from the same schemas the server validates against, so it cannot drift. Tools hidden by the active profile are still declared and marked @profileHidden rather than omitted. Read-only: makes no Premiere request.', inputSchema: z.object({ only: z.array(z.string()).optional().describe('Restrict output to these tool names. Omit for the whole catalogue (large - prefer find_tool first, then request typings for the handful you need).'), includeHidden: z.boolean().optional().describe('Declare tools the active profile hides, marked @profileHidden (default true)') }) },
     ];
   }
@@ -3227,11 +3266,210 @@ export class PremiereProTools {
   getAvailableTools(): MCPTool[] {
     // Curated by default (`core`). PREMIERE_MCP_PROFILE=all returns everything.
     // Anything the profile hides is still discoverable through find_tool, which reports
-    // it as exposed:false with the reason rather than omitting it.
-    return applyProfile(this.getRegisteredTools());
+    // it as exposed:false with the reason rather than omitting it, and still callable
+    // through call_tool unless an authority boundary refuses.
+    const registered = this.getRegisteredTools();
+    const exposed = applyProfile(registered);
+    if (this.activatedTools.size === 0) return exposed;
+    // Union with the session's activations, in catalogue order so the list stays stable.
+    const exposedNames = new Set(exposed.map((tool) => tool.name));
+    return registered.filter(
+      (tool) => exposedNames.has(tool.name) || this.activatedTools.has(tool.name),
+    );
   }
 
-  async executeTool(name: string, args: Record<string, any>): Promise<any> {
+  /**
+   * The router's gate for one target name: may this deployment reach it, and if not,
+   * which setting refused. Shared by call_tool and activate_tools so a tool can never
+   * be reachable by one route and refused by the other.
+   */
+  private routerGateFor(name: string): RouterVerdict {
+    const registered = this.getRegisteredTools();
+    return routerVerdict({
+      name,
+      registeredNames: new Set(registered.map((tool) => tool.name)),
+      exposedNames: new Set(this.getAvailableTools().map((tool) => tool.name)),
+      resolution: resolveProfile(registered.map((tool) => tool.name)),
+    });
+  }
+
+  /**
+   * call_tool: invoke any implemented tool by name, advertised or not.
+   *
+   * This is the context-cost fix. The profile decides what a client is TOLD about; this
+   * decides what it can reach. The two are separated on purpose and the separation stops
+   * dead at an authority boundary (see router.ts).
+   */
+  private async callTool(args: Record<string, any>): Promise<any> {
+    const name = typeof args?.name === 'string' ? args.name.trim() : '';
+    if (!name) {
+      return { success: false, error: 'call_tool requires a tool name. Use find_tool({ query: "<keyword>" }) to search the catalogue.' };
+    }
+
+    const verdict = this.routerGateFor(name);
+    if (!verdict.allowed) {
+      // An unknown name gets the same ranked shortlist a direct miss would produce —
+      // a refusal with no next step is where an agent starts guessing names.
+      const exposedNames = new Set(this.getAvailableTools().map((tool) => tool.name));
+      const suggestions = verdict.code === 'UNKNOWN_TOOL'
+        ? findTools(this.getSearchableCatalogue(), exposedNames, { query: name.replace(/_/g, ' '), limit: 8 })
+            .matches.map((m) => ({ name: m.name, exposed: m.exposed, description: m.description }))
+        : [];
+      return {
+        success: false,
+        error: verdict.reason,
+        refusedBy: verdict.code,
+        routed: { requested: name, invoked: false },
+        ...(suggestions.length ? { didYouMean: suggestions } : {}),
+      };
+    }
+
+    const target = this.getRegisteredTools().find((tool) => tool.name === name);
+    if (!target) {
+      // Unreachable: the gate already proved the name is registered. Kept so a future
+      // refactor that breaks that invariant fails loudly instead of throwing a TypeError.
+      return { success: false, error: `Tool '${name}' passed the router gate but is not in the registry. This is a server bug; please report it.` };
+    }
+
+    const targetArgs: Record<string, any> =
+      args.args && typeof args.args === 'object' && !Array.isArray(args.args) ? args.args : {};
+
+    if (args.dryRun === true) {
+      let jsonSchema: unknown = { type: 'object', additionalProperties: true };
+      try {
+        jsonSchema = z.toJSONSchema(target.inputSchema as any, { unrepresentable: 'any' });
+      } catch { /* keep the permissive fallback rather than failing the dry run */ }
+      const parsed = target.inputSchema.safeParse(targetArgs);
+      return {
+        success: true,
+        dryRun: true,
+        invoked: false,
+        tool: name,
+        argumentsValid: parsed.success,
+        ...(parsed.success ? {} : { validationError: String(parsed.error) }),
+        inputSchema: jsonSchema,
+        reachedPastProfile: verdict.reachedPastProfile,
+        note: 'dryRun validated the arguments against the target\'s real schema and made no Premiere request. Nothing was changed.',
+      };
+    }
+
+    // Everything downstream — NUL guard, schema validation, auto-checkpoint, verification
+    // — is the target tool's normal path. The router adds a gate, not a second code path,
+    // so a tool cannot behave differently depending on how it was called.
+    const result = await this.executeTool(name, targetArgs, { allowUnexposed: true });
+    if (result && typeof result === 'object' && !Array.isArray(result)) {
+      return { ...result, routed: { requested: name, invoked: true, reachedPastProfile: verdict.reachedPastProfile } };
+    }
+    return result;
+  }
+
+  /** activate_tools: promote hidden tools into the advertised list for this session. */
+  private activateTools(args: Record<string, any>): any {
+    const requested: string[] = [];
+    if (Array.isArray(args?.names)) {
+      for (const entry of args.names) if (typeof entry === 'string' && entry.trim()) requested.push(entry.trim());
+    }
+
+    if (typeof args?.query === 'string' && args.query.trim()) {
+      const limit = Math.min(Math.max(Number(args.limit) || 8, 1), 50);
+      const exposedNames = new Set(this.getAvailableTools().map((tool) => tool.name));
+      const matches = findTools(this.getSearchableCatalogue(), exposedNames, {
+        query: args.query,
+        limit,
+      }).matches;
+      for (const match of matches) if (!requested.includes(match.name)) requested.push(match.name);
+    }
+
+    if (!requested.length) {
+      return { success: false, error: 'activate_tools requires names or a query. Use find_tool to search the catalogue first.' };
+    }
+
+    const activated: string[] = [];
+    const alreadyExposed: string[] = [];
+    const refused: Array<{ name: string; reason: string; refusedBy: string }> = [];
+
+    for (const name of requested) {
+      const verdict = this.routerGateFor(name);
+      if (!verdict.allowed) {
+        refused.push({ name, reason: verdict.reason ?? 'refused', refusedBy: verdict.code ?? 'NOT_ROUTABLE' });
+        continue;
+      }
+      if (!verdict.reachedPastProfile) {
+        alreadyExposed.push(name);
+        continue;
+      }
+      this.activatedTools.add(name);
+      activated.push(name);
+    }
+
+    if (activated.length) this.notifyExposureChanged();
+
+    const exposed = this.getAvailableTools();
+    return {
+      success: activated.length > 0 || alreadyExposed.length > 0,
+      activated,
+      alreadyExposed,
+      ...(refused.length ? { refused } : {}),
+      toolsNowAdvertised: exposed.length,
+      activeThisSession: Array.from(this.activatedTools).sort(),
+      // Growing the menu costs context. Report it rather than letting the agent discover
+      // the bill later: this is the same number the startup advisory measures.
+      contextCost: this.measureCatalogueCost(exposed),
+      listChangedNotified: activated.length > 0,
+      ...(activated.length
+        ? {}
+        : { note: 'Nothing was activated, so no tools/list_changed was sent.' }),
+    };
+  }
+
+  /** deactivate_tools: shrink the advertised list back toward the configured profile. */
+  private deactivateTools(args: Record<string, any>): any {
+    if (args?.all === true) {
+      const removed = Array.from(this.activatedTools).sort();
+      this.activatedTools.clear();
+      if (removed.length) this.notifyExposureChanged();
+      const exposed = this.getAvailableTools();
+      return {
+        success: true,
+        deactivated: removed,
+        toolsNowAdvertised: exposed.length,
+        contextCost: this.measureCatalogueCost(exposed),
+        listChangedNotified: removed.length > 0,
+      };
+    }
+
+    const names: string[] = Array.isArray(args?.names)
+      ? args.names.filter((entry: unknown): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+      : [];
+    if (!names.length) {
+      return { success: false, error: 'deactivate_tools requires names, or all:true to clear every activation.' };
+    }
+
+    const deactivated: string[] = [];
+    const notActivated: string[] = [];
+    for (const raw of names) {
+      const name = raw.trim();
+      if (this.activatedTools.delete(name)) deactivated.push(name);
+      else notActivated.push(name);
+    }
+    if (deactivated.length) this.notifyExposureChanged();
+
+    const exposed = this.getAvailableTools();
+    return {
+      success: deactivated.length > 0,
+      deactivated,
+      // A name the configured profile advertises is not an activation and cannot be
+      // dropped here; saying so beats reporting a removal that did not happen.
+      ...(notActivated.length
+        ? { notActivated, note: 'These were not activated this session. A tool the configured profile advertises cannot be deactivated — change PREMIERE_MCP_PROFILE instead.' }
+        : {}),
+      toolsNowAdvertised: exposed.length,
+      contextCost: this.measureCatalogueCost(exposed),
+      listChangedNotified: deactivated.length > 0,
+    };
+  }
+
+  async executeTool(name: string, args: Record<string, any>, options?: { allowUnexposed?: boolean }): Promise<any> {
     // Premiere truncates a string at the first NUL when it is assigned — a
     // marker named "p\0q" is created as "p" — and reports success for the
     // truncated result. JSON.stringify escapes the NUL on the way into the
@@ -3246,7 +3484,12 @@ export class PremiereProTools {
       };
     }
 
-    const tool = this.getAvailableTools().find(t => t.name === name);
+    // `allowUnexposed` is set only by call_tool, which has already run the router gate
+    // (registered + not vetoed by an authority boundary). Resolving against the full
+    // registry here is what makes a curated profile a context-cost decision instead of a
+    // functional one; every other caller still resolves against the advertised list.
+    const tool = (options?.allowUnexposed ? this.getRegisteredTools() : this.getAvailableTools())
+      .find(t => t.name === name);
     if (!tool) {
       // Dumping every tool name here used to be the whole answer. On a catalogue
       // this size that is a multi-kilobyte wall of names the model must scan, and
@@ -3354,6 +3597,12 @@ export class PremiereProTools {
           return this.findTool(args);
         case 'get_tool_typings':
           return this.getToolTypings(args);
+        case 'call_tool':
+          return await this.callTool(args);
+        case 'activate_tools':
+          return this.activateTools(args);
+        case 'deactivate_tools':
+          return this.deactivateTools(args);
         case 'validate_project_for_export':
           return await this.validateProjectForExport(args.sequenceId, args.outputPath, args.presetPath, args.requireNonEmptyTimeline, args.checkGaps);
         case 'get_encoder_presets':
@@ -4499,6 +4748,26 @@ ${this.buildSequenceResolver(sequenceId)}
             searchTool: 'find_tool',
             note: 'find_tool searches tool names and descriptions with no Premiere request, and is exposed under every profile. Prefer it over scanning the full list.'
           },
+          // Advertised and reachable are different numbers, and publishing only the first
+          // would understate this build. A cost profile trims the menu; the router still
+          // reaches the rest. An authority boundary trims BOTH, and says so here.
+          routing: (() => {
+            const selectionKind = classifySelection(profile);
+            const reachable = selectionKind === 'authority' ? exposed.length : total;
+            return {
+              toolsAdvertised: exposed.length,
+              toolsReachable: reachable,
+              selectionKind,
+              router: 'call_tool',
+              activation: 'activate_tools / deactivate_tools',
+              activatedThisSession: Array.from(this.activatedTools).sort(),
+              listChangedSupported: true,
+              pageSize: resolvePageSize() || null,
+              note: selectionKind === 'authority'
+                ? `PREMIERE_MCP_${profile.source === 'explicit' ? 'TOOLS' : 'PROFILE'} sets an authority boundary, so call_tool will NOT reach past it: ${exposed.length} tools advertised and ${reachable} reachable.`
+                : `${exposed.length} tools advertised to save context; all ${reachable} implemented tools remain reachable via call_tool, and activate_tools promotes any of them into the advertised list on demand.`,
+            };
+          })(),
           resources: 13,
           prompts: 10
         };

@@ -108,7 +108,7 @@ describe('PremiereProTools', () => {
       expect(toolNames).toContain('apply_lumetri_preset');
       expect(toolNames).toContain('apply_video_effect');
       expect(toolNames).toContain('get_timeline_render_status');
-      expect(availableTools).toHaveLength(639);
+      expect(availableTools).toHaveLength(642);
       expect(unimplementedExpandedToolNames).toEqual([]);
       for (const name of expandedToolNames) {
         expect(toolNames).toContain(name);
@@ -612,8 +612,8 @@ describe('PremiereProTools', () => {
       expect(result.success).toBe(true);
       // The full catalogue is exposed by default (no profile env set). The
       // catalog block now also reports the active profile for introspection.
-      expect(result.catalog.tools).toBe(639);
-      expect(result.catalog.toolsInFullCatalog).toBe(639);
+      expect(result.catalog.tools).toBe(642);
+      expect(result.catalog.toolsInFullCatalog).toBe(642);
       expect(result.catalog.resources).toBe(13);
       expect(result.catalog.prompts).toBe(10);
       expect(result.catalog.profile.source).toBe('all');

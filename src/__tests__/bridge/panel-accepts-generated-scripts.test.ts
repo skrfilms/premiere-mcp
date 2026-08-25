@@ -27,7 +27,12 @@ jest.mock('fs', () => ({
   }
 }));
 
-jest.mock('node:crypto', () => ({ randomUUID: jest.fn(() => 'test-uuid-1234') }));
+jest.mock('node:crypto', () => ({
+  randomUUID: jest.fn(() => 'test-uuid-1234'),
+  // Bridge IPC auth mints a per-session token with randomBytes; a mock without it
+  // throws before any assertion in this file can run.
+  randomBytes: jest.fn(() => Buffer.from('ab'.repeat(32), 'hex')),
+}));
 
 describe('the script the server sends', () => {
   const mockFs = fs as jest.Mocked<typeof fs>;
@@ -42,6 +47,13 @@ describe('the script the server sends', () => {
 
     const bridge = new PremiereProBridge({ info() {}, warn() {}, error() {}, debug() {} } as never);
     await bridge.initialize();
+    // Bridge IPC auth made initialize() itself write (the per-session auth token) and
+    // unlink (the stale-command sweep). Those are setup, not the subject of these tests, so
+    // the fs mocks are cleared here — otherwise every assertion about "the command write"
+    // picks up the token instead, which is precisely how this suite went red.
+    mockFs.writeFile.mockClear();
+    mockFs.rename.mockClear();
+    mockFs.unlink.mockClear();
     await bridge.executeScript('return 1;');
 
     const payload = mockFs.writeFile.mock.calls[0][1] as string;

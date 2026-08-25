@@ -20,7 +20,12 @@ jest.mock('fs', () => ({
 }));
 
 jest.mock('node:crypto', () => ({
-  randomUUID: jest.fn(() => 'test-uuid-1234')
+  randomUUID: jest.fn(() => 'test-uuid-1234'),
+  // The bridge mints a per-session auth token with randomBytes (bridge IPC auth). A mock
+  // that supplied only randomUUID made every test in this file throw the moment auth
+  // shipped, which is exactly what happened: a partial mock of a real module fails at the
+  // first new call site, not at the one the mock was written for.
+  randomBytes: jest.fn(() => Buffer.from('ab'.repeat(32), 'hex')),
 }));
 
 describe('PremiereProBridge', () => {
@@ -47,6 +52,13 @@ describe('PremiereProBridge', () => {
     mockFs.access.mockRejectedValue(new Error('Not found'));
 
     await bridge.initialize();
+    // Bridge IPC auth made initialize() itself write (the per-session auth token) and
+    // unlink (the stale-command sweep). Those are setup, not the subject of these tests, so
+    // the fs mocks are cleared here — otherwise every assertion about "the command write"
+    // picks up the token instead, which is precisely how this suite went red.
+    mockFs.writeFile.mockClear();
+    mockFs.rename.mockClear();
+    mockFs.unlink.mockClear();
 
     expect(mockFs.mkdir).toHaveBeenCalledWith('/tmp/premiere-mcp-bridge-test', {
       recursive: true,
@@ -63,6 +75,13 @@ describe('PremiereProBridge', () => {
     mockFs.unlink.mockResolvedValue(undefined);
 
     await bridge.initialize();
+    // Bridge IPC auth made initialize() itself write (the per-session auth token) and
+    // unlink (the stale-command sweep). Those are setup, not the subject of these tests, so
+    // the fs mocks are cleared here — otherwise every assertion about "the command write"
+    // picks up the token instead, which is precisely how this suite went red.
+    mockFs.writeFile.mockClear();
+    mockFs.rename.mockClear();
+    mockFs.unlink.mockClear();
     const result = await bridge.executeScript('return JSON.stringify({ ok: true });');
 
     expect(result).toEqual({ ok: true });
@@ -85,6 +104,13 @@ describe('PremiereProBridge', () => {
     mockFs.unlink.mockResolvedValue(undefined);
 
     await bridge.initialize();
+    // Bridge IPC auth made initialize() itself write (the per-session auth token) and
+    // unlink (the stale-command sweep). Those are setup, not the subject of these tests, so
+    // the fs mocks are cleared here — otherwise every assertion about "the command write"
+    // picks up the token instead, which is precisely how this suite went red.
+    mockFs.writeFile.mockClear();
+    mockFs.rename.mockClear();
+    mockFs.unlink.mockClear();
     await bridge.executeScript('(function(){ return JSON.stringify({ ok: true }); })();');
 
     expect(mockFs.writeFile).toHaveBeenCalledWith(
@@ -110,6 +136,13 @@ describe('PremiereProBridge', () => {
     mockFs.unlink.mockResolvedValue(undefined);
 
     await bridge.initialize();
+    // Bridge IPC auth made initialize() itself write (the per-session auth token) and
+    // unlink (the stale-command sweep). Those are setup, not the subject of these tests, so
+    // the fs mocks are cleared here — otherwise every assertion about "the command write"
+    // picks up the token instead, which is precisely how this suite went red.
+    mockFs.writeFile.mockClear();
+    mockFs.rename.mockClear();
+    mockFs.unlink.mockClear();
     const result = await bridge.importMedia('/path/to/video.mp4');
 
     expect(result.success).toBe(true);
@@ -128,6 +161,13 @@ describe('PremiereProBridge', () => {
     mockFs.unlink.mockResolvedValue(undefined);
 
     await bridge.initialize();
+    // Bridge IPC auth made initialize() itself write (the per-session auth token) and
+    // unlink (the stale-command sweep). Those are setup, not the subject of these tests, so
+    // the fs mocks are cleared here — otherwise every assertion about "the command write"
+    // picks up the token instead, which is precisely how this suite went red.
+    mockFs.writeFile.mockClear();
+    mockFs.rename.mockClear();
+    mockFs.unlink.mockClear();
     await bridge.renderSequence('seq-"quoted"', '/tmp/out.mp4', '/tmp/preset.epr', {
       sourceRange: 'in_out',
       removeOnCompletion: false,
@@ -154,6 +194,13 @@ describe('PremiereProBridge', () => {
     Object.defineProperty(process, 'platform', { value: 'darwin' });
     try {
       await bridge.initialize();
+      // Bridge IPC auth made initialize() itself write (the per-session auth token) and
+      // unlink (the stale-command sweep). Those are setup, not the subject of these tests, so
+      // the fs mocks are cleared here — otherwise every assertion about "the command write"
+      // picks up the token instead, which is precisely how this suite went red.
+      mockFs.writeFile.mockClear();
+      mockFs.rename.mockClear();
+      mockFs.unlink.mockClear();
       const result = await bridge.renderSequence('seq-1', '/tmp/out.mp4', '/tmp/preset.epr');
 
       expect(result.success).toBe(false);
@@ -171,6 +218,13 @@ describe('PremiereProBridge', () => {
     mockFs.access.mockRejectedValue(new Error('Not found'));
 
     await bridge.initialize();
+    // Bridge IPC auth made initialize() itself write (the per-session auth token) and
+    // unlink (the stale-command sweep). Those are setup, not the subject of these tests, so
+    // the fs mocks are cleared here — otherwise every assertion about "the command write"
+    // picks up the token instead, which is precisely how this suite went red.
+    mockFs.writeFile.mockClear();
+    mockFs.rename.mockClear();
+    mockFs.unlink.mockClear();
     const result: any = await bridge.importMedia('/path/to/captions.ass');
 
     expect(result.success).toBe(false);
@@ -192,6 +246,13 @@ describe('PremiereProBridge', () => {
     mockFs.unlink.mockResolvedValue(undefined);
 
     await bridge.initialize();
+    // Bridge IPC auth made initialize() itself write (the per-session auth token) and
+    // unlink (the stale-command sweep). Those are setup, not the subject of these tests, so
+    // the fs mocks are cleared here — otherwise every assertion about "the command write"
+    // picks up the token instead, which is precisely how this suite went red.
+    mockFs.writeFile.mockClear();
+    mockFs.rename.mockClear();
+    mockFs.unlink.mockClear();
     const result: any = await bridge.createProject('Test', '/tmp/projects/');
 
     expect(result.success).toBe(false);
@@ -220,6 +281,13 @@ describe('PremiereProBridge', () => {
     mockFs.unlink.mockResolvedValue(undefined);
 
     await bridge.initialize();
+    // Bridge IPC auth made initialize() itself write (the per-session auth token) and
+    // unlink (the stale-command sweep). Those are setup, not the subject of these tests, so
+    // the fs mocks are cleared here — otherwise every assertion about "the command write"
+    // picks up the token instead, which is precisely how this suite went red.
+    mockFs.writeFile.mockClear();
+    mockFs.rename.mockClear();
+    mockFs.unlink.mockClear();
     const result: any = await bridge.openProject('/tmp/projects/Target.prproj');
 
     expect(result.success).toBe(false);
@@ -247,6 +315,13 @@ describe('PremiereProBridge', () => {
     mockFs.unlink.mockResolvedValue(undefined);
 
     await bridge.initialize();
+    // Bridge IPC auth made initialize() itself write (the per-session auth token) and
+    // unlink (the stale-command sweep). Those are setup, not the subject of these tests, so
+    // the fs mocks are cleared here — otherwise every assertion about "the command write"
+    // picks up the token instead, which is precisely how this suite went red.
+    mockFs.writeFile.mockClear();
+    mockFs.rename.mockClear();
+    mockFs.unlink.mockClear();
     const result: any = await bridge.createSequence('Safe Sequence', '/tmp/sequence.sqpreset');
     const commandPayload = JSON.parse(mockFs.writeFile.mock.calls[0][1] as string);
 
@@ -267,6 +342,13 @@ describe('PremiereProBridge', () => {
     mockFs.unlink.mockResolvedValue(undefined);
 
     await bridge.initialize();
+    // Bridge IPC auth made initialize() itself write (the per-session auth token) and
+    // unlink (the stale-command sweep). Those are setup, not the subject of these tests, so
+    // the fs mocks are cleared here — otherwise every assertion about "the command write"
+    // picks up the token instead, which is precisely how this suite went red.
+    mockFs.writeFile.mockClear();
+    mockFs.rename.mockClear();
+    mockFs.unlink.mockClear();
     await bridge.addToTimelineBatch('seq-1', [
       { projectItemId: 'pi-1', trackIndex: 0, time: 0, linkAudio: false },
       { projectItemId: 'pi-2', trackIndex: 0, time: 5 } // omitted → defaults to true
@@ -291,6 +373,13 @@ describe('PremiereProBridge', () => {
     mockFs.unlink.mockResolvedValue(undefined);
 
     await bridge.initialize();
+    // Bridge IPC auth made initialize() itself write (the per-session auth token) and
+    // unlink (the stale-command sweep). Those are setup, not the subject of these tests, so
+    // the fs mocks are cleared here — otherwise every assertion about "the command write"
+    // picks up the token instead, which is precisely how this suite went red.
+    mockFs.writeFile.mockClear();
+    mockFs.rename.mockClear();
+    mockFs.unlink.mockClear();
     await bridge.addToTimelineBatch('seq-1', [
       { projectItemId: 'pi-1', trackIndex: 0, time: 0 },
       { projectItemId: 'pi-2', trackIndex: 0, time: 5 }
@@ -311,6 +400,13 @@ describe('PremiereProBridge', () => {
     mockFs.access.mockRejectedValue(new Error('Not found'));
 
     await bridge.initialize();
+    // Bridge IPC auth made initialize() itself write (the per-session auth token) and
+    // unlink (the stale-command sweep). Those are setup, not the subject of these tests, so
+    // the fs mocks are cleared here — otherwise every assertion about "the command write"
+    // picks up the token instead, which is precisely how this suite went red.
+    mockFs.writeFile.mockClear();
+    mockFs.rename.mockClear();
+    mockFs.unlink.mockClear();
     await bridge.cleanup();
 
     expect(mockFs.rm).not.toHaveBeenCalled();
@@ -324,6 +420,13 @@ describe('PremiereProBridge', () => {
     mockFs.rm.mockResolvedValue(undefined);
 
     await bridge.initialize();
+    // Bridge IPC auth made initialize() itself write (the per-session auth token) and
+    // unlink (the stale-command sweep). Those are setup, not the subject of these tests, so
+    // the fs mocks are cleared here — otherwise every assertion about "the command write"
+    // picks up the token instead, which is precisely how this suite went red.
+    mockFs.writeFile.mockClear();
+    mockFs.rename.mockClear();
+    mockFs.unlink.mockClear();
     await bridge.cleanup();
 
     const generatedTempDir = process.platform === 'win32'

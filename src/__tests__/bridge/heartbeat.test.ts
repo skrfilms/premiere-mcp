@@ -30,7 +30,11 @@ jest.mock('fs', () => ({
 }));
 
 jest.mock('node:crypto', () => ({
-  randomUUID: jest.fn(() => 'test-uuid-1234')
+  randomUUID: jest.fn(() => 'test-uuid-1234'),
+  // Bridge IPC auth mints a per-session token with randomBytes. A partial mock of a
+  // real module fails at the first NEW call site rather than the one it was written
+  // for, so omitting it threw before any assertion in this file could run.
+  randomBytes: jest.fn(() => Buffer.from('ab'.repeat(32), 'hex')),
 }));
 
 describe('bridge panel heartbeat', () => {
@@ -72,6 +76,13 @@ describe('bridge panel heartbeat', () => {
   const readyBridge = async (): Promise<PremiereProBridge> => {
     const bridge = new PremiereProBridge();
     await bridge.initialize();
+    // Bridge IPC auth made initialize() itself write (the per-session auth token) and
+    // unlink (the stale-command sweep). Those are setup, not the subject of these tests, so
+    // the fs mocks are cleared here — otherwise every assertion about "the command write"
+    // picks up the token instead, which is precisely how this suite went red.
+    mockFs.writeFile.mockClear();
+    mockFs.rename.mockClear();
+    mockFs.unlink.mockClear();
     return bridge;
   };
 
