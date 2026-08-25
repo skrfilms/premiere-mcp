@@ -1,0 +1,30 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Panel proposals</title><style>
+ body{margin:0;background:#1b1b1b;color:#eee;font:13px/1.4 -apple-system,"Helvetica Neue",sans-serif}
+ h1{font-size:15px;font-weight:600;margin:14px 16px 4px}
+ p.note{margin:0 16px 12px;color:#9a9a9a;font-size:12px}
+ .row{display:flex;gap:14px;padding:0 16px 20px;align-items:flex-start;overflow-x:auto}
+ .cell{flex:0 0 auto}
+ .cap{font:600 11px/1.5 -apple-system,sans-serif;letter-spacing:.04em;text-transform:uppercase;color:#cfcfcf;padding:6px 0 4px}
+ .cap span{display:block;text-transform:none;font-weight:400;color:#8f8f8f;letter-spacing:0}
+ iframe{width:320px;height:620px;border:0;outline:1px solid #3a3a3a;display:block;background:#000}
+ .state{font:600 12px/1 -apple-system,sans-serif;color:#f0c05a;padding:10px 16px 6px;letter-spacing:.06em}
+</style></head><body>
+<h1>MCP bridge panel — five directions, 320px (Premiere's default panel width)</h1>
+<p class="note">Top row: a command in flight. Bottom row: a failure. Same width, same data, same states.</p>
+<div class="state">COMMAND IN FLIGHT</div>
+<div class="row">
+ <div class="cell"><div class="cap">P1 · Signal path<span>four-hop channel; failure localises</span></div><iframe src="p1-signal-path.html?state=processing"></iframe></div>
+ <div class="cell"><div class="cap">P2 · Slate &amp; tally<span>tally lamp; slate fields</span></div><iframe src="p2-slate-tally.html?state=processing"></iframe></div>
+ <div class="cell"><div class="cap">P3 · Console strip<span>log-scale PPM meter, peak hold</span></div><iframe src="p3-console-strip.html?state=processing"></iframe></div>
+ <div class="cell"><div class="cap">P4 · Edge-code ledger<span>no containers; citable margin key</span></div><iframe src="p4-edge-code.html?state=processing"></iframe></div>
+ <div class="cell"><div class="cap">P5 · Leader<span>countdown to the kill</span></div><iframe src="p5-leader.html?state=processing"></iframe></div>
+</div>
+<div class="state">COMMAND FAILED</div>
+<div class="row">
+ <div class="cell"><div class="cap">P1 · Signal path</div><iframe src="p1-signal-path.html?state=error"></iframe></div>
+ <div class="cell"><div class="cap">P2 · Slate &amp; tally</div><iframe src="p2-slate-tally.html?state=error"></iframe></div>
+ <div class="cell"><div class="cap">P3 · Console strip</div><iframe src="p3-console-strip.html?state=error"></iframe></div>
+ <div class="cell"><div class="cap">P4 · Edge-code ledger</div><iframe src="p4-edge-code.html?state=error"></iframe></div>
+ <div class="cell"><div class="cap">P5 · Leader</div><iframe src="p5-leader.html?state=error"></iframe></div>
+</div>
+</body></html>

@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MCP Bridge (CEP) — edge-code ledger</title>
+<style>
+/* ───────────────────────────────────────────────────────────────────────────
+   EDGE-CODE LEDGER
+   No cards, no tiles, no boxes. Structure comes from three things only:
+   a margin key rail (the spine), one shared figure rail, and hairline field
+   rules. Machine strings are set in mono; human prose is set in the host's
+   own UI face (Adobe Clean, via appSkinInfo.baseFontFamily).
+   Every line in the panel carries a citable key: sheet lines 00-nn, ledger
+   entries <seq>+<leg> after film edge-code grammar (0142+2 = leg 2 of 0142).
+   ─────────────────────────────────────────────────────────────────────────── */
+
+:root{
+  /* paper + ink are written by JS from the host skin; these are the
+     darkest-theme defaults so the panel is never unstyled. */
+  --paper:#212121;
+  --ink:#ECEAE4;      /* primary        13.4:1 on #212121 */
+  --ink-mid:#A9A39A;  /* labels, units   6.4:1 */
+  --key:#99938A;      /* margin keys     5.3:1 */
+  --faint:#8F8981;    /* leaders, rules  4.7:1 */
+  --live:#86C98A;     /* channel open    8.2:1 */
+  --work:#E3AB4A;     /* in flight       7.8:1 */
+  --fault:#F58C79;    /* failed          6.8:1 */
+  --rule:rgba(255,255,255,.22);
+  --rule-soft:rgba(255,255,255,.13);
+  --host-face:"Adobe Clean","Source Sans Pro","Helvetica Neue",Arial,sans-serif;
+  --mono:"SF Mono","Menlo","Consolas","DejaVu Sans Mono",monospace;
+
+  /* the alignment system: four fixed rails + one elastic label column */
+  --kw:44px;   /* margin key rail  */
+  --fw:58px;   /* figure rail (digits end here) */
+  --uw:24px;   /* unit rail (units begin here) */
+  --aw:46px;   /* frame-count rail */
+  --pad:12px;
+}
+*{box-sizing:border-box}
+html{font-size:12px}
+body{
+  margin:0;padding:0;
+  background:var(--paper);
+  color:var(--ink);
+  font-family:var(--host-face);
+  font-size:12px;
+  -webkit-font-smoothing:antialiased;
+}
+.doc{padding:10px var(--pad) 0}
+
+/* ── masthead ─────────────────────────────────────────────────────────── */
+.masthead{display:flex;align-items:baseline;justify-content:space-between;gap:8px;padding-bottom:9px}
+.docid{font-family:var(--mono);font-size:9.5px;letter-spacing:.15em;text-transform:uppercase;color:var(--ink-mid)}
+.docid b{color:var(--ink);font-weight:600}
+
+/* ── boxless actions: a word with a rule under it ─────────────────────── */
+button{
+  -webkit-appearance:none;appearance:none;background:none;border:0;border-radius:0;
+  border-bottom:2px solid var(--ink-mid);
+  font-family:var(--host-face);font-size:11px;font-weight:600;letter-spacing:.02em;
+  color:var(--ink);padding:2px 1px 2px;margin:0;cursor:pointer;white-space:nowrap;
+}
+button:hover{border-bottom-color:var(--ink)}
+button:focus{outline:2px solid var(--ink);outline-offset:3px}
+button:disabled{display:none}          /* live code toggles .disabled: one action shows */
+button.act-live{border-bottom-color:var(--live)}
+button.act-quiet{font-weight:400;color:var(--ink-mid);border-bottom-color:var(--rule-soft);font-size:10px}
+button.act-quiet:hover{color:var(--ink);border-bottom-color:var(--ink-mid)}
+
+/* ── the spine: one continuous rule at the key rail, per column ────────── */
+.col{position:relative}
+.col::before{
+  content:"";position:absolute;left:calc(var(--kw) - 9px);top:0;bottom:0;
+  border-left:1px solid var(--rule-soft);
+}
+
+/* ── verdict: the one-second answer. largest type in the panel. ────────── */
+.verdict{padding:2px 0 10px}
+.verdict-line{display:grid;grid-template-columns:var(--kw) auto 1fr;align-items:center;column-gap:0}
+.verdict-line .k{padding-right:18px}
+.status-dot{                     /* className is overwritten wholesale by live code */
+  display:inline-block;width:9px;height:9px;margin-right:9px;vertical-align:1px;
+  background:none;border:1.5px solid var(--ink-mid);
+}
+.status-dot.connected{background:var(--live);border-color:var(--live)}
+.status-dot.disconnected{background:none;border-color:var(--ink-mid)}
+.verdict-word{font-size:19px;font-weight:600;letter-spacing:-.01em;line-height:1.1}
+.verdict-note{
+  margin:5px 0 0;padding-left:var(--kw);font-size:11.5px;line-height:1.45;color:var(--ink-mid);
+  max-width:48em;
+}
+.verdict-note b{color:var(--ink);font-weight:600}
+.verdict-note code{font-family:var(--mono);font-size:10.5px;color:var(--ink)}
+.t-live .verdict-word{color:var(--live)}
+.t-work .verdict-word{color:var(--work)}
+.t-dead .verdict-word{color:var(--ink)}
+
+/* ── band captions sit ON the rule, they do not enclose anything ───────── */
+.cap{display:grid;grid-template-columns:var(--kw) auto 1fr auto;align-items:center;margin:11px 0 4px}
+.cap b{grid-column:2;font-size:9.5px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--ink-mid);padding-right:9px}
+.cap i{grid-column:3;height:0;border-top:1px solid var(--rule)}
+.cap s{grid-column:4;text-decoration:none;font-family:var(--mono);font-size:9.5px;color:var(--faint);padding-left:9px}
+
+/* ── the ledger line: key | label·leader | figure | unit | frames ──────── */
+.ln{
+  display:grid;
+  grid-template-columns:var(--kw) minmax(0,1fr) var(--fw) var(--uw) var(--aw);
+  align-items:baseline;padding:3px 0;
+}
+.k{
+  grid-column:1;font-family:var(--mono);font-size:9.5px;font-style:normal;letter-spacing:.02em;
+  color:var(--key);text-align:right;padding-right:18px;white-space:nowrap;
+}
+.lb{grid-column:2;display:flex;align-items:baseline;min-width:0;font-size:11px;color:var(--ink-mid)}
+.lb>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lb--say{color:var(--ink);font-size:11.5px}
+.lb::after{content:"";flex:1 1 auto;min-width:6px;margin:0 7px;
+  border-bottom:1px dotted var(--faint);position:relative;top:-3px}
+.fig{grid-column:3;font-family:var(--mono);font-size:12px;font-weight:400;
+  text-align:right;color:var(--ink);font-variant-numeric:tabular-nums;white-space:nowrap}
+.un{grid-column:4;font-family:var(--host-face);font-style:normal;font-size:9.5px;
+  color:var(--ink-mid);padding-left:6px;letter-spacing:.04em;white-space:nowrap}
+.alt{grid-column:5;font-family:var(--mono);font-size:10px;font-weight:400;text-align:right;
+  color:var(--ink-mid);font-variant-numeric:tabular-nums;white-space:nowrap}
+.sub{grid-column:2/6;padding-top:1px;font-size:9.5px;line-height:1.4;color:var(--faint)}
+.idn{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--ink)}
+
+/* unknown vs zero: an em dash is a different fact from a nought */
+.fig.nil,.alt.nil,.val.nil{color:var(--faint)}
+/* a word is not a figure: it right-aligns to the outer edge instead of the
+   digit rail, so it never crowds the units column. */
+.fig.none{color:var(--ink-mid);font-size:11px;font-family:var(--host-face);
+  grid-column:3/6;white-space:nowrap}
+.fig.hot{color:var(--work)}
+.fig.bad{color:var(--fault)}
+
+/* full-bleed value line: paths, project names, prose */
+.ln--w{grid-template-columns:var(--kw) minmax(0,1fr)}
+.ln--w .lb{grid-column:2;display:block}
+.ln--w .lb::after{display:none}
+.ln--w .lb>span{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.35}
+.val{grid-column:2;font-family:var(--mono);font-size:11px;color:var(--ink);
+  word-break:break-all;line-height:1.4}
+
+/* write-on line: a form field is a rule, not a well */
+.field{grid-column:2;display:flex;align-items:baseline;gap:10px;min-width:0}
+input[type=text]{
+  -webkit-appearance:none;appearance:none;flex:1 1 auto;min-width:0;
+  background:none;border:0;border-bottom:1px solid var(--ink-mid);border-radius:0;
+  color:var(--ink);font-family:var(--mono);font-size:11px;padding:2px 0 3px;
+}
+/* italic placeholder so an empty field never reads as a saved path */
+input[type=text]::-webkit-input-placeholder{color:var(--faint);font-style:italic}
+input[type=text]:focus{outline:0;border-bottom:1px solid var(--live);
+  box-shadow:0 1px 0 0 var(--live)}
+
+/* ── fault statement: no box. a rule above, fault ink, and a do-this. ─── */
+.fault{padding:8px 0 4px;margin-top:8px;border-top:1px solid var(--fault)}
+.fault-head{display:grid;grid-template-columns:var(--kw) auto 1fr;align-items:baseline}
+.fault-mark{display:inline-block;width:9px;height:9px;background:var(--fault);margin-right:9px}
+.fault-tag{grid-column:2;font-size:9.5px;font-weight:600;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--fault);white-space:nowrap}
+.fault-when{grid-column:3;text-align:right;font-family:var(--mono);font-size:9.5px;color:var(--faint)}
+.fault-body{padding:5px 0 0 var(--kw);font-size:11.5px;line-height:1.45;color:var(--ink);max-width:54em}
+.fault-body code{font-family:var(--mono);font-size:10.5px}
+.fault-do{padding:4px 0 0 var(--kw);font-size:11px;line-height:1.45;color:var(--ink-mid);max-width:54em}
+
+/* ── watchdog gauge: an inked rule, not a bar in a trough ─────────────── */
+.gauge{display:block;height:2px;margin:5px 0 2px var(--kw);
+  background:linear-gradient(to right,var(--work) 0,var(--work) var(--p,0%),
+             var(--rule-soft) var(--p,0%),var(--rule-soft) 100%)}
+.gauge.idle{background:var(--rule-soft)}
+
+/* ── ledger ───────────────────────────────────────────────────────────── */
+.ledger{max-height:46vh;overflow-y:auto;overflow-x:hidden;padding-top:1px}
+.ent{
+  display:grid;
+  grid-template-columns:var(--kw) minmax(0,1fr) var(--fw) var(--uw) var(--aw);
+  align-items:baseline;padding:4px 0 4px;border-bottom:1px solid var(--rule-soft);
+}
+.ent:last-child{border-bottom:0}
+.ent-b{grid-column:2;min-width:0}
+/* a tool name is the whole point of the entry, so it breaks rather than
+   truncating — a clipped identifier is not citable. Prose keeps its words
+   whole; only the identifier is allowed to break mid-token. */
+.ent-h{display:block;font-size:11px;line-height:1.35;color:var(--ink)}
+.ent-h .idn{word-break:break-all}
+.ent-h .verb{color:var(--ink-mid)}
+.ent-t{display:block;font-family:var(--mono);font-size:9.5px;color:var(--faint);padding-top:1px}
+.ent--run .k,.ent--run .ent-h .verb{color:var(--work)}
+.ent--bad .k,.ent--bad .ent-h .verb{color:var(--fault)}
+.ent--bad .ent-h{color:var(--fault)}
+.ent--note .ent-h{color:var(--ink-mid)}
+.pulse{animation:blink 1.5s steps(2,end) infinite}
+@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.pulse{animation:none}}
+
+/* ── queue: aged rows, above the ledger, same rails ───────────────────── */
+.q-nil{display:grid;grid-template-columns:var(--kw) minmax(0,1fr);padding:3px 0}
+.q-nil span{grid-column:2;font-size:11px;color:var(--faint)}
+
+/* ── breakpoints ────────────────────────────────────────────────────────
+   Driven by a class on <html> from the measured panel width rather than a
+   width media query. A CEP panel is resized by the user dragging a dock
+   edge, and the panel reads its own width honestly; going through a class
+   also lets the design harness pin a width, which headless Chrome cannot
+   do below its 500px minimum window. Four steps:
+     w-s   <340   the 280x300 floor
+     w-m   340-619 single column
+     w-l   620+   sheet | ledger
+     w-xl  900+   wider rails, timestamps inline
+   ── stacking: narrow, the ledger is promoted above the standing sheet
+   bands, because the ledger is what this panel is for.                  */
+.cols{display:grid;grid-template-columns:minmax(0,1fr);
+  grid-template-areas:"flt" "top" "led" "rest"}
+#faultBlock{grid-area:flt}
+#sheetTop{grid-area:top}
+#ledgerCol{grid-area:led}
+#sheetRest{grid-area:rest}
+.w-l .cols,.w-xl .cols{
+  grid-template-columns:minmax(0,296px) minmax(0,1fr);
+  grid-template-areas:"flt flt" "top led" "rest led";grid-template-rows:auto auto 1fr;
+  column-gap:30px;align-items:start}
+.w-l,.w-xl{--pad:16px}
+.w-l .ledger,.w-xl .ledger{max-height:none}
+.w-l .verdict-word,.w-xl .verdict-word{font-size:22px}
+.w-xl{--kw:52px;--fw:74px;--uw:28px;--aw:56px}
+.w-xl .cols{grid-template-columns:minmax(0,376px) minmax(0,1fr);column-gap:44px}
+.w-xl .ent-t{display:inline-block;padding-left:12px}
+/* a sheet has a measure. Let the entry text grow past ~26em and the duration
+   drifts so far from the tool name that they stop reading as one entry, so the
+   figure rails stop travelling and the extra dock width becomes margin. The
+   rules still run the full width, which is how a ruled sheet behaves. */
+.w-xl .ent,.w-xl #ledgerCol .ln{grid-template-columns:var(--kw) minmax(0,26em) var(--fw) var(--uw) var(--aw)}
+/* the floor: shed the frame rail and tighten the leaders, keep every rail */
+.w-s{--kw:46px;--fw:44px;--uw:20px;--aw:0px;--pad:8px}
+.w-s .k{padding-right:9px;font-size:9px}
+.w-s .col::before{left:calc(var(--kw) - 7px)}
+.w-s .alt{display:none}
+.w-s .lb::after{margin:0 5px}
+.w-s .lb,.w-s .ent-h{font-size:10.5px}
+.w-s .ln{padding:2px 0}
+.w-s .cap{margin:8px 0 3px}
+.w-s .verdict-word{font-size:17px}
+.w-s .verdict-note,.w-s .fault-body{font-size:11px}
+.w-s .ledger{max-height:none}
+.w-s .docid .lbl{display:none}
+.w-s .fig{font-size:11px}
+.w-s .ent-t{font-size:9px}
+/* at the floor the tag and its time cannot share a line, so the time drops
+   to the next line of the same key — still keyed, still citable. */
+.w-s .fault-head{grid-template-columns:var(--kw) minmax(0,1fr)}
+.w-s .fault-tag{grid-column:2;white-space:normal}
+.w-s .fault-when{grid-column:2;grid-row:2;text-align:left;padding-top:2px}
+
+/* design harness only: pin the panel to a width headless Chrome refuses to
+   give us, and mark the edge so any overflow is impossible to miss. */
+body.simw{border-right:1px dashed rgba(255,90,60,.45)}
+
+/* ── design-only footer (not part of the panel) ───────────────────────── */
+.rig{margin-top:14px;border-top:1px solid var(--rule-soft);padding:7px var(--pad) 12px;
+  font-family:var(--mono);font-size:9px;letter-spacing:.06em;color:var(--faint)}
+.rig a{color:var(--ink-mid);text-decoration:none;border-bottom:1px solid var(--rule-soft);
+  padding-bottom:1px;margin-right:7px;display:inline-block;margin-top:4px}
+.rig a.on{color:var(--ink);border-bottom-color:var(--live)}
+.rig a:focus{outline:2px solid var(--ink);outline-offset:2px}
+</style>
+</head>
+<body>
+<div class="doc">
+
+  <div class="masthead">
+    <div class="docid"><span class="lbl">Bridge&nbsp;sheet · </span><b id="hostVer">Premiere 26.3.2</b></div>
+    <div>
+      <button id="startButton" class="act-live" onclick="startBridge()">Start bridge</button>
+      <button id="stopButton" onclick="stopBridge()">Stop bridge</button>
+    </div>
+  </div>
+
+  <!-- 00 — the one-second answer -->
+  <div class="col verdict" id="verdictWrap">
+    <div class="verdict-line">
+      <i class="k">00</i>
+      <span><span class="status-dot disconnected" id="connectionStatus"></span></span>
+      <span class="verdict-word" id="connectionText">Disconnected</span>
+    </div>
+    <p class="verdict-note" id="verdictNote"></p>
+  </div>
+
+  <div class="cols">
+    <!-- ══ 01 — the fault statement. Struck across the whole sheet, so the
+             break is visible before you have read a word. ═══════════════ -->
+    <div class="col fault" id="faultBlock" style="display:none">
+      <div class="fault-head">
+        <i class="k">01</i>
+        <span class="fault-tag"><span class="fault-mark"></span><span id="faultTag">Fault</span></span>
+        <span class="fault-when" id="faultWhen">—</span>
+      </div>
+      <div class="fault-body" id="faultBody"></div>
+      <div class="fault-do" id="faultDo"></div>
+    </div>
+
+    <!-- ══ sheet, part one: the command in flight ═══════════════════════ -->
+    <div class="col" id="sheetTop">
+      <div class="cap"><b>In flight</b><i></i></div>
+      <div class="ln ln--w"><i class="k" id="kFlight">02</i><span class="val" id="flightName">—</span></div>
+      <div class="ln"><i class="k" id="kElapsed">03</i><span class="lb"><span>Elapsed</span></span>
+        <b class="fig" id="figElapsed">—</b><em class="un" id="unElapsed"></em><b class="alt" id="altElapsed"></b></div>
+      <div class="ln"><i class="k" id="kDog">04</i><span class="lb"><span id="lbDog">Watchdog kills it in</span></span>
+        <b class="fig" id="figDog">—</b><em class="un" id="unDog"></em><b class="alt" id="altDog"></b></div>
+      <span class="gauge idle" id="dogGauge"></span>
+      <div class="ln ln--w"><i class="k">&nbsp;</i><span class="sub" id="dogNote" style="grid-column:2">Limit 45 000 ms · 1080 f at 24 fps.</span></div>
+    </div>
+
+    <!-- ══ sheet, part two: the standing facts ══════════════════════════ -->
+    <div class="col" id="sheetRest">
+      <div class="cap"><b>Channel</b><i></i><s>poll 250 ms</s></div>
+      <div class="ln"><i class="k">05</i><span class="lb"><span>Heartbeat age</span></span>
+        <b class="fig" id="figBeat">—</b><em class="un" id="unBeat"></em><b class="alt" id="altBeat"></b></div>
+      <div class="ln ln--w"><i class="k">&nbsp;</i><span class="sub" id="beatNote" style="grid-column:2">The server calls the panel dead at 4 000 ms.</span></div>
+      <div class="ln"><i class="k">06</i><span class="lb"><span>Waiting commands</span></span>
+        <b class="fig" id="figQueue">—</b><em class="un" id="unQueue"></em><b class="alt"></b></div>
+      <div class="ln"><i class="k">07</i><span class="lb"><span>Server gives up after</span></span>
+        <b class="fig">8 000</b><em class="un">ms</em><b class="alt">192 f</b></div>
+
+      <div class="cap"><b>Host</b><i></i></div>
+      <div class="ln ln--w"><i class="k">08</i><span class="lb lb--say"><span><span
+        class="status-dot disconnected" id="serverStatus"></span><span id="serverText">Premiere Pro: Start Bridge to enable</span></span></span></div>
+      <div class="ln ln--w"><i class="k">09</i><span class="lb"><span>Open project</span></span></div>
+      <div class="ln ln--w"><i class="k">&nbsp;</i><span class="val" id="projName">—</span></div>
+      <div class="ln ln--w"><i class="k">10</i><span class="lb"><span>Shared folder — must match PREMIERE_TEMP_DIR</span></span></div>
+      <div class="ln ln--w"><i class="k">&nbsp;</i><span class="field">
+        <input type="text" id="tempDirectory" placeholder="/tmp/premiere-mcp-bridge">
+        <button class="act-quiet" onclick="saveConfig()">Save path</button>
+      </span></div>
+
+      <div class="cap"><b>Access</b><i></i></div>
+      <div class="ln ln--w"><i class="k">11</i><span class="lb"><span>Auth mode</span></span></div>
+      <div class="ln ln--w"><i class="k">&nbsp;</i><span class="val" id="authMode">—</span></div>
+      <div class="ln"><i class="k">12</i><span class="lb"><span>Rejected commands</span></span>
+        <b class="fig" id="figRej">—</b><em class="un" id="unRej"></em><b class="alt"></b></div>
+    </div>
+
+    <!-- ══ right: the ledger — the product, not a drawer ════════════════ -->
+    <div class="col" id="ledgerCol">
+      <div class="cap"><b>Ledger</b><i></i><s id="capLedger">ms · frames at 24 fps</s></div>
+      <div id="commandQueue"></div>
+      <div class="ledger" id="logContainer"></div>
+      <div class="ln ln--w" style="padding-top:8px"><i class="k">&nbsp;</i><span style="grid-column:2">
+        <button class="act-quiet" onclick="runDiagnostics()">Write diagnostics</button>
+        <button class="act-quiet" onclick="clearLog()">Clear ledger</button>
+      </span></div>
+    </div>
+  </div>
+</div>
+
+<div class="rig">
+  design preview, not part of the panel<br>
+  state <span id="rigStates"></span><br>
+  paper <span id="rigThemes"></span>
+</div>
+
+<script>
+/* ═══ host skin ═══════════════════════════════════════════════════════════
+   Premiere ships four user brightness levels. Read the real one; fall back
+   to the darkest. Three ink ramps, because a single light-on-dark ramp goes
+   illegible on the third level (#545454) long before the fourth.          */
+var PAPERS={darkest:'#212121',dark:'#323232',mid:'#545454',light:'#b8b8b8'};
+var RAMPS={
+  a:{ink:'#ECEAE4',mid:'#A9A39A',key:'#99938A',faint:'#8F8981',live:'#86C98A',work:'#E3AB4A',fault:'#F58C79',rule:'rgba(255,255,255,.22)',soft:'rgba(255,255,255,.13)'},
+  b:{ink:'#FBFAF7',mid:'#D6D1C8',key:'#BFB9B0',faint:'#B3ADA4',live:'#B4E5B2',work:'#F5CE84',fault:'#FFB6A6',rule:'rgba(255,255,255,.34)',soft:'rgba(255,255,255,.2)'},
+  c:{ink:'#171A1C',mid:'#41474C',key:'#4E5559',faint:'#5C6368',live:'#1E5C2B',work:'#6E4600',fault:'#8E1F0E',rule:'rgba(0,0,0,.30)',soft:'rgba(0,0,0,.17)'}
+};
+function lum(hex){
+  hex=hex.replace('#','');
+  var v=[0,2,4].map(function(i){
+    var c=parseInt(hex.substr(i,2),16)/255;
+    return c<=0.03928?c/12.92:Math.pow((c+0.055)/1.055,2.4);
+  });
+  return 0.2126*v[0]+0.7152*v[1]+0.0722*v[2];
+}
+function paint(paper,face){
+  var L=lum(paper),r=L<0.05?RAMPS.a:(L<0.30?RAMPS.b:RAMPS.c),s=document.documentElement.style;
+  s.setProperty('--paper',paper);
+  s.setProperty('--ink',r.ink); s.setProperty('--ink-mid',r.mid);
+  s.setProperty('--key',r.key); s.setProperty('--faint',r.faint);
+  s.setProperty('--live',r.live); s.setProperty('--work',r.work); s.setProperty('--fault',r.fault);
+  s.setProperty('--rule',r.rule); s.setProperty('--rule-soft',r.soft);
+  if(face) s.setProperty('--host-face','"'+face+'", "Adobe Clean", "Helvetica Neue", Arial, sans-serif');
+}
+function readHostSkin(){
+  try{
+    if(typeof CSInterface!=='function') return null;
+    var sk=new CSInterface().hostEnvironment.appSkinInfo,c=sk.panelBackgroundColor.color;
+    function h(n){n=Math.max(0,Math.min(255,Math.round(n))).toString(16);return n.length<2?'0'+n:n}
+    return {paper:'#'+h(c.red)+h(c.green)+h(c.blue),face:sk.baseFontFamily};
+  }catch(e){return null}
+}
+
+/* ═══ vernacular ══════════════════════════════════════════════════════════
+   24 fps show: durations read in frames as well as milliseconds, because
+   that is the unit an editor thinks in. Thousands split by a narrow space
+   so a column of figures still aligns on the digit.                       */
+var FPS=24, MS_PER_F=1000/FPS, NNBSP=' ';
+function grp(n){
+  var s=String(n),out='',c=0;
+  for(var i=s.length-1;i>=0;i--){out=s[i]+out;if(++c%3===0&&i>0)out=NNBSP+out}
+  return out;
+}
+function fnum(ms){var f=ms/MS_PER_F;return f<10?f.toFixed(1):grp(Math.round(f))}
+function frames(ms){return fnum(ms)+NNBSP+'f'}
+function secs(ms){return (ms/1000).toFixed(1)}
+function el(id){return document.getElementById(id)}
+function txt(id,v){var n=el(id);if(n)n.textContent=(v===undefined||v===null)?'':v}
+function cls(id,c){var n=el(id);if(n)n.className=c}
+function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+
+/* a figure cell: null renders an em dash, never a nought. */
+function figure(figId,unId,altId,val,unit,alt,tone){
+  var f=el(figId);
+  if(val===null||val===undefined){f.textContent='—';f.className='fig nil';txt(unId,'');txt(altId,'');return}
+  f.textContent=val; f.className='fig'+(tone?' '+tone:'');
+  txt(unId,unit||''); txt(altId,alt||'');
+}
+
+/* ═══ mock states ═════════════════════════════════════════════════════════ */
+var STATES={
+'disconnected':{
+  word:'Disconnected',tone:'t-dead',dot:'disconnected',connected:false,
+  note:'The panel is not polling, so nothing outside Premiere can reach the scripting engine. Start the bridge to open the channel.',
+  flight:null,elapsedMs:null,dogMs:null,beatMs:null,queue:null,
+  server:'Premiere Pro: Start Bridge to enable',serverDot:'disconnected',
+  project:null,temp:'/tmp/premiere-mcp-bridge',auth:null,rejected:null,
+  q:null,
+  log:[
+    {k:'0002+0',h:'Saved folder read from config.json',v:'',t:'11:19:02.884',c:'note'},
+    {k:'0001+0',h:'Panel loaded',v:'',t:'11:19:02.611',c:'note'}
+  ]},
+'starting':{
+  word:'Connecting',tone:'t-work',dot:'disconnected',connected:false,
+  note:'Opening the channel. The panel is waiting for Premiere to answer its first script.',
+  flight:null,elapsedMs:null,dogMs:null,beatMs:null,queue:null,
+  server:'Premiere Pro: verifying host…',serverDot:'disconnected',
+  project:null,temp:'/tmp/premiere-mcp-bridge',auth:'Per-session token enforced',rejected:0,
+  q:null,qNote:'Queue depth unknown until the first poll lands.',
+  beatNote:'The first heartbeat lands within 250 ms of the channel opening.',
+  log:[
+    {k:'0004+0',h:'Host check sent',v:'awaiting reply',t:'11:24:01.402',c:'run'},
+    {k:'0003+0',h:'Shared folder ready',v:'',t:'11:24:01.180',c:'note'},
+    {k:'0002+0',h:'Session token written',v:'to auth-token.json',t:'11:24:01.166',c:'note'},
+    {k:'0001+0',h:'Panel loaded',v:'',t:'11:24:00.902',c:'note'}
+  ]},
+'connected-idle':{
+  word:'Connected',tone:'t-live',dot:'connected',connected:true,
+  note:'Channel open. The panel polls the shared folder every 250 ms and nothing is waiting.',
+  flight:'none',elapsedMs:null,dogMs:'idle',beatMs:210,queue:0,
+  server:'Premiere Pro: Ready',serverDot:'connected',
+  project:'graveyard_chase_v2.prproj',temp:'/tmp/premiere-mcp-bridge',
+  auth:'Per-session token enforced',rejected:0,
+  q:[],
+  log:[
+    {k:'0143+2',h:'capture_program_output',v:'answered',ms:1268,t:'11:31:44.902'},
+    {k:'0142+2',h:'set_clip_scale',v:'answered',ms:144,t:'11:31:41.338'},
+    {k:'0141+2',h:'apply_lumetri_preset',v:'answered',ms:96,t:'11:31:38.771'},
+    {k:'0140+2',h:'add_to_timeline',v:'answered',ms:412,t:'11:31:35.204'},
+    {k:'0139+2',h:'bake_keyframe_ease',v:'answered',ms:238,t:'11:31:30.665'}
+  ]},
+'processing':{
+  word:'Connected',tone:'t-live',dot:'connected',connected:true,
+  note:'Running <code>set_clip_scale</code>. Three commands wait behind it.',
+  flight:'set_clip_scale',flightId:'cmd_0144_8f3a',
+  elapsedMs:4212,dogMs:40788,beatMs:180,queue:3,
+  server:'Premiere Pro: Ready',serverDot:'connected',
+  project:'graveyard_chase_v2.prproj',temp:'/tmp/premiere-mcp-bridge',
+  auth:'Per-session token enforced',rejected:0,
+  q:[{n:'add_to_timeline',age:1900},{n:'bake_keyframe_ease',age:1240},{n:'export_sequence',age:420}],
+  log:[
+    {k:'0144+1',h:'set_clip_scale',v:'running',ms:4212,t:'11:33:07.312',c:'run'},
+    {k:'0144+0',h:'set_clip_scale',v:'received',t:'11:33:07.298',c:'note'},
+    {k:'0143+2',h:'capture_program_output',v:'answered',ms:1268,t:'11:33:05.902'},
+    {k:'0143+0',h:'capture_program_output',v:'received',t:'11:33:04.612',c:'note'},
+    {k:'0142+2',h:'set_clip_scale',v:'answered',ms:144,t:'11:33:01.338'},
+    {k:'0141+2',h:'apply_lumetri_preset',v:'answered',ms:96,t:'11:32:58.771'},
+    {k:'0140+2',h:'add_to_timeline',v:'answered',ms:412,t:'11:32:55.204'}
+  ]},
+'error':{
+  word:'Connected',tone:'t-live',dot:'connected',connected:true,
+  note:'The channel is open, but the last command failed. Line 01 has the reason.',
+  fault:{tag:'Command failed',when:'11:36:12.774',
+    body:'<code>export_sequence</code> stopped after 8 003 ms — Premiere answered <code>EvalScript error.</code>',
+    doThis:'Premiere is most likely holding a dialog. Bring it forward and press Escape, then ask the agent to run the command again.'},
+  flight:'none',elapsedMs:null,dogMs:'idle',beatMs:240,queue:1,
+  server:'Premiere Pro: Ready',serverDot:'connected',
+  project:'graveyard_chase_v2.prproj',temp:'/tmp/premiere-mcp-bridge',
+  auth:'Per-session token enforced',rejected:2,
+  q:[{n:'apply_lumetri_preset',age:3100}],
+  log:[
+    {k:'0146+2',h:'export_sequence',v:'failed — EvalScript error.',ms:8003,t:'11:36:12.774',c:'bad'},
+    {k:'0146+0',h:'export_sequence',v:'received',t:'11:36:04.771',c:'note'},
+    {k:'0145+2',h:'set_clip_scale',v:'answered',ms:151,t:'11:36:00.118'},
+    {k:'0144+2',h:'add_to_timeline',v:'answered',ms:404,t:'11:35:56.902'},
+    {k:'0143+9',h:'Command rejected — token did not match',v:'',t:'11:35:41.330',c:'bad'}
+  ]},
+'premiere-not-ready':{
+  word:'Connected',tone:'t-live',dot:'connected',connected:true,
+  note:'The panel is polling, but Premiere has not answered a script for 12 s. Work will queue and then hit the watchdog.',
+  fault:{tag:'Host not answering',when:'11:41:58.204',
+    body:'Premiere has not returned a script result for 12 s. Two commands are queued behind it and the panel version is all it can read.',
+    doThis:'Bring Premiere forward and clear anything it is holding open — a dialog, a modal export, a beachball. The queue drains on its own once the host answers.'},
+  flight:'add_to_timeline',flightId:'cmd_0151_2b7c',
+  elapsedMs:12440,dogMs:32560,beatMs:250,queue:2,
+  server:'Premiere Pro: no answer',serverDot:'disconnected',
+  project:null,temp:'/tmp/premiere-mcp-bridge',
+  auth:'Per-session token enforced',rejected:0,
+  q:[{n:'apply_lumetri_preset',age:11800},{n:'set_clip_scale',age:8300}],
+  log:[
+    {k:'0151+1',h:'add_to_timeline',v:'running — host silent',ms:12440,t:'11:41:58.204',c:'run'},
+    {k:'0151+0',h:'add_to_timeline',v:'received',t:'11:41:58.190',c:'note'},
+    {k:'0150+2',h:'bake_keyframe_ease',v:'answered',ms:322,t:'11:41:44.008'},
+    {k:'0149+2',h:'set_clip_scale',v:'answered',ms:139,t:'11:41:40.771'}
+  ]},
+'temp-dir-unset':{
+  word:'Disconnected',tone:'t-dead',dot:'disconnected',connected:false,
+  note:'No shared folder is set, so the bridge cannot start.',
+  fault:{tag:'Shared folder not set',when:'11:44:09.611',
+    body:'The panel has no folder to poll. Commands from the MCP server land in a directory nobody is watching.',
+    doThis:'Enter the same path your MCP client uses for PREMIERE_TEMP_DIR on line 10, save it, then start the bridge. The default is /tmp/premiere-mcp-bridge.'},
+  flight:null,elapsedMs:null,dogMs:null,beatMs:null,queue:null,
+  server:'Premiere Pro: Start Bridge to enable',serverDot:'disconnected',
+  project:null,temp:'',auth:null,rejected:null,
+  q:null,
+  log:[
+    {k:'0002+0',h:'No saved folder in config.json',v:'',t:'11:44:09.611',c:'bad'},
+    {k:'0001+0',h:'Panel loaded',v:'',t:'11:44:09.402',c:'note'}
+  ]}
+};
+var ORDER=['disconnected','starting','connected-idle','processing','error','premiere-not-ready','temp-dir-unset'];
+
+function render(name){
+  var s=STATES[name]||STATES.disconnected;
+
+  /* 00 — verdict. Live code overwrites connectionStatus.className wholesale,
+     so the mark's meaning must survive on .status-dot + one state class. */
+  txt('connectionText',s.word);
+  cls('connectionStatus','status-dot '+s.dot);
+  el('verdictWrap').className='col verdict '+s.tone;
+  el('verdictNote').innerHTML=s.note;
+
+  /* 01 — fault statement */
+  var fb=el('faultBlock');
+  if(s.fault){
+    fb.style.display='';
+    txt('faultTag',s.fault.tag); txt('faultWhen',s.fault.when);
+    el('faultBody').innerHTML=s.fault.body; el('faultDo').innerHTML=s.fault.doThis;
+  } else fb.style.display='none';
+
+  /* 02-04 — in flight */
+  var fn=el('flightName');
+  if(s.flight===null) fn.innerHTML='<span class="fig nil">—</span>';
+  else if(s.flight==='none') fn.innerHTML='<span style="color:var(--ink-mid)">nothing running</span>';
+  else fn.innerHTML='<span class="idn" style="font-size:12px">'+esc(s.flight)+'</span>'+
+        '<span style="color:var(--faint);font-size:9.5px;padding-left:8px">'+esc(s.flightId||'')+'</span>';
+
+  if(s.elapsedMs===null) figure('figElapsed','unElapsed','altElapsed',null);
+  else figure('figElapsed','unElapsed','altElapsed',grp(s.elapsedMs),'ms',frames(s.elapsedMs),'hot');
+
+  var g=el('dogGauge');
+  if(s.dogMs===null){
+    figure('figDog','unDog','altDog',null); txt('lbDog','Watchdog kills it in');
+    g.className='gauge idle'; g.style.setProperty('--p','0%');
+    txt('dogNote','Limit 45'+NNBSP+'000 ms · 1'+NNBSP+'080 frames at 24 fps.');
+  } else if(s.dogMs==='idle'){
+    el('figDog').textContent='not armed'; el('figDog').className='fig none';
+    txt('unDog',''); txt('altDog',''); txt('lbDog','Watchdog');
+    g.className='gauge idle'; g.style.setProperty('--p','0%');
+    txt('dogNote','It arms at 45'+NNBSP+'000 ms when a command starts.');
+  } else {
+    figure('figDog','unDog','altDog',secs(s.dogMs),'s',frames(s.dogMs),'hot');
+    txt('lbDog','Watchdog kills it in');
+    g.className='gauge'; g.style.setProperty('--p',(100*s.elapsedMs/(s.elapsedMs+s.dogMs)).toFixed(1)+'%');
+    /* the limit, not a restatement of the two figures above it — and the
+       only place frames survive at the 280px floor. */
+    txt('dogNote','It kills the command at 45'+NNBSP+'000 ms · 1'+NNBSP+'080 frames.');
+  }
+
+  /* 05-07 — channel */
+  if(s.beatMs===null){figure('figBeat','unBeat','altBeat',null);
+    txt('beatNote',s.beatNote||'The panel is not writing a heartbeat. The server treats that as dead.')}
+  else{figure('figBeat','unBeat','altBeat',grp(s.beatMs),'ms',frames(s.beatMs));
+       txt('beatNote','The server calls the panel dead at 4'+NNBSP+'000 ms.')}
+  /* no unit on a count — the label is already the noun, and a repeated
+     "items" is the kind of word that crowds the rail at 280. */
+  if(s.queue===null) figure('figQueue','unQueue',null,null);
+  else figure('figQueue','unQueue',null,String(s.queue),'',null,s.queue>0?'hot':'');
+
+  /* 08-10 — host */
+  txt('serverText',s.server);
+  cls('serverStatus','status-dot '+s.serverDot);
+  var pn=el('projName');
+  if(s.project){pn.textContent=s.project;pn.className='val'}
+  else{pn.textContent='—';pn.className='val nil'}
+  el('tempDirectory').value=s.temp;
+
+  /* 11-12 — access */
+  var am=el('authMode');
+  if(s.auth){am.textContent=s.auth;am.className='val'}else{am.textContent='—';am.className='val nil'}
+  if(s.rejected===null) figure('figRej','unRej',null,null);
+  else figure('figRej','unRej',null,String(s.rejected),'',null,s.rejected>0?'bad':'');
+
+  /* queue block */
+  var qh='';
+  if(s.q===null) qh='<div class="q-nil"><span>'+esc(s.qNote||'Queue depth unknown — the panel is not polling.')+'</span></div>';
+  else if(s.q.length===0) qh='<div class="q-nil"><span>Nothing waiting.</span></div>';
+  else{
+    for(var i=0;i<s.q.length;i++){
+      qh+='<div class="ent"><i class="k">q'+(i+1)+'</i><span class="ent-b">'+
+        '<span class="ent-h"><b class="idn">'+esc(s.q[i].n)+'</b> <span class="verb">queued</span></span></span>'+
+        '<b class="fig">'+secs(s.q[i].age)+'</b><em class="un">s</em><b class="alt">'+frames(s.q[i].age)+'</b></div>';
+    }
+  }
+  el('commandQueue').innerHTML=qh;
+
+  /* ledger */
+  var lh='';
+  for(var j=0;j<s.log.length;j++){
+    var e=s.log[j],c=e.c?' ent--'+e.c:'',isCmd=/^[a-z_]+$/.test(e.h);
+    lh+='<div class="ent'+c+'">'+
+      '<i class="k'+(e.c==='run'?' pulse':'')+'">'+esc(e.k)+'</i>'+
+      '<span class="ent-b"><span class="ent-h">'+
+        (isCmd?'<b class="idn">'+esc(e.h)+'</b>':esc(e.h))+
+        (e.v?' <span class="verb">'+esc(e.v)+'</span>':'')+
+      '</span><span class="ent-t">'+esc(e.t)+'</span></span>'+
+      (e.ms!==undefined?'<b class="fig">'+grp(e.ms)+'</b><em class="un">ms</em><b class="alt">'+frames(e.ms)+'</b>'
+                       :'<b class="fig"></b><em class="un"></em><b class="alt"></b>')+
+    '</div>';
+  }
+  el('logContainer').innerHTML=lh;
+
+  /* live code owns these two lines: startButton.disabled = isConnected */
+  el('startButton').disabled=s.connected;
+  el('stopButton').disabled=!s.connected;
+}
+
+/* ═══ design rig ══════════════════════════════════════════════════════════ */
+function q(){
+  var o={},p=(location.search||'').replace(/^\?/,'').split('&');
+  for(var i=0;i<p.length;i++){var kv=p[i].split('=');if(kv[0])o[decodeURIComponent(kv[0])]=decodeURIComponent(kv[1]||'')}
+  return o;
+}
+var Q=q(),STATE=STATES[Q.state]?Q.state:'connected-idle',THEME=PAPERS[Q.theme]?Q.theme:null;
+
+/* Panel width -> step class. CEP resizes the panel, not the page, so read
+   the real width every time it changes. ?w= pins it for screenshots. */
+var SIMW=Q.w?parseInt(Q.w,10):0;
+function fitWidth(){
+  var w=SIMW||document.documentElement.clientWidth,c;
+  if(SIMW){document.body.style.width=SIMW+'px';document.body.className='simw'}
+  c=w<340?'w-s':(w<620?'w-m':(w<900?'w-l':'w-xl'));
+  document.documentElement.className=c;
+  /* the frame rail is dropped at the floor, so stop the caption promising it */
+  txt('capLedger',c==='w-s'?'ms':'ms · frames at 24 fps');
+}
+window.addEventListener('resize',fitWidth);
+
+(function(){
+  fitWidth();
+  var hs=readHostSkin();
+  if(THEME) paint(PAPERS[THEME],hs&&hs.face);
+  else if(hs) paint(hs.paper,hs.face);
+  var tail=(THEME?'&theme='+THEME:'')+(SIMW?'&w='+SIMW:''),a='',i;
+  for(i=0;i<ORDER.length;i++) a+='<a href="?state='+ORDER[i]+tail+'" class="'+(ORDER[i]===STATE?'on':'')+'">'+ORDER[i]+'</a>';
+  el('rigStates').innerHTML=a;
+  var t='',names=['darkest','dark','mid','light'];
+  for(i=0;i<names.length;i++) t+='<a href="?state='+STATE+'&theme='+names[i]+(SIMW?'&w='+SIMW:'')+'" class="'+(names[i]===THEME?'on':'')+'">'+names[i]+'</a>';
+  el('rigThemes').innerHTML=t;
+  render(STATE);
+})();
+
+/* handlers the live panel replaces */
+function startBridge(){render('starting')}
+function stopBridge(){render('disconnected')}
+function saveConfig(){}
+function runDiagnostics(){}
+function clearLog(){el('logContainer').innerHTML='<div class="q-nil"><span>Ledger cleared.</span></div>'}
+</script>
+</body>
+</html>

@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MCP Bridge — Direction B (Strip + Stream)</title>
+<style>
+/* ============================================================
+   DIRECTION B — STRIP + STREAM
+   App-shell: a NON-SCROLLING status strip pinned to the top
+   (status + the one action + a telemetry rail), a scrolling
+   activity stream in the middle (queue then log), and a
+   one-line config/identity footer pinned to the bottom.
+   The strip can never fall below the fold, at any width.
+   ============================================================ */
+:root{
+  --surface:#1a1a19;
+  --surface-2:#232322;
+  --surface-3:#2c2c2a;
+  --hairline:#2c2c2a;
+  --baseline:#383835;
+  --ink-1:#ffffff;
+  --ink-2:#c3c2b7;
+  --ink-3:#898781;
+  --series:#3987e5;
+  --series-track:#184f95;
+  --accent-fill:#256abf;
+  --good:#0ca30c;
+  --warning:#fab219;
+  --serious:#ec835a;
+  --critical:#d03b3b;
+}
+*{box-sizing:border-box}
+[hidden]{display:none !important}
+html,body{margin:0;height:100%}
+body{
+  background:var(--surface);color:var(--ink-1);
+  font:13px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;
+  display:flex;flex-direction:column;height:100%;overflow:hidden;
+}
+.devbar{
+  flex:0 0 auto;display:flex;flex-wrap:wrap;gap:4px;padding:6px 8px;
+  border-bottom:1px solid var(--hairline);background:var(--surface-2);
+}
+.devbar b{font:600 10px/18px system-ui;color:var(--ink-3);letter-spacing:.08em;text-transform:uppercase;margin-right:4px}
+.devbar a{font:500 10px/1 system-ui;color:var(--ink-2);text-decoration:none;padding:5px 7px;border:1px solid var(--hairline);border-radius:4px}
+.devbar a[aria-current="true"]{color:var(--ink-1);border-color:var(--baseline);background:var(--surface-3)}
+body.bare .devbar{display:none}
+
+/* ================= THE STRIP (never scrolls) ================= */
+.strip{
+  flex:0 0 auto;background:var(--surface-2);
+  border-bottom:1px solid var(--baseline);
+  padding:9px 10px 8px;
+}
+.strip-top{display:flex;align-items:flex-start;gap:9px;flex-wrap:wrap}
+.st-status{display:flex;gap:8px;align-items:flex-start;min-width:0;flex:1 1 150px}
+.ico{display:block;width:15px;height:15px}
+.st-ico{flex:0 0 auto;margin-top:2px}
+.lv-good .st-ico,.ic-good{color:var(--good)}
+.lv-warning .st-ico,.ic-warning{color:var(--warning)}
+.lv-serious .st-ico,.ic-serious{color:var(--serious)}
+.lv-critical .st-ico,.ic-critical{color:var(--critical)}
+.lv-off .st-ico,.ic-off,.lv-pending .st-ico,.ic-pending{color:var(--ink-3)}
+.st-txt{min-width:0}
+#connectionText{display:block;font-size:15px;line-height:1.2;font-weight:650;letter-spacing:-.01em}
+#serverText{display:block;margin-top:3px;font-size:11px;color:var(--ink-2);overflow-wrap:anywhere}
+.st-act{flex:0 0 auto}
+button{
+  font:600 12px/1 system-ui,-apple-system,"Segoe UI",sans-serif;border-radius:4px;
+  padding:9px 13px;cursor:pointer;border:1px solid var(--baseline);
+  background:var(--surface-3);color:var(--ink-1);
+}
+button:focus-visible{outline:2px solid var(--series);outline-offset:2px}
+button.primary{background:var(--accent-fill);border-color:var(--accent-fill);color:#fff}
+/* the live bridge already sets these two disabled flags; hide the disabled one
+   and exactly ONE action is ever on screen — a CSS-only port. */
+#startButton:disabled,#stopButton:disabled{display:none}
+#bridgeBusy{display:inline-flex;align-items:center;gap:6px;opacity:.75;cursor:default}
+#bridgeBusy[hidden]{display:none}
+@media (max-width:379px){
+  .st-act{flex:1 1 100%}
+  .st-act button{width:100%}
+}
+.spin{animation:spin 1.1s linear infinite;transform-origin:50% 50%}
+@keyframes spin{to{transform:rotate(360deg)}}
+.dots::after{content:"";animation:dots 1.4s steps(4,end) infinite}
+@keyframes dots{0%{content:""}25%{content:"."}50%{content:".."}75%{content:"..."}}
+@media (prefers-reduced-motion:reduce){.spin,.dots::after{animation:none}.dots::after{content:"…"}}
+
+/* current command line */
+.nowline{
+  margin-top:8px;padding:6px 8px;border-radius:4px;background:var(--surface);
+  font-size:11.5px;color:var(--ink-2);display:flex;gap:6px;align-items:center;
+}
+.nowline[hidden]{display:none}
+.nowline .cmd{color:var(--ink-1);font-weight:600;font-family:ui-monospace,Menlo,monospace;min-width:0;overflow-wrap:anywhere}
+.nowline .el{margin-left:auto;font-variant-numeric:tabular-nums;flex:0 0 auto}
+
+/* telemetry rail — compact readout cells, no card chrome */
+.rail{
+  display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:1px;margin-top:9px;background:var(--hairline);
+  border:1px solid var(--hairline);border-radius:4px;overflow:hidden;
+}
+@media (min-width:520px){.rail{grid-template-columns:repeat(4,minmax(0,1fr))}}
+.cell{background:var(--surface-2);padding:6px 8px 7px;min-width:0;align-content:start}
+.cell-l{font-size:10px;color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cell-v{
+  display:block;margin-top:2px;font-size:16px;line-height:1.1;font-weight:600;
+  letter-spacing:-.01em;overflow-wrap:anywhere;
+}
+.cell-v .u{font-size:10px;font-weight:500;color:var(--ink-3)}
+.cell-d{display:flex;align-items:center;gap:3px;margin-top:3px;font-size:10px;color:var(--ink-2)}
+.cell-d .ico{width:8px;height:8px;flex:0 0 auto}
+.cell-d.up-good{color:var(--good)}
+.cell-d.bad{color:var(--critical)}
+.cell-spark{display:block;width:100%;height:18px;margin-top:4px}
+.cell-spark[hidden]{display:none}
+
+/* the latency meter lives INSIDE the rail cell as a 4px bar */
+.microbar{height:4px;border-radius:2px;background:var(--series-track);margin-top:5px;overflow:hidden}
+.microbar>i{display:block;height:100%;background:var(--series);border-right:2px solid var(--surface-2)}
+.microbar>i.sev-warning{background:var(--warning)}
+.microbar>i.sev-critical{background:var(--critical)}
+.microbar[hidden]{display:none}
+.budget{display:flex;align-items:center;gap:4px;margin-top:4px;font-size:10px;color:var(--ink-2)}
+.budget .ico{width:9px;height:9px}
+.budget[hidden]{display:none}
+
+/* error callout sits in the strip: it is a "right now" fact */
+.callout{
+  display:flex;gap:7px;margin-top:9px;padding:8px 9px;border-radius:4px;
+  background:var(--surface);border-left:3px solid var(--critical);
+  font-size:11px;color:var(--ink-2);
+}
+.callout[hidden]{display:none}
+.callout .ico{width:12px;height:12px;flex:0 0 auto;margin-top:1px;color:var(--critical)}
+.callout b{display:block;color:var(--ink-1);font-weight:600;margin-bottom:2px;font-size:11.5px}
+.callout code{font:10.5px/1.4 ui-monospace,Menlo,monospace;overflow-wrap:anywhere}
+
+/* ================= THE STREAM (the only scroller) ================= */
+.stream{flex:1 1 auto;min-height:0;overflow-y:auto;padding:0 10px 12px}
+.streamhead{
+  position:sticky;top:0;z-index:2;background:var(--surface);
+  display:flex;align-items:center;gap:8px;padding:11px 0 6px;
+}
+.streamhead h2{margin:0;font:600 10px/1 system-ui;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
+.streamhead .count{font-size:10px;color:var(--ink-3);margin-left:auto;font-variant-numeric:tabular-nums}
+.streamhead button{padding:5px 8px;font-size:10.5px;font-weight:500;color:var(--ink-2);background:none;border-color:var(--hairline)}
+
+/* LIVE MARKUP CONTRACT (bridge-cep.js):
+   #commandQueue > .command-item > .command-label + .command-status.{pending|executing|completed}
+   #logContainer > .log-entry.{info|warning|error}                                     */
+#commandQueue{border:1px solid var(--hairline);border-radius:4px;overflow:hidden}
+.command-item{display:flex;align-items:center;gap:8px;padding:7px 9px;background:var(--surface-2);border-top:1px solid var(--hairline)}
+.command-item:first-child{border-top:0}
+.command-label{
+  flex:1 1 auto;min-width:0;font:11.5px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;
+  color:var(--ink-1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.command-ms{font-size:10.5px;color:var(--ink-3);font-variant-numeric:tabular-nums;flex:0 0 auto}
+.command-status{
+  flex:0 0 auto;display:inline-flex;align-items:center;gap:4px;
+  font:600 9.5px/1 system-ui;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-2);
+}
+.command-status::before{content:"";width:8px;height:8px;background:currentColor;flex:0 0 auto}
+.command-status.completed{color:var(--good)}
+.command-status.completed::before{border-radius:50%}
+.command-status.executing{color:var(--ink-1)}
+.command-status.executing::before{border-radius:50%;background:none;box-shadow:inset 0 0 0 1.5px currentColor}
+.command-status.pending{color:var(--ink-3)}
+.command-status.pending::before{border-radius:50%;background:none;box-shadow:inset 0 0 0 1.5px currentColor}
+.command-status.failed{color:var(--critical)}
+.command-status.failed::before{clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%)}
+@media (max-width:339px){.command-ms{display:none}}
+
+#logContainer{border:1px solid var(--hairline);border-radius:4px;background:var(--surface-2);padding:3px}
+.log-entry{
+  font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;padding:5px 7px;
+  color:var(--ink-2);border-left:2px solid var(--baseline);overflow-wrap:anywhere;margin-bottom:2px;
+}
+.log-entry:last-child{margin-bottom:0}
+.log-entry.warning{border-left-color:var(--warning);color:var(--ink-1)}
+.log-entry.error{border-left-color:var(--critical);color:var(--ink-1)}
+.empty{font-size:11.5px;color:var(--ink-3);padding:10px 9px;border:1px solid var(--hairline);border-radius:4px}
+
+/* ================= THE FOOTER (config + identity, one line) ================= */
+.foot{
+  flex:0 0 auto;border-top:1px solid var(--hairline);background:var(--surface-2);
+  padding:7px 10px;
+}
+.foot-row{display:flex;align-items:center;gap:7px;min-width:0}
+.foot-row .ico{width:11px;height:11px;flex:0 0 auto;color:var(--ink-3)}
+.foot-label{font-size:10px;color:var(--ink-3);flex:0 0 auto}
+#tempDirectory{
+  flex:1 1 auto;min-width:0;background:var(--surface);color:var(--ink-1);
+  border:1px solid transparent;border-radius:3px;padding:5px 7px;
+  font:11px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace;
+  text-overflow:ellipsis;
+}
+#tempDirectory:hover{border-color:var(--hairline)}
+#tempDirectory:focus{outline:none;border-color:var(--series)}
+.foot.needs{border-top-color:var(--warning)}
+.foot.needs #tempDirectory{border-color:var(--warning)}
+.foot .save{padding:5px 9px;font-size:10.5px;font-weight:500;color:var(--ink-2);background:none;border-color:var(--hairline);flex:0 0 auto}
+.foot-id{
+  display:flex;gap:6px;align-items:baseline;margin-top:5px;font-size:10px;color:var(--ink-3);
+}
+.foot-id strong{color:var(--ink-2);font-weight:600}
+.foot-id .spacer{flex:1 1 auto}
+@media (max-width:339px){.foot .save{display:none}.foot-id{margin-top:4px}}
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+  <symbol id="i-good" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5" fill="currentColor"/></symbol>
+  <symbol id="i-off" viewBox="0 0 16 16"><circle cx="8" cy="8" r="4.4" fill="none" stroke="currentColor" stroke-width="1.9"/></symbol>
+  <symbol id="i-pending" viewBox="0 0 16 16"><circle class="spin" cx="8" cy="8" r="5.2" fill="none" stroke="currentColor" stroke-width="1.9" stroke-dasharray="11 7" stroke-linecap="round"/></symbol>
+  <symbol id="i-warning" viewBox="0 0 16 16"><path d="M8 1.9 15.2 14.4H.8Z" fill="currentColor"/></symbol>
+  <symbol id="i-serious" viewBox="0 0 16 16"><path d="M8 1.2 14.8 8 8 14.8 1.2 8Z" fill="currentColor"/></symbol>
+  <symbol id="i-critical" viewBox="0 0 16 16"><path d="M3.4 4.8 4.8 3.4 12.6 11.2l-1.4 1.4Z M11.2 3.4l1.4 1.4-7.8 7.8-1.4-1.4Z" fill="currentColor"/></symbol>
+  <symbol id="i-up" viewBox="0 0 10 10"><path d="M5 1 9.5 8.5H.5Z" fill="currentColor"/></symbol>
+  <symbol id="i-down" viewBox="0 0 10 10"><path d="M5 9 .5 1.5h9Z" fill="currentColor"/></symbol>
+  <symbol id="i-flat" viewBox="0 0 10 10"><rect x="1" y="4.2" width="8" height="1.6" fill="currentColor"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 16 16"><path d="M1.5 3.5h4.2l1.3 1.6h7.5v7.4H1.5Z" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol>
+</defs></svg>
+
+<nav class="devbar" id="devbar"><b>State</b></nav>
+
+<!-- ============ STRIP ============ -->
+<header class="strip lv-off" id="strip" aria-live="polite">
+  <div class="strip-top">
+    <div class="st-status">
+      <span class="st-ico"><svg class="ico" id="heroIcon"><use href="#i-off"></use></svg></span>
+      <span class="st-txt">
+        <span id="connectionText">Disconnected</span>
+        <span id="serverText">Start Bridge to enable</span>
+      </span>
+      <span id="connectionStatus" hidden></span><span id="serverStatus" hidden></span>
+    </div>
+    <div class="st-act">
+      <button class="primary" id="startButton" onclick="startBridge()">Start Bridge</button>
+      <button id="stopButton" onclick="stopBridge()" disabled>Stop Bridge</button>
+      <button id="bridgeBusy" hidden disabled><svg class="ico" style="width:12px;height:12px"><use href="#i-pending"></use></svg><span class="dots">Starting</span></button>
+    </div>
+  </div>
+
+  <div class="nowline" id="nowLine" hidden>
+    <span>Running</span><span class="cmd" id="nowCmd">—</span><span class="el" id="nowElapsed">0.0s</span>
+  </div>
+
+  <div class="rail" id="rail"></div>
+
+  <div class="callout" id="errorCallout" hidden>
+    <svg class="ico"><use href="#i-critical"></use></svg>
+    <div><b id="errorTitle">Last error</b><code id="errorBody">—</code></div>
+  </div>
+</header>
+
+<!-- ============ STREAM ============ -->
+<div class="stream">
+  <div class="streamhead"><h2>Command queue</h2><span class="count" id="queueCount">0</span></div>
+  <div id="commandQueue" role="table" aria-label="Command queue"></div>
+
+  <div class="streamhead">
+    <h2>Activity log</h2>
+    <button id="diagnosticsButton" onclick="runDiagnostics()">Diagnostics</button>
+    <button id="clearButton" onclick="clearLog()">Clear</button>
+  </div>
+  <div id="logContainer"></div>
+</div>
+
+<!-- ============ FOOTER ============ -->
+<footer class="foot" id="foot">
+  <div class="foot-row">
+    <svg class="ico"><use href="#i-folder"></use></svg>
+    <span class="foot-label">Temp dir</span>
+    <input type="text" id="tempDirectory" placeholder="not set — required" aria-label="Temp directory">
+    <button class="save" onclick="saveConfig()">Save</button>
+  </div>
+  <div class="foot-id"><strong>MCP Bridge</strong><span>CEP</span><span class="spacer"></span><span>v1.2.0</span></div>
+</footer>
+
+<script>
+function clamp8(n){return Math.max(0,Math.min(255,Math.round(n)))}
+function toHex(r,g,b){return '#'+[r,g,b].map(function(v){return clamp8(v).toString(16).padStart(2,'0')}).join('')}
+function lum(r,g,b){var a=[r,g,b].map(function(v){v/=255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4)});return 0.2126*a[0]+0.7152*a[1]+0.0722*a[2]}
+function mix(r,g,b,tr,tg,tb,t){return toHex(r+(tr-r)*t,g+(tg-g)*t,b+(tb-b)*t)}
+function applyHostTheme(){
+  var r=26,g=26,b=25;
+  try{if(typeof CSInterface==='function'){var c=new CSInterface().hostEnvironment.appSkinInfo.panelBackgroundColor.color;r=c.red;g=c.green;b=c.blue}}catch(e){}
+  var dark=lum(r,g,b)<0.35,s=document.documentElement.style,t=dark?255:0;
+  s.setProperty('--surface',toHex(r,g,b));
+  s.setProperty('--surface-2',mix(r,g,b,t,t,t,dark?0.045:0.035));
+  s.setProperty('--surface-3',mix(r,g,b,t,t,t,dark?0.095:0.075));
+  s.setProperty('--hairline',mix(r,g,b,t,t,t,dark?0.09:0.12));
+  s.setProperty('--baseline',mix(r,g,b,t,t,t,dark?0.16:0.22));
+  s.setProperty('--ink-1',dark?'#ffffff':'#0b0b0b');
+  s.setProperty('--ink-2',dark?'#c3c2b7':'#52514e');
+  s.setProperty('--ink-3',dark?'#898781':'#6f6e69');
+  /* light Premiere themes: #2a78d6 only reaches 2.23:1 on the lightest panel gray (#b8b8b8),
+     so the series steps down to #1c5cab (validated PASS) and the meter track becomes the
+     LIGHTER step #2a78d6 so the ordinal ramp still reads more-is-darker. */
+  if(!dark){s.setProperty('--series','#1c5cab');s.setProperty('--series-track','#2a78d6')}
+}
+applyHostTheme();
+
+var LAT=[142,138,151,133,147,162,140,129,155,148,136,144];
+var QUE=[0,0,1,0,2,3,3,2,1,0,1,0];
+var ERRS=[0,0,0,1,0,0,0,2,1,0,0,1];
+var HIST_OK=[['add_to_timeline','completed','412'],['set_clip_scale','completed','188'],['get_full_sequence_info','completed','96'],['create_bin','completed','133'],['list_sequences','completed','74'],['bake_keyframe_ease','completed','655'],['set_clip_opacity','completed','119'],['add_marker','completed','88']];
+var HIST_BUSY=[['export_sequence','executing','2140'],['add_transition','pending','—'],['set_clip_opacity','pending','—'],['add_to_timeline','completed','412'],['set_clip_scale','completed','188'],['get_full_sequence_info','completed','96'],['create_bin','completed','133']];
+var HIST_ERR=[['apply_effect','failed','8004'],['list_available_effects','completed','221'],['add_to_timeline','completed','412'],['set_clip_scale','completed','188'],['get_full_sequence_info','completed','96'],['create_bin','completed','133']];
+var LOG_OK=[['info','Bridge started · polling /tmp/premiere-mcp-bridge every 250ms'],['info','Host: Premiere Pro 26.3.1 · project graveyard_chase.prproj'],['info','add_to_timeline verified:true (412ms)'],['info','set_clip_scale verified:true (188ms)'],['info','get_full_sequence_info verified:true (96ms)']];
+var LOG_ERR=[['error','apply_effect failed: QE effect add rejected by host (8004ms, budget 8000ms) verified:false'],['warning','Retry 1 of 1 for apply_effect'],['info','list_available_effects verified:true (221ms)'],['info','add_to_timeline verified:true (412ms)']];
+
+var STATES={
+  'disconnected':{level:'off',icon:'i-off',title:'Bridge stopped',server:'Premiere: not polled while stopped',control:'start',temp:'/tmp/premiere-mcp-bridge',
+    cells:[{l:'Queue',v:'—'},{l:'Round-trip',v:'—'},{l:'Uptime',v:'—'},{l:'Errors',v:'—'}],hist:[],log:[['info','Panel loaded. Bridge not started.']]},
+  'starting':{level:'pending',icon:'i-pending',title:'Starting bridge',server:'Premiere: handshake pending',control:'busy',temp:'/tmp/premiere-mcp-bridge',
+    cells:[{l:'Queue',v:'0'},{l:'Round-trip',v:'—'},{l:'Uptime',v:'0:02'},{l:'Errors',v:'0'}],hist:[],log:[['info','Creating bridge directories in /tmp/premiere-mcp-bridge'],['info','Opening command watcher…']]},
+  'connected-idle':{level:'good',icon:'i-good',title:'Bridge live · idle',server:'Premiere ready · graveyard_chase.prproj',control:'stop',temp:'/tmp/premiere-mcp-bridge',
+    cells:[{l:'Queue',v:'0',d:{dir:'flat',t:'no backlog'}},{l:'Round-trip',v:'144',u:'ms',spark:LAT,meter:{ms:144,budget:8000}},{l:'Uptime',v:'2:14:36'},{l:'Errors',v:'0',d:{dir:'flat',t:'0 / hour'}}],
+    hist:HIST_OK,log:LOG_OK},
+  'processing':{level:'good',icon:'i-good',title:'Bridge live · executing',server:'Premiere ready · graveyard_chase.prproj',control:'stop',temp:'/tmp/premiere-mcp-bridge',
+    now:{cmd:'export_sequence',el:'2.1s'},
+    cells:[{l:'Queue',v:'3',spark:QUE,d:{dir:'up',t:'+3 / min'}},{l:'Round-trip',v:'2,140',u:'ms',spark:LAT.concat([2140]).slice(-12),meter:{ms:2140,budget:8000}},{l:'Uptime',v:'2:16:02'},{l:'Errors',v:'0',d:{dir:'flat',t:'0 / hour'}}],
+    hist:HIST_BUSY,log:LOG_OK},
+  'error':{level:'critical',icon:'i-critical',title:'Command failed',server:'Bridge still live · Premiere ready',control:'stop',temp:'/tmp/premiere-mcp-bridge',
+    error:{title:'apply_effect · 14:22:07',body:'QE effect add rejected by host after 8004 ms (budget 8000 ms). verified:false'},
+    cells:[{l:'Queue',v:'0',d:{dir:'flat',t:'drained'}},{l:'Round-trip',v:'8,004',u:'ms',spark:LAT.concat([8004]).slice(-12),meter:{ms:8004,budget:8000}},{l:'Uptime',v:'2:19:41'},{l:'Errors',v:'4',spark:ERRS,d:{dir:'up',t:'+1 / hour',bad:true}}],
+    hist:HIST_ERR,log:LOG_ERR},
+  'premiere-not-ready':{level:'serious',icon:'i-serious',title:'Bridge live · Premiere not ready',server:'No project open — queued commands are held',control:'stop',temp:'/tmp/premiere-mcp-bridge',
+    cells:[{l:'Queue',v:'2',spark:QUE,d:{dir:'up',t:'held'}},{l:'Round-trip',v:'—'},{l:'Uptime',v:'0:41:18'},{l:'Errors',v:'0',d:{dir:'flat',t:'0 / hour'}}],
+    hist:[['add_transition','pending','—'],['set_clip_scale','pending','—']],
+    log:[['warning','Host reports 0 open projects. Holding 2 queued commands.'],['info','Bridge polling normally.']]},
+  'temp-dir-unset':{level:'warning',icon:'i-warning',title:'Temp directory not set',server:'Bridge cannot start without a shared directory',control:'config',temp:'',
+    cells:[{l:'Queue',v:'—'},{l:'Round-trip',v:'—'},{l:'Uptime',v:'—'},{l:'Errors',v:'—'}],hist:[],
+    log:[['warning','No temp directory configured. Set it to the same path as PREMIERE_TEMP_DIR.']]}
+};
+var ORDER=['disconnected','starting','connected-idle','processing','error','premiere-not-ready','temp-dir-unset'];
+
+function sparkline(vals,h){
+  h=h||18;var w=100,p=3,min=Math.min.apply(null,vals),max=Math.max.apply(null,vals),r=(max-min)||1;
+  var pts=vals.map(function(v,i){return [p+i*(w-2*p)/(vals.length-1),h-p-((v-min)/r)*(h-2*p)]});
+  var d=pts.map(function(pt,i){return (i?'L':'M')+pt[0].toFixed(1)+' '+pt[1].toFixed(1)}).join(' ');
+  var last=pts[pts.length-1];
+  return '<svg class="cell-spark" viewBox="0 0 '+w+' '+h+'" preserveAspectRatio="none" aria-hidden="true">'
+    +'<path d="'+d+'" fill="none" stroke="var(--series)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>'
+    +'<circle cx="'+last[0].toFixed(1)+'" cy="'+last[1].toFixed(1)+'" r="3.2" fill="var(--series)" stroke="var(--surface-2)" stroke-width="2"/></svg>';
+}
+function deltaHTML(d){
+  if(!d)return '';
+  var ic=d.dir==='up'?'i-up':d.dir==='down'?'i-down':'i-flat';
+  return '<span class="cell-d'+(d.good?' up-good':d.bad?' bad':'')+'"><svg class="ico"><use href="#'+ic+'"></use></svg><span>'+d.t+'</span></span>';
+}
+function meterHTML(m){
+  var pct=Math.min(100,m.ms/m.budget*100),sev=pct>=100?'critical':pct>=60?'warning':'';
+  var ic=sev==='critical'?'i-critical':sev==='warning'?'i-warning':'i-good';
+  var cl=sev==='critical'?'ic-critical':sev==='warning'?'ic-warning':'ic-good';
+  var txt=sev==='critical'?'over 8.0 s budget':sev==='warning'?'nearing 8.0 s budget':'within 8.0 s budget';
+  return '<div class="microbar"><i class="'+(sev?'sev-'+sev:'')+'" style="width:'+Math.max(3,pct)+'%"></i></div>'
+    +'<div class="budget"><svg class="ico '+cl+'"><use href="#'+ic+'"></use></svg><span>'+txt+'</span></div>';
+}
+
+function render(key){
+  var s=STATES[key]||STATES['disconnected'];
+  document.title='MCP Bridge — B — '+key;
+  document.getElementById('strip').className='strip lv-'+s.level;
+  document.getElementById('heroIcon').innerHTML='<use href="#'+s.icon+'"></use>';
+  document.getElementById('connectionText').textContent=s.title;
+  document.getElementById('serverText').textContent=s.server;
+
+  var nl=document.getElementById('nowLine');
+  if(s.now){nl.hidden=false;document.getElementById('nowCmd').textContent=s.now.cmd;document.getElementById('nowElapsed').textContent=s.now.el}else nl.hidden=true;
+
+  var start=document.getElementById('startButton'),stop=document.getElementById('stopButton'),busy=document.getElementById('bridgeBusy');
+  start.disabled=(s.control!=='start'&&s.control!=='config');
+  stop.disabled=(s.control!=='stop');
+  busy.hidden=(s.control!=='busy');
+  start.textContent=s.control==='config'?'Set temp dir':'Start Bridge';
+
+  var ec=document.getElementById('errorCallout');
+  if(s.error){ec.hidden=false;document.getElementById('errorTitle').textContent=s.error.title;document.getElementById('errorBody').textContent=s.error.body}else ec.hidden=true;
+
+  document.getElementById('rail').innerHTML=s.cells.map(function(c){
+    return '<div class="cell"><div class="cell-l">'+c.l+'</div>'
+      +'<span class="cell-v">'+c.v+(c.u?' <span class="u">'+c.u+'</span>':'')+'</span>'
+      +deltaHTML(c.d)+(c.spark?sparkline(c.spark):'')+(c.meter?meterHTML(c.meter):'')+'</div>';
+  }).join('');
+
+  var cq=document.getElementById('commandQueue');
+  cq.innerHTML=s.hist.length?s.hist.map(function(h){
+    return '<div class="command-item" role="row"><span class="command-label">'+h[0]+'</span>'
+      +'<span class="command-ms">'+h[2]+(h[2]==='—'?'':' ms')+'</span>'
+      +'<span class="command-status '+h[1]+'">'+h[1]+'</span></div>';
+  }).join(''):'<div class="command-item"><span class="command-label">No commands in queue</span></div>';
+  document.getElementById('queueCount').textContent=s.hist.length?s.hist.length+' shown':'empty';
+
+  document.getElementById('logContainer').innerHTML=s.log.map(function(l,i){
+    return '<div class="log-entry '+l[0]+'">[2026-08-25T14:22:'+String(10+i).padStart(2,'0')+'Z] '+l[1]+'</div>';
+  }).join('');
+
+  var foot=document.getElementById('foot'),inp=document.getElementById('tempDirectory');
+  inp.value=s.temp; foot.className='foot'+(s.temp?'':' needs');
+  if(!s.temp)inp.setAttribute('aria-invalid','true');else inp.removeAttribute('aria-invalid');
+}
+
+(function(){
+  var q=new URLSearchParams(location.search);
+  if(q.get('bare')==='1')document.body.classList.add('bare');
+  var cur=q.get('state')||'connected-idle',bar=document.getElementById('devbar');
+  ORDER.forEach(function(k){
+    var a=document.createElement('a');
+    a.href='?state='+k+(q.get('bare')==='1'?'&bare=1':'');
+    a.textContent=k; if(k===cur)a.setAttribute('aria-current','true');
+    a.onclick=function(e){e.preventDefault();history.replaceState(0,'',a.href);
+      [].forEach.call(bar.querySelectorAll('a'),function(x){x.removeAttribute('aria-current')});
+      a.setAttribute('aria-current','true');render(k)};
+    bar.appendChild(a);
+  });
+  render(cur);
+})();
+function startBridge(){}function stopBridge(){}function runDiagnostics(){}function saveConfig(){}function clearLog(){}
+</script>
+</body>
+</html>
