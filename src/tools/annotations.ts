@@ -105,6 +105,14 @@ const OVERRIDES: Record<string, Partial<ToolAnnotations>> = {
   batch_execute: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   // Reads state, but through a spawned process rather than the DOM.
   evaluate_expression: { readOnlyHint: true, openWorldHint: true },
+  // The router invokes an arbitrary catalogue tool, so its behaviour is exactly as
+  // unknowable as its target. Hinted at the pessimistic end on purpose: a client must
+  // not treat one approval of `call_tool` as an approval of everything it can reach.
+  call_tool: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  // These change what THIS server advertises. Real state, but server-side only: no
+  // Premiere request, no filesystem, and re-running one lands on the same list.
+  activate_tools: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  deactivate_tools: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 };
 
 function startsWithAny(name: string, prefixes: string[]): boolean {

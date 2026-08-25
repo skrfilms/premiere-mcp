@@ -15,8 +15,12 @@ import {
 
 const ALL = [
   // find_tool is in ALWAYS_KEPT alongside get_capabilities: curation is only safe if
-  // the agent can still discover what curation removed.
-  'get_capabilities', 'find_tool', 'get_project_info', 'list_sequences',
+  // the agent can still discover what curation removed. The schema-on-demand trio
+  // (get_tool_typings / call_tool / activate_tools / deactivate_tools) is kept for the
+  // stronger reason that discovery without a call path is just a better-worded refusal.
+  'get_capabilities', 'find_tool', 'get_tool_typings',
+  'call_tool', 'activate_tools', 'deactivate_tools',
+  'get_project_info', 'list_sequences',
   'add_to_timeline', 'razor_timeline_at_time', 'export_sequence',
   'color_correct', 'apply_lut', 'adjust_audio_levels', 'setup_ducking',
   'execute_extendscript', 'evaluate_expression',

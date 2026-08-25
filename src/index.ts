@@ -6,6 +6,7 @@ import { z, type ZodTypeAny } from 'zod';
 import { PremiereProTools } from './tools/index.js';
 import { annotationsFor } from './tools/annotations.js';
 import { startupAdvisory } from './tools/catalogue-cost.js';
+import { cursorFromParams, paginate, resolvePageSize } from './tools/router.js';
 import { attachImageForResult } from './tools/image-content.js';
 import { PremiereProResources } from './resources/index.js';
 import { PremiereProPrompts } from './prompts/index.js';
@@ -40,7 +41,11 @@ class MCPPremiereProServer {
       },
       {
         capabilities: {
-          tools: {},
+          // listChanged is declared because `activate_tools` really does change the
+          // advertised list mid-session. Without the declaration the SDK refuses to send
+          // the notification, and a client would hold a stale list — an activated tool it
+          // could see named in a result and still not call.
+          tools: { listChanged: true },
           resources: {},
           prompts: {}
         },
@@ -55,6 +60,18 @@ class MCPPremiereProServer {
     );
 
     this.setupHandlers(server);
+
+    // Wire activation -> notification. Fire-and-forget: a client that cannot receive the
+    // notification (or has gone away) must not turn a successful activation into a failed
+    // tool call, so the reason is logged and the activation stands either way.
+    this.tools.onExposureChanged(() => {
+      void server
+        .notification({ method: 'notifications/tools/list_changed' })
+        .catch((error: unknown) => {
+          this.logger.error('Failed to send tools/list_changed:', error);
+        });
+    });
+
     return server;
   }
 
@@ -68,7 +85,7 @@ class MCPPremiereProServer {
 
   private setupHandlers(server: Server): void {
     // List available tools
-    server.setRequestHandler('tools/list', async () => {
+    server.setRequestHandler('tools/list', async (request) => {
       // Behavioural hints per the MCP spec. Clients use these to decide what to
       // auto-approve versus confirm with a human; emitting none (as this server used
       // to) makes get_project_info look exactly as risky as delete_sequence. They are
@@ -80,7 +97,23 @@ class MCPPremiereProServer {
         inputSchema: this.inputSchemaToJsonSchema(tool.inputSchema as ZodTypeAny),
         annotations: annotationsFor(tool.name)
       }));
-      return { tools };
+
+      // Cursor pagination, OFF unless PREMIERE_MCP_PAGE_SIZE is set. Paging by default
+      // would silently truncate the list for any client that ignores nextCursor, which
+      // is the same class of lie as reporting an unverified edit as done.
+      const pageSize = resolvePageSize();
+      const paged = paginate(tools, cursorFromParams(request.params), pageSize);
+      if (paged.invalidCursor) {
+        // The spec's prescribed answer for a cursor we did not issue. Resuming from 0
+        // instead would hand back page 1 forever and look like a short catalogue.
+        throw new ProtocolError(
+          ProtocolErrorCode.InvalidParams,
+          'Invalid tools/list cursor. Cursors are opaque and only valid for this server; omit it to start from the first page.'
+        );
+      }
+      return paged.nextCursor !== undefined
+        ? { tools: paged.page, nextCursor: paged.nextCursor }
+        : { tools: paged.page };
     });
 
     // Execute tool calls

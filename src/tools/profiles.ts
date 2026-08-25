@@ -1,14 +1,14 @@
 /**
  * Tool profiles: a curated, env-selected subset of the full catalogue.
  *
- * The server registers 638 tools. Exposing all of them by default was a bug, not a
+ * The server registers 642 tools. Advertising all of them by default was a bug, not a
  * feature, and it was measured rather than argued:
  *
- *   - all  = 638 tools ≈ 102,000 tokens ≈ 51% of a 200k context window, spent before
+ *   - all  = 642 tools ≈ 103,500 tokens ≈ 52% of a 200k context window, spent before
  *            the user has said anything.
- *   - core =  64 tools ≈ 7% of the same window.
+ *   - core = 101 tools ≈ 11% of the same window.
  *
- * Three independent limits agree that 638 is too many. Anthropic's guidance puts tool
+ * Three independent limits agree that 642 is too many. Anthropic's guidance puts tool
  * selection degradation past roughly 30–50 tools; MCP's own client best-practice doc
  * suggests deferring definitions past 1–5% of context; and VS Code / Copilot HARD-ERRORS
  * above 128 tools, meaning the previous default could not run there at all.
@@ -22,6 +22,11 @@
  * which is the same class of lie as a fake success.
  *
  * Set PREMIERE_MCP_PROFILE=all for the full catalogue.
+ *
+ * Curation bounds what is ADVERTISED. It is not, by itself, what is REACHABLE: a cost
+ * profile can be routed past via `call_tool`, and tools can be promoted into the
+ * advertised list at runtime by `activate_tools`. See router.ts — including which
+ * profiles are authority boundaries the router refuses to cross.
  *
  * Selection order (later overrides earlier):
  *   1. PREMIERE_MCP_PROFILE  — a named profile below (default: "core").
@@ -45,7 +50,29 @@ export interface ProfileEnv {
  * curation is only safe if the agent can discover what curation removed — it
  * reports profile-hidden matches as `exposed: false` rather than hiding them.
  */
-export const ALWAYS_KEPT = ['get_capabilities', 'find_tool'] as const;
+export const ALWAYS_KEPT = [
+  'get_capabilities',
+  'find_tool',
+  // The schema-on-demand loop. find_tool alone could only ever say "that capability
+  // exists and you cannot call it"; these three make the rest of the catalogue
+  // reachable without advertising it. Keeping them under every profile is what lets a
+  // curated deployment be a context-cost decision rather than a functional downgrade.
+  // Each one still refuses to cross an authority boundary — see router.ts.
+  'get_tool_typings',
+  'call_tool',
+  'activate_tools',
+  'deactivate_tools',
+] as const;
+
+/**
+ * Profiles that exist to bound AUTHORITY rather than context cost.
+ *
+ * `call_tool` will not route past these, and `activate_tools` will not promote a tool
+ * they exclude. Everything else (core, audio, color) is a menu-size decision that the
+ * router may reach past, because trimming a menu to fit a context window was never a
+ * statement about what the deployment is allowed to do.
+ */
+export const AUTHORITY_PROFILES = new Set<string>(['read-only']);
 
 /**
  * Named profiles. Patterns are exact names, "prefix_*" globs, or "*".
@@ -247,6 +274,19 @@ export function resolveProfile(
 }
 
 /**
+ * ALWAYS_KEPT members that YIELD to an explicit exclusion.
+ *
+ * `get_capabilities` and `find_tool` are read-only introspection and are kept even when
+ * an exclusion names them, because losing them makes a curated build indistinguishable
+ * from a build missing the feature. The routing trio is different: it is the mechanism
+ * that reaches past the advertised list, so an operator who excludes it plainly means
+ * "no router here". Forcing it back would be an operator veto that silently did nothing
+ * — the same class of dishonesty as a fake success, and worse here because it concerns
+ * what the deployment can reach.
+ */
+export const YIELDS_TO_EXCLUSION = new Set<string>(['call_tool', 'activate_tools', 'deactivate_tools']);
+
+/**
  * Filter a tool list by the active profile. `get_capabilities` (ALWAYS_KEPT) is
  * always retained. Order of the input list is preserved.
  */
@@ -259,6 +299,14 @@ export function applyProfile<T extends { name: string }>(
     return tools; // fast path: unchanged default
   }
   const keep = new Set(resolution.selected);
-  for (const name of ALWAYS_KEPT) keep.add(name);
+  for (const name of ALWAYS_KEPT) {
+    if (
+      YIELDS_TO_EXCLUSION.has(name) &&
+      resolution.excluded.some((pattern) => matchesPattern(name, pattern))
+    ) {
+      continue;
+    }
+    keep.add(name);
+  }
   return tools.filter((tool) => keep.has(tool.name));
 }
