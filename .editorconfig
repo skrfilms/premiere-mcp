@@ -1,0 +1,35 @@
+# Editor defaults, written to match the tree as it actually is rather than as a
+# style we would like it to be. Nothing here reformats anything: it only stops the
+# next contributor's editor from introducing tabs or CRLF into files that have
+# neither.
+#
+# `.prettierrc.json` is the authority on TypeScript formatting. This file exists for
+# the file types prettier does not own here (YAML, shell, PowerShell, Markdown) and
+# for the two settings prettier cannot express to an editor: charset and EOL.
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 2
+insert_final_newline = true
+
+# Deliberately off. Six files under src/ carry trailing whitespace inside block
+# comments, and src/tools/index.ts is 17k lines that three people are editing at
+# once — an editor that trims on save would turn every one-line change into a
+# whole-file diff. Turn this on when the prettier backlog is cleared and the
+# tree-wide format gate goes green.
+trim_trailing_whitespace = false
+
+# Two trailing spaces are a hard line break in Markdown; trimming them changes
+# rendered output.
+[*.md]
+trim_trailing_whitespace = false
+
+[*.{ps1,psm1}]
+indent_size = 4
+
+[Makefile]
+indent_style = tab

@@ -614,8 +614,19 @@ describe('PremiereProTools', () => {
       // catalog block now also reports the active profile for introspection.
       expect(result.catalog.tools).toBe(642);
       expect(result.catalog.toolsInFullCatalog).toBe(642);
-      expect(result.catalog.resources).toBe(13);
-      expect(result.catalog.prompts).toBe(10);
+      // Resource and prompt counts must be COMPUTED from the modules that own them, not
+      // stated. They were hardcoded as 13 and 10 while the real resource count had already
+      // drifted to 21, so get_capabilities was publishing a false number to every client.
+      // Asserting against the live modules is the only version of this test that cannot
+      // itself go stale — a literal here would just relocate the lie into the suite.
+      const { PremiereProResources } = await import('../../resources/index.js');
+      const { PremiereProPrompts } = await import('../../prompts/index.js');
+      const liveResourceCount = new PremiereProResources(mockBridge as never).getAvailableResources().length;
+      const livePromptCount = new PremiereProPrompts().getAvailablePrompts().length;
+      expect(result.catalog.resources.count).toBe(liveResourceCount);
+      expect(result.catalog.prompts.count).toBe(livePromptCount);
+      expect(result.catalog.resources.countedFrom).toMatch(/enumerated at call time/);
+      expect(result.catalog.prompts.countedFrom).toMatch(/enumerated at call time/);
       expect(result.catalog.profile.source).toBe('all');
       expect(result.catalog.profile.name).toBeNull();
       expect(result.catalog.profile.available).toEqual(

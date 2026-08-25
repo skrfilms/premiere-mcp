@@ -280,6 +280,14 @@
         // behind a modal dialog" from "crashed" — all of which used to look identical.
         this.currentCommandId = null;
         this.currentCommandStartedAt = null;
+        // Loopback WebSocket transport. `socket` is non-null from the moment a dial starts, so one
+        // attempt is in flight at a time; `socketReady` turns true only after the server's welcome,
+        // so nothing is pushed to a connection that has not been authenticated and version-checked.
+        this.socket = null;
+        this.socketReady = false;
+        this.socketEndpoint = null;
+        this.socketNextAttemptAt = 0;
+        this.socketUnavailableLogged = false;
         this.csInterface = new CSInterface();
         this.init();
     }
@@ -648,18 +656,266 @@
         }
     };
 
+    // ── Loopback WebSocket transport ───────────────────────────────────────────────────
+    //
+    // The file poll below is a ~250ms tick, so every command paid up to that before Premiere had
+    // done any work at all. The server now also listens on 127.0.0.1 on an ephemeral port and
+    // publishes it in bridge-endpoint.json; this half dials in, authenticates, announces what it can
+    // do, and then runs commands through THE SAME executeCommand path the file poller uses. One
+    // execution path, two ways of being asked.
+    //
+    // The browser WebSocket is used, not a Node one. CEF gives the panel a real WebSocket global and
+    // the panel is not allowed to require() anything beyond fs/path/os, so there is nothing to
+    // install on this side. Where the global is missing (an older CEF, or a test harness) the panel
+    // simply stays on the file poll and says so once.
+    //
+    // EXACTLY ONE CHANNEL PER COMMAND. The server publishes to the socket or to a file, never both.
+    // This half enforces the same rule from the other end: while the socket is handshaken, the file
+    // scan is skipped entirely, so even a stale command file cannot be executed alongside a socket
+    // command.
+    var SOCKET_PROTOCOL_VERSION = '1.0';
+    // Reconnect on close only, never on error — an error is followed by a close, and reconnecting on
+    // both produces a storm against a listener that is refusing connections.
+    var SOCKET_RECONNECT_MS = 2000;
+
+    MCPPremiereBridge.prototype.readBridgeEndpoint = function() {
+        try {
+            if (!this.tempDirectory) return null;
+            var endpointPath = path.join(this.tempDirectory, 'bridge-endpoint.json');
+            if (!fs.existsSync(endpointPath)) return null;
+            var parsed = JSON.parse(fs.readFileSync(endpointPath, 'utf8'));
+            if (!parsed || typeof parsed.port !== 'number' || parsed.port <= 0) return null;
+            return parsed;
+        } catch (e) {
+            return null;
+        }
+    };
+
+    // Called from the poll tick, so a server that starts after Premiere is picked up without any
+    // separate timer. Guarded so one dial is in flight at a time and a refused port backs off.
+    MCPPremiereBridge.prototype.maintainSocket = function() {
+        if (this.socket) return;
+        if (typeof WebSocket === 'undefined') {
+            if (!this.socketUnavailableLogged) {
+                this.socketUnavailableLogged = true;
+                this.log('No WebSocket in this runtime; staying on the file transport.', 'warning');
+            }
+            return;
+        }
+        if (this.socketNextAttemptAt && Date.now() < this.socketNextAttemptAt) return;
+        this.socketNextAttemptAt = Date.now() + SOCKET_RECONNECT_MS;
+        this.connectSocket();
+    };
+
+    MCPPremiereBridge.prototype.connectSocket = function() {
+        var self = this;
+        var endpoint = this.readBridgeEndpoint();
+        if (!endpoint) return;
+        // Re-read every attempt rather than cached: the MCP server is launched per session over
+        // stdio and Premiere outlives it, so the port changes underneath a long-lived panel.
+        this.socketEndpoint = endpoint;
+        var url = 'ws://127.0.0.1:' + endpoint.port;
+        var socket;
+        try {
+            socket = new WebSocket(url);
+        } catch (e) {
+            this.log('Could not open the bridge socket: ' + e.message, 'warning');
+            return;
+        }
+        this.socket = socket;
+        this.socketReady = false;
+
+        socket.onopen = function() {
+            var premiereVersion = null;
+            try {
+                var env = self.normalizeHostEnvironment(self.csInterface.getHostEnvironment());
+                if (env && env.appVersion) premiereVersion = String(env.appVersion);
+            } catch (eEnv) {}
+            // The hello is the first frame and carries the token, so the server never has to hold an
+            // unauthenticated connection open waiting for a second frame. The feature list is what
+            // the server gates behaviour on: anything absent from it is sent over the file channel
+            // instead of being attempted and failing.
+            self.sendSocketFrame({
+                type: 'hello',
+                token: self.readExpectedToken(),
+                protocolVersion: SOCKET_PROTOCOL_VERSION,
+                features: ['extendscript', 'cep_js', 'heartbeat'],
+                premiereVersion: premiereVersion,
+                engine: 'extendscript'
+            });
+        };
+
+        socket.onmessage = function(event) {
+            self.handleSocketMessage(event && event.data);
+        };
+
+        socket.onerror = function() {
+            // Logged only. The close handler below owns cleanup and reconnect scheduling; doing it
+            // here as well produced two reconnects per failure.
+            self.log('Bridge socket error (a close will follow).', 'warning');
+        };
+
+        socket.onclose = function(event) {
+            var code = event && event.code ? event.code : 0;
+            var reason = event && event.reason ? event.reason : '';
+            self.socket = null;
+            self.socketReady = false;
+            self.socketNextAttemptAt = Date.now() + SOCKET_RECONNECT_MS;
+            // 4002/4003 are configuration faults, not transient ones: reconnecting on a 2s loop
+            // would spam the log with the same refusal forever, so say it once and plainly.
+            if (code === 4002) {
+                self.log('Bridge socket rejected: the token did not match this session. The panel ' +
+                    'is reading auth-token.json from ' + self.tempDirectory + ' — check that it is ' +
+                    'the same directory the MCP server uses. Falling back to the file transport.', 'error');
+            } else if (code === 4003) {
+                self.log('Bridge socket rejected: protocol version mismatch. ' + reason +
+                    ' Reinstall the CEP panel so it ships from the same build as the server. ' +
+                    'Falling back to the file transport.', 'error');
+            } else if (code === 4001) {
+                self.log('Bridge socket closed: the server saw no hello in time. Falling back to ' +
+                    'the file transport and retrying.', 'warning');
+            } else {
+                self.log('Bridge socket closed (' + code + '). Falling back to the file transport ' +
+                    'and retrying.', 'info');
+            }
+        };
+    };
+
+    MCPPremiereBridge.prototype.disconnectSocket = function() {
+        if (!this.socket) return;
+        var socket = this.socket;
+        this.socket = null;
+        this.socketReady = false;
+        try { socket.close(1000, 'panel stopped'); } catch (e) {}
+    };
+
+    MCPPremiereBridge.prototype.sendSocketFrame = function(frame) {
+        if (!this.socket) return false;
+        try {
+            this.socket.send(JSON.stringify(frame));
+            return true;
+        } catch (e) {
+            this.log('Could not send a bridge frame: ' + e.message, 'warning');
+            return false;
+        }
+    };
+
+    MCPPremiereBridge.prototype.handleSocketMessage = function(data) {
+        var frame;
+        try {
+            frame = JSON.parse(String(data));
+        } catch (e) {
+            this.log('Ignoring unparseable bridge frame.', 'warning');
+            return;
+        }
+        if (!frame || typeof frame !== 'object') return;
+
+        if (frame.type === 'welcome') {
+            this.socketReady = true;
+            this.log('Bridge socket ready: server protocol ' + frame.protocolVersion +
+                ', session ' + frame.sessionId + '. Commands now arrive by push; the file poll ' +
+                'stays as the fallback.', 'info');
+            return;
+        }
+        if (frame.type === 'error') {
+            this.log('Bridge server error frame (' + frame.code + '): ' + frame.message, 'error');
+            return;
+        }
+        if (frame.type === 'command') {
+            this.executeSocketCommand(frame);
+            return;
+        }
+        this.log('Ignoring bridge frame of unknown type: ' + String(frame.type), 'warning');
+    };
+
+    MCPPremiereBridge.prototype.executeSocketCommand = function(frame) {
+        var self = this;
+        var command = {
+            id: frame.id,
+            type: (frame.commandType === 'cep_js') ? 'cep_js' : 'extendscript',
+            script: frame.script,
+            timeoutMs: (typeof frame.timeoutMs === 'number') ? frame.timeoutMs : undefined,
+            token: frame.token
+        };
+
+        // The same authorisation check the file path runs, against the same token file. The socket
+        // was already authenticated at handshake, so on a healthy connection this can only pass —
+        // which is the point: one check covers both channels, so auth cannot be tightened on one and
+        // silently left off the other.
+        var authResult = this.isCommandAuthorized(command);
+        if (!authResult.ok) {
+            this.log('REJECTED socket command ' + command.id + ': ' + authResult.reason, 'error');
+            this.sendSocketFrame({
+                type: 'response',
+                id: command.id,
+                ok: false,
+                error: 'Command rejected by the Premiere bridge panel: ' + authResult.reason +
+                       '. The panel requires the per-session token from auth-token.json in the shared temp directory.'
+            });
+            return;
+        }
+
+        // The in-flight guard is shared with the file path on purpose. An outstanding evalScript
+        // cannot be cancelled, so a second concurrent command would have its completion callback
+        // clear isProcessing out from under the first.
+        if (this.isProcessing && this.currentCommandId && this.currentCommandId !== command.id) {
+            this.sendSocketFrame({
+                type: 'response',
+                id: command.id,
+                ok: false,
+                error: 'The panel is already executing command ' + this.currentCommandId +
+                       ' and an outstanding host script cannot be cancelled. Nothing was run for this ' +
+                       'command, so it is safe to send again once the panel is idle.'
+            });
+            return;
+        }
+
+        this.log('Processing socket command: ' + command.id, 'info');
+        this.addToQueue(command);
+        this.isProcessing = true;
+        this.currentCommandId = command.id;
+        this.currentCommandStartedAt = Date.now();
+        this.executeCommand(command, function(result) {
+            // The payload is the SAME object the file path writes into response-<uuid>.json, and the
+            // server unwraps it by the same rule. Reshaping it here would change what every tool in
+            // the catalogue sees, but only on the socket path.
+            self.sendSocketFrame({ type: 'response', id: command.id, payload: result });
+            self.log('Socket command completed: ' + command.id, 'info');
+            self.updateCommandStatus(command.id, 'completed');
+            self.isProcessing = false;
+            self.currentCommandId = null;
+            self.currentCommandStartedAt = null;
+        });
+    };
+
+    // One tick of the panel's clock. Split out of startCommandPolling so it can be driven directly:
+    // a setInterval callback is unreachable from a test, which is how the channel-selection rule
+    // below would have gone unverified on this side.
+    MCPPremiereBridge.prototype.pollTick = function() {
+        // Beat unconditionally — including while processing — so the server can tell a
+        // panel that is busy (fresh heartbeat, isProcessing=true) apart from one that
+        // has died (heartbeat gone stale). evalScript is async, so this interval keeps
+        // firing even while a host-side script is running.
+        //
+        // The FILE heartbeat is kept whatever the socket is doing, because it is the only
+        // liveness signal that survives the socket being down — which is exactly when the
+        // question "is the panel alive?" gets asked.
+        this.writeHeartbeat();
+        if (this.isConnected) this.maintainSocket();
+        // While the socket is handshaken the server publishes only over the socket, so scanning
+        // for command files here could only ever pick up something stale — or, if a second
+        // server were sharing the directory, execute work this connection knows nothing about.
+        // Skipping the scan is what makes "exactly one channel" true at both ends.
+        if (!this.isProcessing && this.isConnected && !this.socketReady) {
+            var tempPath = this.getTempDirectory();
+            if (tempPath) this.watchDirectory(tempPath);
+        }
+    };
+
     MCPPremiereBridge.prototype.startCommandPolling = function() {
         var self = this;
         setInterval(function() {
-            // Beat unconditionally — including while processing — so the server can tell a
-            // panel that is busy (fresh heartbeat, isProcessing=true) apart from one that
-            // has died (heartbeat gone stale). evalScript is async, so this interval keeps
-            // firing even while a host-side script is running.
-            self.writeHeartbeat();
-            if (!self.isProcessing && self.isConnected) {
-                var tempPath = self.getTempDirectory();
-                if (tempPath) self.watchDirectory(tempPath);
-            }
+            self.pollTick();
         }, 250);
     };
 
@@ -817,6 +1073,9 @@
             return;
         }
         this.log('Watching: ' + tempPath + ' (must match your MCP client PREMIERE_TEMP_DIR)', 'info');
+        // Dial the push channel immediately rather than waiting for the next poll tick, so a bridge
+        // started against an already-running server is on the fast path from the first command.
+        this.maintainSocket();
         // The Premiere light used to turn green HERE, on the strength of the temp directory
         // existing — which proves nothing about the host. testPremiereConnection() was
         // written to prove it and was never called from anywhere in the panel. A server that
@@ -837,6 +1096,9 @@
     MCPPremiereBridge.prototype.stopBridge = function() {
         this.log('Stopping MCP Bridge...', 'info');
         this.isConnected = false;
+        // Close the socket so the server stops choosing it and reports "no panel connected" instead
+        // of publishing into a connection nobody is reading.
+        this.disconnectSocket();
         if (this.isProcessing && this.currentCommandId) {
             // Same reason as startBridge: stopping the bridge stops us picking up NEW
             // commands. It cannot recall a script already handed to the host.

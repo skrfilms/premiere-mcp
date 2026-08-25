@@ -1,0 +1,1239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MCP bridge</title>
+<!--
+  ════════════════════════════════════════════════════════════════════════════
+  G3 — CINEMA GLOSS
+  A grading suite at night. Deep graphite glass, milled bezels, jewel beads
+  seated in sockets, and one continuous light pipe carrying the signal from the
+  MCP client to Premiere. Highlights come from a single off-screen key light
+  above and slightly left, so every bevel agrees about where the light is.
+
+  THE ONE DECISION THAT MAKES THE THEME WORK
+  Premiere ships four panel brightnesses: #1e1e1e #323232 #8f8f8f #b8b8b8.
+  Measured (WCAG, sRGB): every state colour I want collapses on the two light
+  ones and on the mid grey #535353 —
+      carrier vs #8f8f8f 1.61:1   vs #b8b8b8 1.02:1   vs #535353 3.82:1
+      fault   vs #8f8f8f 1.13:1   vs #b8b8b8 1.85:1   vs #535353 2.10:1
+  and the darkened steps are no better (fault deep vs #535353 = 1.00:1).
+  So the instrument face NEVER inherits the host brightness. A grading suite is
+  dark at every hour; you don't turn the lights on to grade. What adapts is the
+  BEZEL the face is set into: on a light host the panel grows a machined rim
+  milled out of the host colour, with a real drop shadow and a lit top edge, so
+  the dark face reads as a deliberate inset display in a light body — the way a
+  dark LCD reads on a light-bodied hardware panel — instead of an ugly dark box
+  dumped on grey. Bloom drops and glows tighten on light hosts, because ambient
+  brightness eats soft haze. Every state colour then sits on one known
+  substrate (#0d0f13) where the worst of them is 4.79:1.
+
+  RUNTIME: Premiere 2026 CEP = Chromium 99 (CEF 99.2.15.0). Used freely:
+  backdrop-filter, gap, inset, conic/radial-gradient, filter, mix-blend-mode,
+  multi-layer box-shadow, custom properties, :focus-visible, @supports,
+  clamp(), keyframes, prefers-reduced-motion. Avoided: :has(), container
+  queries, color-mix(), oklch(), CSS nesting, @property.
+  Offline: no CDN, no web font, no network. Inline SVG + one data-URI grain.
+  ════════════════════════════════════════════════════════════════════════════
+-->
+<style>
+/* ═══════════════════════════════════════════════════════════════ TOKENS ═══ */
+:root{
+  /* ── substrate: the instrument face. Fixed, not host-derived (see header). */
+  --face-1:#16181d;      /* face top, where the key light lands             */
+  --face-2:#111318;      /* face body                                       */
+  --face-3:#0b0d11;      /* face foot                                       */
+  --screen:#0d0f13;      /* recessed wells — the reference substrate         */
+  --screen-lo:#080a0d;   /* deepest point of a well                         */
+  --plate:#1c1f26;       /* raised lacquer, e.g. a machined key             */
+  --plate-hi:#2a2e37;    /* its lit top face                                */
+
+  /* ── ambient depth: the project nebula, held far under the glass.        */
+  --neb-mag:214,74,160;
+  --neb-cyn:46,168,196;
+  --bloom:.17;           /* lowered on light hosts by applyHostTheme()      */
+  --sheen:.055;          /* top-edge gloss on the face                      */
+  --grain:.42;           /* dither strength — deep gradients band without it */
+
+  /* ── hairlines & bevels. One key light: top edge lit, foot in shadow.    */
+  --edge:rgba(255,255,255,.075);
+  --edge-hi:rgba(255,255,255,.13);
+  --edge-lo:rgba(0,0,0,.55);
+  --engrave:0 1px 0 rgba(0,0,0,.65);
+
+  /* ── ink, measured on --screen #0d0f13                                   */
+  --ink:#f4f6f8;         /* 17.71:1 */
+  --ink-2:#c3c8d1;       /* 11.42:1 */
+  --ink-3:#8e949f;       /*  6.29:1 */
+  --ink-4:#6d7380;       /*  4.10:1 — decoration only, never a value        */
+
+  /* ── state roles. Named hex, one substrate, measured on --screen.        */
+  --carrier:#35c9d1;     /*  9.52:1  live / crossing                        */
+  --carrier-lo:#0d6b73;
+  --carrier-hi:#8ee8ee;
+  --hold:#f0b429;        /* 10.29:1  waiting on something                   */
+  --hold-lo:#7d5300;
+  --hold-hi:#ffd479;
+  --fault:#e2565f;       /*  5.23:1  broken                                 */
+  --fault-lo:#a11f28;
+  --fault-hi:#f39aa0;
+  --unlit:#7c7f88;       /*  4.79:1  dark on purpose                        */
+  --unlit-lo:#55585f;
+  --unlit-hi:#a8abb4;
+
+  /* ── radii scale */
+  --r1:6px;   /* chips, inputs, rods            */
+  --r2:10px;  /* cards                          */
+  --r3:14px;  /* wells                          */
+  --r4:18px;  /* the face, when it has a bezel  */
+
+  /* ── shadow scale (seat → lift → float) */
+  --sh1:inset 0 1px 0 var(--edge-hi), 0 1px 0 var(--edge-lo);
+  --sh2:inset 0 1px 0 var(--edge-hi), 0 1px 1px rgba(0,0,0,.5), 0 8px 20px -14px rgba(0,0,0,.95);
+  --sh3:0 1px 2px rgba(0,0,0,.6), 0 14px 30px -16px rgba(0,0,0,1);
+  --sunk:inset 0 1px 2px rgba(0,0,0,.85), inset 0 0 0 1px rgba(255,255,255,.045);
+
+  /* ── glow scale. Calibrated instrument, not neon: tight radius, low alpha,
+        and every glow is paired with a hard-edged core so the shape survives. */
+  --g1:0 0 5px -1px;     /* bead        */
+  --g2:0 0 8px -2px;     /* rod, chip   */
+  --g3:0 0 18px -6px;    /* hero figure */
+  --glow-k:1;            /* multiplier; tightened on light hosts            */
+
+  /* ── type */
+  --fnt:"Adobe Clean","Source Sans Pro",-apple-system,BlinkMacSystemFont,"Segoe UI",Tahoma,sans-serif;
+  --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+
+  --host:#1e1e1e; --host-hi:#2a2a2a; --host-lo:#141414; --bez-ink:#eceff3;
+
+  /* first-paint defaults, so nothing renders as an invalid gradient before
+     render() runs and sets the real values */
+  --bhi:var(--unlit-hi); --bc:var(--unlit); --blo:var(--unlit-lo);
+  --rc:var(--unlit); --stubIn:transparent; --stubOut:transparent;
+  --dc:var(--unlit); --da:0deg;
+  --sev:var(--hold); --sev-wash:rgba(240,180,41,.13);
+  --pl:rgba(255,255,255,.07); --plg:none;
+}
+*,*::before,*::after{box-sizing:border-box}
+[hidden]{display:none !important}
+html,body{margin:0;padding:0;min-height:100%}
+body{
+  background:linear-gradient(180deg,var(--host-hi),var(--host) 46%,var(--host-lo));
+  font-family:var(--fnt);font-size:12px;line-height:1.35;
+  -webkit-font-smoothing:antialiased;
+  min-width:280px;min-height:100vh;
+  display:flex;flex-direction:column;
+}
+button,input{font-family:inherit}
+:focus{outline:none}
+:focus-visible{outline:2px solid var(--carrier-hi);outline-offset:2px}
+
+/* ═══════════════════════════════════════════════════════ THE FACE ═════════
+   Layer order, bottom to top: graphite body, nebula bloom, top sheen, grain.
+   The grain is not decoration — a 6-stop deep gradient over 600px bands into
+   visible steps at 8 bit, and this dither is what removes them.            */
+.face{
+  position:relative;flex:1 1 auto;display:flex;flex-direction:column;
+  overflow:hidden;
+  background:
+    linear-gradient(180deg,rgba(255,255,255,var(--sheen)),rgba(255,255,255,0) 120px),
+    radial-gradient(125% 74% at 86% -10%,rgba(var(--neb-mag),var(--bloom)),rgba(var(--neb-mag),0) 62%),
+    radial-gradient(110% 66% at -12% 106%,rgba(var(--neb-cyn),var(--bloom)),rgba(var(--neb-cyn),0) 64%),
+    linear-gradient(180deg,var(--face-1) 0,var(--face-2) 52%,var(--face-3) 100%);
+  color:var(--ink);
+}
+.face::after{
+  content:'';position:absolute;inset:0;pointer-events:none;z-index:60;
+  opacity:var(--grain);mix-blend-mode:overlay;
+  background-image:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120"><filter id="n"><feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="3" stitchTiles="stitch"/><feColorMatrix type="saturate" values="0"/></filter><rect width="120" height="120" filter="url(%23n)" opacity="0.55"/></svg>');
+}
+.face>*{flex:0 0 auto;position:relative;z-index:1}
+.hdr{order:1} .well{order:2} .report{order:3} .cols{order:5}
+.cfg-sec{order:6} .mock{order:9}
+/* the temp directory is once-per-machine furniture — it sits low, and only
+   outranks live state in the one state where it IS the action. */
+body[data-state="temp-dir-unset"] .cfg-sec{order:4}
+
+/* the machined bezel, milled from the host colour. Invisible on #1e1e1e,
+   structural on #b8b8b8. */
+html[data-lum="dark"] .face{border-radius:0}
+html[data-lum="mid"] body,html[data-lum="light"] body{padding:7px}
+html[data-lum="mid"] .face,html[data-lum="light"] .face{
+  border-radius:var(--r4);
+  box-shadow:0 0 0 1px rgba(0,0,0,.6),0 1px 0 rgba(255,255,255,.42),var(--sh3);
+}
+html[data-lum="mid"] .face{box-shadow:0 0 0 1px rgba(0,0,0,.68),0 1px 0 rgba(255,255,255,.14),var(--sh3)}
+
+/* ═════════════════════════════════════════════════════ TYPE ROLES ════════ */
+.rack{                                     /* engraved rack label */
+  font-size:9px;font-weight:700;letter-spacing:.17em;text-transform:uppercase;
+  color:var(--ink-3);text-shadow:var(--engrave);
+}
+.read{font-family:var(--mono);font-size:11px;font-variant-numeric:tabular-nums;color:var(--ink-2)}
+.micro{font-size:9.5px;color:var(--ink-3)}
+.prose{font-size:11.5px;color:var(--ink-2);margin:0}
+/* the display treatment for figures: brushed metal, milled off the top edge. */
+.fig{
+  font-family:var(--mono);font-weight:600;font-variant-numeric:tabular-nums;
+  letter-spacing:-.015em;color:var(--ink);line-height:1.05;
+}
+@supports (-webkit-background-clip:text){
+  html[data-lum] .fig-hero{
+    background-image:linear-gradient(178deg,#ffffff 6%,#dfe5ec 44%,#aeb7c4 96%);
+    -webkit-background-clip:text;background-clip:text;
+    -webkit-text-fill-color:transparent;
+  }
+}
+.nil{color:var(--ink-3);font-family:var(--mono)}   /* an em dash, never a 0 */
+
+/* ═════════════════════════════════════════════════════════ HEADER ════════ */
+.hdr{display:flex;align-items:center;gap:9px;padding:9px 12px 8px}
+.hdr::after{
+  content:'';position:absolute;left:12px;right:12px;bottom:0;height:1px;
+  background:linear-gradient(90deg,transparent,var(--edge) 18%,var(--edge) 82%,transparent);
+}
+.mark{
+  flex:0 0 auto;width:26px;height:26px;border-radius:8px;
+  display:flex;align-items:center;justify-content:center;color:var(--carrier-hi);
+  background:linear-gradient(180deg,var(--plate-hi),var(--plate) 60%,#141720);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.16),inset 0 0 0 1px rgba(53,201,209,.16),
+             0 1px 2px rgba(0,0,0,.6),0 0 10px -4px rgba(53,201,209,.5);
+}
+.mark svg{width:15px;height:15px;display:block}
+.ttl{flex:1 1 auto;min-width:0}
+.ttl h1{margin:0;font-size:13px;font-weight:600;letter-spacing:.005em;line-height:1.2;
+        color:var(--ink);text-shadow:0 1px 0 rgba(0,0,0,.5)}
+.ttl .rack{display:block;font-size:8.5px;margin-bottom:1px}
+
+/* heartbeat dial — age swept against the 4 s staleness threshold.
+   A dial, not a pulsing badge: it reports a number, and an unknown heartbeat
+   is a hollow dotted ring with no sweep at all. */
+.beacon{flex:0 0 auto;display:flex;align-items:center;gap:6px}
+.dial{position:relative;width:20px;height:20px;border-radius:50%;flex:0 0 auto;
+      background:conic-gradient(from -90deg,var(--dc) 0 var(--da),rgba(255,255,255,.13) var(--da) 100%);
+      box-shadow:inset 0 0 0 1px rgba(0,0,0,.75),0 0 6px -3px var(--dc)}
+.dial::after{content:'';position:absolute;inset:4px;border-radius:50%;
+      background:radial-gradient(circle at 36% 30%,#20242c,#0c0e12);
+      box-shadow:inset 0 1px 1px rgba(0,0,0,.8),0 0 0 1px rgba(255,255,255,.05)}
+.dial::before{content:'';position:absolute;inset:7.5px;border-radius:50%;z-index:1;
+      background:var(--dc);box-shadow:var(--g1) var(--dc)}
+.dial.unknown{background:none;box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.10)}
+.dial.unknown::before{background:none;box-shadow:none}
+.beacon .read{font-size:10px;white-space:nowrap}
+.beacon.stale .read{color:var(--hold)}
+
+/* ══════════════════════════════════ THE CHANNEL — signature element ══════
+   One light pipe, four jewel beads seated in milled sockets. A command is a
+   single specular glint that runs the length of the pipe; the beads bloom in
+   the order the glint reaches them, phase-locked to the same 1.8 s cycle, so
+   the whole panel has exactly ONE moving moment. A break is a real gap cut in
+   the pipe with a ruby spark at the cut, and everything past it goes dark
+   glass. An EMPTY socket (no bead at all) means unknown; a SEATED but dull
+   bead with a shorting bar means dark on purpose. Those must never look alike. */
+.well{
+  margin:9px 10px 0;padding:8px 10px 7px;border-radius:var(--r3);
+  background:
+    radial-gradient(120% 90% at 50% -20%,rgba(53,201,209,.055),transparent 66%),
+    linear-gradient(180deg,var(--screen) 0,var(--screen-lo) 100%);
+  box-shadow:var(--sunk),0 1px 0 var(--edge-hi);
+}
+.well-hd{display:flex;align-items:baseline;gap:8px;margin-bottom:6px}
+.well-hd .rack{flex:1 1 auto}
+.well-hd .read{font-size:10px;color:var(--ink-3)}
+
+.rail{display:flex;flex-direction:column}
+/* the pipe is CONTINUOUS: it passes behind every socket rather than stopping at
+   it, so the only interruption anywhere in the run is a real break. */
+.hop{position:relative;display:flex;align-items:center;gap:7px;min-height:24px}
+.hop::before,.hop::after{content:'';position:absolute;left:8.5px;width:3px;z-index:0}
+.hop::before{top:0;height:50%;background:var(--stubIn)}
+.hop::after{top:50%;bottom:0;background:var(--stubOut)}
+.sock{
+  position:relative;z-index:2;flex:0 0 20px;width:20px;height:20px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  background:conic-gradient(from 208deg,#31363f,#5a616d 22%,#191c22 50%,#454b56 74%,#262a31);
+  box-shadow:inset 0 0 0 1px rgba(0,0,0,.7),0 1px 1px rgba(0,0,0,.65),0 0 0 0 rgba(0,0,0,0);
+}
+.sock::before{                                   /* the socket void */
+  content:'';position:absolute;inset:3px;border-radius:50%;
+  background:radial-gradient(circle at 38% 30%,#171a20,#07080b);
+  box-shadow:inset 0 1px 2px rgba(0,0,0,.9);
+}
+.bead{
+  position:relative;z-index:2;width:11px;height:11px;border-radius:50%;
+  background:radial-gradient(circle at 33% 26%,var(--bhi) 0 14%,var(--bc) 46%,var(--blo) 100%);
+  box-shadow:var(--g1) var(--bc),inset 0 -1px 1px rgba(0,0,0,.45);
+}
+.bead .bar{position:absolute;left:2px;right:2px;top:50%;height:1.5px;margin-top:-.75px;
+           background:rgba(0,0,0,.62);border-radius:1px}
+.sock[data-sig="unknown"] .bead{display:none}   /* empty socket = unknown */
+.sock[data-sig="unknown"]::after{
+  content:'';position:absolute;inset:4.5px;border-radius:50%;
+  box-shadow:inset 0 0 0 1.2px rgba(255,255,255,.16);
+  background:repeating-conic-gradient(from 0deg,rgba(255,255,255,.14) 0 8deg,transparent 8deg 20deg);
+  -webkit-mask:radial-gradient(circle,transparent 58%,#000 60%);
+          mask:radial-gradient(circle,transparent 58%,#000 60%);
+}
+.sock[data-sig="carrying"]{box-shadow:inset 0 0 0 1px rgba(0,0,0,.7),0 1px 1px rgba(0,0,0,.65),0 0 12px -5px var(--carrier)}
+.sock[data-sig="fault"]{box-shadow:inset 0 0 0 1px rgba(0,0,0,.7),0 1px 1px rgba(0,0,0,.65),0 0 12px -5px var(--fault)}
+/* fallback: if the live code only ever sets the wholesale className on the two
+   id'd dots and never a data-sig, the dots still render as jewels. */
+.sock:not([data-sig]) .status-dot{width:11px;height:11px;border-radius:50%;z-index:2}
+.sock:not([data-sig]) .status-dot.connected{background:radial-gradient(circle at 33% 26%,var(--carrier-hi) 0 14%,var(--carrier) 46%,var(--carrier-lo) 100%);box-shadow:var(--g1) var(--carrier)}
+.sock:not([data-sig]) .status-dot.disconnected{background:radial-gradient(circle at 33% 26%,var(--unlit-hi) 0 14%,var(--unlit) 46%,var(--unlit-lo) 100%)}
+.sock:not([data-sig]) .status-dot.waiting{background:radial-gradient(circle at 33% 26%,var(--hold-hi) 0 14%,var(--hold) 46%,var(--hold-lo) 100%);box-shadow:var(--g1) var(--hold)}
+.sock:not([data-sig]) .status-dot.error{background:radial-gradient(circle at 33% 26%,var(--fault-hi) 0 14%,var(--fault) 46%,var(--fault-lo) 100%);box-shadow:var(--g1) var(--fault)}
+.sock[data-sig] .status-dot{display:none}
+
+/* name and sub share one line at panel widths — vertical space is the scarce
+   axis at the 400px default height — and the whole line ellipses as one. */
+.hop-txt{flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hop-name{font-size:10px;font-weight:700;letter-spacing:.15em;text-transform:uppercase;
+          color:var(--ink);text-shadow:var(--engrave)}
+.hop-sub{font-size:9.5px;color:var(--ink-3)}
+.hop-val{flex:0 0 auto;text-align:right;max-width:44%}
+.hop-val .v{display:block;font-family:var(--mono);font-size:10.5px;font-variant-numeric:tabular-nums;
+            color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* the state word is the non-colour encoding, so it is always present — but a
+   healthy hop stays quiet ink. Only held and faulted earn colour, so the one
+   hop that needs the reader is the only one shouting. */
+.hop-state{display:block;font-size:8.5px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-4)}
+.hop[data-sig="carrying"] .hop-state,.hop[data-sig="lit"] .hop-state{color:var(--ink-3)}
+.hop[data-sig="hold"] .hop-state{color:var(--hold)}
+.hop[data-sig="fault"] .hop-state{color:var(--fault)}
+
+/* the pipe between two sockets */
+.tie{position:relative;height:12px;margin-left:8.5px}
+.rod{position:absolute;left:0;top:-1px;bottom:-1px;width:3px;border-radius:2px;
+     background:linear-gradient(90deg,rgba(0,0,0,.45),var(--rc),rgba(255,255,255,.16));
+     box-shadow:var(--g2) var(--rc)}
+.tie[data-tie="unlit"] .rod{background:linear-gradient(90deg,#05060a,#1b1f26 55%,#2c313a);box-shadow:none}
+.tie[data-tie="held"] .rod{
+  background:repeating-linear-gradient(180deg,var(--hold) 0,var(--hold) 3px,rgba(0,0,0,.55) 3px,rgba(0,0,0,.55) 6px);
+  box-shadow:var(--g2) var(--hold-lo);
+}
+.tie[data-tie="open"]{height:18px}
+.tie[data-tie="open"] .rod{top:-1px;bottom:auto;height:5px;box-shadow:none;
+  background:linear-gradient(90deg,rgba(0,0,0,.45),var(--rc),rgba(255,255,255,.16))}
+.tie[data-tie="open"] .rod2{position:absolute;left:0;bottom:-1px;width:3px;height:5px;border-radius:2px;
+  background:linear-gradient(90deg,#05060a,#1b1f26 55%,#2c313a)}
+.tie[data-tie="open"] .spark{
+  position:absolute;left:-2px;top:6.5px;width:7px;height:5px;border-radius:50%;
+  background:radial-gradient(circle,var(--fault-hi) 0 30%,var(--fault) 60%,rgba(226,86,95,0) 100%);
+  box-shadow:0 0 10px -2px var(--fault);
+}
+/* the travelling glint: one orchestrated sweep, phase-offset per tie */
+.tie[data-tie="carrying"] .glint{
+  position:absolute;left:-1.5px;width:6px;height:11px;border-radius:3px;
+  background:linear-gradient(180deg,rgba(142,232,238,0),var(--carrier-hi) 45%,rgba(142,232,238,0));
+  box-shadow:0 0 9px -1px var(--carrier-hi);
+  animation:glint-v 1.8s cubic-bezier(.4,0,.6,1) infinite;
+}
+.tie[data-tie="carrying"][data-ph="1"] .glint{animation-delay:0s}
+.tie[data-tie="carrying"][data-ph="2"] .glint{animation-delay:.26s}
+.tie[data-tie="carrying"][data-ph="3"] .glint{animation-delay:.52s}
+@keyframes glint-v{
+  0%{top:-12px;opacity:0} 6%{opacity:1}
+  30%{top:12px;opacity:1} 36%{top:12px;opacity:0} 100%{top:12px;opacity:0}
+}
+.sock[data-sig="carrying"] .bead{animation:bloom 1.8s cubic-bezier(.4,0,.6,1) infinite}
+.hop[data-ph="0"] .bead{animation-delay:0s}
+.hop[data-ph="1"] .bead{animation-delay:.26s}
+.hop[data-ph="2"] .bead{animation-delay:.52s}
+.hop[data-ph="3"] .bead{animation-delay:.78s}
+@keyframes bloom{
+  0%,100%{box-shadow:var(--g1) var(--bc),inset 0 -1px 1px rgba(0,0,0,.45)}
+  14%{box-shadow:0 0 11px 0 var(--carrier),inset 0 -1px 1px rgba(0,0,0,.3)}
+  46%{box-shadow:var(--g1) var(--bc),inset 0 -1px 1px rgba(0,0,0,.45)}
+}
+.tie-tag{position:absolute;left:12px;top:50%;margin-top:-5px;
+  font-size:8.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase}
+.tie[data-tie="open"] .tie-tag{color:var(--fault);top:5px;margin-top:0}
+.tie[data-tie="held"] .tie-tag{color:var(--hold)}
+
+.verdict{margin:7px 0 0;padding-top:6px;font-size:11.5px;color:var(--ink-2);
+  border-top:1px solid rgba(255,255,255,.055)}
+.verdict b{color:var(--ink);font-weight:600}
+
+/* ══════════════════════════════════════════════════════════ CARDS ═══════ */
+.card{
+  position:relative;margin:9px 10px 0;padding:9px 10px 9px;border-radius:var(--r2);
+  background:linear-gradient(180deg,rgba(255,255,255,.048),rgba(255,255,255,.012) 46%,rgba(0,0,0,.13));
+  box-shadow:var(--sh2),inset 0 0 0 1px rgba(255,255,255,.055);
+}
+.card-hd{display:flex;align-items:baseline;gap:8px;margin-bottom:6px}
+.card-hd .rack{flex:1 1 auto}
+.card-hd .read{font-size:9.5px;color:var(--ink-3)}
+
+/* fault / hold report — the remedy outranks the evidence, so the plain-language
+   fix sits above the verbatim reply and can never be the thing below the fold. */
+.report{overflow:hidden;padding-left:13px;
+  background:
+    radial-gradient(130% 130% at 0% 0%,var(--sev-wash),transparent 66%),
+    linear-gradient(180deg,rgba(255,255,255,.05),rgba(0,0,0,.13));
+}
+.report::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;
+  background:linear-gradient(180deg,var(--sev),rgba(0,0,0,0) 92%);
+  box-shadow:0 0 12px -3px var(--sev)}
+.report .rack{color:var(--sev)}
+.report .when{color:var(--ink-3);letter-spacing:.06em;font-weight:400}
+.report h2{margin:3px 0 0;font-size:12.5px;font-weight:600;line-height:1.28;color:var(--ink)}
+.report .fix{margin:5px 0 0;font-size:11.5px;color:var(--ink-2)}
+.report .fix b{color:var(--ink);font-weight:600}
+.report .detail{margin:7px 0 0;padding:5px 7px;border-radius:var(--r1);
+  background:linear-gradient(180deg,var(--screen-lo),var(--screen));
+  box-shadow:var(--sunk);
+  font-family:var(--mono);font-size:10px;line-height:1.45;color:var(--ink-2);
+  overflow-wrap:break-word}
+.report .detail em{font-style:normal;color:var(--ink-3);letter-spacing:.04em}
+
+/* what is crossing right now */
+.punch::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;
+  border-radius:var(--r2) 0 0 var(--r2);background:var(--pl);box-shadow:var(--plg)}
+.punch{padding-left:13px}
+.punch-top{display:flex;align-items:baseline;gap:7px}
+/* the hero slot keeps its size when the value is unknown, so an em dash reads
+   as "we do not know this" rather than as an absent row */
+#punchName{flex:1 1 auto;min-width:0;font-size:17px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.punch-top .cid{flex:0 0 auto;font-family:var(--mono);font-size:9.5px;color:var(--ink-3)}
+.punch .note{margin:3px 0 0;font-size:11px;color:var(--ink-3)}
+
+.rows{margin:7px 0 0;padding:0}
+.row{display:flex;align-items:baseline;gap:8px;min-height:19px;padding:3px 0;
+     border-top:1px solid rgba(255,255,255,.05)}
+.row:first-child{border-top:0}
+.row dt{flex:1 1 auto;min-width:0;font-size:9.5px;letter-spacing:.07em;text-transform:uppercase;
+        color:var(--ink-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row dd{flex:0 0 auto;margin:0;font-family:var(--mono);font-size:11px;
+        font-variant-numeric:tabular-nums;color:var(--ink);white-space:nowrap}
+.row dd.dim{color:var(--ink-3)}
+.row dd.warn{color:var(--hold)}
+.row dd.bad{color:var(--fault)}
+
+/* kill-deadline tube — THREE modes, because a glowing instrument has to make
+   all three legible without a caption:
+     lit     7px, glossy, filled, glowing        — a command is running
+     dark    3px unglazed groove, NO fill        — we know nothing is running
+     unknown 3px groove, hatched, NO fill        — we cannot know
+   A lit tube is twice as tall as an empty one and is the only one that glows,
+   so an empty meter can never be misread as a full one, and a dark instrument
+   never gets confused with an unknown one. */
+.tube-wrap{margin:8px 0 0}
+.tube{position:relative;height:7px;border-radius:4px;overflow:hidden;
+  background:linear-gradient(180deg,var(--screen-lo),#12151b);
+  box-shadow:var(--sunk)}
+.tube.empty{height:3px;border-radius:2px;
+  background:linear-gradient(180deg,#000,#171a20);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.075)}
+.tube.unknown{height:3px;border-radius:2px;
+  background:repeating-linear-gradient(115deg,rgba(255,255,255,.13) 0 1.5px,rgba(0,0,0,.85) 1.5px 5px);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.075)}
+.tube-fill{position:absolute;left:0;top:0;bottom:0;border-radius:4px 2px 2px 4px;
+  background:linear-gradient(90deg,var(--carrier-lo),var(--carrier) 78%,var(--carrier-hi));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.4),0 0 10px -2px var(--carrier)}
+.tube-tick{position:absolute;top:-1px;bottom:-1px;width:2px;background:var(--ink-2);
+  box-shadow:0 0 0 1px rgba(0,0,0,.6)}
+.tube-tick.past{background:var(--hold);box-shadow:0 0 0 1px rgba(0,0,0,.6),0 0 7px -1px var(--hold)}
+.tube-cap{display:flex;gap:8px;margin-top:5px;font-size:9.5px;color:var(--ink-3)}
+.tube-cap>span:first-child{flex:1 1 auto}
+.tube-cap b{color:var(--ink-2);font-family:var(--mono);font-weight:600;font-variant-numeric:tabular-nums}
+.tube-cap .over{color:var(--hold)}
+
+/* ═══════════════════════════════════════════════════════ CONTROLS ═══════ */
+.acts{display:flex;align-items:center;gap:7px;margin:9px 10px 0}
+.btn{
+  flex:0 0 auto;display:inline-flex;align-items:center;gap:6px;
+  padding:6px 11px;border:0;border-radius:9px;cursor:pointer;
+  font-size:11.5px;font-weight:600;color:var(--ink);
+  background:linear-gradient(180deg,var(--plate-hi),var(--plate) 55%,#14171d);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.15),inset 0 0 0 1px rgba(255,255,255,.06),
+             0 1px 2px rgba(0,0,0,.6),0 6px 14px -10px rgba(0,0,0,1);
+  transition:box-shadow .16s ease,transform .1s ease,filter .16s ease;
+}
+.btn:hover{filter:brightness(1.14)}
+.btn:active{transform:translateY(1px);box-shadow:inset 0 1px 3px rgba(0,0,0,.7),inset 0 0 0 1px rgba(255,255,255,.05)}
+.btn svg{width:12px;height:12px;display:block;fill:currentColor}
+.btn.primary{
+  color:#03191c;
+  background:linear-gradient(180deg,var(--carrier-hi) 0,var(--carrier) 40%,#12909a 100%);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.55),inset 0 -1px 0 rgba(0,0,0,.22),
+             inset 0 0 0 1px rgba(53,201,209,.5),
+             0 1px 2px rgba(0,0,0,.55),0 8px 18px -10px rgba(53,201,209,.5);
+}
+.btn.ghost{background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.015));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.09),inset 0 0 0 1px rgba(255,255,255,.07);color:var(--ink-2)}
+.acts .grow{flex:1 1 auto}
+#startButton:disabled,#stopButton:disabled{display:none}
+#bridgeBusy{font-size:11px;color:var(--hold);display:flex;align-items:center;gap:6px}
+#bridgeBusy .sp{width:8px;height:8px;border-radius:50%;background:var(--hold);
+  box-shadow:var(--g1) var(--hold);animation:sp 1.4s ease-in-out infinite}
+@keyframes sp{0%,100%{opacity:.35}50%{opacity:1}}
+
+/* ═════════════════════════════════════════════════════════ QUEUE ════════ */
+#commandQueue{margin:0}
+.command-item{display:flex;align-items:baseline;gap:7px;padding:4px 0;
+  border-top:1px solid rgba(255,255,255,.05)}
+.command-item:first-child{border-top:0}
+.command-label{flex:1 1 auto;min-width:0;font-family:var(--mono);font-size:10.5px;color:var(--ink-2);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.command-label:only-child{white-space:normal;font-family:var(--fnt);font-size:11px;color:var(--ink-3)}
+.command-age{flex:0 0 auto;font-family:var(--mono);font-size:9.5px;
+  font-variant-numeric:tabular-nums;color:var(--ink-3)}
+.command-status{flex:0 0 auto;position:relative;padding-left:12px;
+  font-size:8.5px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:var(--ink-4)}
+.command-status::before{content:'';position:absolute;left:0;top:50%;margin-top:-3px;
+  width:6px;height:6px;border-radius:50%;
+  background:radial-gradient(circle at 32% 26%,var(--unlit-hi),var(--unlit-lo))}
+.command-status.executing{color:var(--carrier)}
+.command-status.executing::before{background:radial-gradient(circle at 32% 26%,var(--carrier-hi),var(--carrier-lo));box-shadow:var(--g1) var(--carrier)}
+.command-status.completed{color:var(--ink-3)}
+.command-status.completed::before{background:radial-gradient(circle at 32% 26%,#5f6772,#2b3038)}
+.command-status.pending{color:var(--hold)}
+.command-status.pending::before{background:radial-gradient(circle at 32% 26%,var(--hold-hi),var(--hold-lo));box-shadow:var(--g1) var(--hold-lo)}
+.command-status.failed{color:var(--fault)}
+.command-status.failed::before{background:radial-gradient(circle at 32% 26%,var(--fault-hi),var(--fault-lo));box-shadow:var(--g1) var(--fault)}
+
+/* ══════════════════════════════════════════════ IDENTITY + CONFIG ═══════ */
+.cfg-sec .cfg{display:flex;gap:7px;align-items:center}
+#tempDirectory{
+  flex:1 1 auto;min-width:0;padding:6px 8px;border:0;border-radius:var(--r1);
+  background:linear-gradient(180deg,var(--screen-lo),var(--screen));
+  box-shadow:var(--sunk);
+  color:var(--ink);font-family:var(--mono);font-size:10.5px;
+}
+#tempDirectory::placeholder{color:var(--ink-4)}
+#tempDirectory.unset{box-shadow:var(--sunk),inset 0 0 0 1px var(--hold-lo),0 0 9px -3px var(--hold)}
+#tempDirectory:focus{box-shadow:var(--sunk),inset 0 0 0 1px var(--carrier),0 0 10px -3px var(--carrier)}
+.cfg-sec .hint{margin:6px 0 0;font-size:9.5px;color:var(--ink-4);line-height:1.45}
+body[data-state="temp-dir-unset"] .cfg-sec{
+  box-shadow:var(--sh2),inset 0 0 0 1px rgba(240,180,41,.28),0 0 20px -14px var(--hold)}
+
+/* ═══════════════════════════════════════════════════════════ LOG ════════ */
+#logContainer{
+  max-height:96px;overflow-y:auto;padding:4px 6px;border-radius:var(--r1);
+  background:linear-gradient(180deg,var(--screen-lo),var(--screen));
+  box-shadow:var(--sunk);
+}
+#logContainer::-webkit-scrollbar{width:5px}
+#logContainer::-webkit-scrollbar-thumb{border-radius:3px;background:#31363f}
+.log-entry{position:relative;padding:1px 0 1px 9px;margin-bottom:1px;
+  font-family:var(--mono);font-size:10px;line-height:1.5;color:var(--ink-3);
+  overflow-wrap:break-word}
+.log-entry::before{content:'';position:absolute;left:0;top:3px;bottom:3px;width:2px;
+  border-radius:1px;background:#2b3038}
+.log-entry.info{color:var(--ink-2)}
+.log-entry.warning{color:var(--ink-2)}
+.log-entry.warning::before{background:var(--hold);box-shadow:0 0 6px -2px var(--hold)}
+.log-entry.error{color:var(--ink)}
+.log-entry.error::before{background:var(--fault);box-shadow:0 0 6px -2px var(--fault)}
+
+/* ═════════════════════════════════════════════════ mock switcher ════════ */
+.mock{margin:10px 10px 10px;padding:8px 10px 6px;border-radius:var(--r2);
+  background:rgba(0,0,0,.22);box-shadow:inset 0 0 0 1px rgba(255,255,255,.045)}
+.mock-btns{display:flex;flex-wrap:wrap;gap:4px;margin-top:5px}
+.mock-btns button{padding:3px 7px;border:0;border-radius:5px;cursor:pointer;font-size:9.5px;
+  background:rgba(255,255,255,.05);color:var(--ink-3);box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)}
+.mock-btns button[aria-pressed="true"]{color:#03191c;background:linear-gradient(180deg,var(--carrier-hi),var(--carrier));
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.4)}
+.foot{flex:1 1 auto;order:8;min-height:6px}
+
+/* ═════════════════════════════════════════════════════ BREAKPOINTS ══════ */
+/* ≤319 (the 280 floor): hop subs go, the hop's state WORD stays, ages lose
+   the frames suffix so the tool name is never what gets truncated. */
+@media (max-width:319px){
+  .well,.card,.acts,.mock{margin-left:7px;margin-right:7px}
+  .hdr{padding-left:9px;padding-right:9px}
+  .hop-sub{display:none}
+  .hop-val{max-width:38%}
+  .ttl h1{font-size:12px}
+  #punchName{font-size:15.5px}
+}
+/* below 460 the queue drops the frames suffix, so the TOOL NAME is never the
+   thing that gets truncated. Frames stay on the in-flight readout above. */
+@media (max-width:459px){ .command-age .fr{display:none} }
+/* docked wide: the pipe lies down and becomes a patch strip; two columns. */
+@media (min-width:620px){
+  .well{margin:11px 12px 0;padding:11px 13px 10px}
+  .card,.acts,.mock{margin-left:12px;margin-right:12px}
+  .rail{flex-direction:row;align-items:flex-start}
+  .hop{flex:1 1 auto;flex-direction:column;align-items:center;text-align:center;gap:5px;
+       max-width:190px;min-height:0}
+  /* the pipe lies down and still runs behind every socket */
+  .hop::before,.hop::after{top:8.5px;bottom:auto;height:3px;width:auto}
+  .hop::before{left:0;right:50%}
+  .hop::after{left:50%;right:0}
+  /* with room to spare, the label stack unpacks: name, then role, then value */
+  .hop-txt{flex:0 0 auto;max-width:100%;white-space:normal}
+  .hop-name,.hop-sub{display:block}
+  .hop-sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+  .hop-val{max-width:100%;text-align:center}
+  .tie{flex:0 1 90px;height:20px;min-width:22px;margin:0}
+  .rod{left:0;right:0;top:8.5px;bottom:auto;width:auto;height:3px;
+       background:linear-gradient(180deg,rgba(0,0,0,.45),var(--rc),rgba(255,255,255,.16))}
+  .tie[data-tie="unlit"] .rod{background:linear-gradient(180deg,#05060a,#1b1f26 55%,#2c313a)}
+  .tie[data-tie="held"] .rod{
+    background:repeating-linear-gradient(90deg,var(--hold) 0,var(--hold) 3px,rgba(0,0,0,.55) 3px,rgba(0,0,0,.55) 6px)}
+  .tie[data-tie="open"]{height:20px}
+  .tie[data-tie="open"] .rod{left:0;right:auto;width:26%;height:3px;top:8.5px;bottom:auto}
+  .tie[data-tie="open"] .rod2{right:0;left:auto;bottom:auto;top:8.5px;width:26%;height:3px}
+  .tie[data-tie="open"] .spark{left:50%;margin-left:-3.5px;top:7.5px;width:8px;height:5px}
+  .tie[data-tie="carrying"] .glint{top:6.5px;left:auto;width:11px;height:6px;border-radius:3px;
+    background:linear-gradient(90deg,rgba(142,232,238,0),var(--carrier-hi) 45%,rgba(142,232,238,0));
+    animation-name:glint-h}
+  @keyframes glint-h{
+    0%{left:-12px;opacity:0} 6%{opacity:1}
+    30%{left:100%;opacity:1} 36%{left:100%;opacity:0} 100%{left:100%;opacity:0}
+  }
+  .tie-tag{left:0;right:0;top:15px;margin-top:0;text-align:center}
+  .tie[data-tie="open"] .tie-tag{top:15px}
+  .hop-name{font-size:11px;letter-spacing:.17em}
+  .cols{display:flex;align-items:flex-start;gap:0}
+  .cols>*{flex:1 1 50%;min-width:0}
+  .cols .card,.cols .acts{margin-left:12px;margin-right:12px}
+  .colR .card:first-child{margin-top:9px}
+  #logContainer{max-height:150px}
+  #punchName{font-size:19px}
+}
+@media (min-width:900px){
+  .cols>.colL{flex:1 1 58%} .cols>.colR{flex:1 1 42%}
+}
+/* the 300px-tall floor: vertical space is scarcer than horizontal. */
+@media (max-height:400px){
+  .hop{min-height:21px}
+  .tie{height:10px}
+  .tie[data-tie="open"]{height:15px}
+  .hop-sub,.hop-state{display:none}
+  #logContainer{max-height:52px}
+  .verdict{margin-top:6px;padding-top:5px}
+  .cfg-sec .hint{display:none}
+}
+/* ONE moving moment, and it stops. The glint parks mid-pipe and the beads hold
+   their bloom, so a carrying pipe still reads differently from a merely lit one. */
+@media (prefers-reduced-motion:reduce){
+  .tie[data-tie="carrying"] .glint{animation:none;top:2px}
+  .sock[data-sig="carrying"] .bead{animation:none;box-shadow:0 0 10px 0 var(--carrier),inset 0 -1px 1px rgba(0,0,0,.3)}
+  #bridgeBusy .sp{animation:none;opacity:1}
+  .btn{transition:none}
+}
+@media (prefers-reduced-motion:reduce) and (min-width:620px){
+  .tie[data-tie="carrying"] .glint{top:6.5px;left:50%;margin-left:-5.5px}
+}
+@media (forced-colors:active){
+  .bead,.sock,.rod,.dial{forced-color-adjust:none}
+  .card,.well,.btn,#tempDirectory,#logContainer{border:1px solid CanvasText}
+}
+</style>
+</head>
+<body>
+
+<div class="face" id="face">
+
+  <header class="hdr">
+    <div class="mark" aria-hidden="true">
+      <svg viewBox="0 0 16 16"><path d="M2 8h3.2l1.4-3.4L9.2 12l1.5-4H14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </div>
+    <div class="ttl">
+      <span class="rack">Premiere automation</span>
+      <h1>MCP bridge</h1>
+    </div>
+    <div class="beacon" id="beacon" title="Heartbeat age against the 4 s staleness threshold">
+      <span class="dial unknown" id="dial" aria-hidden="true"></span>
+      <span class="read" id="beaconRead">—</span>
+    </div>
+  </header>
+
+  <!-- ══════════════ 1. IS THE CHANNEL OPEN? — the signature element ══════ -->
+  <section class="well" aria-label="Channel from the MCP client to Premiere">
+    <div class="well-hd">
+      <span class="rack">Channel</span>
+      <span class="read" id="chanMeta">—</span>
+    </div>
+
+    <div class="rail" id="rail">
+      <div class="hop" id="hop-client" data-ph="0">
+        <span class="sock"><span class="bead"></span></span>
+        <span class="hop-txt">
+          <span class="hop-name">Client</span>
+          <span class="hop-sub">MCP server process</span>
+        </span>
+        <span class="hop-val"><span class="v">—</span><span class="hop-state">—</span></span>
+      </div>
+
+      <div class="tie" id="tie-1" data-ph="1"><span class="rod"></span><span class="rod2"></span><span class="spark"></span><span class="glint"></span><span class="tie-tag"></span></div>
+
+      <!-- #connectionStatus is the queue bead: it IS "is the panel polling". -->
+      <div class="hop" id="hop-queue" data-ph="1">
+        <span class="sock"><span class="bead"></span><span class="status-dot disconnected" id="connectionStatus"></span></span>
+        <span class="hop-txt">
+          <span class="hop-name">Queue</span>
+          <span class="hop-sub" id="connectionText">Disconnected</span>
+        </span>
+        <span class="hop-val"><span class="v">—</span><span class="hop-state">—</span></span>
+      </div>
+
+      <div class="tie" id="tie-2" data-ph="2"><span class="rod"></span><span class="rod2"></span><span class="spark"></span><span class="glint"></span><span class="tie-tag"></span></div>
+
+      <div class="hop" id="hop-engine" data-ph="2">
+        <span class="sock"><span class="bead"></span></span>
+        <span class="hop-txt">
+          <span class="hop-name">Engine</span>
+          <span class="hop-sub">Premiere's script engine</span>
+        </span>
+        <span class="hop-val"><span class="v">—</span><span class="hop-state">—</span></span>
+      </div>
+
+      <div class="tie" id="tie-3" data-ph="3"><span class="rod"></span><span class="rod2"></span><span class="spark"></span><span class="glint"></span><span class="tie-tag"></span></div>
+
+      <div class="hop" id="hop-host" data-ph="3">
+        <span class="sock"><span class="bead"></span><span class="status-dot disconnected" id="serverStatus"></span></span>
+        <span class="hop-txt">
+          <span class="hop-name">Host</span>
+          <span class="hop-sub" id="serverText">Premiere Pro: start the bridge</span>
+        </span>
+        <span class="hop-val"><span class="v">—</span><span class="hop-state">—</span></span>
+      </div>
+    </div>
+
+    <p class="verdict" id="verdict"></p>
+  </section>
+
+  <!-- ══════════════ 3. WHICH HOP BROKE, AND WHAT DO I DO? ═══════════════ -->
+  <section class="card report" id="report" hidden role="alert">
+    <span class="rack" id="reportHop"></span>
+    <h2 id="reportTitle"></h2>
+    <p class="fix" id="reportFix"></p>
+    <div class="detail" id="reportDetail"></div>
+  </section>
+
+  <!-- config furniture: low by default, promoted by CSS when it is the action -->
+  <section class="card cfg-sec">
+    <div class="card-hd"><span class="rack">Temp directory</span><span class="read" id="cfgNote"></span></div>
+    <div class="cfg">
+      <input type="text" id="tempDirectory" placeholder="/tmp/premiere-mcp-bridge" spellcheck="false" autocomplete="off" aria-describedby="cfgHint">
+      <button class="btn ghost" id="saveButton" type="button" onclick="saveConfig()">Save</button>
+    </div>
+    <p class="hint" id="cfgHint">The MCP server and this panel swap command files through this folder. Set it once per machine.</p>
+  </section>
+
+  <div class="cols">
+    <div class="colL">
+
+      <!-- ══════════ 2. WHAT IS CROSSING IT RIGHT NOW? ═══════════════════ -->
+      <section class="card punch" id="punch">
+        <div class="card-hd"><span class="rack" id="punchKick">Crossing now</span><span class="read" id="punchWhere"></span></div>
+        <div class="punch-top">
+          <span class="fig fig-hero" id="punchName">—</span>
+          <span class="cid" id="punchId"></span>
+        </div>
+        <p class="note" id="punchNote" hidden></p>
+        <dl class="rows">
+          <div class="row"><dt>Elapsed in the engine</dt><dd id="mElapsed">—</dd></div>
+          <div class="row"><dt>Last round trip</dt><dd id="mRtt">—</dd></div>
+          <div class="row"><dt>Waiting in the queue</dt><dd id="mDepth">—</dd></div>
+        </dl>
+        <div class="tube-wrap">
+          <div class="tube empty" id="tube">
+            <span class="tube-fill" id="tubeFill" hidden></span>
+            <span class="tube-tick" id="tubeTick" hidden></span>
+          </div>
+          <div class="tube-cap"><span id="tubeLeft">—</span><span id="tubeRight"></span></div>
+        </div>
+      </section>
+
+      <div class="acts">
+        <button class="btn primary" id="startButton" type="button" onclick="startBridge()">
+          <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 2.2 10 6l-7 3.8z"/></svg>Start bridge
+        </button>
+        <button class="btn" id="stopButton" type="button" onclick="stopBridge()" disabled>
+          <svg viewBox="0 0 12 12" aria-hidden="true"><rect x="3" y="3" width="6" height="6" rx="1"/></svg>Stop bridge
+        </button>
+        <span id="bridgeBusy" hidden><span class="sp"></span>Opening the channel…</span>
+        <span class="grow"></span>
+        <button class="btn ghost" id="traceButton" type="button" onclick="tracePath()">Trace path</button>
+      </div>
+
+      <section class="card">
+        <div class="card-hd"><span class="rack">Queue</span><span class="read" id="queueMeta">—</span></div>
+        <div class="command-queue" id="commandQueue"></div>
+      </section>
+
+    </div>
+    <div class="colR">
+
+      <section class="card">
+        <div class="card-hd"><span class="rack">Session</span></div>
+        <dl class="rows">
+          <div class="row"><dt>Premiere</dt><dd id="iHost" class="dim">—</dd></div>
+          <div class="row"><dt>Project</dt><dd id="iProj" class="dim">—</dd></div>
+          <div class="row"><dt>Auth</dt><dd id="iAuth" class="dim">—</dd></div>
+          <div class="row"><dt>Rejected commands</dt><dd id="iRej" class="dim">—</dd></div>
+        </dl>
+      </section>
+
+      <section class="card">
+        <div class="card-hd"><span class="rack">Log</span>
+          <button class="btn ghost" type="button" style="padding:2px 7px;font-size:9.5px" onclick="clearLog()">Clear</button>
+        </div>
+        <div class="log-container" id="logContainer"></div>
+      </section>
+
+    </div>
+  </div>
+
+  <div class="foot"></div>
+
+  <div class="mock" id="mock">
+    <span class="rack">Mock state</span>
+    <div class="mock-btns" id="mockBtns"></div>
+  </div>
+
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════ THEME ════
+   Read appSkinInfo. The instrument face stays dark on all four Premiere
+   brightnesses — that is the flavour and the only way the state colours keep
+   ≥3:1 (measured: carrier on #b8b8b8 is 1.02:1, fault on #535353 is 2.10:1).
+   What the host colour drives is the BEZEL the face sits in, the bloom, and
+   the glow radius. Three declared brightness bands, chosen by measured
+   relative luminance, not by guessing.                                     */
+function hex2rgb(h){h=String(h).replace('#','');return [parseInt(h.substr(0,2),16),parseInt(h.substr(2,2),16),parseInt(h.substr(4,2),16)];}
+function rgb2hex(r){function p(n){n=Math.max(0,Math.min(255,Math.round(n))).toString(16);return n.length<2?'0'+n:n;}return '#'+p(r[0])+p(r[1])+p(r[2]);}
+function relLum(rgb){var c=rgb.map(function(v){v/=255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4);});
+  return 0.2126*c[0]+0.7152*c[1]+0.0722*c[2];}
+function mix(a,b,t){return [a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t,a[2]+(b[2]-a[2])*t];}
+
+function applyHostTheme(){
+  var surf='#1e1e1e';
+  try{
+    var cs=new CSInterface();
+    var c=cs.hostEnvironment.appSkinInfo.panelBackgroundColor.color;
+    surf=rgb2hex([c.red,c.green,c.blue]);
+    var f=cs.hostEnvironment.appSkinInfo.baseFontFamily;
+    if(f) document.documentElement.style.setProperty('--fnt',
+      '"'+f+'","Adobe Clean",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif');
+  }catch(e){}
+  /* dev only: ?surface=8f8f8f stands in for a host brightness so all four can
+     be SEEN, not merely computed. Never present inside Premiere. */
+  var ov=/[?&]surface=([0-9a-fA-F]{6})/.exec(location.search);
+  if(ov) surf='#'+ov[1];
+
+  var s=hex2rgb(surf), L=relLum(s);
+  var band = L>0.22 ? 'light' : (L>0.055 ? 'mid' : 'dark');
+  document.documentElement.setAttribute('data-lum',band);
+
+  var R=document.documentElement.style;
+  R.setProperty('--host',surf);
+  R.setProperty('--host-hi',rgb2hex(mix(s,[255,255,255],band==='dark'?0.06:0.13)));
+  R.setProperty('--host-lo',rgb2hex(mix(s,[0,0,0],band==='dark'?0.22:0.12)));
+  R.setProperty('--bez-ink',L>0.22?'#14161a':'#eceff3');
+  /* ambient brightness eats soft haze: bloom down and glows tighten as the
+     host gets lighter, so the face stays crisp instead of turning to mud. */
+  R.setProperty('--bloom', band==='dark'?'.17':band==='mid'?'.14':'.11');
+  R.setProperty('--sheen', band==='dark'?'.055':'.07');
+  R.setProperty('--grain', band==='dark'?'.42':'.34');
+  /* light hosts: the face darkens a step so its edge does not vibrate against
+     a mid grey, which is the hardest of the four. */
+  if(band!=='dark'){
+    R.setProperty('--face-1','#14161b');R.setProperty('--face-2','#0f1116');R.setProperty('--face-3','#090b0e');
+  }
+}
+
+/* ═══════════════════════════════════════════ BEADS, RODS, FORMATTERS ═════ */
+var BEAD={
+  carrying:['--carrier-hi','--carrier','--carrier-lo'],
+  lit:     ['--carrier-hi','--carrier','--carrier-lo'],
+  hold:    ['--hold-hi','--hold','--hold-lo'],
+  fault:   ['--fault-hi','--fault','--fault-lo'],
+  unlit:   ['--unlit-hi','--unlit','--unlit-lo'],
+  unknown: ['--unlit-hi','--unlit','--unlit-lo']
+};
+var WORD={carrying:'carrying',lit:'lit',unlit:'dark',unknown:'unknown',hold:'held',fault:'faulted'};
+function tieColor(t){return t==='carrying'||t==='lit'?'--carrier':t==='unlit'?'--unlit':t==='open'?'--fault':'--hold';}
+/* what the pipe looks like where it runs UNDER a bezel. Solid, and never
+   glowing: light only escapes where the pipe is exposed between sockets. */
+var DEAD='#1e222a';
+function stubPaint(t,side){
+  if(t==='carrying'||t==='lit') return 'var(--carrier)';
+  if(t==='held')  return 'var(--hold)';
+  /* an open link: the upstream stub still carries, the downstream one is dead
+     glass. stubOut is the segment leaving a hop, stubIn the one arriving. */
+  if(t==='open')  return side==='out' ? 'var(--fault)' : DEAD;
+  return DEAD;
+}
+
+var FPS=24, DASH='—', KILL=45000, BUDGET=8000, HB_STALE=4000;
+function frames(ms){return (ms*FPS/1000).toFixed(1)+' f';}
+function dur(ms){
+  if(ms===null||ms===undefined) return DASH;
+  var t=ms<1000?Math.round(ms)+' ms':(ms/1000).toFixed(2)+' s';
+  return t+' · '+frames(ms);
+}
+function el(id){return document.getElementById(id);}
+
+/* ═════════════════════════════════════════════════════════ MOCK DATA ════ */
+var STATES={
+
+'disconnected':{
+  conn:['disconnected','Not polling'], server:['disconnected','Premiere Pro: start the bridge'],
+  running:false,
+  hops:{client:'unknown',queue:'unlit',engine:'unlit',host:'unknown'},
+  hopVal:{client:DASH,queue:DASH,engine:DASH,host:DASH},
+  ties:[['unlit',''],['unlit',''],['unlit','']],
+  chanMeta:'closed',
+  verdict:'<b>The channel is closed.</b> Start the bridge to open it. Until then nothing reaches Premiere, and nothing on the far side can be read from here.',
+  punch:{kick:'Crossing now',where:'',name:DASH,id:'',
+    note:'The panel is not polling, so nothing can cross and nothing is known.',
+    elapsed:null,rtt:null,depth:null},
+  tube:null, tubeKnown:false,
+  queueMeta:DASH, queue:[{label:'Queue unknown — the bridge is not polling',status:null}],
+  temp:'/tmp/premiere-mcp-bridge', tempUnset:false, cfgNote:'saved',
+  host:DASH, proj:DASH, auth:DASH, rej:null, hb:null,
+  log:[['info','Panel loaded. Bridge stopped.']]
+},
+
+'starting':{
+  conn:['disconnected','Opening'], server:['disconnected','Premiere Pro: checking the host…'],
+  running:'busy',
+  hops:{client:'unknown',queue:'hold',engine:'unknown',host:'hold'},
+  hopVal:{client:DASH,queue:'opening',engine:DASH,host:'checking'},
+  ties:[['held','no path yet'],['held',''],['held','no host yet']],
+  chanMeta:'opening',
+  verdict:'<b>Opening the channel.</b> The queue starts polling as soon as the temp directory answers, then the host is checked.',
+  punch:{kick:'Crossing now',where:'',name:DASH,id:'',
+    note:'Polling has not begun, so the queue cannot be read yet.',
+    elapsed:null,rtt:null,depth:null},
+  tube:null, tubeKnown:false,
+  queueMeta:DASH, queue:[{label:'Queue not polling yet',status:null}],
+  temp:'/tmp/premiere-mcp-bridge', tempUnset:false, cfgNote:'saved',
+  host:DASH, proj:DASH, auth:DASH, rej:null, hb:null,
+  log:[['info','Panel loaded. Bridge stopped.'],
+       ['info','Resolving /tmp/premiere-mcp-bridge…'],
+       ['info','Checking the script engine…']]
+},
+
+'connected-idle':{
+  conn:['connected','Polling every 250 ms'], server:['connected','Premiere Pro: ready'],
+  running:true,
+  hops:{client:'lit',queue:'lit',engine:'lit',host:'lit'},
+  hopVal:{client:'token seen',queue:'0 waiting',engine:'idle',host:'26.3.2'},
+  ties:[['lit',''],['lit',''],['lit','']],
+  chanMeta:'open · 4 of 4 lit',
+  verdict:'<b>All four hops are lit.</b> Commands reach Premiere, and nothing is crossing right now.',
+  punch:{kick:'Last crossed',where:'completed 41 s ago',name:'set_clip_scale',id:'cmd_7c41e9',
+    note:'Nothing is crossing now. The channel stays open and the queue is empty.',
+    elapsed:null,rtt:412,depth:0},
+  tube:null,
+  queueMeta:'0 waiting', queue:[
+    {label:'set_clip_scale',status:'completed',age:412},
+    {label:'apply_lumetri_preset',status:'completed',age:1860},
+    {label:'add_to_timeline',status:'completed',age:288}
+  ],
+  temp:'/tmp/premiere-mcp-bridge', tempUnset:false, cfgNote:'saved',
+  host:'26.3.2', proj:'graveyard_chase_v2.prproj', auth:'Per-session token', rej:0, hb:1180,
+  log:[['info','Bridge started. Polling /tmp/premiere-mcp-bridge'],
+       ['info','Host checked: Premiere Pro 26.3.2'],
+       ['info','Session token written. Per-session token enforced.'],
+       ['info','cmd_7c41e9 set_clip_scale completed in 412 ms · 9.9 f'],
+       ['info','Idle. Last command 41 s ago.']]
+},
+
+'processing':{
+  conn:['connected','Polling every 250 ms'], server:['connected','Premiere Pro: ready'],
+  running:true,
+  hops:{client:'carrying',queue:'carrying',engine:'carrying',host:'carrying'},
+  hopVal:{client:'token seen',queue:'3 waiting',engine:'12.48 s',host:'26.3.2'},
+  ties:[['carrying',''],['carrying',''],['carrying','']],
+  chanMeta:'open · carrying',
+  verdict:'<b>All four hops are carrying.</b> One command is inside the engine and three are queued behind it.',
+  punch:{kick:'Crossing now',where:'in the engine',name:'export_sequence',id:'cmd_8f3a21',
+    note:null,elapsed:12480,rtt:1860,depth:3},
+  tube:{elapsed:12480},
+  queueMeta:'3 waiting · oldest 9.1 s', queue:[
+    {label:'export_sequence',status:'executing',age:12480},
+    {label:'capture_program_output',status:'pending',age:9100},
+    {label:'bake_keyframe_ease',status:'pending',age:6020},
+    {label:'set_clip_scale',status:'pending',age:1440}
+  ],
+  temp:'/tmp/premiere-mcp-bridge', tempUnset:false, cfgNote:'saved',
+  host:'26.3.2', proj:'graveyard_chase_v2.prproj', auth:'Per-session token', rej:0, hb:640,
+  log:[['info','cmd_8f3a21 export_sequence sent to the engine'],
+       ['warning','cmd_8f3a21 passed the 8 s server budget at 12.48 s · 299.5 f. The MCP client stopped waiting; the export keeps running here.'],
+       ['info','3 commands queued behind cmd_8f3a21']]
+},
+
+'error':{
+  conn:['connected','Polling every 250 ms'], server:['disconnected','Premiere Pro: state unknown'],
+  running:true,
+  hops:{client:'lit',queue:'lit',engine:'fault',host:'unknown'},
+  hopVal:{client:'token seen',queue:'2 waiting',engine:'rejected',host:DASH},
+  ties:[['lit',''],['lit',''],['open','open']],
+  chanMeta:'broken at hop 3',
+  verdict:'<b>Signal stops at the engine.</b> The engine-to-host link is open, so Premiere’s state cannot be read from here.',
+  punch:{kick:'Last crossed',where:'failed at hop 3',name:'bake_keyframe_ease',id:'cmd_9b02de',
+    note:'Two commands are holding behind the break.',elapsed:null,rtt:144,depth:2},
+  tube:null,
+  report:{sev:'fault',hop:'Break at hop 3 · engine',when:'11:42:07',
+    title:'The engine rejected the script.',
+    fix:'Open a sequence in Premiere, then send <b>bake_keyframe_ease</b> again. The engine needs an active sequence before it can address clips.',
+    detail:'<em>Premiere replied:</em> Object does not support the property or method ‘insertClip’'},
+  queueMeta:'2 waiting · oldest 18.2 s', queue:[
+    {label:'bake_keyframe_ease',status:'failed',age:144},
+    {label:'set_clip_scale',status:'pending',age:18200},
+    {label:'add_to_timeline',status:'pending',age:11600}
+  ],
+  temp:'/tmp/premiere-mcp-bridge', tempUnset:false, cfgNote:'saved',
+  host:'26.3.2', proj:DASH, auth:'Per-session token', rej:2, hb:820,
+  log:[['info','cmd_9b02de bake_keyframe_ease sent to the engine'],
+       ['error','cmd_9b02de failed at 11:42:07 — Premiere replied: Object does not support the property or method ‘insertClip’'],
+       ['error','Command rejected at 11:35:41 — the token did not match.'],
+       ['warning','2 commands are holding in the queue.']]
+},
+
+'premiere-not-ready':{
+  conn:['connected','Polling every 250 ms'], server:['waiting','Premiere Pro: answering, no project'],
+  running:true,
+  hops:{client:'lit',queue:'lit',engine:'lit',host:'hold'},
+  hopVal:{client:'no token',queue:'1 waiting',engine:'idle',host:'no project'},
+  ties:[['lit',''],['lit',''],['held','no host']],
+  chanMeta:'open · held at hop 4',
+  verdict:'<b>Held at the host.</b> Three hops are lit. Premiere is answering but has no project open, so the queue holds.',
+  punch:{kick:'Waiting to cross',where:'held at hop 4',name:'add_to_timeline',id:'cmd_2a77b0',
+    note:'Queued 6.2 s ago. It runs as soon as a project loads.',elapsed:null,rtt:null,depth:1},
+  tube:null,
+  report:{sev:'hold',hop:'Held at hop 4 · host',when:'11:39:54',
+    title:'Premiere has no project open.',
+    fix:'Open a project in Premiere. The channel stays open and <b>1 command</b> is already waiting — it runs as soon as the project loads.',
+    detail:'<em>Premiere replied in 96 ms · 2.3 f:</em> no project is open, so there is nothing to address.'},
+  queueMeta:'1 waiting · 6.2 s old', queue:[
+    {label:'add_to_timeline',status:'pending',age:6200}
+  ],
+  temp:'/tmp/premiere-mcp-bridge', tempUnset:false, cfgNote:'saved',
+  host:'26.3.2', proj:DASH, auth:'Legacy, unauthenticated', authBad:true, rej:0, hb:5900,
+  log:[['info','Bridge started. Polling /tmp/premiere-mcp-bridge'],
+       ['warning','This MCP server build sends no session token. Any local process can queue a command.'],
+       ['warning','Premiere answered but has no project open. Holding the queue.'],
+       ['info','add_to_timeline queued at 11:39:54']]
+},
+
+'temp-dir-unset':{
+  conn:['disconnected','No directory to poll'], server:['disconnected','Premiere Pro: start the bridge'],
+  running:false,
+  hops:{client:'unknown',queue:'hold',engine:'unlit',host:'unknown'},
+  hopVal:{client:DASH,queue:'no path',engine:DASH,host:DASH},
+  ties:[['open','open'],['unlit',''],['unlit','']],
+  chanMeta:'no path',
+  verdict:'<b>No path from the client.</b> The first link is open, so nothing can arrive and no hop past it can be read.',
+  punch:{kick:'Crossing now',where:'',name:DASH,id:'',
+    note:'There is no directory to poll, so the queue cannot be read.',
+    elapsed:null,rtt:null,depth:null},
+  tube:null, tubeKnown:false,
+  report:{sev:'hold',hop:'Break at hop 2 · queue',when:'11:31:02',
+    title:'The bridge has no temp directory.',
+    fix:'Enter the folder your MCP server writes to — usually <b>/tmp/premiere-mcp-bridge</b> — save it, then start the bridge.',
+    detail:'<em>Resolved to:</em> nothing. There is no shared folder to poll for command files.'},
+  queueMeta:DASH, queue:[{label:'Queue unknown — there is no directory to poll',status:null}],
+  temp:'', tempUnset:true, cfgNote:'not set',
+  host:DASH, proj:DASH, auth:DASH, rej:null, hb:null,
+  log:[['info','Panel loaded. Bridge stopped.'],
+       ['error','No temp directory set. Set one before starting the bridge.']]
+}
+};
+
+/* ═══════════════════════════════════════════════════════════ RENDER ═════ */
+function setHop(key,sig,val,stubIn,stubOut){
+  var h=el('hop-'+key);
+  h.setAttribute('data-sig',sig);
+  h.style.setProperty('--stubIn',stubIn);
+  h.style.setProperty('--stubOut',stubOut);
+  var sock=h.querySelector('.sock'), bead=h.querySelector('.bead');
+  sock.setAttribute('data-sig',sig);
+  var c=BEAD[sig];
+  bead.style.setProperty('--bhi','var('+c[0]+')');
+  bead.style.setProperty('--bc','var('+c[1]+')');
+  bead.style.setProperty('--blo','var('+c[2]+')');
+  bead.innerHTML = sig==='unlit' ? '<span class="bar"></span>' : '';
+  var v=h.querySelector('.hop-val');
+  v.innerHTML='<span class="v">'+val+'</span><span class="hop-state">'+WORD[sig]+'</span>';
+  if(val===DASH) v.querySelector('.v').className='v nil';
+}
+function setTie(n,state,tag){
+  var t=el('tie-'+n);
+  t.setAttribute('data-tie',state);
+  t.style.setProperty('--rc','var('+tieColor(state)+')');
+  t.querySelector('.tie-tag').textContent=tag||'';
+}
+
+function render(name){
+  var d=STATES[name]; if(!d) return;
+  document.body.setAttribute('data-state',name);
+
+  /* live-code contract: className is overwritten wholesale on these two, so
+     nothing here may depend on any extra class living on them. */
+  el('connectionStatus').className='status-dot '+d.conn[0];
+  el('connectionText').textContent=d.conn[1];
+  el('serverStatus').className='status-dot '+d.server[0];
+  el('serverText').textContent=d.server[1];
+
+  /* stub colours make the pipe continuous: each hop's two half-segments are
+     painted by the links either side of it. Ends of the run get nothing. */
+  var T=d.ties.map(function(t){return t[0];});
+  var stub=[
+    ['transparent',                stubPaint(T[0],'out')],
+    [stubPaint(T[0],'in'),         stubPaint(T[1],'out')],
+    [stubPaint(T[1],'in'),         stubPaint(T[2],'out')],
+    [stubPaint(T[2],'in'),         'transparent']
+  ];
+  ['client','queue','engine','host'].forEach(function(k,i){
+    setHop(k,d.hops[k],d.hopVal[k],stub[i][0],stub[i][1]);
+  });
+  for(var i=0;i<3;i++) setTie(i+1,d.ties[i][0],d.ties[i][1]);
+  el('chanMeta').textContent=d.chanMeta;
+  el('verdict').innerHTML=d.verdict;
+
+  /* heartbeat dial: age swept against the 4 s staleness threshold. */
+  var dial=el('dial'), br=el('beaconRead');
+  if(d.hb===null){
+    dial.className='dial unknown'; dial.style.setProperty('--da','0deg');
+    br.textContent=DASH; el('beacon').className='beacon';
+  }else{
+    var stale=d.hb>HB_STALE;
+    dial.className='dial';
+    dial.style.setProperty('--da',Math.min(360,d.hb/HB_STALE*360).toFixed(0)+'deg');
+    dial.style.setProperty('--dc',stale?'var(--hold)':'var(--carrier)');
+    br.textContent=(d.hb/1000).toFixed(1)+' s'+(stale?' · stale':'');
+    el('beacon').className='beacon'+(stale?' stale':'');
+  }
+
+  /* the report: which hop, what happened, WHAT TO DO, then the raw reply. */
+  var r=el('report');
+  if(d.report){
+    r.hidden=false;
+    r.style.setProperty('--sev','var(--'+d.report.sev+')');
+    r.style.setProperty('--sev-wash', d.report.sev==='fault'
+      ? 'rgba(226,86,95,.14)' : 'rgba(240,180,41,.13)');
+    el('reportHop').innerHTML=d.report.hop+' <span class="when">· '+d.report.when+'</span>';
+    el('reportTitle').textContent=d.report.title;
+    el('reportFix').innerHTML=d.report.fix;
+    el('reportDetail').innerHTML=d.report.detail;
+  }else r.hidden=true;
+
+  /* what is crossing */
+  var p=d.punch, live=p.elapsed!==null;
+  el('punch').style.setProperty('--pl',live?'var(--carrier)':'rgba(255,255,255,.07)');
+  el('punch').style.setProperty('--plg',live?'0 0 14px -4px var(--carrier)':'none');
+  el('punchKick').textContent=p.kick;
+  el('punchWhere').textContent=p.where||'';
+  var pn=el('punchName');
+  pn.textContent=p.name;
+  pn.className = p.name===DASH ? 'fig nil' : 'fig fig-hero';
+  el('punchId').textContent=p.id||'';
+  el('punchNote').hidden=!p.note;
+  if(p.note) el('punchNote').textContent=p.note;
+  el('mElapsed').textContent=dur(p.elapsed); el('mElapsed').className=live?'':'dim';
+  el('mRtt').textContent=dur(p.rtt);        el('mRtt').className=p.rtt===null?'dim':'';
+  el('mDepth').textContent=p.depth===null?DASH:(p.depth===1?'1 command':p.depth+' commands');
+  el('mDepth').className=p.depth===null?'dim':(p.depth>1?'warn':'');
+
+  /* kill deadline, three honest modes. When the channel is closed we cannot
+     know whether anything is running, so the tube goes hatched and the caption
+     says so — it must never claim "nothing is running" on no evidence. */
+  var tube=el('tube'),fill=el('tubeFill'),tick=el('tubeTick');
+  fill.hidden=true; tick.hidden=true;
+  if(d.tube){
+    tube.className='tube';
+    fill.hidden=false; fill.style.width=Math.min(100,d.tube.elapsed/KILL*100).toFixed(1)+'%';
+    tick.hidden=false; tick.style.left=(BUDGET/KILL*100).toFixed(1)+'%';
+    var past=d.tube.elapsed>BUDGET;
+    tick.className='tube-tick'+(past?' past':'');
+    el('tubeLeft').innerHTML='Killed in <b>'+dur(KILL-d.tube.elapsed)+'</b>';
+    el('tubeRight').innerHTML=past?'<span class="over">past the 8 s server budget</span>':'8 s server budget';
+  }else if(d.tubeKnown===false){
+    tube.className='tube unknown';
+    el('tubeLeft').innerHTML='Kill deadline '+DASH+' · nothing running can be read from here';
+    el('tubeRight').textContent='';
+  }else{
+    tube.className='tube empty';
+    el('tubeLeft').innerHTML='No command running · kill deadline <b>45.00 s · 1080.0 f</b>';
+    el('tubeRight').textContent='';
+  }
+
+  /* queue — the exact markup the live bridge emits */
+  el('queueMeta').textContent=d.queueMeta;
+  el('commandQueue').innerHTML=d.queue.map(function(q){
+    var age='';
+    if(q.age!==undefined&&q.age!==null)
+      age='<span class="command-age">'+dur(q.age).replace(/ · (.*)$/,'<span class="fr"> · $1</span>')+'</span>';
+    return '<div class="command-item"><span class="command-label">'+q.label+'</span>'+age+
+           (q.status?'<span class="command-status '+q.status+'">'+q.status+'</span>':'')+'</div>';
+  }).join('');
+
+  /* session + config */
+  el('iHost').textContent=d.host===DASH?DASH:'Premiere Pro '+d.host;
+  el('iHost').className=d.host===DASH?'dim':'';
+  el('iProj').textContent=d.proj; el('iProj').className=d.proj===DASH?'dim':'';
+  el('iAuth').textContent=d.auth; el('iAuth').className=d.auth===DASH?'dim':(d.authBad?'warn':'');
+  el('iRej').textContent=d.rej===null?DASH:String(d.rej);
+  el('iRej').className=d.rej===null?'dim':(d.rej>0?'bad':'');
+
+  var td=el('tempDirectory');
+  td.value=d.temp; td.className=d.tempUnset?'unset':'';
+  el('cfgNote').textContent=d.cfgNote;
+  el('saveButton').className='btn'+(d.tempUnset?' primary':' ghost');
+
+  el('logContainer').innerHTML=d.log.map(function(l){
+    return '<div class="log-entry '+l[0]+'">'+l[1]+'</div>';
+  }).join('');
+
+  /* one visible action, from the same disabled flags the live code already sets */
+  var start=el('startButton'),stop=el('stopButton'),busy=el('bridgeBusy');
+  if(d.running==='busy'){start.disabled=true;stop.disabled=true;busy.hidden=false;}
+  else{start.disabled=!!d.running;stop.disabled=!d.running;busy.hidden=true;}
+
+  var b=el('mockBtns').getElementsByTagName('button');
+  for(var j=0;j<b.length;j++)
+    b[j].setAttribute('aria-pressed',b[j].getAttribute('data-s')===name?'true':'false');
+}
+
+/* handlers the live panel calls ------------------------------------------- */
+function startBridge(){render('starting');}
+function stopBridge(){render('disconnected');}
+function tracePath(){logLine('info','Traced the path: client → queue → engine → host');}
+function saveConfig(){
+  var v=el('tempDirectory').value;
+  el('tempDirectory').className=v?'':'unset';
+  el('cfgNote').textContent=v?'saved':'not set';
+  logLine(v?'info':'error', v?('Temp directory saved: '+v):'Enter a folder before saving.');
+}
+function clearLog(){el('logContainer').innerHTML='<div class="log-entry info">Log cleared.</div>';}
+function logLine(cls,msg){
+  var c=el('logContainer');
+  c.insertAdjacentHTML('beforeend','<div class="log-entry '+cls+'">'+msg+'</div>');
+  c.scrollTop=c.scrollHeight;
+}
+
+/* boot -------------------------------------------------------------------- */
+(function(){
+  var q=location.search;
+  /* dev framing: ?state=NAME.f280x300 renders this file in an iframe of that
+     exact size so the 300px-tall floor really gets its own viewport. */
+  var f=/[?&]state=([a-z-]+)\.f(\d+)(?:x(\d+))?/.exec(q);
+  if(f){
+    document.documentElement.style.background='#000';
+    document.body.style.cssText='margin:0;padding:0;background:#000';
+    document.body.innerHTML='<iframe title="panel" style="border:0;display:block;background:#000;width:'+
+      f[2]+'px;height:'+(f[3]||620)+'px" src="'+location.pathname+'?bare=1&state='+f[1]+'"></iframe>';
+    return;
+  }
+  applyHostTheme();
+  el('mockBtns').innerHTML=Object.keys(STATES).map(function(n){
+    return '<button type="button" data-s="'+n+'" onclick="render(\''+n+'\')">'+n+'</button>';
+  }).join('');
+  if(/[?&]bare=1/.test(q)) el('mock').hidden=true;
+  var m=/[?&]state=([a-z-]+)/.exec(q);
+  render(m&&STATES[m[1]]?m[1]:'connected-idle');
+})();
+</script>
+</body>
+</html>
