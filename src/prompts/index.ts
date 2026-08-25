@@ -454,7 +454,9 @@ function renderSystemText(workflow: WorkflowSpec): string {
       'PREMIERE_MCP_AUTO_CHECKPOINT=1) so the pre-edit state is recoverable.',
   );
   lines.push(
-    "- If you cannot find the right tool, call find_tool with a keyword rather than guessing a name.",
+    '- If you cannot find the right tool, call find_tool with a keyword rather than guessing a name. ' +
+      'A match marked exposed:false is hidden to save context, not missing — call_tool({ name, args }) ' +
+      'runs it, and activate_tools adds it to your tool list.',
   );
   lines.push(
     '- Finish by reporting what completed, what was skipped, and what failed. Do not summarize an ' +

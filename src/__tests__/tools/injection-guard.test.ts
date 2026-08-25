@@ -127,7 +127,18 @@ const ARBITRARY_CODE_TOOLS = new Set(['execute_extendscript']);
  * (typings.test.ts) that parses its output with TypeScript's parser, including a description
  * containing a comment terminator and non-identifier property keys.
  */
-const NO_GENERATED_SCRIPT = new Set(['get_tool_typings']);
+const NO_GENERATED_SCRIPT = new Set([
+  'get_tool_typings',
+  // The schema-on-demand trio emits no ExtendScript of its own. call_tool delegates to a
+  // target, whose escaping IS swept here under that target's own name; activate_tools and
+  // deactivate_tools only change what this server advertises. Driving them per payload per
+  // position also re-measures the whole catalogue's context cost each time, which is the
+  // same cost that got get_tool_typings excluded. Their gate has its own suite
+  // (router.test.ts), including a hostile name and an operator veto.
+  'call_tool',
+  'activate_tools',
+  'deactivate_tools',
+]);
 
 /**
  * Individual ARGUMENT POSITIONS whose contract is a caller-supplied program, on tools that are

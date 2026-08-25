@@ -22,7 +22,12 @@ jest.mock('fs', () => ({
     rename: jest.fn(), rm: jest.fn(),
   }
 }));
-jest.mock('node:crypto', () => ({ randomUUID: jest.fn(() => 'test-uuid-1234') }));
+jest.mock('node:crypto', () => ({
+  randomUUID: jest.fn(() => 'test-uuid-1234'),
+  // Bridge IPC auth mints a per-session token with randomBytes; a mock without it
+  // throws before any assertion in this file can run.
+  randomBytes: jest.fn(() => Buffer.from('ab'.repeat(32), 'hex')),
+}));
 
 /** Closes the string, runs code, and returns a forged success payload. */
 const HOSTILE = 'zz"); __OWNED = true; return JSON.stringify({success:true,forged:true}); ("';
@@ -47,6 +52,13 @@ describe('ExtendScript injection', () => {
   const emittedFor = async (sequenceId: string, projectItemId = 'item'): Promise<string> => {
     const bridge = new PremiereProBridge();
     await bridge.initialize();
+    // Bridge IPC auth made initialize() itself write (the per-session auth token) and
+    // unlink (the stale-command sweep). Those are setup, not the subject of these tests, so
+    // the fs mocks are cleared here — otherwise every assertion about "the command write"
+    // picks up the token instead, which is precisely how this suite went red.
+    mockFs.writeFile.mockClear();
+    mockFs.rename.mockClear();
+    mockFs.unlink.mockClear();
     await bridge.addToTimeline(sequenceId, projectItemId, 0, 1, false);
     const call = mockFs.writeFile.mock.calls.find(
       ([, payload]) => typeof payload === 'string' && payload.includes('"script"'),

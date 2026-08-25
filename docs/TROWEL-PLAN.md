@@ -218,6 +218,27 @@ Recorded so the list below is not re-worked. Evidence in `docs/RUN-LOG-2026-08-2
   the active sequence.
 - **The 638-tool default — DONE.** Default profile is now `core` (97 tools). See the run log for
   the measurement; `all` cost ~51% of a 200k context and could not run in VS Code at all.
+- **Curation left 542 tools uncallable — DONE (2026-08-25), schema-on-demand.** Narrowing the
+  default fixed the context bill and created a worse problem: `find_tool` would name a capability
+  and then offer no way to use it. What is ADVERTISED is now separated from what is REACHABLE.
+  `find_tool` (search) → `get_tool_typings` (exact signature) → **`call_tool`** (invoke) reaches the
+  whole catalogue through three tool definitions instead of 642, and **`activate_tools` /
+  `deactivate_tools`** grow or shrink the advertised list at runtime, emitting
+  `notifications/tools/list_changed` (the server now declares `tools.listChanged`) and reporting the
+  measured context cost of the change rather than letting the agent discover the bill later. All six
+  live in `ALWAYS_KEPT`, so the loop exists under every profile.
+  **The separation stops dead at an authority boundary** — `read-only`, an explicit
+  `PREMIERE_MCP_TOOLS` allowlist, and any `PREMIERE_MCP_EXCLUDE` veto refuse both routing and
+  activation, and the refusal names the setting responsible. A router that quietly widened an
+  operator's authority decision would be a worse lie than a fake success, so `router.ts` classifies
+  every selection as `cost` or `authority` and only ever reaches past the former.
+  `get_capabilities` publishes both numbers (`toolsAdvertised` vs `toolsReachable`) plus
+  `selectionKind`. `tools/list` also gained spec-compliant cursor pagination, **off unless
+  `PREMIERE_MCP_PAGE_SIZE` is set**: paging by default would silently truncate the list for a client
+  that ignores `nextCursor`, which is the same class of lie this server exists to avoid.
+  Tests: `router.test.ts` (31) — the pure gate, an end-to-end `.srt` round trip through a
+  profile-hidden tool, dry-run validation, every refusal path, and a cursor walk that visits each
+  item exactly once.
 
 ### Tier 0 — ADDED overnight 2026-08-24
 
