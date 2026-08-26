@@ -786,17 +786,32 @@ export class PremiereProBridge implements PremiereProTransport {
     }
   }
 
+  /** Our own token file — exclusively ours, so we can delete it on exit without a race. */
+  private get sessionTokenFile(): string {
+    return join(this.tempDir, `auth-session-${this.sessionId}.json`);
+  }
+
   /**
    * Write the per-session token the panel must echo back.
    *
-   * Backwards compatibility is deliberate: the panel enforces a token only when this file EXISTS.
-   * An older server that never writes one keeps working with a new panel, and a new server always
-   * writes one so enforcement is always on in practice. The file is rewritten every session, so a
-   * token cannot outlive the process that issued it.
+   * TWO files, on purpose.
+   *
+   * `auth-session-<sessionId>.json` is ours alone. Nothing else ever writes it, so there is no
+   * read-modify-write race between servers starting at the same time, and on exit we can delete it
+   * knowing the file we are removing is the one we created. The panel accepts a token matching ANY
+   * of these, which is what lets several servers share one PREMIERE_TEMP_DIR: each has a live token,
+   * and each is answered. Before this, `auth-token.json` was single-valued and last-writer-wins, so
+   * every server but the newest had its commands rejected as UNAUTHORIZED.
+   *
+   * `auth-token.json` is still written, unchanged in shape, for one reason: an OLDER installed panel
+   * only knows how to read that file. Dropping it would break a mismatched-version install silently.
+   * It names the newest server, which is also the one the socket points at.
+   *
+   * Backwards compatibility in the other direction is also deliberate: the panel enforces a token
+   * only when at least one of these files exists. An older server that writes none keeps working.
    */
   private async writeAuthToken(): Promise<void> {
     this.authToken = randomBytes(32).toString('hex');
-    const tokenFile = join(this.tempDir, 'auth-token.json');
     const payload = JSON.stringify({
       token: this.authToken,
       sessionId: this.sessionId,
@@ -806,10 +821,14 @@ export class PremiereProBridge implements PremiereProTransport {
     try {
       // Write-then-rename so the panel can never read a half-written token, and 0600 so it is not
       // group- or world-readable even if the directory mode is somehow loosened later.
-      const staging = join(this.tempDir, '.auth-token.tmp');
-      await fs.writeFile(staging, payload, { mode: 0o600 });
-      await fs.chmod(staging, 0o600);
-      await fs.rename(staging, tokenFile);
+      const writeAtomic = async (target: string, staging: string): Promise<void> => {
+        const stagingPath = join(this.tempDir, staging);
+        await fs.writeFile(stagingPath, payload, { mode: 0o600 });
+        await fs.chmod(stagingPath, 0o600);
+        await fs.rename(stagingPath, target);
+      };
+      await writeAtomic(this.sessionTokenFile, `.auth-session-${this.sessionId}.tmp`);
+      await writeAtomic(join(this.tempDir, 'auth-token.json'), '.auth-token.tmp');
       this.logger.debug('Wrote per-session bridge auth token');
     } catch (error) {
       // A bridge that cannot authenticate should still run rather than refuse to start; the panel
@@ -817,6 +836,72 @@ export class PremiereProBridge implements PremiereProTransport {
       this.logger.warn(`Could not write auth token, continuing without it: ${error}`);
       this.authToken = null;
     }
+    await this.reapDeadSessionTokens();
+  }
+
+  /**
+   * Remove `auth-session-*.json` files whose server is gone.
+   *
+   * A server killed with SIGKILL — or one whose host crashed — never runs its own cleanup, and the
+   * panel would keep accepting that token for as long as Premiere stayed open. `kill(pid, 0)` is a
+   * liveness probe that sends no signal; EPERM means the pid exists but belongs to another user, so
+   * that counts as alive rather than reapable.
+   *
+   * Not a security boundary — the temp directory is 0700, so anything that can read these files
+   * already runs as this user and could read a live token just as easily. It is hygiene: it stops
+   * the accepted-token list growing without bound across a long Premiere session.
+   */
+  private async reapDeadSessionTokens(): Promise<void> {
+    try {
+      const entries = await fs.readdir(this.tempDir);
+      for (const name of entries) {
+        if (!name.startsWith('auth-session-') || !name.endsWith('.json')) continue;
+        const path = join(this.tempDir, name);
+        if (path === this.sessionTokenFile) continue;
+        let pid: number | null = null;
+        try {
+          const parsed = JSON.parse(await fs.readFile(path, 'utf8'));
+          pid = typeof parsed?.pid === 'number' ? parsed.pid : null;
+        } catch {
+          // Unreadable or malformed: it can never authorise anything, so it is safe to drop.
+        }
+        if (pid !== null) {
+          try {
+            process.kill(pid, 0);
+            continue; // alive — leave its token in place
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === 'EPERM') continue; // alive, another user
+          }
+        }
+        try {
+          await fs.unlink(path);
+          this.logger.debug(`Reaped the bridge token of a server that is no longer running (${name})`);
+        } catch { /* another instance won the race */ }
+      }
+    } catch (error) {
+      this.logger.debug(`Could not reap stale session tokens: ${error}`);
+    }
+  }
+
+  /**
+   * Retire this session's token.
+   *
+   * The session file is ours exclusively, so it goes unconditionally. `auth-token.json` is shared
+   * and last-writer-wins, so it goes ONLY if it still names us: deleting a newer server's token
+   * would leave that server unable to authorise anything, and — worse — deleting the last token
+   * file makes the panel run unauthenticated, which is the one outcome to avoid. When a newer
+   * server owns it, leaving it alone is correct; its own cleanup removes it.
+   */
+  private async retireAuthToken(): Promise<void> {
+    try {
+      await fs.unlink(this.sessionTokenFile);
+    } catch { /* never written, or already gone */ }
+
+    const sharedFile = join(this.tempDir, 'auth-token.json');
+    try {
+      const parsed = JSON.parse(await fs.readFile(sharedFile, 'utf8'));
+      if (parsed?.sessionId === this.sessionId) await fs.unlink(sharedFile);
+    } catch { /* absent, unreadable, or owned by another server — leave it */ }
   }
 
   /**
@@ -2335,6 +2420,12 @@ export class PremiereProBridge implements PremiereProTransport {
       }
       this.socket = null;
     }
+
+    // Retire our token BEFORE the directory decision below, because that decision leaves an
+    // externally-configured directory standing — which is how a dead server's token used to stay
+    // in place and reject a live one. This is symmetric with the socket transport retiring
+    // bridge-endpoint.json above; the asymmetry was the bug.
+    await this.retireAuthToken();
 
     // Only remove temp dirs created by this server. The shared bridge directory is
     // configured externally and should persist across restarts.

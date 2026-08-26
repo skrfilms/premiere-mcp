@@ -41,7 +41,7 @@ describe('placement that cannot be confirmed', () => {
   const mockFs = fs as jest.Mocked<typeof fs>;
   // Written straight to the polled name here. Publishing via a scratch file and
   // a rename is a separate change to the transport and is not part of this one.
-  const commandPath = '/tmp/premiere-mcp-bridge-test/command-test-uuid-1234.json';
+  const _commandPath = '/tmp/premiere-mcp-bridge-test/command-test-uuid-1234.json';
 
   beforeEach(() => {
     jest.clearAllMocks();
