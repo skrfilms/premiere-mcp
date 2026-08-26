@@ -22,7 +22,7 @@
  */
 import { PremiereProBridge } from '../dist/bridge/index.js';
 import { PremiereProTools } from '../dist/tools/index.js';
-import { requireScratchProject } from './lib/require-scratch-project.mjs';
+import { requireScratchProject, assertStillScratch } from './lib/require-scratch-project.mjs';
 
 const KEEP = ['fixture_seq_a', 'fixture_seq_b'];
 const MARKER_PREFIX = 'harness-drift-probe';
@@ -32,7 +32,7 @@ const tools = new PremiereProTools(bridge);
 await bridge.initialize();
 
 try {
-  await requireScratchProject(bridge, 'live-verify-cleanup');
+  const pinned = await requireScratchProject(bridge, 'live-verify-cleanup');
 
   const { sequences = [] } = await tools.executeTool('list_sequences', {});
   const doomed = sequences.filter((s) => !KEEP.includes(s.name));
@@ -40,6 +40,10 @@ try {
   doomed.forEach((s) => console.log('  - ' + s.name));
 
   for (const s of doomed) {
+    // Re-pinned before EVERY delete, not once at startup. delete_sequence takes an id but resolves it
+    // within whichever project is ACTIVE, and the startup check cannot speak for a project that
+    // became active afterwards. A round trip per delete is nothing against deleting a real cut.
+    await assertStillScratch(bridge, pinned, 'live-verify-cleanup');
     const r = await tools.executeTool('delete_sequence', { sequenceId: s.id });
     console.log(`  delete_sequence ${s.name}: success=${r.success} verified=${r.verified}${r.error ? ' error=' + r.error : ''}`);
   }
