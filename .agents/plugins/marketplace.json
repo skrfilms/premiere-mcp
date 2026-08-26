@@ -1,14 +1,14 @@
 {
-  "name": "adobe-premiere-pro-mcp",
+  "name": "premiere-mcp",
   "interface": {
     "displayName": "MCP Bridge for Adobe Premiere Pro"
   },
   "plugins": [
     {
-      "name": "premiere-pro-mcp",
+      "name": "premiere-mcp",
       "source": {
         "source": "local",
-        "path": "./plugins/premiere-pro-mcp"
+        "path": "./plugins/premiere-mcp"
       },
       "policy": {
         "installation": "AVAILABLE",

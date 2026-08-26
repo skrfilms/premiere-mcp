@@ -617,7 +617,7 @@ export function createHttpGate(deps: GateDeps): HttpGate {
     return {
       server: 'up',
       transport: 'http',
-      name: 'adobe-premiere-pro-mcp',
+      name: 'premiere-mcp',
       version,
       bind: `${config.host}:${deps.boundPort?.port ?? config.port}`,
       auth: config.token === null ? 'disabled' : 'bearer-token',

@@ -719,29 +719,66 @@ export class PremiereProBridge implements PremiereProTransport {
    * Its real jobs are to block BLIND writes into the directory, to keep two concurrent server
    * instances from consuming each other's commands, and to make the trust boundary explicit. The
    * protection against other users is the 0700 directory and the ownership check, not the token.
+   *
+   * ON WINDOWS THAT MODE IS NOT ENFORCED, so the sentence above describes macOS only. NTFS stores
+   * no POSIX mode: both the 0700 directory and the 0600 token file are inert, and the ownership
+   * check is skipped because process.getuid does not exist there. The token is protected only by
+   * the ACL the directory inherited. scripts/install-windows.ps1 restricts that ACL and
+   * scripts/doctor-windows.ps1 verifies it; a server started without those having run has no
+   * equivalent protection. See docs/WINDOWS-PARITY.md section 2.
    */
   private async setupTempDirectory(): Promise<void> {
     try {
       await fs.mkdir(this.tempDir, { recursive: true, mode: 0o700 });
-      // mkdir's mode is ignored for an existing directory, so assert it every time.
-      try {
-        const stats = await fs.stat(this.tempDir);
-        if (stats.uid !== process.getuid?.()) {
-          throw new Error(
-            `Refusing to use ${this.tempDir}: it is owned by uid ${stats.uid}, not by this process (uid ${process.getuid?.()}). ` +
-            'A directory owned by someone else can feed arbitrary ExtendScript into Premiere.',
-          );
+      // POSIX only. mkdir's mode is ignored for an existing directory, so assert it every
+      // time -- but only where a mode and a uid mean something.
+      //
+      // The gate is the presence of a uid, not the platform name, because that is the thing
+      // the comparison actually needs. On Windows process.getuid does not exist and
+      // fs.Stats.uid is always 0, so this read `0 !== undefined`: always true. It threw
+      // before the bridge ever reached Premiere, which made every tool in the catalogue
+      // unreachable on Windows. Any other runtime without getuid failed the same way, and
+      // "I cannot verify the owner" is not the same claim as "the owner is wrong".
+      const processUid = process.getuid?.();
+      if (processUid !== undefined) {
+        try {
+          const stats = await fs.stat(this.tempDir);
+          if (stats.uid !== processUid) {
+            throw new Error(
+              `Refusing to use ${this.tempDir}: it is owned by uid ${stats.uid}, not by this process (uid ${processUid}). ` +
+              'A directory owned by someone else can feed arbitrary ExtendScript into Premiere.',
+            );
+          }
+          const mode = stats.mode & 0o777;
+          if (mode !== 0o700) {
+            await fs.chmod(this.tempDir, 0o700);
+            this.logger.warn(`Tightened ${this.tempDir} from mode ${mode.toString(8)} to 700`);
+          }
+        } catch (statError) {
+          // An ownership mismatch must abort; a stat/chmod failure for any other reason should not
+          // take the bridge down, since the directory may still be perfectly usable.
+          if (statError instanceof Error && statError.message.startsWith('Refusing to use')) throw statError;
+          this.logger.warn(`Could not verify temp directory permissions: ${statError}`);
         }
-        const mode = stats.mode & 0o777;
-        if (mode !== 0o700) {
-          await fs.chmod(this.tempDir, 0o700);
-          this.logger.warn(`Tightened ${this.tempDir} from mode ${mode.toString(8)} to 700`);
-        }
-      } catch (statError) {
-        // An ownership mismatch must abort; a stat/chmod failure for any other reason should not
-        // take the bridge down, since the directory may still be perfectly usable.
-        if (statError instanceof Error && statError.message.startsWith('Refusing to use')) throw statError;
-        this.logger.warn(`Could not verify temp directory permissions: ${statError}`);
+      } else if (process.platform === 'win32') {
+        // NTFS stores no POSIX mode, so the 0o700 above did nothing and a chmod here would
+        // only toggle the read-only attribute. Saying so is the honest move: the previous
+        // code logged `Tightened <dir> ... to 700` for an operation that cannot happen on
+        // this platform. The directory and auth-token.json are protected by the ACL the
+        // directory inherited and by nothing else -- scripts/install-windows.ps1 restricts
+        // it and scripts/doctor-windows.ps1 re-checks it. See docs/WINDOWS-PARITY.md §2.
+        this.logger.warn(
+          `${this.tempDir}: POSIX permissions are not enforced on Windows, so this directory and ` +
+          'auth-token.json are protected only by their inherited NTFS ACL. Run ' +
+          '`npm run setup:doctor:win` to check it.',
+        );
+      } else {
+        // Neither a uid nor a documented alternative: report the gap rather than imply a
+        // check happened.
+        this.logger.warn(
+          `${this.tempDir}: this runtime exposes no process.getuid, so the directory's owner ` +
+          'could not be verified and its permissions were not asserted.',
+        );
       }
 
       await this.sweepStaleCommands();

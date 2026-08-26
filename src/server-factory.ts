@@ -96,7 +96,7 @@ export function buildPremiereMcpServer(
 
   const server = new Server(
     {
-      name: options.name ?? 'adobe-premiere-pro-mcp',
+      name: options.name ?? 'premiere-mcp',
       version: options.version ?? '1.2.0',
       description: 'Model Context Protocol tools for Adobe Premiere Pro - AI-powered video editing',
     },

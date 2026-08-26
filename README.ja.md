@@ -7,8 +7,8 @@ Adobe Premiere Pro を MCP 経由で操作できます。Codex、Claude Code、C
 ## クイックスタート
 
 ```bash
-git clone https://github.com/hetpatel-11/Adobe_Premiere_Pro_MCP.git
-cd Adobe_Premiere_Pro_MCP
+git clone https://github.com/skrfilms/premiere-mcp.git
+cd premiere-mcp
 npm run setup:mac
 ```
 

@@ -23,6 +23,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import vm from 'vm';
 import { createSecureTempDir, validateFilePath } from '../../utils/security.js';
+import { bridgeTempDirForDocs } from '../../resources/index.js';
 import { PremiereProBridge } from '../../bridge/index.js';
 
 const PANEL_PATH = path.join(__dirname, '..', '..', '..', 'cep-plugin', 'bridge-cep.js');
@@ -207,15 +208,17 @@ describe('createSecureTempDir — win32 branch', () => {
     expect(createSecureTempDir('abc123').startsWith('C:\\Temp')).toBe(true);
   });
 
-  it('ignores TMP on win32, unlike the panel — the two can disagree', () => {
+  it('honours TMP on win32, in the same order as the panel', () => {
     setPlatform('win32');
     delete process.env.TEMP;
     process.env.TMP = 'D:\\scratch';
     try {
-      // Panel: %TEMP% || %TMP% || C:\Temp. Server: %TEMP% || C:\Temp. With only TMP
-      // set, the panel polls D:\scratch\premiere-mcp-bridge and the server writes to
-      // C:\Temp\premiere-bridge-<uuid>: every tool call times out, panel looks healthy.
-      expect(createSecureTempDir('abc123')).not.toContain('D:\\scratch');
+      // Panel: %TEMP% || %TMP% || C:\Temp. The server used to be %TEMP% || C:\Temp, so
+      // with only TMP set the panel polled D:\scratch\premiere-mcp-bridge while the
+      // server wrote to C:\Temp\premiere-bridge-<uuid> — a different drive. Every tool
+      // call timed out and the panel still looked healthy. Fixed 2026-08-26; the two now
+      // agree on the BASE. They still differ on the leaf name, which the next test pins.
+      expect(createSecureTempDir('abc123')).toBe('D:\\scratch\\premiere-bridge-abc123');
     } finally {
       delete process.env.TMP;
     }
@@ -231,9 +234,55 @@ describe('createSecureTempDir — win32 branch', () => {
     expect(createSecureTempDir('abc123')).not.toContain('premiere-mcp-bridge');
   });
 
-  it('still builds a /tmp path on darwin', () => {
+  it('still builds a posix /tmp path on darwin, whatever host runs the test', () => {
     setPlatform('darwin');
+    // Asserted with forward slashes literally, not path.join: joining with the HOST
+    // flavour is precisely the bug this pins. The darwin branch must emit a posix path
+    // even when the suite runs on a Windows runner, where the old host-bound normalize()
+    // turned it into \tmp\premiere-bridge-abc123 and failed this test for a reason that
+    // had nothing to do with darwin.
     expect(createSecureTempDir('abc123')).toBe('/tmp/premiere-bridge-abc123');
+  });
+});
+
+describe('the setup text the server hands agents and users', () => {
+  /**
+   * The in-product setup resource used to tell EVERY reader, on every platform, to type
+   * `/tmp/premiere-mcp-bridge` into the panel — the one input the panel explicitly
+   * rejects on win32. Following the documentation was sufficient to make the bridge
+   * unstartable (docs/WINDOWS-PARITY.md P0 #2).
+   *
+   * Asserted by composition rather than by restating the string: the value the resource
+   * emits is fed to the panel's REAL sanitizer, so this fails if either side changes
+   * independently of the other.
+   */
+  const sanitizerFor = (env: Record<string, string | undefined>) =>
+    loadPanelTempHelpers('win32', env).sanitizeTempDirectoryInput;
+
+  it('gives a win32 reader a path the panel accepts, unchanged', () => {
+    const env = { TEMP: 'C:\\Users\\testuser\\AppData\\Local\\Temp' };
+    const documented = bridgeTempDirForDocs('win32', env);
+    expect(sanitizerFor(env)(documented)).toBe(documented);
+  });
+
+  it('matches the panel default exactly, so the field is already correct', () => {
+    // Same base fallback order and same leaf name. If these drift apart, a Windows user
+    // who trusts the pre-filled field and one who follows the docs end up in different
+    // directories, and only one of them matches the server.
+    for (const env of [{ TEMP: 'C:\\T' }, { TMP: 'D:\\scratch' }, {}]) {
+      expect(bridgeTempDirForDocs('win32', env))
+        .toBe(loadPanelTempHelpers('win32', env).getDefaultTempPath());
+    }
+  });
+
+  it('emits no %TEMP%, because the panel expands nothing', () => {
+    // path.resolve('%TEMP%\\x') on Windows yields <cwd>\%TEMP%\x — a real directory with
+    // a literal percent-sign name, and a server polling somewhere else.
+    expect(bridgeTempDirForDocs('win32', { TEMP: 'C:\\T' })).not.toContain('%');
+  });
+
+  it('still documents /tmp off win32', () => {
+    expect(bridgeTempDirForDocs('darwin', { TEMP: 'C:\\T' })).toBe('/tmp/premiere-mcp-bridge');
   });
 });
 
@@ -250,15 +299,28 @@ describe('validateFilePath — why its Windows behaviour is NOT verifiable from 
    * different reason. A passing test written from macOS would be evidence of the
    * wrong thing, so no behavioural assertion is made.
    *
-   * What is asserted is the structural cause: the module binds path helpers to the
-   * host platform instead of selecting path.win32 for win32 input. Until that
+   * What is asserted is the structural cause: validateFilePath binds its path helpers
+   * to the HOST platform instead of selecting a flavour for win32 input. Until that
    * changes, no amount of macOS testing can cover the Windows branch, and this test
    * is the marker saying so. The lower-casing patch is in docs/WINDOWS-PARITY.md.
+   *
+   * Scope narrowed 2026-08-26: createSecureTempDir in the same module now joins with
+   * path.win32 / path.posix per branch, so a bare "this module contains no path.win32"
+   * assertion is no longer true and would have to be deleted. The marker is kept by
+   * asserting the thing that is still true — validateFilePath itself uses the
+   * host-bound normalize/isAbsolute/resolve — so it cannot be retired by an unrelated
+   * fix elsewhere in the file.
    */
-  it('binds path helpers to the host platform, so win32 input cannot be covered here', () => {
+  it('binds validateFilePath’s path helpers to the host platform, so win32 input cannot be covered here', () => {
     const source = readFileSync(path.join(__dirname, '..', '..', 'utils', 'security.ts'), 'utf8');
-    expect(source).toMatch(/import \{ normalize, isAbsolute, resolve \} from 'path'/);
-    expect(source).not.toMatch(/path\.win32/);
+    // Host-bound helpers are still imported unqualified and still used by the guard.
+    expect(source).toMatch(/import \{ normalize, isAbsolute, resolve[^}]*\} from 'path'/);
+    // Just the function, cut at its own closing brace in column 1 — not at the next `export`,
+    // which would drag in the following doc comment and whatever it happens to mention.
+    const guard = source.slice(source.indexOf('export function validateFilePath'));
+    const guardBody = guard.slice(0, guard.indexOf('\n}') + 2);
+    expect(guardBody).toMatch(/\bresolve\(/);
+    expect(guardBody).not.toMatch(/win32/);
     // The Windows entries the guard claims to cover, which only bite on a real host.
     expect(source).toContain('C:\\\\Windows\\\\System32');
   });
@@ -294,12 +356,17 @@ describe('bridge temp-directory ownership check on a platform without getuid()',
    * The MCP server does not start on Windows at all.
    *
    * Deleting process.getuid on macOS reproduces it exactly: undefined getuid, a real
-   * uid on the directory, same mismatch, same throw. Marked it.failing because the
-   * fix belongs in src/bridge/index.ts, which this change does not own — the patch is
-   * in docs/WINDOWS-PARITY.md. Flip to it() when that patch lands; Jest will fail
-   * this suite the moment it passes, so it cannot rot into a silent skip.
+   * uid on the directory, same mismatch, same throw.
+   *
+   * FIXED 2026-08-26 in src/bridge/index.ts: the ownership assertion is now gated on a
+   * uid actually being available (`process.getuid?.()` !== undefined) rather than run
+   * unconditionally, because without a uid the comparison is not a failed check — it is
+   * no check at all. Windows takes an explicit branch that says the mode is unenforced
+   * on NTFS instead of logging a "tightened to 700" that cannot have happened. This was
+   * it.failing while the patch was owed; it is a live assertion now, and the sibling
+   * test below stops the fix being "achieved" by deleting the check.
    */
-  it.failing('initialises instead of refusing the directory as foreign-owned', async () => {
+  it('initialises instead of refusing the directory as foreign-owned', async () => {
     const original = process.getuid;
     (process as unknown as { getuid: undefined }).getuid = undefined;
     try {

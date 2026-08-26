@@ -4,8 +4,7 @@
   "description": "Premiere MCP — an MCP bridge for Adobe Premiere Pro with 643 tools for AI-driven video editing. By Skry. Based on Adobe_Premiere_Pro_MCP (MIT).",
   "main": "dist/index.js",
   "bin": {
-    "premiere-mcp": "dist/cli.js",
-    "premiere-pro-mcp": "dist/cli.js"
+    "premiere-mcp": "dist/cli.js"
   },
   "files": [
     "dist",
@@ -37,6 +36,7 @@
     "setup:win": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/install-windows.ps1",
     "setup:doctor:win": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/doctor-windows.ps1",
     "uninstall:mac": "bash ./scripts/uninstall-macos.sh",
+    "uninstall:win": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/uninstall-windows.ps1",
     "test": "jest",
     "lint": "eslint src --ext .ts",
     "format": "prettier --write \"src/**/*.ts\"",
@@ -60,6 +60,14 @@
   ],
   "author": "Skry",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/skrfilms/premiere-mcp.git"
+  },
+  "homepage": "https://github.com/skrfilms/premiere-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/skrfilms/premiere-mcp/issues"
+  },
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"

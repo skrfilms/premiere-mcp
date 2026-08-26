@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
-  "name": "premiere-pro-mcp",
+  "name": "premiere-mcp",
   "displayName": "MCP Bridge for Adobe Premiere Pro",
   "version": "1.2.0",
   "description": "Inspect, edit, verify, and export local Adobe Premiere Pro projects through the MCP Bridge.",

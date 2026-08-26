@@ -9,9 +9,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-5fd3c6.svg)](LICENSE.md)
 [![Node.js](https://img.shields.io/badge/Node.js-20%2B-339933.svg)](https://nodejs.org/)
 [![MCP](https://img.shields.io/badge/MCP-local%20server-5fd3c6.svg)](https://modelcontextprotocol.io/)
-[![npm](https://img.shields.io/npm/v/adobe-premiere-pro-mcp.svg)](https://www.npmjs.com/package/adobe-premiere-pro-mcp)
-[![CEP](https://img.shields.io/badge/CEP-production-2ea44f.svg)](https://github.com/hetpatel-11/Adobe_Premiere_Pro_MCP#install)
-[![UXP](https://img.shields.io/badge/UXP-experimental-f2c14e.svg)](https://github.com/hetpatel-11/Adobe_Premiere_Pro_MCP#install)
+[![npm](https://img.shields.io/npm/v/premiere-mcp.svg)](https://www.npmjs.com/package/premiere-mcp)
+[![CEP](https://img.shields.io/badge/CEP-production-2ea44f.svg)](#install)
+[![UXP](https://img.shields.io/badge/UXP-experimental-f2c14e.svg)](#install)
 
 </div>
 
@@ -28,9 +28,9 @@
 The supported bridge is the included **CEP panel**. Install the npm package on the same computer as Premiere Pro and your MCP client:
 
 ```bash
-npm install -g adobe-premiere-pro-mcp
-premiere-pro-mcp --install-cep
-premiere-pro-mcp --doctor
+npm install -g premiere-mcp
+premiere-mcp --install-cep
+premiere-mcp --doctor
 ```
 
 `--install-cep` installs the CEP bridge, enables the required Adobe CEP debug setting, prepares the bridge directory, and configures supported local MCP clients. `--doctor` verifies the server build, CEP installation, bridge directory, debug setting, and client configuration.
@@ -51,10 +51,10 @@ From a clone of this repository, install the Codex plugin that bundles the MCP c
 
 ```bash
 codex plugin marketplace add .
-codex plugin add premiere-pro-mcp@adobe-premiere-pro-mcp
+codex plugin add premiere-mcp@premiere-mcp
 ```
 
-The plugin still requires the local CEP bridge. Run `premiere-pro-mcp --install-cep`, restart Premiere, start `Window > Extensions > MCP Bridge (CEP)`, then ask Codex to run `get_capabilities` followed by `verify_premiere_connection`.
+The plugin still requires the local CEP bridge. Run `premiere-mcp --install-cep`, restart Premiere, start `Window > Extensions > MCP Bridge (CEP)`, then ask Codex to run `get_capabilities` followed by `verify_premiere_connection`.
 
 ### Claude Code plugin
 
@@ -62,14 +62,14 @@ From a clone of this repository:
 
 ```text
 /plugin marketplace add .
-/plugin install premiere-pro-mcp@adobe-premiere-pro-mcp
+/plugin install premiere-mcp@premiere-mcp
 ```
 
 Install and start the CEP bridge with the same steps as above before using the plugin.
 
 ### Claude Desktop one-click bundle
 
-Each GitHub release includes an `.mcpb` bundle for Claude Desktop. Download the matching `adobe-premiere-pro-mcp-<version>.mcpb` asset and open it in Claude Desktop to install the local MCP server. Its first launch installs the bundled CEP bridge for the current user.
+Each GitHub release includes an `.mcpb` bundle for Claude Desktop. Download the matching `premiere-mcp-<version>.mcpb` asset and open it in Claude Desktop to install the local MCP server. Its first launch installs the bundled CEP bridge for the current user.
 
 Restart Premiere Pro, open `Window > Extensions > MCP Bridge (CEP)`, set the bridge directory, and start the bridge. Then ask Claude:
 
@@ -85,7 +85,7 @@ The installer configures Claude Desktop on macOS and Claude Desktop plus GitHub 
 {
   "mcpServers": {
     "premiere-pro": {
-      "command": "premiere-pro-mcp"
+      "command": "premiere-mcp"
     }
   }
 }
@@ -96,8 +96,8 @@ The installer configures Claude Desktop on macOS and Claude Desktop plus GitHub 
 Use source setup when developing the MCP, modifying the CEP panel, or troubleshooting a package install:
 
 ```bash
-git clone https://github.com/hetpatel-11/Adobe_Premiere_Pro_MCP.git
-cd Adobe_Premiere_Pro_MCP
+git clone https://github.com/skrfilms/premiere-mcp.git
+cd premiere-mcp
 npm install
 npm run build
 npm run setup:mac # macOS
@@ -175,13 +175,13 @@ High-level workflow tools included:
 If you want Codex, Claude Code, or another agent to handle installation, verification, and day-to-day usage correctly, install the included Agent Skill:
 
 ```bash
-npx skills add hetpatel-11/Adobe_Premiere_Pro_MCP --skill premiere-pro-mcp
+npx skills add skrfilms/premiere-mcp --skill premiere-mcp
 ```
 
 Or install directly from the skill path:
 
 ```bash
-npx skills add https://github.com/hetpatel-11/Adobe_Premiere_Pro_MCP/tree/main/skills/premiere-pro-mcp
+npx skills add https://github.com/skrfilms/premiere-mcp/tree/main/skills/premiere-mcp
 ```
 
 The skill teaches agents how to install the MCP, start and verify the CEP bridge, use the Premiere tools safely, import real media before editing, prefer sequence-aware operations, and run diagnostics when something fails.
@@ -192,9 +192,9 @@ For source installs, client-specific MCP configuration, Windows installer flags,
 
 The short version:
 
-1. Install with `npm install -g adobe-premiere-pro-mcp`, then run `premiere-pro-mcp --install-cep`.
+1. Install with `npm install -g premiere-mcp`, then run `premiere-mcp --install-cep`.
 2. Restart Premiere Pro and your MCP client, then start `Window > Extensions > MCP Bridge (CEP)`.
-3. Run `premiere-pro-mcp --doctor`, then ask the client to call `verify_premiere_connection` without making changes.
+3. Run `premiere-mcp --doctor`, then ask the client to call `verify_premiere_connection` without making changes.
 
 For manual registration in any MCP client, use the global command after npm installation:
 
@@ -202,7 +202,7 @@ For manual registration in any MCP client, use the global command after npm inst
 {
   "mcpServers": {
     "premiere-pro": {
-      "command": "premiere-pro-mcp"
+      "command": "premiere-mcp"
     }
   }
 }

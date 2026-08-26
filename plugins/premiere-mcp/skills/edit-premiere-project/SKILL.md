@@ -27,9 +27,9 @@ Operate Premiere through the `premiere-pro` MCP tools. Preserve the user's proje
 Install the companion bridge on the same computer as Premiere and Codex:
 
 ```bash
-npm install -g adobe-premiere-pro-mcp
-premiere-pro-mcp --install-cep
-premiere-pro-mcp --doctor
+npm install -g premiere-mcp
+premiere-mcp --install-cep
+premiere-mcp --doctor
 ```
 
 Restart Premiere Pro, open `Window > Extensions > MCP Bridge (CEP)`, start the bridge, then run `verify_premiere_connection`.

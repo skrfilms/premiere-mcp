@@ -467,7 +467,34 @@ export class PremiereProTools {
     }
   }
 
+  /**
+   * The locally-implemented tool catalogue, built ONCE per process.
+   *
+   * The literal below constructs several hundred Zod schemas, and it was re-evaluated on
+   * every call. executeTool() calls it two to three times for a SINGLE tool call (the
+   * getAvailableTools lookup, then the local-vs-expanded check), so the cost landed on
+   * every real edit as well as on the sweeps: the injection-guard suite, which calls
+   * executeTool once per tool x position x payload, spent the overwhelming majority of its
+   * 25 minutes rebuilding this array and timed out on the Windows runner because of it.
+   *
+   * Caching is safe because the builder is pure: it reads no environment variable and no
+   * instance state (`this` appears nowhere inside it), so the catalogue is byte-identical
+   * for every instance in the process. Profile curation is deliberately NOT cached —
+   * applyProfile() reads process.env on every call, so getAvailableTools() still reflects a
+   * profile or exclusion set changed after startup, which several suites depend on.
+   *
+   * A fresh array is returned per call, not the cached one, so a caller that sorts or
+   * splices its copy cannot corrupt the catalogue for everyone else. Copying ~640 object
+   * references is free next to rebuilding ~640 schemas.
+   */
+  private static localToolsCache: MCPTool[] | null = null;
+
   private getLocalTools(): MCPTool[] {
+    PremiereProTools.localToolsCache ??= this.buildLocalTools();
+    return [...PremiereProTools.localToolsCache];
+  }
+
+  private buildLocalTools(): MCPTool[] {
     return [
       // Discovery Tools (NEW)
       {
@@ -3339,13 +3366,23 @@ export class PremiereProTools {
     };
   }
 
-  /** Every tool this build implements, before the active profile filters anything. */
+  /**
+   * Every tool this build implements, before the active profile filters anything.
+   *
+   * Cached for the same reason getLocalTools is, and on the same terms: pure inputs, a fresh
+   * array handed to each caller. This is the one the hot paths actually call.
+   */
+  private static registeredToolsCache: MCPTool[] | null = null;
+
   getRegisteredTools(): MCPTool[] {
-    const localTools = this.getLocalTools();
-    return [
-      ...localTools,
-      ...getExpandedTools(new Set(localTools.map((tool) => tool.name)))
-    ];
+    PremiereProTools.registeredToolsCache ??= (() => {
+      const localTools = this.getLocalTools();
+      return [
+        ...localTools,
+        ...getExpandedTools(new Set(localTools.map((tool) => tool.name)))
+      ];
+    })();
+    return [...PremiereProTools.registeredToolsCache];
   }
 
   getAvailableTools(): MCPTool[] {

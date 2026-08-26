@@ -34,8 +34,88 @@ jobs:
       - name: Build
         run: npm run build
 
+      # Same summary parser as ci.yml, for the same reason and now with a measurement
+      # behind it: a local run of this suite exited 0 while the summary read
+      # "Test Suites: 1 failed, 65 passed". Trusting the exit code here would have let a
+      # red suite through on the one platform this job exists to cover.
+      #
+      # bash, not powershell: GitHub's windows runners ship Git Bash, so this is the
+      # identical script rather than a PowerShell translation of it that can drift.
       - name: Test
-        run: npm test -- --runInBand --silent --testTimeout=60000
+        shell: bash
+        run: |
+          set +e
+          set -uo pipefail
+
+          EXPECTED_SUITES=$(find src -name '*.test.ts' | wc -l | tr -d ' ')
+          echo "expecting $EXPECTED_SUITES test suites on disk"
+
+          npm test -- --runInBand --ci --testTimeout=60000 > jest.log 2>&1
+          JEST_EXIT=$?
+
+          echo "----- last 120 lines of jest output -----"
+          tail -n 120 jest.log
+
+          fail() {
+            echo "::error::$1"
+            echo "----- FAIL lines -----"
+            grep -aE '^[[:space:]]*(FAIL |●)' jest.log | head -n 60
+            exit 1
+          }
+
+          SUITES_LINE=$(grep -aoE 'Test Suites:.*' jest.log | tail -n 1 || true)
+          TESTS_LINE=$(grep -aoE 'Tests:[[:space:]]+[0-9].*' jest.log | tail -n 1 || true)
+
+          echo "jest exit code : $JEST_EXIT"
+          echo "summary        : ${SUITES_LINE:-<none>} | ${TESTS_LINE:-<none>}"
+
+          [ -n "$SUITES_LINE" ] || fail "jest printed no 'Test Suites:' summary — the run did not finish"
+          [ -n "$TESTS_LINE" ] || fail "jest printed no 'Tests:' summary — the run did not finish"
+
+          case "$SUITES_LINE" in *failed*) fail "failing test suites: $SUITES_LINE" ;; esac
+          case "$TESTS_LINE" in *failed*) fail "failing tests: $TESTS_LINE" ;; esac
+          if grep -aqE '^[[:space:]]*FAIL ' jest.log; then fail "jest printed at least one FAIL line"; fi
+
+          SUITES_PASSED=$(printf '%s' "$SUITES_LINE" | sed -nE 's/.*[^0-9]([0-9]+) passed.*/\1/p')
+          SUITES_TOTAL=$(printf '%s' "$SUITES_LINE" | sed -nE 's/.*[^0-9]([0-9]+) total.*/\1/p')
+          TESTS_PASSED=$(printf '%s' "$TESTS_LINE" | sed -nE 's/.*[^0-9]([0-9]+) passed.*/\1/p')
+
+          [ "${SUITES_TOTAL:-0}" = "$EXPECTED_SUITES" ] \
+            || fail "jest ran ${SUITES_TOTAL:-0} suites but $EXPECTED_SUITES *.test.ts files exist on disk"
+          [ "${SUITES_PASSED:-0}" = "${SUITES_TOTAL:-0}" ] \
+            || fail "only ${SUITES_PASSED:-0} of ${SUITES_TOTAL:-0} suites passed"
+
+          # `skipped` is expected on THIS platform specifically: the POSIX-mode
+          # assertions in auth.test.ts and socket-transport.test.ts are it.skip on win32
+          # rather than weakened, because NTFS reports a mode the server never asked for.
+          # A skip that says "not run" is the honest result; zero passes is not.
+          [ "${TESTS_PASSED:-0}" -gt 0 ] \
+            || fail "0 tests passed — a green run that asserted nothing"
+
+          [ "$JEST_EXIT" -eq 0 ] \
+            || fail "summary looks clean but jest exited $JEST_EXIT — trust the exit code and investigate"
+
+          echo "summary parsed clean: $SUITES_LINE | $TESTS_LINE"
+
+      # docs/WINDOWS-PARITY.md section 3 item 1: nothing had ever confirmed the three .ps1
+      # files even PARSE. Cheapest possible check, no Premiere needed, and it covers
+      # uninstall-windows.ps1 — which the steps below never run, because it would tear
+      # down the install they just made.
+      - name: Parse-check the PowerShell scripts
+        shell: pwsh
+        run: |
+          $bad = 0
+          foreach ($f in Get-ChildItem scripts/*.ps1) {
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$null, [ref]$errors) | Out-Null
+            if ($errors) {
+              $bad++
+              Write-Host "::error file=$($f.Name)::$($errors -join '; ')"
+            } else {
+              Write-Host "$($f.Name): parses"
+            }
+          }
+          if ($bad -gt 0) { exit 1 }
 
       - name: Run Windows installer smoke
         shell: powershell
