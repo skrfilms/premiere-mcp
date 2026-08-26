@@ -463,7 +463,7 @@ async function consolidateAndTransfer(bridge: PremiereProTransport, args: Record
     if (!source) continue;
     try {
       await fs.stat(source);
-      let fileName = basename(source);
+      const fileName = basename(source);
       let destination = join(mediaDir, fileName);
       let suffix = 1;
       while (usedDestinations.has(destination)) {
