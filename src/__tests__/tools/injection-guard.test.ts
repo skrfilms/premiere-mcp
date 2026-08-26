@@ -138,6 +138,13 @@ const NO_GENERATED_SCRIPT = new Set([
   'call_tool',
   'activate_tools',
   'deactivate_tools',
+  // transact_sequence_edits emits no ExtendScript of its own: it delegates each step to a
+  // target tool (whose escaping IS swept here under that target's own name) and, given a
+  // hostile tool name, classifies it as unrestorable and refuses before running anything.
+  // Driving it per payload per position also re-measures the whole catalogue's context cost
+  // each time, the same cost that got call_tool excluded. Its state machine has its own
+  // suite (transactions.test.ts).
+  'transact_sequence_edits',
 ]);
 
 /**

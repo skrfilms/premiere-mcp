@@ -113,6 +113,10 @@ const OVERRIDES: Record<string, Partial<ToolAnnotations>> = {
   // Premiere request, no filesystem, and re-running one lands on the same list.
   activate_tools: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   deactivate_tools: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  // Runs an arbitrary plan of sequence edits, so its effect is as broad as the plan it
+  // wraps — hinted at the pessimistic end for the same reason as call_tool. It clones and
+  // may delete a sequence, and re-running the same plan is not a no-op, so not idempotent.
+  transact_sequence_edits: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
 };
 
 function startsWithAny(name: string, prefixes: string[]): boolean {

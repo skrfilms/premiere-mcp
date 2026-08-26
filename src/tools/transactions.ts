@@ -72,6 +72,7 @@ export const TRANSACTION_GUARANTEES: {
     'Premiere\'s undo stack. This transaction never calls undo/redo; the rollback is a fresh clone of the snapshot, so the human\'s undo history after a rollback does not walk back into the pre-edit state.',
     'The sequence ID, when rollbackStrategy is "replace_original": the pre-edit content comes back under the original NAME, but as a new sequence with a new ID. Cached sequence IDs go stale.',
     'The saved state of the project on disk. Nothing here saves; if Premiere is closed without saving, both the edits and the rollback are lost together.',
+    'Which sequence is open and active. This transaction makes the target sequence active before it runs a step, because a step that omits a sequence id edits whatever is active, and it leaves it active afterwards — so a human who was looking at a different sequence comes back to this one.',
   ],
 };
 
@@ -409,6 +410,16 @@ export interface TransactionExecutor {
   fingerprint(sequenceId?: string): Promise<FingerprintResult>;
   /** Clone the sequence into a tagged `[recovery] …` snapshot. */
   createCheckpoint(sequenceId: string, label: string): Promise<CheckpointResult>;
+  /**
+   * Make `sequenceId` the active sequence.
+   *
+   * Required because steps that omit a sequence id edit whatever is ACTIVE, and several things
+   * inside a transaction move that target out from under them — the checkpoint clone most of all
+   * (Premiere activates a freshly cloned sequence). Without this the plan would run against the
+   * snapshot while every read-back agreed, because each tool verifies itself against the sequence
+   * it actually touched. See ensureActive.
+   */
+  setActiveSequence(sequenceId: string): Promise<MutationResult>;
   /** Clip-level comparison of two sequences; name-independent, unlike the fingerprint. */
   diffSequences(sequenceIdA: string, sequenceIdB: string): Promise<DiffResult>;
   /** Run one planned edit (or a read-back check) by tool name. */
@@ -562,6 +573,12 @@ export interface TransactionLedgerEntry {
   /** Full result, kept only for the step that stopped the transaction. */
   result?: unknown;
   error?: string;
+  /**
+   * Set only when something had to be corrected before the step ran — at present, the active
+   * sequence having drifted off the snapshotted target. Recorded rather than silently fixed,
+   * because a plan that keeps drifting is a plan whose steps are moving the target.
+   */
+  note?: string;
 }
 
 // ── Small pure helpers ─────────────────────────────────────────────────────
@@ -862,6 +879,32 @@ export async function runTransaction(
   }
   preState.snapshotVerified = true;
 
+  // ── Boundary 6: point the edits back at the sequence we just snapshotted.
+  // Cloning for the checkpoint makes the CLONE active, so without this every step
+  // that omits a sequence id would edit the snapshot instead of the target — and
+  // would report success while doing it. Fail closed: no confirmed target, no edits.
+  const targetGuard = await ensureActive(executor, sequenceId);
+  if (!targetGuard.ok) {
+    return refuse(
+      transactionId,
+      `The snapshot was taken but NO step was run, because the edits could not be aimed at '${
+        sequenceName ?? sequenceId
+      }': ${targetGuard.reason}. Steps that omit a sequence id edit the ACTIVE sequence, so running now would have edited the wrong one. The checkpoint sequence '${
+        checkpointName ?? checkpointId
+      }' (id ${checkpointId}) is still in the project — delete it by hand if you do not want it.`,
+      plan,
+      {
+        preState,
+        checkpoint: {
+          sequenceId: checkpointId,
+          name: checkpointName,
+          retained: true,
+          deleted: false,
+        },
+      },
+    );
+  }
+
   // ── Apply. One ledger entry per step, always.
   const ledger: TransactionLedgerEntry[] = [];
   let previousFingerprint: string | null = preState.fingerprint;
@@ -892,6 +935,26 @@ export async function runTransaction(
     if (failedIndex !== null) {
       ledger.push(entry);
       continue;
+    }
+
+    // Re-aim before EVERY step, not once at the top. A step is allowed to be a tool that
+    // changes the active sequence as a side effect (anything in the sequence_lifecycle
+    // class — create_*, duplicate_sequence, import_sequences), and the user can click a
+    // different timeline mid-transaction. Re-reading is one round-trip and only writes when
+    // the target has actually drifted, so the steady-state cost is a read per step.
+    const stepGuard = await ensureActive(executor, sequenceId);
+    if (!stepGuard.ok) {
+      entry.error = `Refused to run this step: ${stepGuard.reason}`;
+      entry.verification = {
+        basis: 'not_attempted',
+        reason: `${entry.error} Running it would have edited a sequence this transaction did not snapshot, so it was not run.`,
+      };
+      failedIndex = i + 1;
+      ledger.push(entry);
+      continue;
+    }
+    if (stepGuard.reasserted) {
+      entry.note = `Before this step ${stepGuard.reason}.`;
     }
 
     entry.attempted = true;
@@ -1135,6 +1198,102 @@ async function safeDiff(
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
+}
+
+// ── Keeping the edits pointed at the sequence we snapshotted ───────────────
+
+interface ActiveGuardOutcome {
+  ok: boolean;
+  /** Present only when the target had drifted and was put back. */
+  reasserted: boolean;
+  reason: string;
+}
+
+/**
+ * Guarantee the target is the ACTIVE sequence, or say plainly that it is not.
+ *
+ * Why this exists. Steps addressed to no particular sequence edit whatever Premiere considers
+ * active, and a transaction moves that target itself: `create_recovery_checkpoint` clones the
+ * sequence, and Premiere makes a fresh clone active. Every later step then landed on the SNAPSHOT.
+ * Nothing caught it, because the evidence chain is per-tool: each tool read back the sequence it
+ * really touched and honestly returned verified:true, so the transaction committed while the
+ * sequence the caller named was untouched. (A step declaring expectFingerprintChanged:true was the
+ * one shape that noticed, since the fingerprint is always taken of the NAMED id — but that is opt-in
+ * and most steps do not declare it.)
+ *
+ * Fail closed. Re-asserting is not enough on its own: setActiveSequence is verified by RE-READING
+ * the active sequence, because a write that silently did nothing is exactly the case that would
+ * otherwise send the plan into the snapshot with a reassuring log line. If it cannot be confirmed,
+ * the caller is told and no step runs.
+ */
+async function ensureActive(
+  executor: TransactionExecutor,
+  sequenceId: string,
+): Promise<ActiveGuardOutcome> {
+  let current: SequenceRef;
+  try {
+    current = await executor.resolveActiveSequence();
+  } catch (error) {
+    return {
+      ok: false,
+      reasserted: false,
+      reason: `could not read which sequence is active: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+  if (current && current.success !== false && current.id && String(current.id) === sequenceId) {
+    return { ok: true, reasserted: false, reason: 'already active' };
+  }
+
+  const drifted = current && current.id ? String(current.id) : 'none';
+  let set: MutationResult;
+  try {
+    set = await executor.setActiveSequence(sequenceId);
+  } catch (error) {
+    return {
+      ok: false,
+      reasserted: false,
+      reason: `the active sequence had drifted to '${drifted}' and could not be set back: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
+  }
+  if (!set || set.success === false) {
+    return {
+      ok: false,
+      reasserted: false,
+      reason: `the active sequence had drifted to '${drifted}' and setting it back failed: ${
+        set?.error || 'no error message given'
+      }`,
+    };
+  }
+
+  // Confirm by re-reading, not by trusting the setter's return value.
+  let after: SequenceRef;
+  try {
+    after = await executor.resolveActiveSequence();
+  } catch (error) {
+    return {
+      ok: false,
+      reasserted: false,
+      reason: `set the active sequence back to '${sequenceId}' but could not confirm it: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
+  }
+  if (!after || after.success === false || !after.id || String(after.id) !== sequenceId) {
+    return {
+      ok: false,
+      reasserted: false,
+      reason: `asked Premiere to activate '${sequenceId}' but it reports '${
+        after && after.id ? String(after.id) : 'none'
+      }' as active. Steps without an explicit sequence id would have edited the wrong sequence.`,
+    };
+  }
+  return {
+    ok: true,
+    reasserted: true,
+    reason: `the active sequence had drifted to '${drifted}' and was set back to '${sequenceId}'`,
+  };
 }
 
 // ── Per-step verification ──────────────────────────────────────────────────
