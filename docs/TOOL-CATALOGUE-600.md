@@ -1,4 +1,4 @@
-# Premiere MCP Tool Catalogue — The Road to 600
+# Tool Catalogue — The Road to 600
 
 **Goal:** every function an editor performs in Premiere Pro, callable through this MCP —
 the most capable, most cohesive, most flexible Premiere MCP on the market.

@@ -43,7 +43,7 @@ if (!process.env.PREMIERE_TEMP_DIR) {
 
 for (const p of [...CLIPS, STILL]) {
   if (!existsSync(p)) {
-    console.error(`missing fixture media: ${p}\nRun the ffmpeg generation step first (see docs/RUN-LOG-2026-08-24.md).`);
+    console.error(`missing fixture media: ${p}\nGenerate the fixture media with ffmpeg first (see scripts/build-test-fixture.mjs).`);
     process.exit(2);
   }
 }
