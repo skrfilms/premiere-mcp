@@ -28,6 +28,7 @@
 import { PremiereProBridge } from '../dist/bridge/index.js';
 import { PremiereProTools } from '../dist/tools/index.js';
 import { writeFileSync } from 'node:fs';
+import { requireScratchProject } from './lib/require-scratch-project.mjs';
 
 const ALLOW_MUTATE = process.argv.includes('--mutate');
 const REPORT_PATH = process.argv.includes('--out')
@@ -150,19 +151,12 @@ async function main() {
   await bridge.initialize();
   const tools = new PremiereProTools(bridge);
 
-  // Confirm we are pointed at a scratch project before anything else runs.
-  const state = await bridge.executeScript(
-    'return JSON.stringify({ project: String(app.project.name), path: String(app.project.path), version: String(app.version) });'
-  );
-  line(`host: Premiere ${state.version}`);
-  line(`project: ${state.project}`);
-  const looksScratch = /test|scratch|untitled/i.test(String(state.project));
-  if (!looksScratch) {
-    line('');
-    line(`REFUSING TO RUN: "${state.project}" does not look like a scratch project.`);
-    line('This sweep invokes hundreds of tools. Open a throwaway project first.');
-    process.exit(2);
-  }
+  // Confirm we are pointed at a scratch project before anything else runs. Via the shared helper,
+  // not the inline copy this used to carry: that copy was missing 'fixture', so it refused a
+  // project the other three harnesses accept, and nothing would have caught the divergence.
+  await requireScratchProject(bridge, 'live-smoke-sweep');
+  const version = await bridge.executeScript('return JSON.stringify({ version: String(app.version) });');
+  line(`host: Premiere ${version.version}`);
   line(`mutating tools: ${ALLOW_MUTATE ? 'ENABLED (--mutate)' : 'disabled'}`);
   line('');
 

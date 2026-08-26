@@ -5,6 +5,7 @@ import fsSync from 'node:fs';
 import path from 'node:path';
 import { PremiereProBridge } from '../dist/bridge/index.js';
 import { PremiereProTools } from '../dist/tools/index.js';
+import { requireScratchProject } from './lib/require-scratch-project.mjs';
 
 process.env.PREMIERE_TEMP_DIR = process.env.PREMIERE_TEMP_DIR || '/tmp/premiere-mcp-bridge';
 
@@ -190,6 +191,12 @@ function getTool(name) {
 
 async function main() {
   await bridge.initialize();
+
+  // This sweep is intentionally mutating — it creates `Sweep ...` sequences, imports generated
+  // assets and exercises destructive tools — and it had NO guard on which project it was pointed
+  // at. Run once against an editor's open cut it would have scattered sweep artefacts through it.
+  // The guard exits rather than warns, and it runs before the first invoke().
+  await requireScratchProject(bridge, 'live-tool-sweep');
 
   const catalog = tools.getAvailableTools();
   const catalogNames = new Set(catalog.map((tool) => tool.name));

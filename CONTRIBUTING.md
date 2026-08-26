@@ -60,7 +60,15 @@ scripts/
   doctor-macos.sh         local installation verifier
   doctor-windows.ps1      Windows installation verifier
   uninstall-macos.sh      macOS uninstall helper
-  live-tool-sweep.mjs     end-to-end live tool verifier
+  uninstall-windows.ps1   Windows uninstall helper
+  reset-scratch.mjs       rebuild the disposable fixture project from synthesised media
+  live-tool-sweep.mjs     end-to-end live tool verifier (the execution census)
+  live-smoke-sweep.mjs    faster read-mostly sweep; --mutate opts into write tools
+  live-verify-honesty.mjs re-asks the real host the claims a mock cannot answer
+  live-verify-cleanup.mjs in-place restore of the fixture after the verifier
+  live-verify-tier1.mjs   read-only Tier-1 / footage-index verifier
+  lib/
+    require-scratch-project.mjs  shared guard: refuse to mutate a non-scratch project
 ```
 
 ## Tool Design Rules
@@ -100,9 +108,17 @@ Minimum bar before merging:
 Release bar:
 
 - `npm run setup:doctor`
+- `node scripts/reset-scratch.mjs`
 - `node scripts/live-tool-sweep.mjs`
+- `node scripts/live-verify-honesty.mjs`, then `node scripts/live-verify-cleanup.mjs`
 
-The live sweep is intentionally mutating. Use a disposable project because it creates `Sweep ...` sequences and imports generated assets.
+### The live harnesses mutate the open project
+
+They create `Sweep ...` sequences, import generated assets, add markers and delete sequences. Open the disposable fixture first, never an edit you care about.
+
+Every mutating harness calls `requireScratchProject()` from [scripts/lib/require-scratch-project.mjs](scripts/lib/require-scratch-project.mjs), which refuses any project whose name does not read as disposable and exits rather than warning. `src/__tests__/platform/live-harness-guards.test.ts` pins that each of them still calls it — add a new mutating harness to that list when you write one.
+
+The guard is a backstop, not permission to be careless. It matches on the project NAME, so a real project that happens to be called `colour_test` passes it.
 
 ## Editing the CEP Bridge
 
