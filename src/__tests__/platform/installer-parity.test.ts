@@ -158,7 +158,7 @@ describe('the Windows scripts carry no POSIX-only assumptions', () => {
   it.each(winScripts)('%s builds no path under /tmp', (_name, source) => {
     const offenders = codeOnly(source)
       .split('\n')
-      .filter((line) => /(^|[^a-zA-Z0-9_.])\/tmp[\/'"\s]/.test(line));
+      .filter((line) => /(^|[^a-zA-Z0-9_.])\/tmp['"/\s]/.test(line));
     expect(offenders).toEqual([]);
   });
 
