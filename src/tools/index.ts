@@ -7419,7 +7419,12 @@ ${this.buildSequenceResolver(sequenceId)}
         var name = String(seq.name);
         // Try to bump version: _v001 -> _v002, _v01 -> _v02, or append _v001
         var newName;
-        var vMatch = name.match(/(.*[_\-v])(\d+)$/i);
+        // Escapes are DOUBLED because this regex lives inside a template literal: the host
+        // receives the result of collapsing them. Written single, \\d reached Premiere as a
+        // literal 'd' and \\- turned [_\\-v] into the character RANGE _ through v, so no real
+        // sequence name ever matched and every call fell through to appending '_v002' —
+        // 'SHOW_008_0080_v001' became 'SHOW_008_0080_v001_v002' instead of '..._v002'.
+        var vMatch = name.match(/(.*[_\\-v])(\\d+)$/i);
         if (vMatch) {
           var prefix = vMatch[1]; var num = parseInt(vMatch[2],10);
           var newNum = String(num+1); while(newNum.length < vMatch[2].length) newNum = '0'+newNum;
