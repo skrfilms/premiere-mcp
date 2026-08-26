@@ -4,7 +4,7 @@
 
 **Operate local Adobe Premiere Pro projects through MCP.**
 
-643 implemented tools — **101 advertised by default**, all 643 reachable through `call_tool` — plus 13 context resources and 10 guided prompts for Codex, Claude Code, Claude Desktop, and other MCP clients. CEP is the supported production bridge; UXP remains experimental.
+643 implemented tools — **101 advertised by default**, all 643 reachable through `call_tool` — plus 21 context resources and 16 guided prompts for Codex, Claude Code, Claude Desktop, and other MCP clients. CEP is the supported production bridge; UXP remains experimental.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-5fd3c6.svg)](LICENSE.md)
 [![Node.js](https://img.shields.io/badge/Node.js-20%2B-339933.svg)](https://nodejs.org/)
