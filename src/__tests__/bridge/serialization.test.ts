@@ -39,7 +39,7 @@ describe('script serialization', () => {
   const commandPath = path.join(configuredTempDir, 'command-test-uuid-1234.json');
   // Written here first, then renamed to commandPath so the panel cannot read a
   // half-written command while polling.
-  const stagingPath = path.join(configuredTempDir, '.tmp-test-uuid-1234.json');
+  const _stagingPath = path.join(configuredTempDir, '.tmp-test-uuid-1234.json');
 
   const LINE_SEPARATOR = '\u2028';
   const PARAGRAPH_SEPARATOR = '\u2029';

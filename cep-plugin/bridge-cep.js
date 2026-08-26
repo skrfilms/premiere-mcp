@@ -288,6 +288,13 @@
         this.socketEndpoint = null;
         this.socketNextAttemptAt = 0;
         this.socketUnavailableLogged = false;
+        // Live telemetry the status pane surfaces. All four are populated from real
+        // events — a proven host round trip, the heartbeat we actually wrote, the
+        // transport we are actually using — never a placeholder. When a value is not
+        // yet known the fact shows an em-dash rather than an invented number.
+        this.lastRtt = null;             // ms of the last proven ExtendScript round trip
+        this.lastProjectName = null;     // project name from that round trip
+        this.lastHeartbeatAt = null;     // ts of the last heartbeat we successfully wrote
         this.csInterface = new CSInterface();
         this.init();
     }
@@ -401,12 +408,15 @@
     };
 
     /**
-     * Read the per-session auth token the server writes to auth-token.json.
+     * Read the token of the NEWEST server, from the shared auth-token.json.
      *
      * Re-read on every check rather than cached: the server rewrites the file each session, and a
      * cached token would make the panel reject every command from a server that restarted while the
      * panel stayed open — which is the normal case, since the MCP server is launched per session
      * over stdio and Premiere outlives it.
+     *
+     * Kept as its own function because it is the only token an OLDER server publishes, and because
+     * the socket hello needs one specific credential rather than the accepted set.
      */
     MCPPremiereBridge.prototype.readExpectedToken = function() {
         try {
@@ -420,22 +430,84 @@
     };
 
     /**
+     * Every token that currently belongs to a live server.
+     *
+     * ONE PANEL, MANY SERVERS. The panel holds a single socket — to whichever server last published
+     * bridge-endpoint.json — but any number of MCP servers can share one PREMIERE_TEMP_DIR, and the
+     * others reach the panel over the file poll. auth-token.json is single-valued and
+     * last-writer-wins, so authorising against it alone rejected every server except the newest:
+     * its commands were answered UNAUTHORIZED through no fault of the caller.
+     *
+     * So each server also writes auth-session-<sessionId>.json, which it owns outright and deletes
+     * on exit, and all of those are accepted here. No shared file is ever read-modify-written, so two
+     * servers starting at the same moment cannot erase each other's credential.
+     *
+     * Returns null to mean "no token file at all" — the backwards-compatible unauthenticated case for
+     * a server too old to write one. An EMPTY ARRAY is different and means every command is refused.
+     */
+    MCPPremiereBridge.prototype.readAcceptedTokens = function() {
+        var tokens = [];
+        var sawTokenFile = false;
+
+        var shared = this.readExpectedToken();
+        if (shared) { tokens.push(shared); sawTokenFile = true; }
+        // A present-but-unusable auth-token.json still counts as a token file: a server published it,
+        // so enforcement is on, and failing closed is the safe reading of a malformed credential.
+        try {
+            if (fs.existsSync(path.join(this.tempDirectory, 'auth-token.json'))) sawTokenFile = true;
+        } catch (eShared) {}
+
+        try {
+            // Guarded because the vm sandbox used by the tests supplies a partial fs, and a throw
+            // here would run on every 250ms tick.
+            var entries = (typeof fs.readdirSync === 'function') ? fs.readdirSync(this.tempDirectory) : [];
+            for (var i = 0; i < entries.length; i++) {
+                var name = entries[i];
+                if (name.indexOf('auth-session-') !== 0) continue;
+                if (name.length < 6 || name.slice(-5) !== '.json') continue;
+                sawTokenFile = true;
+                try {
+                    var parsed = JSON.parse(fs.readFileSync(path.join(this.tempDirectory, name), 'utf8'));
+                    if (parsed && typeof parsed.token === 'string' && parsed.token.length > 0 &&
+                        tokens.indexOf(parsed.token) === -1) {
+                        tokens.push(parsed.token);
+                    }
+                } catch (eOne) {}
+            }
+        } catch (eDir) {}
+
+        return sawTokenFile ? tokens : null;
+    };
+
+    /**
      * Decide whether to run a command.
      *
-     * Enforced ONLY when auth-token.json exists. That is the backwards-compatible half: an older
-     * server that never writes a token keeps working, while any current server always writes one, so
-     * enforcement is on in practice. Rejection is by comparing the whole string — this is a local
+     * Enforced ONLY when some token file exists. That is the backwards-compatible half: an older
+     * server that never writes one keeps working, while any current server always writes one, so
+     * enforcement is on in practice. Comparison is over the whole string — this is a local
      * file-permission boundary, not a network one, so timing-attack hardening would be theatre
      * against an attacker who can simply read the file.
      */
     MCPPremiereBridge.prototype.isCommandAuthorized = function(command) {
-        var expected = this.readExpectedToken();
-        if (!expected) return { ok: true, reason: 'no token file present; running unauthenticated (older server)' };
+        var accepted = this.readAcceptedTokens();
+        if (accepted === null) return { ok: true, reason: 'no token file present; running unauthenticated (older server)' };
         var supplied = command && typeof command.token === 'string' ? command.token : '';
-        if (supplied.length !== expected.length) return { ok: false, reason: supplied ? 'token length mismatch' : 'command carried no token' };
-        var same = true;
-        for (var i = 0; i < expected.length; i++) { if (supplied.charAt(i) !== expected.charAt(i)) same = false; }
-        return same ? { ok: true } : { ok: false, reason: 'token did not match this session' };
+        if (!supplied) return { ok: false, reason: 'command carried no token' };
+        if (accepted.length === 0) {
+            return { ok: false, reason: 'a token file is present but holds no usable token, so nothing can be authorised' };
+        }
+        for (var i = 0; i < accepted.length; i++) {
+            var expected = accepted[i];
+            if (supplied.length !== expected.length) continue;
+            var same = true;
+            for (var c = 0; c < expected.length; c++) { if (supplied.charAt(c) !== expected.charAt(c)) same = false; }
+            if (same) return { ok: true };
+        }
+        return {
+            ok: false,
+            reason: 'token did not match this session' +
+                (accepted.length > 1 ? ' (or any of the ' + accepted.length + ' servers currently sharing this bridge directory)' : ''),
+        };
     };
 
     MCPPremiereBridge.prototype.processCommandFile = function(filePath) {
@@ -650,6 +722,7 @@
             var staging = hbFile + '.part';
             fs.writeFileSync(staging, JSON.stringify(payload));
             fs.renameSync(staging, hbFile);
+            this.lastHeartbeatAt = payload.ts;
         } catch (e) {
             // A heartbeat that cannot be written is not worth surfacing or retrying; the
             // server degrades to its original full-timeout behaviour when it sees none.
@@ -735,9 +808,14 @@
             // unauthenticated connection open waiting for a second frame. The feature list is what
             // the server gates behaviour on: anything absent from it is sent over the file channel
             // instead of being attempted and failing.
+            // The token comes from the ENDPOINT file, not from auth-token.json. Both are written by
+            // the newest server so they normally agree, but they are two writes: a panel that dialled
+            // during the gap authenticated to the server it had just connected to using a different
+            // server's token and was closed with 4002. Using the endpoint's own token means the
+            // credential always belongs to the process on the other end of this socket.
             self.sendSocketFrame({
                 type: 'hello',
-                token: self.readExpectedToken(),
+                token: (endpoint && endpoint.token) ? endpoint.token : self.readExpectedToken(),
                 protocolVersion: SOCKET_PROTOCOL_VERSION,
                 features: ['extendscript', 'cep_js', 'heartbeat'],
                 premiereVersion: premiereVersion,
@@ -818,7 +896,26 @@
             return;
         }
         if (frame.type === 'error') {
-            this.log('Bridge server error frame (' + frame.code + '): ' + frame.message, 'error');
+            // Not every frame the server TYPES as an error is a failure, and the difference is
+            // visible to the operator: this panel's log() routes level 'error' to the persistent
+            // "What stopped" card, which is meant for something that needs a human.
+            //
+            // The server closes a socket by sending an error frame and then closing, so an ordinary
+            // shutdown arrives here as {type:'error', code:4006}. Logged at 'error' it painted a red
+            // failure card reading "Bridge server error frame (4006)" every time an MCP server
+            // exited normally — routine, alarming, and it stayed up until the next host round trip.
+            // 4005 is the same shape: another panel handshook, so this one simply returns to the
+            // file poll and keeps working.
+            //
+            // The rest (4001-4004, 4007) mean the push channel is misconfigured and will not
+            // recover on its own, so those keep the card.
+            var routine = (frame.code === 4006) || (frame.code === 4005);
+            if (routine) {
+                this.log('Bridge socket retired by the server (' + frame.code + '): ' + frame.message +
+                    ' Commands continue over the file poll.', 'info');
+            } else {
+                this.log('Bridge server error frame (' + frame.code + '): ' + frame.message, 'error');
+            }
             return;
         }
         if (frame.type === 'command') {
@@ -901,12 +998,29 @@
         // liveness signal that survives the socket being down — which is exactly when the
         // question "is the panel alive?" gets asked.
         this.writeHeartbeat();
+        // Refresh the live status pane on the same 250ms cadence: the meter's elapsed
+        // time and the heartbeat-age fact are both wall-clock and must keep ticking.
+        this.updateLiveMeter();
+        this.updateLiveFacts();
         if (this.isConnected) this.maintainSocket();
-        // While the socket is handshaken the server publishes only over the socket, so scanning
-        // for command files here could only ever pick up something stale — or, if a second
-        // server were sharing the directory, execute work this connection knows nothing about.
-        // Skipping the scan is what makes "exactly one channel" true at both ends.
-        if (!this.isProcessing && this.isConnected && !this.socketReady) {
+        // The file scan runs even while the push socket is handshaken.
+        //
+        // This guard used to include !socketReady, on the reasoning that the socket's own server
+        // publishes only over the socket, so any file left in the directory must be stale or
+        // belong to "a second server this connection knows nothing about". That second server is
+        // not hypothetical: one panel holds ONE socket — to whichever server last wrote
+        // bridge-endpoint.json — while several servers routinely share this directory (a second
+        // agent session, Claude Desktop alongside the CLI, a reloaded server). Every one of those
+        // servers was silently unserviceable: its command files sat unread until they timed out,
+        // and the panel meanwhile reported itself connected, idle, and host-ready, which from the
+        // caller's side is indistinguishable from a wedged bridge.
+        //
+        // Reading both channels is safe because a server publishes a given command over exactly
+        // one of them (src/bridge/index.ts: the file path is reached only when the socket was not
+        // used or declined before anything was sent), both channels funnel into the same
+        // executeCommand, isProcessing still serialises execution, and each command file is
+        // unlinked once answered.
+        if (!this.isProcessing && this.isConnected) {
             var tempPath = this.getTempDirectory();
             if (tempPath) this.watchDirectory(tempPath);
         }
@@ -1219,14 +1333,23 @@
                 return JSON.stringify({ error: String(e) });\
             }\
         })();';
+        var startedAt = Date.now();
         this.executeExtendScript(script, function(err, result) {
+            // A proven round trip is the one honest source for the latency and project
+            // facts: the host actually answered, and we timed it end to end.
+            self.lastRtt = Date.now() - startedAt;
             if (err) {
                 self.log('Premiere Pro connection failed: ' + err.message, 'error');
                 self.updateServerStatus(false);
             } else {
+                try {
+                    var parsed = (typeof result === 'string') ? JSON.parse(result) : result;
+                    if (parsed && parsed.projectName) self.lastProjectName = parsed.projectName;
+                } catch (eParse) { /* leave the project fact as it was */ }
                 self.log('Premiere Pro connection OK: ' + JSON.stringify(result), 'info');
                 self.updateServerStatus(true);
             }
+            self.updateLiveFacts();
         });
     };
 
@@ -1264,6 +1387,9 @@
         if (state === true) {
             serverStatus.className = 'status-dot connected';
             serverText.textContent = 'Premiere Pro: Ready';
+            // A proven host clears the last-failure card: whatever stopped has been
+            // superseded by a working round trip, so leaving the red card up would lie.
+            this.hideFailure();
         } else if (state === 'verifying') {
             serverStatus.className = 'status-dot disconnected';
             serverText.textContent = 'Premiere Pro: verifying host...';
@@ -1271,6 +1397,121 @@
             serverStatus.className = 'status-dot disconnected';
             serverText.textContent = 'Premiere Pro: Start Bridge to enable';
         }
+    };
+
+    // The status pane's four facts. Every one is fed from proven state; an unknown
+    // value stays an em-dash rather than a placeholder number. Called after each host
+    // round trip and on every poll tick (so the heartbeat age stays live).
+    MCPPremiereBridge.prototype.updateLiveFacts = function() {
+        function setFact(id, text, warn) {
+            var el = document.getElementById(id);
+            if (!el) return;
+            var known = (text !== null && text !== undefined && text !== '');
+            el.textContent = known ? text : '—';
+            // Rebuild the class list: mono for the two numeric/path facts, dim when the
+            // value is still unknown, warn when the caller flags it.
+            var base = (id === 'fProj' || id === 'fRtt') ? 'mono' : '';
+            var cls = base;
+            if (!known) cls += ' dim';
+            if (warn) cls += ' warn';
+            el.className = cls.replace(/^\s+/, '');
+        }
+
+        setFact('fProj', this.lastProjectName, false);
+
+        // Channel: which transport is actually carrying commands right now.
+        var channel = null;
+        if (this.socketReady) channel = 'Push (socket)';
+        else if (this.isConnected) channel = 'File poll';
+        setFact('fAuth', channel, false);
+
+        // Last round trip: the timed host answer. Only meaningful once one has happened.
+        setFact('fRtt', (this.lastRtt !== null) ? (this.lastRtt + ' ms') : null, false);
+
+        // Heartbeat: age of the last heartbeat we wrote. Stale (> 4 s) while connected
+        // means the poll loop has stalled — worth flagging.
+        var beat = null, beatStale = false;
+        if (this.lastHeartbeatAt) {
+            var age = Date.now() - this.lastHeartbeatAt;
+            beat = (age < 1500) ? 'just now' : (Math.round(age / 1000) + 's ago');
+            beatStale = this.isConnected && age > 4000;
+        }
+        setFact('fBeat', beat, beatStale);
+    };
+
+    // The live command + its 8 s-budget meter. Shown only while a command is executing;
+    // elapsed is read from currentCommandStartedAt, so it is the real wall-clock time the
+    // host has been busy, not an animation.
+    MCPPremiereBridge.prototype.updateLiveMeter = function() {
+        var BUDGET_MS = 8000;
+        var cmdLine = document.getElementById('cmdLine');
+        var meterWrap = document.getElementById('meterWrap');
+        var running = this.isProcessing === true && !!this.currentCommandStartedAt;
+
+        if (cmdLine) cmdLine.hidden = !running;
+        if (meterWrap) meterWrap.hidden = !running;
+        if (!running) return;
+
+        // Label + id from the queue entry for the command in flight, falling back to the id.
+        var label = this.currentCommandId, id = this.currentCommandId;
+        if (this.commandQueue) {
+            for (var i = 0; i < this.commandQueue.length; i++) {
+                if (this.commandQueue[i].id === this.currentCommandId) {
+                    if (this.commandQueue[i].script) label = this.commandQueue[i].script;
+                    break;
+                }
+            }
+        }
+        var nameEl = document.getElementById('cmdName');
+        var idEl = document.getElementById('cmdId');
+        if (nameEl) nameEl.textContent = label || '—';
+        if (idEl) idEl.textContent = id ? ('#' + String(id).substring(0, 8)) : '';
+
+        var elapsed = Date.now() - this.currentCommandStartedAt;
+        var over = elapsed > BUDGET_MS;
+        var pct = Math.max(0, Math.min(1, elapsed / BUDGET_MS)) * 100;
+        var gauge = document.getElementById('gauge');
+        var fill = document.getElementById('gFill');
+        if (gauge) gauge.className = 'gauge well'; // clears the idle 'unread' hatch
+        if (fill) {
+            fill.style.width = pct + '%';
+            fill.className = over ? 'fill over' : 'fill';
+        }
+        var capL = document.getElementById('capL');
+        var capR = document.getElementById('capR');
+        if (capL) {
+            capL.textContent = (elapsed / 1000).toFixed(1) + 's';
+            capL.className = over ? 'hot' : '';
+        }
+        if (capR) capR.textContent = over ? 'over 8s budget' : 'of 8s budget';
+    };
+
+    // "What stopped" — the last error, surfaced prominently above the live panels.
+    MCPPremiereBridge.prototype.showFailure = function(message) {
+        var card = document.getElementById('failCard');
+        if (!card) return;
+        var titleEl = document.getElementById('failTitle');
+        var detailEl = document.getElementById('failDetail');
+        var whenEl = document.getElementById('failWhen');
+        var text = String(message === null || message === undefined ? '' : message);
+        // First sentence/line as the headline; the whole thing verbatim below it.
+        var headline = text.split('\n')[0];
+        if (headline.length > 120) headline = headline.substring(0, 117) + '...';
+        if (titleEl) titleEl.textContent = headline;
+        if (detailEl) detailEl.textContent = text;
+        if (whenEl) {
+            try {
+                var d = new Date();
+                whenEl.textContent = ('0' + d.getHours()).slice(-2) + ':' +
+                    ('0' + d.getMinutes()).slice(-2) + ':' + ('0' + d.getSeconds()).slice(-2);
+            } catch (e) { whenEl.textContent = ''; }
+        }
+        card.hidden = false;
+    };
+
+    MCPPremiereBridge.prototype.hideFailure = function() {
+        var card = document.getElementById('failCard');
+        if (card) card.hidden = true;
     };
 
     MCPPremiereBridge.prototype.log = function(message, level) {
@@ -1283,6 +1524,10 @@
             logContainer.appendChild(el);
             logContainer.scrollTop = logContainer.scrollHeight;
         }
+        // Errors also raise the prominent "What stopped" card. The log is the one place
+        // every failure path already funnels through — rejections, host failures, and
+        // command errors alike — so surfacing here catches them all from a single hook.
+        if (level === 'error') this.showFailure(message);
         console.log(message);
     };
 

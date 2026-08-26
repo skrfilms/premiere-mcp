@@ -17,7 +17,7 @@
  * other's commands, and to make the trust boundary explicit. Protection from OTHER users comes from
  * the 0700 directory and the ownership check.
  */
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, statSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, statSync, mkdirSync, rmSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PremiereProBridge } from '../../bridge/index.js';
@@ -59,7 +59,11 @@ describe('per-session auth token', () => {
     expect(payload.pid).toBe(process.pid);
   });
 
-  it('issues a different token per session, so a token cannot outlive its process', async () => {
+  it('issues a different token per session', async () => {
+    // This says nothing about a token being RETIRED — it was once titled "so a token cannot
+    // outlive its process", matching a comment in the bridge that claimed the same thing. Both
+    // were wrong: with PREMIERE_TEMP_DIR set the directory survives, so the file did too. What
+    // actually retires a token is asserted in 'retiring a token' below.
     await initBridge();
     const first = JSON.parse(readFileSync(join(dir, 'auth-token.json'), 'utf8')).token;
     await initBridge();
@@ -75,6 +79,131 @@ describe('per-session auth token', () => {
     mkdirSync(dir, { mode: 0o777 });
     await initBridge();
     expect(statSync(dir).mode & 0o777).toBe(0o700);
+  });
+});
+
+/** A pid that is certainly not running, found rather than guessed. */
+function deadPid(): number {
+  for (let candidate = 100000; candidate < 400000; candidate++) {
+    try {
+      process.kill(candidate, 0);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ESRCH') return candidate;
+    }
+  }
+  throw new Error('could not find an unused pid');
+}
+
+const sessionFiles = (): string[] =>
+  readdirSync(dir).filter((name) => name.startsWith('auth-session-') && name.endsWith('.json'));
+
+describe('many servers, one bridge directory', () => {
+  /*
+   * THE CEILING THIS REMOVES. A panel holds ONE socket — to whichever server last published
+   * bridge-endpoint.json — but any number of MCP servers can share a single PREMIERE_TEMP_DIR, and
+   * the rest reach the panel over the file poll. auth-token.json is single-valued and
+   * last-writer-wins, so the panel authorised only the newest server and answered every other one
+   * UNAUTHORIZED through no fault of the caller.
+   *
+   * The fix is one file per server, owned outright by that server: no shared file is ever
+   * read-modify-written, so two servers starting in the same instant cannot erase each other, and
+   * each can delete its own credential on the way out without touching anyone else's.
+   */
+
+  it('publishes a token file of its own, owner-readable only, matching the shared one', async () => {
+    await initBridge();
+    const files = sessionFiles();
+    expect(files).toHaveLength(1);
+
+    const sessionPath = join(dir, files[0] as string);
+    expect(statSync(sessionPath).mode & 0o777).toBe(0o600);
+
+    const session = JSON.parse(readFileSync(sessionPath, 'utf8'));
+    const shared = JSON.parse(readFileSync(join(dir, 'auth-token.json'), 'utf8'));
+    expect(session.token).toMatch(/^[0-9a-f]{64}$/);
+    // The single-server case must stay trivially consistent, or an older panel that reads only the
+    // shared file would authorise a different token than a new panel does.
+    expect(session.token).toBe(shared.token);
+    expect(session.sessionId).toBe(shared.sessionId);
+    expect(session.pid).toBe(process.pid);
+  });
+
+  it('leaves an earlier server’s token in place, so both stay usable', async () => {
+    await initBridge();
+    const firstToken = JSON.parse(readFileSync(join(dir, 'auth-token.json'), 'utf8')).token;
+    await initBridge();
+    const secondToken = JSON.parse(readFileSync(join(dir, 'auth-token.json'), 'utf8')).token;
+
+    const tokens = sessionFiles().map(
+      (name) => JSON.parse(readFileSync(join(dir, name), 'utf8')).token,
+    );
+    // Both live servers are represented. Before this, the first server's credential was simply
+    // overwritten and its commands started coming back UNAUTHORIZED.
+    expect(tokens).toHaveLength(2);
+    expect(tokens).toContain(firstToken);
+    expect(tokens).toContain(secondToken);
+    // The shared file still names the newest, which is also the one the socket points at.
+    expect(secondToken).not.toBe(firstToken);
+  });
+
+  it('reaps the token of a server that is no longer running, and keeps a live one', async () => {
+    // A server killed with SIGKILL never runs its own cleanup. Without reaping, the panel would go
+    // on accepting that token for as long as Premiere stayed open.
+    writeFileSync(
+      join(dir, 'auth-session-ghost.json'),
+      JSON.stringify({ token: 'a'.repeat(64), sessionId: 'ghost', pid: deadPid() }),
+    );
+    writeFileSync(
+      join(dir, 'auth-session-alive.json'),
+      JSON.stringify({ token: 'b'.repeat(64), sessionId: 'alive', pid: process.pid }),
+    );
+    // Malformed: it can never authorise anything, so dropping it is safe and keeps the list short.
+    writeFileSync(join(dir, 'auth-session-torn.json'), '{"token":');
+
+    await initBridge();
+
+    const names = sessionFiles();
+    expect(names).not.toContain('auth-session-ghost.json');
+    expect(names).not.toContain('auth-session-torn.json');
+    expect(names).toContain('auth-session-alive.json');
+  });
+});
+
+describe('retiring a token', () => {
+  it('removes its own token on cleanup, so a dead server stops being authorised', async () => {
+    const bridge = await initBridge();
+    expect(sessionFiles()).toHaveLength(1);
+    expect(existsSync(join(dir, 'auth-token.json'))).toBe(true);
+
+    await bridge.cleanup();
+
+    // Both go, because this server owned both. Previously neither did: cleanup() only removes the
+    // temp directory when it created it, and PREMIERE_TEMP_DIR being set makes that false — which
+    // is exactly the configuration in use, so the token always outlived its process.
+    expect(sessionFiles()).toHaveLength(0);
+    expect(existsSync(join(dir, 'auth-token.json'))).toBe(false);
+  });
+
+  it('does NOT delete the shared token when a newer server owns it', async () => {
+    // The reason an unconditional unlink would be the wrong fix. Deleting a live server's
+    // credential would break it; deleting the LAST token file is worse still, because the panel
+    // treats "no token file" as an older server and runs unauthenticated.
+    const first = await initBridge();
+    const second = await initBridge();
+    const secondToken = JSON.parse(readFileSync(join(dir, 'auth-token.json'), 'utf8')).token;
+
+    await first.cleanup();
+
+    expect(existsSync(join(dir, 'auth-token.json'))).toBe(true);
+    expect(JSON.parse(readFileSync(join(dir, 'auth-token.json'), 'utf8')).token).toBe(secondToken);
+    // Only the departing server's own file went; the survivor's is untouched.
+    const remaining = sessionFiles().map(
+      (name) => JSON.parse(readFileSync(join(dir, name), 'utf8')).token,
+    );
+    expect(remaining).toEqual([secondToken]);
+
+    await second.cleanup();
+    expect(sessionFiles()).toHaveLength(0);
   });
 });
 

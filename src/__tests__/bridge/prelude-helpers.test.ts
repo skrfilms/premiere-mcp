@@ -30,7 +30,7 @@ jest.mock('node:crypto', () => ({
 
 describe('prelude QE helpers', () => {
   const mockFs = fs as jest.Mocked<typeof fs>;
-  const commandPath = '/tmp/premiere-mcp-bridge-test/command-test-uuid-1234.json';
+  const _commandPath = '/tmp/premiere-mcp-bridge-test/command-test-uuid-1234.json';
 
   beforeEach(() => {
     jest.clearAllMocks();
