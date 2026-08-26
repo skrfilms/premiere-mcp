@@ -1834,6 +1834,8 @@ export class PremiereProTools {
       { name: 'assert_clips_unchanged', description: 'Compares the current sequence state to a previously saved snapshot JSON. Returns a diff of any changes.', inputSchema: z.object({ snapshotPath: z.string(), sequenceId: z.string().optional() }) },
       { name: 'get_app_property', description: 'Reads an application-level property via app.properties.getProperty(key).', inputSchema: z.object({ key: z.string() }) },
       { name: 'set_app_property', description: 'Sets an application-level property via app.properties.setProperty(key, value) with readback verification.', inputSchema: z.object({ key: z.string(), value: z.string() }) },
+      { name: 'get_autosave_settings', description: 'Reads Premiere\'s Auto Save preferences (enabled, interval in minutes, max project versions, also-save-current-project, save-to-cloud) plus the auto-save folder. Wraps the BE.Prefs.AutoSave.* keys so callers do not have to know them. Read-only.', inputSchema: z.object({}) },
+      { name: 'set_autosave_settings', description: 'Sets Premiere\'s Auto Save preferences with per-key readback verification. IMPORTANT: app.properties writes the LIVE preference; Premiere only flushes preferences to its prefs file on a graceful quit, so a crash or force-quit before then reverts the change. Set persistToPrefsFile (default true) to also rewrite the single matching tag in the prefs file on disk, backed up first, so both stores agree. A running auto-save timer may not re-read the interval until the next cycle.', inputSchema: z.object({ enabled: z.boolean().optional().describe('BE.Prefs.AutoSave.DoSave — master Auto Save switch.'), intervalMinutes: z.number().int().min(1).max(1440).optional().describe('Minutes between auto-saves.'), maxVersions: z.number().int().min(1).max(1000).optional().describe('How many auto-save versions to keep before the oldest is discarded.'), alsoSaveCurrentProject: z.boolean().optional().describe('Also save the open project itself, not just a copy into the Auto-Save folder.'), saveToCloud: z.boolean().optional().describe('Auto-save backups to Creative Cloud.'), persistToPrefsFile: z.boolean().optional().describe('Also write the value into Premiere\'s prefs file on disk so a force-quit cannot revert it. Default true.') }) },
       { name: 'get_panel_visibility', description: 'Returns the visibility state of key Premiere panels using app.isWindowVisible().', inputSchema: z.object({ panels: z.array(z.string()).optional().describe('Panel names to check. Default: Timeline, Source Monitor, Program Monitor, Effects, Lumetri Color.') }) },
       { name: 'api_surface_report', description: 'Returns a static report of the confirmed API surface: QE clip methods, QE sequence methods, confirmed DOM methods, and the honest wall of inaccessible features.', inputSchema: z.object({}) },
 
@@ -4326,6 +4328,8 @@ export class PremiereProTools {
         case 'assert_clips_unchanged': return await this.assertClipsUnchanged(args.snapshotPath, args.sequenceId);
         case 'get_app_property': return await this.getAppProperty(args.key);
         case 'set_app_property': return await this.setAppProperty(args.key, args.value);
+        case 'get_autosave_settings': return await this.getAutosaveSettings();
+        case 'set_autosave_settings': return await this.setAutosaveSettings(args);
         case 'get_panel_visibility': return await this.getPanelVisibility(args.panels);
         case 'api_surface_report': return this.apiSurfaceReport();
         case 'apply_morph_cut': return await this.applyMorphCut(args.trackIndex, args.clipIndex, args.sequenceId, args.durationFrames);
@@ -18036,6 +18040,199 @@ ${this.buildSequenceResolver(sequenceId)}
           note: back === before ? 'The property already held this value; nothing changed.' : undefined});
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
     `);
+  }
+
+  /**
+   * Premiere's Auto Save preferences, by their real key names.
+   *
+   * These are ordinary app.properties keys, so set_app_property could already reach them — but
+   * only if the caller knew the exact strings, and nothing told them that a live write is not a
+   * durable one. Both halves of that cost a real 111-sequence cut once.
+   */
+  private static readonly AUTOSAVE_KEYS = {
+    enabled: 'BE.Prefs.AutoSave.DoSave',
+    intervalMinutes: 'BE.Prefs.AutoSave.Interval',
+    maxVersions: 'BE.Prefs.AutoSave.MaxProjectVersions',
+    alsoSaveCurrentProject: 'BE.Prefs.AutoSave.AlsoSaveCurrentProject',
+    saveToCloud: 'BE.Prefs.AutoSave.DoSaveToCloud',
+  } as const;
+
+  private static readonly AUTOSAVE_FOLDER_KEY = 'BE.Prefs.ScratchDisks.FirstAutoSaveFolder';
+
+  /**
+   * Locates Premiere's prefs file by searching, not by constructing a path from a guessed version
+   * number and account name. A constructed path that misses silently reports "persisted" for a
+   * write that went nowhere, which is the exact failure mode this tool exists to prevent.
+   */
+  private findPremierePrefsFile(): string | null {
+    const roots = platform() === 'win32'
+      ? [pathSync.join(process.env.APPDATA ?? pathSync.join(homedir(), 'AppData', 'Roaming'), 'Adobe', 'Premiere Pro')]
+      : [
+        pathSync.join(homedir(), 'Documents', 'Adobe', 'Premiere Pro'),
+        pathSync.join(homedir(), 'Library', 'Preferences', 'Adobe', 'Premiere Pro'),
+      ];
+    const found: { path: string; mtime: number }[] = [];
+    for (const root of roots) {
+      let versions: string[] = [];
+      try { versions = fsSync.readdirSync(root); } catch { continue; }
+      for (const version of versions) {
+        const versionDir = pathSync.join(root, version);
+        let profiles: string[] = [];
+        try { profiles = fsSync.readdirSync(versionDir); } catch { continue; }
+        for (const profile of profiles) {
+          if (!profile.startsWith('Profile-')) continue;
+          const candidate = pathSync.join(versionDir, profile, 'Adobe Premiere Pro Prefs');
+          try {
+            const stat = fsSync.statSync(candidate);
+            if (stat.isFile()) found.push({ path: candidate, mtime: stat.mtimeMs });
+          } catch { /* not this one */ }
+        }
+      }
+    }
+    // Newest wins: several Premiere versions can be installed and only the running one is current.
+    found.sort((a, b) => b.mtime - a.mtime);
+    return found.length > 0 ? found[0]!.path : null;
+  }
+
+  /**
+   * Rewrites one `<Key>value</Key>` tag in the prefs file, backing the file up first.
+   *
+   * Deliberately surgical: it refuses unless exactly one occurrence of the key is present, because
+   * a broad substitution in Adobe's prefs file is how you make Premiere reset every preference on
+   * next launch. Premiere overwrites this file from memory on a graceful quit, so this write only
+   * matters when Premiere is force-quit or crashes before that.
+   */
+  private persistPrefToFile(key: string, value: string): any {
+    // Refuse under a test runner. This method rewrites a real Adobe preferences file discovered by
+    // globbing the user's home directory, and it is on by default — so a unit test that calls
+    // set_autosave_settings with default arguments would silently trash the preferences of the
+    // Premiere install on the machine running CI. That is the same shape as the harness that
+    // overwrote a 111-sequence cut: real user state reached through a soft check. A hard refusal
+    // costs a test nothing (assert on the returned reason) and is the only thing that cannot be
+    // forgotten.
+    if (process.env.JEST_WORKER_ID !== undefined || process.env.NODE_ENV === 'test' || process.env.PREMIERE_MCP_NO_PREFS_WRITE === '1') {
+      return {
+        persisted: false,
+        refused: true,
+        reason: 'Refusing to write Premiere\'s preferences file from a test runner or with PREMIERE_MCP_NO_PREFS_WRITE=1 set. The live preference was still applied; it will reach disk when Premiere quits gracefully.',
+      };
+    }
+    const prefsPath = this.findPremierePrefsFile();
+    if (!prefsPath) {
+      return { persisted: false, reason: 'Could not locate Premiere\'s "Adobe Premiere Pro Prefs" file, so the live value will only reach disk when Premiere quits gracefully.' };
+    }
+    let source: string;
+    try { source = fsSync.readFileSync(prefsPath, 'utf8'); } catch (e: any) {
+      return { persisted: false, prefsPath, reason: `Could not read the prefs file: ${e.message}` };
+    }
+    const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const tag = new RegExp(`(<${escaped}>)([^<]*)(</${escaped}>)`, 'g');
+    const matches = source.match(tag);
+    if (!matches || matches.length !== 1) {
+      return { persisted: false, prefsPath, reason: `Expected exactly one <${key}> tag in the prefs file, found ${matches ? matches.length : 0}. The file was not modified.` };
+    }
+    const backupPath = `${prefsPath}.mcp-backup`;
+    try {
+      if (!fsSync.existsSync(backupPath)) fsSync.copyFileSync(prefsPath, backupPath);
+      const updated = source.replace(tag, `$1${value}$3`);
+      fsSync.writeFileSync(prefsPath, updated, 'utf8');
+      const readback = fsSync.readFileSync(prefsPath, 'utf8').match(tag);
+      const persistedValue = readback ? readback[0].replace(/^<[^>]*>|<[^>]*>$/g, '') : null;
+      if (persistedValue !== value) {
+        return { persisted: false, prefsPath, backupPath, reason: `The prefs file reads back "${persistedValue}" rather than "${value}".` };
+      }
+      return { persisted: true, prefsPath, backupPath, verifiedBy: 'prefs-file readback' };
+    } catch (e: any) {
+      return { persisted: false, prefsPath, reason: `Could not write the prefs file: ${e.message}` };
+    }
+  }
+
+  private async getAutosaveSettings(): Promise<any> {
+    const keys = PremiereProTools.AUTOSAVE_KEYS;
+    const result = await this.bridge.executeScript(`
+      try {
+        function rd(k){ try{ var v=app.properties.getProperty(k); return v===undefined?null:String(v); }catch(e){ return null; } }
+        return JSON.stringify({success:true,
+          enabled:rd(${JSON.stringify(keys.enabled)}),
+          intervalMinutes:rd(${JSON.stringify(keys.intervalMinutes)}),
+          maxVersions:rd(${JSON.stringify(keys.maxVersions)}),
+          alsoSaveCurrentProject:rd(${JSON.stringify(keys.alsoSaveCurrentProject)}),
+          saveToCloud:rd(${JSON.stringify(keys.saveToCloud)}),
+          autoSaveFolder:rd(${JSON.stringify(PremiereProTools.AUTOSAVE_FOLDER_KEY)})});
+      }catch(e){return JSON.stringify({success:false,error:e.toString()});}
+    `);
+    if (!result || result.success === false) return result;
+    const num = (v: any) => (v === null || v === '' || isNaN(Number(v)) ? null : Number(v));
+    const bool = (v: any) => (v === null || v === '' ? null : String(v) === 'true');
+    return {
+      success: true,
+      enabled: bool(result.enabled),
+      intervalMinutes: num(result.intervalMinutes),
+      maxVersions: num(result.maxVersions),
+      alsoSaveCurrentProject: bool(result.alsoSaveCurrentProject),
+      saveToCloud: bool(result.saveToCloud),
+      autoSaveFolder: result.autoSaveFolder,
+      raw: result,
+      prefsFile: this.findPremierePrefsFile(),
+      keys,
+    };
+  }
+
+  private async setAutosaveSettings(args: {
+    enabled?: boolean;
+    intervalMinutes?: number;
+    maxVersions?: number;
+    alsoSaveCurrentProject?: boolean;
+    saveToCloud?: boolean;
+    persistToPrefsFile?: boolean;
+  }): Promise<any> {
+    const keys = PremiereProTools.AUTOSAVE_KEYS;
+    const requested: { field: string; key: string; value: string }[] = [];
+    if (args.enabled !== undefined) requested.push({ field: 'enabled', key: keys.enabled, value: String(args.enabled) });
+    if (args.intervalMinutes !== undefined) requested.push({ field: 'intervalMinutes', key: keys.intervalMinutes, value: String(args.intervalMinutes) });
+    if (args.maxVersions !== undefined) requested.push({ field: 'maxVersions', key: keys.maxVersions, value: String(args.maxVersions) });
+    if (args.alsoSaveCurrentProject !== undefined) requested.push({ field: 'alsoSaveCurrentProject', key: keys.alsoSaveCurrentProject, value: String(args.alsoSaveCurrentProject) });
+    if (args.saveToCloud !== undefined) requested.push({ field: 'saveToCloud', key: keys.saveToCloud, value: String(args.saveToCloud) });
+
+    if (requested.length === 0) {
+      return { success: false, error: 'No Auto Save setting was given. Pass at least one of enabled, intervalMinutes, maxVersions, alsoSaveCurrentProject, saveToCloud.' };
+    }
+
+    const persist = args.persistToPrefsFile !== false;
+    const changes: any[] = [];
+    for (const item of requested) {
+      const live = await this.setAppProperty(item.key, item.value);
+      const applied = live?.success === true && live?.verified === true;
+      changes.push({
+        field: item.field,
+        key: item.key,
+        requested: item.value,
+        before: live?.before ?? null,
+        readback: live?.readback ?? null,
+        liveApplied: applied,
+        liveError: live?.error ?? live?.setError ?? live?.unverifiedReason ?? undefined,
+        prefsFile: persist && applied ? this.persistPrefToFile(item.key, item.value) : undefined,
+      });
+    }
+
+    const failed = changes.filter((c) => !c.liveApplied);
+    const notPersisted = changes.filter((c) => c.prefsFile && c.prefsFile.persisted === false);
+    return {
+      success: failed.length === 0,
+      verified: failed.length === 0,
+      verifiedBy: 'app.properties.getProperty() readback per key' + (persist ? ' + prefs-file readback' : ''),
+      changes,
+      ...(failed.length ? { error: `${failed.length} of ${changes.length} Auto Save settings did not read back as requested.` } : {}),
+      note: [
+        'app.properties writes the LIVE preference. Premiere flushes preferences to its prefs file only on a graceful quit.',
+        persist
+          ? (notPersisted.length
+            ? 'The prefs file could not be updated for every key, so a force-quit before Premiere exits normally may revert those.'
+            : 'The prefs file was updated too, so a force-quit cannot revert this.')
+          : 'persistToPrefsFile was false, so a force-quit before Premiere exits normally will revert this.',
+        'A running auto-save timer may not pick up a new interval until its next cycle.',
+      ].join(' '),
+    };
   }
 
   private async getPanelVisibility(panels?: string[]): Promise<any> {
