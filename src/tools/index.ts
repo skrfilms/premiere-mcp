@@ -289,6 +289,58 @@ export function evaluateTextInjectionResult(result: any): any {
   };
 }
 
+/** The aggregate verdict for a tool that loops over N items. */
+export interface BatchVerdict {
+  success: boolean;
+  batchStatus: 'complete' | 'partial' | 'failed' | 'empty';
+  batchSummary: { requested: number; succeeded: number; failed: number };
+  error?: string;
+  warning?: string;
+}
+
+/**
+ * Decide whether a batch of per-item results is a success.
+ *
+ * Every wrapper that loops used to end in a flat `success: true`, so a batch whose every single
+ * item failed reported exactly what a batch that fully worked reported. The per-item errors WERE in
+ * the payload, but `success` is the field an agent branches on, and it said OK — which is the one
+ * thing this server is not supposed to do.
+ *
+ * The three states deliberately match `evaluateTextInjectionResult` above so a caller reads one
+ * vocabulary across the catalogue: nothing worked is a FAILURE, something worked is a success
+ * carrying a `warning`, and the counts are always present either way. An empty request is honest
+ * rather than an error — asking for zero items and getting zero is not a fault.
+ */
+export function summarizeBatch<T>(
+  items: T[],
+  isOk: (item: T) => boolean,
+  noun: string,
+): BatchVerdict {
+  const requested = items.length;
+  const succeeded = items.filter((item) => isOk(item)).length;
+  const failed = requested - succeeded;
+  const batchSummary = { requested, succeeded, failed };
+
+  if (requested === 0) return { success: true, batchStatus: 'empty', batchSummary };
+  if (succeeded === 0) {
+    return {
+      success: false,
+      batchStatus: 'failed',
+      batchSummary,
+      error: `All ${requested} ${noun} failed. Nothing was produced; see the per-item results for each reason.`,
+    };
+  }
+  if (failed > 0) {
+    return {
+      success: true,
+      batchStatus: 'partial',
+      batchSummary,
+      warning: `${failed} of ${requested} ${noun} failed; the other ${succeeded} succeeded. See the per-item results.`,
+    };
+  }
+  return { success: true, batchStatus: 'complete', batchSummary };
+}
+
 const motionStyleSchema = z.enum(['push_in', 'pull_out', 'alternate', 'none']);
 
 const clipPlanSchema = z.object({
@@ -3117,8 +3169,8 @@ export class PremiereProTools {
       { name: 'start_encode_and_monitor', description: 'Adds the active sequence to the AME queue and starts encoding. Returns job status immediately. Use get_export_progress to poll.', inputSchema: z.object({ outputPath: z.string().describe('Output file path'), presetPath: z.string().optional().describe('AME .epr preset path'), workAreaType: z.number().optional().describe('0=entire, 1=work area. Default 0.') }) },
       { name: 'export_per_marker_range', description: 'Exports separate clips for each pair of sequence in/out markers (by name pattern). Sets sequence work area to each range and calls exportAsMediaDirect.', inputSchema: z.object({ outputDir: z.string().describe('Output directory'), presetPath: z.string().optional().describe('AME preset path'), markerNamePattern: z.string().optional().describe('Filter markers by name prefix. Default: all marker pairs.') }) },
       { name: 'batch_export_sequences', description: 'Exports multiple sequences with the same AME preset. Args: sequenceIds, outputDir, preset. Returns list of output paths.', inputSchema: z.object({ sequenceIds: z.array(z.string()).describe('Sequence IDs to export'), outputDir: z.string().describe('Output directory'), presetPath: z.string().optional().describe('AME .epr preset path') }) },
-      { name: 'export_omf_with_settings', description: 'Exports the active sequence as OMF via app.project.exportOMF(). Reports the export path and any known limitations (zero-arg API).', inputSchema: z.object({ outputPath: z.string().describe('Output .omf file path') }) },
-      { name: 'export_aaf_with_settings', description: 'Exports the active sequence as AAF via app.project.exportAAF(). Reports the export path and any known limitations (zero-arg API).', inputSchema: z.object({ outputPath: z.string().describe('Output .aaf file path') }) },
+      { name: 'export_omf_with_settings', description: 'Exports the active sequence as OMF via app.project.exportOMF(), then verifies it by checking that a new file arrived at outputPath (the API reports nothing about its own result). Only the path is honoured; this API exposes no other settings. If Premiere rejects the full argument list, a zero-argument fallback runs, which cannot write to outputPath and is reported as a failure.', inputSchema: z.object({ outputPath: z.string().describe('Output .omf file path') }) },
+      { name: 'export_aaf_with_settings', description: 'Exports the active sequence as AAF via app.project.exportAAF(), then verifies it by checking that a new file arrived at outputPath (the API reports nothing about its own result). Only the path is honoured; this API exposes no other settings. If Premiere rejects the full argument list, a zero-argument fallback runs, which cannot write to outputPath and is reported as a failure.', inputSchema: z.object({ outputPath: z.string().describe('Output .aaf file path') }) },
       { name: 'verify_export_file', description: 'Uses ffprobe to verify an exported file: returns duration, fps, resolution, codec, file size, and whether they match expected sequence settings.', inputSchema: z.object({ filePath: z.string().describe('Path to the exported file to verify'), expectedDurationSecs: z.number().optional(), expectedFps: z.number().optional(), expectedWidth: z.number().optional(), expectedHeight: z.number().optional() }) },
 
       // Title & MOGRT tools
@@ -20461,7 +20513,10 @@ ${this.buildSequenceResolver(sequenceId)}
       } catch (e: any) { results[tool] = `ERROR: ${e.message?.slice(0, 80)}`; }
     }
     const passed = Object.values(results).filter(v => v === 'PASS').length;
-    return { success: true, passed, total: tools.length, results };
+    // A self-test named "honesty" reporting success:true while 0 of 4 probes passed was the least
+    // defensible instance of the flat-true batch bug in the catalogue.
+    const verdict = summarizeBatch(Object.values(results), (v) => v === 'PASS', 'probe(s)');
+    return { ...verdict, passed, total: tools.length, results };
   }
 
   private async convertProjectToProduction(productionPath: string, description?: string): Promise<any> {
@@ -20724,31 +20779,96 @@ ${this.buildSequenceResolver(sequenceId)}
       `);
       results.push(r);
     }
-    return { success: true, count: results.length, results };
+    // Three unknown sequence IDs used to come back as {success:true, count:3} with three
+    // "Sequence not found" entries buried in `results`, so an agent moved on believing three files
+    // existed. No file check is possible here: exportAsMediaDirect queues in AME and returns before
+    // anything is written, so this reports only what the per-sequence calls reported.
+    const verdict = summarizeBatch(results, (r: any) => r?.success !== false, 'sequence export(s)');
+    return { ...verdict, count: results.length, results };
   }
 
   private async exportOmfWithSettings(outputPath: string): Promise<any> {
-    return await this.bridge.executeScript(`
+    return await this.exportInterchange('OMF', outputPath, `
       try {
         app.project.exportOMF(app.project.activeSequence, ${JSON.stringify(outputPath)}, '', '', '', '', false, false, 0, false);
-        return JSON.stringify({success:true,outputPath:${JSON.stringify(outputPath)},note:'OMF exported. The exportOMF API has limited parameter control.'});
+        return JSON.stringify({called:true,fallbackUsed:false});
       } catch(e) {
-        try { app.project.exportOMF(); return JSON.stringify({success:true,note:'exportOMF called with no args (uses project defaults)'}); }
-        catch(e2) { return JSON.stringify({success:false,error:e2.toString()}); }
+        try { app.project.exportOMF(); return JSON.stringify({called:true,fallbackUsed:true,firstError:e.toString()}); }
+        catch(e2) { return JSON.stringify({called:false,error:e2.toString(),firstError:e.toString()}); }
       }
     `);
   }
 
   private async exportAafWithSettings(outputPath: string): Promise<any> {
-    return await this.bridge.executeScript(`
+    return await this.exportInterchange('AAF', outputPath, `
       try {
         app.project.exportAAF(app.project.activeSequence, ${JSON.stringify(outputPath)}, '', '', false, false, 0, false, false, false);
-        return JSON.stringify({success:true,outputPath:${JSON.stringify(outputPath)},note:'AAF exported.'});
+        return JSON.stringify({called:true,fallbackUsed:false});
       } catch(e) {
-        try { app.project.exportAAF(); return JSON.stringify({success:true,note:'exportAAF called with no args'}); }
-        catch(e2) { return JSON.stringify({success:false,error:e2.toString()}); }
+        try { app.project.exportAAF(); return JSON.stringify({called:true,fallbackUsed:true,firstError:e.toString()}); }
+        catch(e2) { return JSON.stringify({called:false,error:e2.toString(),firstError:e.toString()}); }
       }
     `);
+  }
+
+  /** Size and mtime of a path, or null when it is absent or unreadable. */
+  private statSnapshot(filePath: string): { size: number; mtimeMs: number } | null {
+    try {
+      const s = fsSync.statSync(filePath);
+      return { size: s.size, mtimeMs: s.mtimeMs };
+    } catch { return null; }
+  }
+
+  /**
+   * Run an OMF/AAF export and confirm it by looking for the file, rather than by the call not
+   * throwing.
+   *
+   * Neither `exportOMF` nor `exportAAF` reports whether it worked — the return value is
+   * undocumented and was discarded — so the old code answered `success:true` on any call that did
+   * not raise, with `verifyExportFile` sitting unused a few lines below. The zero-argument fallback
+   * was the sharper edge: that form takes no path at all, so it cannot write to `outputPath`, yet
+   * it reported success AND the path the caller asked for.
+   *
+   * The pre-snapshot is the part that makes this honest. Checking only `existsSync` afterwards
+   * would certify a stale file left by an earlier export as this one's output — the same
+   * assume-it-worked reasoning in a new place — so an unchanged size+mtime counts as "no file
+   * produced".
+   */
+  private async exportInterchange(kind: 'OMF' | 'AAF', outputPath: string, script: string): Promise<any> {
+    const before = this.statSnapshot(outputPath);
+    const raw: any = await this.bridge.executeScript(script);
+
+    if (!raw || raw.called !== true) {
+      return {
+        success: false, verified: false, kind, outputPath,
+        error: raw?.error ? `${kind} export failed: ${raw.error}` : `${kind} export did not run.`,
+        firstError: raw?.firstError ?? null,
+      };
+    }
+
+    const after = this.statSnapshot(outputPath);
+    const fallbackUsed = raw.fallbackUsed === true;
+    const produced = after !== null && (before === null || after.mtimeMs !== before.mtimeMs || after.size !== before.size);
+
+    if (!produced) {
+      return {
+        success: false, verified: true, kind, outputPath, fallbackUsed,
+        fileExisted: before !== null,
+        error: fallbackUsed
+          ? `Premiere rejected the full ${kind} argument list, so the zero-argument fallback ran instead. That form takes no path, so nothing was written to ${outputPath}; whatever it produced went to the project's own default location.`
+          : `Premiere raised no error, but no new file appeared at ${outputPath}. ${kind} export does not report its own result, so this is reported as a failure rather than assumed to have worked.`,
+        firstError: raw.firstError ?? null,
+      };
+    }
+
+    return {
+      success: true, verified: true, kind, outputPath,
+      fileSizeBytes: after.size, fallbackUsed,
+      note: fallbackUsed
+        ? `The full ${kind} argument list was rejected and the zero-argument fallback ran, but a new file is present at the requested path.`
+        : `${kind} exported. This API exposes limited parameter control, so only the path is honoured.`,
+      firstError: raw.firstError ?? null,
+    };
   }
 
   private verifyExportFile(filePath: string, expectedDuration?: number, expectedFps?: number, expectedWidth?: number, expectedHeight?: number): any {
@@ -20759,7 +20879,10 @@ ${this.buildSequenceResolver(sequenceId)}
       const info = JSON.parse(out);
       const video = (info.streams || []).find((s: any) => s.codec_type === 'video');
       const dur = parseFloat(info.format?.duration ?? '0');
-      const fps = video ? eval(video.r_frame_rate || '0') : 0;
+      // r_frame_rate arrives as "num/den" (e.g. "24000/1001"). Parsed rather than eval'd: this is a
+      // string from an external process, and the comment on the generated-script builder above says
+      // this codebase does not reach for eval()/Function() in the host — that applies here too.
+      const fps = (video && typeof video.r_frame_rate === 'string' ? this.parseFrameRate(video.r_frame_rate) : 0) ?? 0;
       const w = video?.width, h = video?.height;
       const codec = video?.codec_name;
       const size = fs.statSync(filePath).size;
@@ -20781,7 +20904,8 @@ ${this.buildSequenceResolver(sequenceId)}
       const r2: any = await this.executeTool('add_text_overlay', { text: title, startTime: startTimeSecs, duration: durationSecs, position: 'bottom-left', trackIndex: trackIndex + 1 });
       results.push({ layer: 'title', result: r2 });
     }
-    return { success: true, name, title, startTimeSecs, durationSecs, layers: results };
+    const verdict = summarizeBatch(results, (entry: any) => entry?.result?.success !== false, 'text layer(s)');
+    return { ...verdict, name, title, startTimeSecs, durationSecs, layers: results };
   }
 
   private async titleCard(text: string, startTimeSecs: number, durationSecs: number, trackIndex: number, _seqId?: string): Promise<any> {
@@ -20898,7 +21022,11 @@ ${this.buildSequenceResolver(sequenceId)}
       const r = await this.lowerThirdPreset(item.name, item.title, item.timeSecs, durationSecs, trackIndex, seqId);
       results.push({ ...item, result: r });
     }
-    return { success: true, count: results.length, results };
+    // Nested: each item is a lower_third_preset, which is itself a batch of text layers. Its
+    // verdict is now honest, so reading `result.success` here propagates a failure two levels up
+    // instead of stopping at the inner wrapper's old flat true.
+    const verdict = summarizeBatch(results, (entry: any) => entry?.result?.success !== false, 'graphic(s)');
+    return { ...verdict, count: results.length, results };
   }
 
   private async countdownLeader(startTimeSecs: number, count: number, trackIndex: number, _seqId?: string): Promise<any> {
@@ -20908,7 +21036,10 @@ ${this.buildSequenceResolver(sequenceId)}
       const r: any = await this.executeTool('add_text_overlay', { text: String(i), startTime: t, duration: 1, position: 'center', trackIndex });
       results.push({ count: i, timeSecs: t, result: r?.success !== false ? 'OK' : 'FAIL' });
     }
-    return { success: true, count, startTimeSecs, layers: results };
+    // This one already recorded 'FAIL' per layer, which made the flat true worse rather than
+    // better: the tool knew the count was wrong and still reported OK.
+    const verdict = summarizeBatch(results, (entry) => entry.result === 'OK', 'countdown number(s)');
+    return { ...verdict, count, startTimeSecs, layers: results };
   }
 
   private async createAdjustmentLayerAt(startTimeSecs: number, durationSecs: number, trackIndex?: number, _seqId?: string): Promise<any> {
