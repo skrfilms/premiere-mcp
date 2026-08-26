@@ -64,6 +64,12 @@ import {
   MAX_EASE_SAMPLES,
   sampleEaseKeyframes,
 } from './easing.js';
+import {
+  type TransactionExecutor,
+  TRANSACTION_TOOL_NAME,
+  transactSequenceEditsSchema,
+  runTransaction,
+} from './transactions.js';
 
 export interface MCPTool {
   name: string;
@@ -3156,6 +3162,13 @@ export class PremiereProTools {
       { name: 'activate_tools', description: 'Promotes hidden tools into the advertised tool list for the rest of this session, so the client sees their real typed schemas instead of routing through call_tool. Pass explicit names, or a query to activate the top matches of a catalogue search. Emits a tools/list_changed notification, so a client that follows the MCP spec re-lists automatically. Returns the measured context cost of the new list, because growing the menu is a real cost and should be visible rather than silent. Refuses any tool an authority boundary excludes (read-only profile, explicit allowlist, or exclusion veto) and says which. Activation is session state and is never persisted -- restarting the server returns exactly the configured profile.', inputSchema: z.object({ names: z.array(z.string()).optional().describe('Exact tool names to advertise, e.g. ["normalize_loudness","loudness_report"]'), query: z.string().optional().describe('Instead of names: activate the best catalogue matches for this keyword (same ranking as find_tool)'), limit: z.number().optional().describe('With query: how many matches to activate (default 8, max 50)') }) },
       { name: 'deactivate_tools', description: 'Removes tools previously added by activate_tools from the advertised list, shrinking the context cost back down. Pass names, or all:true to return to exactly the configured profile. Emits tools/list_changed. Cannot remove a tool the configured profile itself advertises -- change PREMIERE_MCP_PROFILE for that.', inputSchema: z.object({ names: z.array(z.string()).optional().describe('Activated tool names to stop advertising'), all: z.boolean().optional().describe('Deactivate everything activate_tools added this session (default false)') }) },
       { name: 'get_tool_typings', description: 'Returns TypeScript declarations (.d.ts) for this server\'s tools: an argument interface per tool, a ToolName union, and one overloaded callTool signature per callable tool. Fetch this BEFORE authoring a script or a multi-step plan against these tools -- it turns a wrong argument shape into a compile-time error instead of a runtime tool failure you have to decode from an error string. Generated from the same schemas the server validates against, so it cannot drift. Tools hidden by the active profile are still declared and marked @profileHidden rather than omitted. Read-only: makes no Premiere request.', inputSchema: z.object({ only: z.array(z.string()).optional().describe('Restrict output to these tool names. Omit for the whole catalogue (large - prefer find_tool first, then request typings for the handful you need).'), includeHidden: z.boolean().optional().describe('Declare tools the active profile hides, marked @profileHidden (default true)') }) },
+
+      // Transactional editing. Snapshots the active sequence, runs a plan step by
+      // step, verifies each one, and rolls back to the snapshot if any step fails
+      // or cannot be proven. Refuses before running anything it cannot promise to
+      // undo. Orchestrates existing verified handlers — emits no ExtendScript of
+      // its own. See src/tools/transactions.ts.
+      { name: TRANSACTION_TOOL_NAME, description: 'Runs a multi-step sequence edit as an all-or-nothing transaction: it clones the active sequence into a recovery snapshot FIRST, runs your steps in order, verifies each one (read-back, fingerprint, or the tool\'s own verified flag), and if any step fails or cannot be proven it restores the snapshot and reports exactly where it stopped. Every step is classified BEFORE anything runs; if any step names a tool whose effect escapes one sequence (imports, bin/project-item changes, file writes, arbitrary scripts, project/sequence lifecycle), the whole transaction refuses without touching the project — a sequence clone cannot put those back. dryRun classifies the plan without reading or writing anything. Only wraps edits whose whole effect stays inside the active sequence; run anything else outside a transaction. Read the verifiedEndToEnd, rolledBack, and projectStateNow fields of the result — they say plainly what state the project is in.', inputSchema: transactSequenceEditsSchema },
     ];
   }
 
@@ -3381,6 +3394,43 @@ export class PremiereProTools {
       return { ...result, routed: { requested: name, invoked: true, reachedPastProfile: verdict.reachedPastProfile } };
     }
     return result;
+  }
+
+  /**
+   * transact_sequence_edits: run a plan as an all-or-nothing edit against the
+   * active sequence, rolling back to a snapshot on any failure.
+   *
+   * The orchestration lives in the pure runTransaction state machine; this method
+   * only supplies the executor — a thin adapter that maps each of the eight things
+   * the transaction needs onto an EXISTING verified handler, invoked through
+   * executeTool so the snapshot/diff/restore inherit those handlers' fail-closed
+   * read-backs. It generates no ExtendScript of its own. Every internal call uses
+   * allowUnexposed so the machinery works regardless of which tools the active
+   * profile advertises; the transaction tool itself is the authority gate, and the
+   * classification layer (in transactions.ts) is what refuses unsafe steps.
+   */
+  private async transactSequenceEdits(args: Record<string, any>): Promise<any> {
+    const run = (tool: string, toolArgs: Record<string, unknown>): Promise<any> =>
+      this.executeTool(tool, toolArgs, { allowUnexposed: true });
+
+    const executor: TransactionExecutor = {
+      resolveActiveSequence: () => run('get_active_sequence', {}),
+      fingerprint: (sequenceId?: string) =>
+        run('timeline_fingerprint', sequenceId ? { sequenceId } : {}),
+      createCheckpoint: (sequenceId: string, label: string) =>
+        run('create_recovery_checkpoint', { sequenceId, label }),
+      setActiveSequence: (sequenceId: string) => run('set_active_sequence', { sequenceId }),
+      diffSequences: (sequenceIdA: string, sequenceIdB: string) =>
+        run('diff_sequences', { sequenceIdA, sequenceIdB }),
+      runTool: (tool: string, toolArgs: Record<string, unknown>) => run(tool, toolArgs ?? {}),
+      restoreCheckpoint: (checkpointSequenceId: string, newName: string, setActive: boolean) =>
+        run('restore_recovery_checkpoint', { checkpointSequenceId, newName, setActive }),
+      deleteSequence: (sequenceId: string) => run('delete_sequence', { sequenceId }),
+      renameProjectItem: (projectItemId: string, newName: string) =>
+        run('rename_project_item', { projectItemId, newName }),
+    };
+
+    return runTransaction(executor, (args ?? {}) as never);
   }
 
   /** activate_tools: promote hidden tools into the advertised list for this session. */
@@ -3623,6 +3673,8 @@ export class PremiereProTools {
           return this.activateTools(args);
         case 'deactivate_tools':
           return this.deactivateTools(args);
+        case TRANSACTION_TOOL_NAME:
+          return await this.transactSequenceEdits(args);
         case 'validate_project_for_export':
           return await this.validateProjectForExport(args.sequenceId, args.outputPath, args.presetPath, args.requireNonEmptyTimeline, args.checkGaps);
         case 'get_encoder_presets':
