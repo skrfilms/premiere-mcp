@@ -40,6 +40,13 @@ function panelWithSocket(fsOverrides: Record<string, unknown> = {}) {
     readFileSync: (p: string) => files[p] ?? '',
     writeFileSync: () => {},
     renameSync: () => {},
+    // Derived from `files` so the fake filesystem cannot disagree with itself: a test that adds a
+    // token file has it appear in a directory listing too, which is how the panel finds the tokens
+    // of servers other than the newest.
+    readdirSync: (p: string) =>
+      Object.keys(files)
+        .filter((full) => full.startsWith(`${p}/`))
+        .map((full) => full.slice(p.length + 1)),
     ...fsOverrides,
   };
   const { bridge } = loadPanel({ fs });
@@ -120,6 +127,31 @@ describe('routing frames from the server', () => {
     expect(bridge.currentCommandId).toBeNull();
   });
 
+  it('does not raise a failure card for a shutdown or a supersede, but does for a real one', () => {
+    // The server closes a socket by sending an error frame and then closing, so an ORDINARY
+    // shutdown arrives typed as an error (code 4006, CLOSE_CODES.SHUTDOWN in
+    // src/bridge/socket-transport.ts). Routed to level 'error' it reached showFailure and left a
+    // persistent red "What stopped" card up every time an MCP server exited normally.
+    const cases: Array<[number, boolean]> = [
+      [4006, false], // SHUTDOWN — the server exited; the file poll carries on
+      [4005, false], // SUPERSEDED — another panel took the socket; this one falls back
+      [4002, true],  // AUTH_FAILED — the push channel is misconfigured and needs a human
+      [4003, true],  // PROTOCOL_MISMATCH — likewise
+      [4007, true],  // NOT_LOOPBACK — likewise
+    ];
+
+    for (const [code, expectFailure] of cases) {
+      const { bridge } = panelWithSocket();
+      const levels: string[] = [];
+      bridge.log = (_message: string, level?: string) => { levels.push(level ?? 'info'); };
+
+      bridge.handleSocketMessage(JSON.stringify({ type: 'error', code, message: 'because.' }));
+
+      expect(levels).toHaveLength(1);
+      expect(levels[0] === 'error').toBe(expectFailure);
+    }
+  });
+
   it('maps a cep_js command onto the panel-context branch', () => {
     const { bridge } = panelWithSocket();
     const executed: Array<Record<string, unknown>> = [];
@@ -172,8 +204,94 @@ describe('authorisation applies to both channels', () => {
   });
 });
 
+describe('authorising more than one server at a time', () => {
+  /*
+   * A panel holds ONE socket, to whichever server last published bridge-endpoint.json, while any
+   * number of MCP servers can share one PREMIERE_TEMP_DIR and reach the panel over the file poll.
+   * auth-token.json is single-valued and last-writer-wins, so authorising against it alone rejected
+   * every server except the newest — its commands came back UNAUTHORIZED through no fault of the
+   * caller. Each server now also publishes auth-session-<sessionId>.json, which it owns outright,
+   * and all live ones are accepted.
+   */
+  const OTHER = 'e'.repeat(64);
+
+  function withSecondServer() {
+    const harness = panelWithSocket();
+    harness.files['/tmp/bridge/auth-session-s2.json'] = JSON.stringify({
+      token: OTHER, sessionId: 's2', pid: 4242,
+    });
+    return harness;
+  }
+
+  it('accepts the token of a second server, not only the newest', () => {
+    const { bridge } = withSecondServer();
+    expect(bridge.isCommandAuthorized({ token: TOKEN }).ok).toBe(true);
+    expect(bridge.isCommandAuthorized({ token: OTHER }).ok).toBe(true);
+    // Still not a free pass — an unrelated token is refused.
+    expect(bridge.isCommandAuthorized({ token: 'f'.repeat(64) }).ok).toBe(false);
+  });
+
+  it('names how many servers it checked, so a refusal is diagnosable', () => {
+    const { bridge } = withSecondServer();
+    const refusal = bridge.isCommandAuthorized({ token: 'f'.repeat(64) });
+    expect(refusal.reason).toContain('2 servers');
+  });
+
+  it('still runs unauthenticated when NO token file exists at all', () => {
+    // The backwards-compatible case, and the reason a token is never deleted without checking who
+    // owns it: a server too old to publish one must keep working against a current panel.
+    const { bridge, files } = panelWithSocket();
+    delete files['/tmp/bridge/auth-token.json'];
+    const verdict = bridge.isCommandAuthorized({});
+    expect(verdict.ok).toBe(true);
+    expect(verdict.reason).toContain('unauthenticated');
+  });
+
+  it('fails closed when a token file exists but yields no usable token', () => {
+    // The opposite of the case above, and the distinction that matters: a file that IS there was
+    // published by a server, so enforcement is on. Treating a torn or truncated credential as
+    // "no token file" would turn a corrupt write into an open door.
+    const { bridge, files } = panelWithSocket();
+    files['/tmp/bridge/auth-token.json'] = '{"token":';
+    const verdict = bridge.isCommandAuthorized({ token: TOKEN });
+    expect(verdict.ok).toBe(false);
+    expect(verdict.reason).toContain('no usable token');
+  });
+
+  it('ignores a session file it cannot parse without rejecting the ones it can', () => {
+    const { bridge, files } = withSecondServer();
+    files['/tmp/bridge/auth-session-torn.json'] = '{"token":';
+    expect(bridge.isCommandAuthorized({ token: TOKEN }).ok).toBe(true);
+    expect(bridge.isCommandAuthorized({ token: OTHER }).ok).toBe(true);
+  });
+
+  it('survives a runtime whose fs has no readdirSync', () => {
+    // Read on every command, so a throw here would fire on every 250ms tick. Older CEF builds are
+    // the reason this is guarded rather than assumed.
+    const { bridge } = panelWithSocket({ readdirSync: undefined });
+    expect(() => bridge.isCommandAuthorized({ token: TOKEN })).not.toThrow();
+    expect(bridge.isCommandAuthorized({ token: TOKEN }).ok).toBe(true);
+  });
+});
+
 describe('exactly one channel, enforced at the panel end too', () => {
-  it('stops scanning for command files while the socket is handshaken', () => {
+  it('keeps scanning for command files even while the socket is handshaken', () => {
+    // This asserts the OPPOSITE of what it used to, because the old invariant was wrong and it
+    // cost a whole debugging session. The panel used to skip the file scan whenever socketReady
+    // was true, on the reasoning that "the server publishes over the socket only, so anything in
+    // the directory is stale or belongs to a different server."
+    //
+    // The second half of that sentence is the bug. A panel holds exactly ONE socket — to whichever
+    // server last wrote bridge-endpoint.json — while several servers routinely share one
+    // PREMIERE_TEMP_DIR. Every server except that one was left with no channel at all: its command
+    // files sat unread until it gave up at its 60s timeout, while the panel displayed "Ready".
+    //
+    // Scanning both cannot double-apply anything, because the DOUBLE-APPLICATION IS PREVENTED AT
+    // THE SERVER, not here: a command is published over the socket or to a file, never both. That
+    // is asserted in both directions by 'EXACTLY ONE channel per command' in
+    // src/__tests__/bridge/dual-transport.test.ts. A file found during a socket session is
+    // therefore a DIFFERENT command from a different server, and answering it is the correct thing
+    // to do — even if the answer is UNAUTHORIZED, which at least says so immediately.
     const { bridge } = panelWithSocket();
     let scans = 0;
     bridge.watchDirectory = () => { scans += 1; };
@@ -181,11 +299,31 @@ describe('exactly one channel, enforced at the panel end too', () => {
 
     bridge.socketReady = true;
     bridge.pollTick();
-    // The server publishes over the socket only, so anything in the directory is stale or belongs to
-    // a different server. Executing it would be the double-application this rule exists to prevent.
-    expect(scans).toBe(0);
+    expect(scans).toBe(1);
 
     bridge.socketReady = false;
+    bridge.pollTick();
+    expect(scans).toBe(2);
+  });
+
+  it('scans no directory while a command is already in flight, on either channel', () => {
+    // This is the guard that actually prevents a command running twice, and it is the one the
+    // removed socketReady check was mistakenly credited with. processCommandFile holds
+    // isProcessing for the whole life of the command and only unlinks the file once it has been
+    // answered, so a re-scan before then is the one thing that could re-run it.
+    const { bridge } = panelWithSocket();
+    let scans = 0;
+    bridge.watchDirectory = () => { scans += 1; };
+    bridge.maintainSocket = () => {};
+
+    bridge.isProcessing = true;
+    bridge.socketReady = false;
+    bridge.pollTick();
+    bridge.socketReady = true;
+    bridge.pollTick();
+    expect(scans).toBe(0);
+
+    bridge.isProcessing = false;
     bridge.pollTick();
     expect(scans).toBe(1);
   });
