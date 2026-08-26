@@ -9,7 +9,7 @@ a shared temp directory and the panel noticed it on its next tick. This adds a *
 alongside it — a WebSocket bound to `127.0.0.1` on an ephemeral port — and keeps file IPC as the
 fallback, because file IPC needs no port and triggers no firewall prompt.
 
-Where the field stands (from `docs/INTERNAL-PLAN.md`, Tier 0b / Tier 0 #5): one rival uses an authed
+Where the field stands, from a survey of the other Premiere MCP bridges: one rival uses an authed
 loopback socket with a capability handshake for its **UXP** bridge; another talks WebSocket to its
 CEP panel with no handshake. Nobody has a socket on the **CEP** path with a versioned handshake
 **and** published latency. That combination is what this is.
@@ -182,7 +182,7 @@ transport, not about the host. The end-to-end figure needs the live measurement 
 - `socket` — refuse to publish over file IPC, and say so, naming the setting.
 
 Configurable rather than hardcoded because a peer bridge reports Premiere dying on the first inbound
-socket command on some Windows builds (`docs/INTERNAL-PLAN.md`, Tier 0 strategic risks). That report is
+socket command on some Windows builds. That report is
 **asserted, not verified** — which is a reason to leave an escape hatch, not a reason to default away
 from the socket.
 

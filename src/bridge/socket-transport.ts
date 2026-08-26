@@ -28,7 +28,7 @@
  *
  * WHAT THIS MODULE DOES NOT DO
  * ----------------------------
- * It does not run a relay daemon. `docs/INTERNAL-PLAN.md` (Tier 0 #5) is right that an in-process
+ * It does not run a relay daemon. It is a fair objection that an in-process
  * listener dies with the MCP session, and that a relay is the pattern that survives. This listener
  * is deliberately in-process anyway, because it is bound to the per-session token and the panel
  * re-reads the endpoint file on every reconnect: a server restart moves the port, the panel's

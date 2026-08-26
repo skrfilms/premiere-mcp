@@ -111,8 +111,8 @@ Two composition rules worth knowing before adding a bundle:
 ## Recipes
 
 Static text, no host request, readable when the bridge is down — which is the point for the
-recovery one. Each exists because a specific failure was paid for on a live host and written up
-in `RUN-LOG-2026-08-24.md`. The bar is *prevents a named failure*, not *sounds like good advice*.
+recovery one. Each exists because a specific failure was paid for on a live host and written up.
+The bar is *prevents a named failure*, not *sounds like good advice*.
 
 | recipe | the failure it prevents |
 |---|---|

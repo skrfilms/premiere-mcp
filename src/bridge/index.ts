@@ -664,7 +664,7 @@ export class PremiereProBridge implements PremiereProTransport {
    *   file            never bind a listener (no port, no firewall prompt)
    *   socket          refuse to publish over file IPC at all, and say so
    * Configurable rather than hardcoded because a peer bridge reports Premiere dying on the first
-   * inbound socket command on some Windows builds (docs/INTERNAL-PLAN.md, Tier 0 risks). That report
+   * inbound socket command on some Windows builds. That report
    * is unverified, which is a reason to leave an escape hatch, not a reason to default to file.
    */
   private readonly transportPreference: 'auto' | 'file' | 'socket';

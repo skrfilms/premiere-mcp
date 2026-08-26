@@ -21,8 +21,8 @@ export interface MCPResource {
  *
  * Every other resource here is a live projection of the project (sequences, clips,
  * effects). These are different: they are static text, they never touch the bridge, and
- * each one exists because a specific failure was PAID FOR on a live host and written up
- * in `docs/RUN-LOG-2026-08-24.md`. The bar for a recipe is that it prevents a named
+ * each one exists because a specific failure was PAID FOR on a live host and written up.
+ * The bar for a recipe is that it prevents a named
  * failure. "Read before you write" is advice; "`Sequence.end` is a ticks string while
  * `Sequence.getInPoint()` is a seconds string, and reading `.ticks` off either yields the
  * literal text undefined" is a recipe — that one silently broke nine tools.

@@ -186,7 +186,7 @@ describe('every bundle is self-sufficient for its task', () => {
   it('no bundle recommends a tool that is known-broken on the verified host build', () => {
     // These are still in the catalogue and still reachable through call_tool. They are
     // simply not what a fresh agent should be handed as a recommendation: each one is
-    // recorded as failing or hazardous on 26.3.2 in docs/RUN-LOG-2026-08-24.md.
+    // recorded as failing or hazardous on 26.3.2 during live host verification.
     const knownBad = [
       'audio_crossfade_at_cut', // "Invalid parameter"
       'apply_morph_cut', // "Invalid parameter"
