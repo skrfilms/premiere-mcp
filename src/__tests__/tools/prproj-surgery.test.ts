@@ -14,6 +14,15 @@
  * goes depends on the machine running the tests, so forcing it either way would produce a test that
  * passes for the wrong reason. The deterministic half — that a successful bridge answer is what the
  * decision is made from — is covered.
+ *
+ * That branch was instead verified by hand against a real host on 2026-08-26, along with the two
+ * claims no mock can settle:
+ *   - bridge unreachable while Premiere ran  -> refused OPEN_STATE_UNKNOWN, wrote nothing
+ *   - bridge reachable, target open          -> refused PROJECT_IS_OPEN, wrote nothing
+ *   - bridge reachable, target closed        -> wrote the file, and Premiere 26.3 OPENED it and
+ *     returned the edited bin name from its own project model via get_bin_tree
+ * The last one is why premiereWillLoad stays 'unverified' per call but the note can claim the
+ * writer itself has been proven: the evidence is about the writer, not about any given file.
  */
 
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, mkdirSync } from 'node:fs';
@@ -562,6 +571,7 @@ describe('project_file_edit as a tool', () => {
     expect(result.verified).toBe(false);
     expect(result.replacementsApplied[0]).toMatchObject({ matches: 1 });
     expect(result.censusDiff).toEqual([]);
+    expect(result.wrote).toBe(false);
     expect(existsSync(output)).toBe(false);
   });
 
@@ -586,6 +596,9 @@ describe('project_file_edit as a tool', () => {
     expect(result.outputSha256).toBe(sha256(readFileSync(output)));
     // Invariant 7. XML validity is not acceptance, and this tool cannot make that claim for itself.
     expect(result.premiereWillLoad).toBe('unverified');
+    // Every refusal reports wrote:false, so the one path that does write must say so rather than
+    // leaving a caller that branches on it reading undefined.
+    expect(result.wrote).toBe(true);
     expect(result.premiereWillLoadNote).toContain('open_project');
     expect(readProjectFile(output).file.xml).toContain('<Name>renamed_bin</Name>');
   });

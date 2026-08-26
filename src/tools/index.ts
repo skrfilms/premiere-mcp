@@ -18487,6 +18487,7 @@ ${this.buildSequenceResolver(sequenceId)}
           verified: false,
           verifiedBy: 'nothing was written — every invariant was checked against the source file only',
           ...common,
+          wrote: false,
           wouldWrite: pathSync.resolve(args.outputPath),
           note: 'Every invariant passed and nothing was written. Re-run with dryRun false to produce the file.',
         };
@@ -18504,6 +18505,9 @@ ${this.buildSequenceResolver(sequenceId)}
         verified: readbackOk && sourceUntouched,
         verifiedBy: 'the written file was re-read from disk and its XML and census compared; the source was re-hashed to prove it was untouched',
         ...common,
+        // Every refusal path reports wrote:false, so this has to be set here too. A caller that
+        // branches on `wrote` would otherwise read undefined on the one path that did write.
+        wrote: true,
         outputPath: written.outputPath,
         outputBytes: written.outputBytes,
         outputSha256: written.outputSha256,
@@ -18514,7 +18518,7 @@ ${this.buildSequenceResolver(sequenceId)}
         // Invariant 7 in full. XML validity is not acceptance, and this is the one claim this tool
         // cannot make for itself.
         premiereWillLoad: 'unverified',
-        premiereWillLoadNote: `Whether Premiere accepts this file has NOT been verified — that requires opening it. To verify: open_project with "${written.outputPath}", then read the edited value back (get_bin_tree, list_sequences, or get_project_info). Editing a .prproj by this exact path has been verified to load on Premiere 26.3, but that is evidence about the mechanism, not about this file.`,
+        premiereWillLoadNote: `Whether Premiere accepts this file has NOT been verified — that requires opening it. To verify: open_project with "${written.outputPath}", then read the edited value back (get_bin_tree, list_sequences, or get_project_info). A file written by this tool has been opened successfully on Premiere 26.3, with the edited value read back from Premiere's own project model — but that is evidence about the writer, not about this file.`,
         ...(readbackOk && sourceUntouched ? {} : { error: !sourceUntouched ? 'The source file changed during the edit — treat the output as suspect.' : 'The file written to disk did not read back as the document that was intended.' }),
       };
     } catch (error) {
