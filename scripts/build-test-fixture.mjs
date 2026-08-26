@@ -21,7 +21,9 @@
 import { PremiereProBridge } from '../dist/bridge/index.js';
 import { writeFileSync } from 'node:fs';
 
-const PLATE = '/Users/testuser/Documents/ProjectRoot/01_MyShots/_unsorted_renders/SHOW_008_0080_4s-plate.mp4';
+// Any short video on disk works. Point PREMIERE_MCP_FIXTURE_PLATE at your own clip.
+const PLATE = process.env.PREMIERE_MCP_FIXTURE_PLATE
+  || '/tmp/premiere-mcp-bridge/fixture-plate.mp4';
 const SRT_PATH = '/tmp/premiere-mcp-bridge/fixture-captions.srt';
 
 const bridge = new PremiereProBridge();

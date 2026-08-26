@@ -69,7 +69,7 @@ describe('a regex emitted into ExtendScript keeps the escapes it was written wit
       return m[1]! + num;
     };
 
-    // the maintainer's actual naming convention, which is what the shipped bug got wrong.
+    // A real-world shot-naming convention, which is what the shipped bug got wrong.
     expect(bumped('SHOW_008_0080_v001')).toBe('SHOW_008_0080_v002');
     expect(bumped('SHOW_008_0700_genAI_v001')).toBe('SHOW_008_0700_genAI_v002');
     expect(bumped('shot_v01')).toBe('shot_v02');

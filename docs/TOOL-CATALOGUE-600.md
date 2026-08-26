@@ -450,7 +450,7 @@ Covered already: `create_recovery_checkpoint` family, `save_project(_as)`,
 
 | Tool | Editor function | Surface | Verify | Tier |
 |---|---|---|---|---|
-| `assemble_review_reel` | Latest-version clips → gap-free reel (we hand-build these for the project today) | DOM+BR | structure diff | T1 |
+| `assemble_review_reel` | Latest-version clips → gap-free reel (we hand-build these by hand today) | DOM+BR | structure diff | T1 |
 | `version_up_sequence` | Duplicate + rename per naming convention + ledger | DOM+BR | readback | T1 |
 | `shot_status_report` | Label colors → status board (JSON/CSV) | DOM | computed | T1 |
 | `set_shot_status` | Status → label color + metadata, by shot code | DOM | readback | T1 |
@@ -521,7 +521,7 @@ These were listed as "walled". Live probing on 26.3.2 confirmed scriptable paths
 
 | Was walled / unknown | What we found | New tool(s) |
 |---|---|---|
-| **Productions / Team Projects — WALL GONE** | `qe.ea` is `QEEA` — full Productions API: `createProduction(name,path,bool,desc,team,bool)`, `openProduction(id,bool)`, `closeProduction`, `renameProduction`, `saveProductionAs`, `getProductionList`, `convertProjectIntoProduction`, `convertProductionIntoProject`, `share`, `sync`, `getConflicts`, `resolveConflict`, `getSessionSyncStatus`. User confirmed logged in as `maintainer@example.com`. | `create_production`, `open_production`, `list_productions`, `share_production`, `sync_production`, `convert_to_production` (T2 QE via qe.ea) |
+| **Productions / Team Projects — WALL GONE** | `qe.ea` is `QEEA` — full Productions API: `createProduction(name,path,bool,desc,team,bool)`, `openProduction(id,bool)`, `closeProduction`, `renameProduction`, `saveProductionAs`, `getProductionList`, `convertProjectIntoProduction`, `convertProductionIntoProject`, `share`, `sync`, `getConflicts`, `resolveConflict`, `getSessionSyncStatus`. Confirmed live against a signed-in Team Projects account. | `create_production`, `open_production`, `list_productions`, `share_production`, `sync_production`, `convert_to_production` (T2 QE via qe.ea) |
 | **Runtime export preset creation** | `app.encoder.getExporters()` returns 24 format objects each with `name/classID/fileExtension`. `exporter.getPresets()` gives all presets. `EncoderPreset.setExportParamValue(paramName, value)` — all param names (VBREncoding, TargetBitrate, MaxBitrate, FrameRate, Width, Height, VideoBitrate, AudioBitrate…) confirmed **OK**. `preset.writeToFile(path)` confirmed wrote `.epr` to disk. `app.encoder.exportWithPresetObject(outputPath, preset, seq, ?)` available. Full 24-format catalog: AAC/AIFF/GIF/ProRes/AS-10/DNxHR(152 presets)/DPX/H.264(43)/H.265/JPEG/JP2K/MP3/MPEG2/MPEG4/MXF/OpenEXR/PNG/QuickTime(35)/Targa/TIFF/WAV. | `list_encoder_formats`, `list_encoder_presets`, `create_custom_preset`, `export_with_custom_preset` (T1) |
 | **Render bar timeline status** | QE sequence: `getGreenBarTimes()`, `getRedBarTimes()`, `getYellowBarTimes()`, `getEmptyBarTimes()` — each returns Array of `QETime` objects with `.ticks`, `.secs`, `.frames` all readable. Live: yellow range = 0s→4.04s, 97 frames. `isIncompleteBackgroundVideoEffects()` confirmed. | `get_sequence_render_status` — exact TC ranges per bar color (T1 QE) |
 | **Write sidecar files** | `app.project.writeSidecarFile(fileName, fileExtension, contents)` — write arbitrary sidecar content alongside project. | `write_sidecar_file` (T1) |
@@ -579,7 +579,7 @@ These were listed as "walled". Live probing on 26.3.2 confirmed scriptable paths
 | **All clip timing props** | `start`, `end`, `inPoint`, `outPoint`, `duration` — ticks+seconds confirmed. | Already in tools |
 | **DOM Track: `insertClip()`, `overwriteClip()`, `isTargeted()`** | Unexplored DOM methods. | `insert_clip_on_track_dom`, `is_track_targeted` (T2) |
 | **Essential Sound via `setProjectMetadata`** | ALL 10 ESP keys write-confirmed: `ESP.Tag`, `ESP.AdjustmentsModeID`, `ESP.ClipMixTypeID`, and full adjustment settings chain. Premiere reaction needs pixel-verify. | `set_essential_sound_category` (T1 verify needed) |
-| **PP2026 Object Mask architecture** | Masks moved to top-level clip Object Mask tool. Draw → appears as new component in `clip.components`. No QE mask creation API found. Component probe pending the maintainer drawing a mask. | `set_clip_mask` (T2 — component probe pending) |
+| **PP2026 Object Mask architecture** | Masks moved to top-level clip Object Mask tool. Draw → appears as new component in `clip.components`. No QE mask creation API found. Component probe pending a mask drawn by hand in the UI. | `set_clip_mask` (T2 — component probe pending) |
 | **`setLogColorManagement(bool)` + `setLUTInterpolationMethod(0|1)` confirmed** | Both writable. | `set_log_color_management`, `set_lut_interpolation` (T1) |
 | **`exportAsMediaDirect(outputPath, presetPath, workAreaType:number)` full sig** | 3 args confirmed. workAreaType: 0=entire sequence, 1=work area. | Upgrade `export_sequence` (T1) |
 | **QE sequence properties all readable** | CTI, inPoint, outPoint, workInPoint, workOutPoint, player, previewPresetPath, previewPresetCodec, editingMode (GUID), useMaxBitDepth, useMaxRenderQuality. | Already in tools |
