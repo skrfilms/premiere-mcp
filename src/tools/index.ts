@@ -32,6 +32,37 @@ import { classifySelection, resolvePageSize, routerVerdict, type RouterVerdict }
 import { findTools, type SearchableTool } from './search.js';
 import { generateToolTypings, type TypingsTool, type JsonSchemaNode } from './typings.js';
 import { annotationsFor } from './annotations.js';
+import {
+  SurgeryRefusal,
+  applyReplacements,
+  assertOutputWritable,
+  assertSupportedFormat,
+  censusDiff,
+  censusOf,
+  containerCanary,
+  countOccurrences,
+  documentSanity,
+  readProjectFile,
+  surgeryEnabled,
+  writeEditedProject,
+  PRPROJ_SUPPORTED_FORMAT_VERSIONS,
+  SURGERY_ENV_FLAG,
+  type Replacement,
+} from './prproj-surgery.js';
+
+interface ProjectFileInspectArgs {
+  projectPath: string;
+  countStrings?: string[];
+  xmlExcerptAround?: string;
+}
+
+interface ProjectFileEditArgs {
+  sourcePath: string;
+  outputPath: string;
+  replacements: Replacement[];
+  dryRun?: boolean;
+  allowCensusChange?: boolean;
+}
 import { describeCatalogueCost, type CatalogueCost } from './catalogue-cost.js';
 import {
   RECOVERY_PREFIX,
@@ -1836,6 +1867,8 @@ export class PremiereProTools {
       { name: 'set_app_property', description: 'Sets an application-level property via app.properties.setProperty(key, value) with readback verification.', inputSchema: z.object({ key: z.string(), value: z.string() }) },
       { name: 'get_autosave_settings', description: 'Reads Premiere\'s Auto Save preferences (enabled, interval in minutes, max project versions, also-save-current-project, save-to-cloud) plus the auto-save folder. Wraps the BE.Prefs.AutoSave.* keys so callers do not have to know them. Read-only.', inputSchema: z.object({}) },
       { name: 'set_autosave_settings', description: 'Sets Premiere\'s Auto Save preferences with per-key readback verification. IMPORTANT: app.properties writes the LIVE preference; Premiere only flushes preferences to its prefs file on a graceful quit, so a crash or force-quit before then reverts the change. Set persistToPrefsFile (default true) to also rewrite the single matching tag in the prefs file on disk, backed up first, so both stores agree. A running auto-save timer may not re-read the interval until the next cycle.', inputSchema: z.object({ enabled: z.boolean().optional().describe('BE.Prefs.AutoSave.DoSave — master Auto Save switch.'), intervalMinutes: z.number().int().min(1).max(1440).optional().describe('Minutes between auto-saves.'), maxVersions: z.number().int().min(1).max(1000).optional().describe('How many auto-save versions to keep before the oldest is discarded.'), alsoSaveCurrentProject: z.boolean().optional().describe('Also save the open project itself, not just a copy into the Auto-Save folder.'), saveToCloud: z.boolean().optional().describe('Auto-save backups to Creative Cloud.'), persistToPrefsFile: z.boolean().optional().describe('Also write the value into Premiere\'s prefs file on disk so a force-quit cannot revert it. Default true.') }) },
+      { name: 'project_file_inspect', description: 'Reads a .prproj FILE ON DISK without opening it in Premiere, and reports its format version, whether it is gzip-compressed, a structural node census (including ObjectUID definition counts that match what Premiere reports for sequences/master clips/bins), the SHA-256, and whether the container round-trips byte-identically. Optionally counts occurrences of literal strings, which is how you find a unique match before editing. Read-only: opens nothing, writes nothing, and works while Premiere is closed. Useful for auditing archived projects, finding which project references a media path, or checking a cut without waiting for Premiere to load it.', inputSchema: z.object({ projectPath: z.string().describe('Absolute path to a .prproj file.'), countStrings: z.array(z.string()).optional().describe('Literal strings to count occurrences of in the project XML. Use this to confirm a find string is unique before calling project_file_edit.'), xmlExcerptAround: z.string().optional().describe('Return a short XML excerpt around the first occurrence of this literal, so you can see the surrounding markup before editing.') }) },
+      { name: 'project_file_edit', description: `Edits a .prproj FILE ON DISK by literal string replacement, writing the result to a NEW file. This reaches project state that ExtendScript cannot (Premiere exposes no scripted menu bus), but it is deliberately hard to misuse and is DISABLED by default: set ${SURGERY_ENV_FLAG}=1 to enable. Refuses unless every invariant holds: the output path must not already exist (never edits in place); neither file may be open in Premiere (checked against the running host, not self-certified); the format version must be recognised (${[...PRPROJ_SUPPORTED_FORMAT_VERSIONS].join(', ')}); re-encoding the untouched container must reproduce the original bytes exactly; each replacement must match its expectedMatches count exactly (there is no replace-all); the structural node census must be unchanged; and the written file is re-read and compared. Whether Premiere will actually LOAD the result is reported as unverified unless you open it — XML validity is not acceptance. Use dryRun first.`, inputSchema: z.object({ sourcePath: z.string().describe('Absolute path to the .prproj to read. Never modified.'), outputPath: z.string().describe('Absolute path to write. Must not already exist.'), replacements: z.array(z.object({ find: z.string().min(1).describe('Literal text to find in the project XML. Not a regex.'), replace: z.string().describe('Literal replacement. A bare & is refused — write &amp;. A raw < or > is refused unless allowMarkupEdit is set, since that is editing markup rather than text.'), expectedMatches: z.number().int().min(1).max(100000).optional().describe('Required match count. Default 1. A different actual count refuses the whole edit.'), allowMarkupEdit: z.boolean().optional().describe('Permit raw < or > in replace, i.e. restructuring the XML rather than changing text. Default false.') })).min(1).max(200).describe('Replacements to apply. All match counts are checked against the original document before any is applied, so they cannot interact.'), dryRun: z.boolean().optional().describe('Validate every invariant and report the match counts and census without writing anything. Default false.'), allowCensusChange: z.boolean().optional().describe('Permit the structural node census to change. Default false. Only set this when you intend to add or remove structure and have inspected the diff.') }) },
       { name: 'get_panel_visibility', description: 'Returns the visibility state of key Premiere panels using app.isWindowVisible().', inputSchema: z.object({ panels: z.array(z.string()).optional().describe('Panel names to check. Default: Timeline, Source Monitor, Program Monitor, Effects, Lumetri Color.') }) },
       { name: 'api_surface_report', description: 'Returns a static report of the confirmed API surface: QE clip methods, QE sequence methods, confirmed DOM methods, and the honest wall of inaccessible features.', inputSchema: z.object({}) },
 
@@ -4330,6 +4363,8 @@ export class PremiereProTools {
         case 'set_app_property': return await this.setAppProperty(args.key, args.value);
         case 'get_autosave_settings': return await this.getAutosaveSettings();
         case 'set_autosave_settings': return await this.setAutosaveSettings(args);
+        case 'project_file_inspect': return await this.projectFileInspect(args as ProjectFileInspectArgs);
+        case 'project_file_edit': return await this.projectFileEdit(args as ProjectFileEditArgs);
         case 'get_panel_visibility': return await this.getPanelVisibility(args.panels);
         case 'api_surface_report': return this.apiSurfaceReport();
         case 'apply_morph_cut': return await this.applyMorphCut(args.trackIndex, args.clipIndex, args.sequenceId, args.durationFrames);
@@ -18233,6 +18268,261 @@ ${this.buildSequenceResolver(sequenceId)}
         'A running auto-save timer may not pick up a new interval until its next cycle.',
       ].join(' '),
     };
+  }
+
+  /**
+   * Is a Premiere process running at all, independent of the bridge?
+   *
+   * Needed because "the bridge did not answer" has two very different meanings: Premiere is closed
+   * (so no project can be open, and file surgery is safe), or Premiere is running with a wedged
+   * panel (so a project may well be open and surgery is not safe). Matching on the process NAME via
+   * `ps -Ao comm=` rather than the full command line is deliberate — a `pgrep -f "Adobe Premiere
+   * Pro"` would also match a harness or editor whose own command line mentions it, and a false
+   * "running" here blocks legitimate work on archived projects.
+   *
+   * Returns null when it cannot tell, which callers must treat as "running".
+   */
+  private premiereProcessRunning(): boolean | null {
+    try {
+      if (process.platform === 'win32') {
+        const out = execSync('tasklist /FO CSV /NH', { encoding: 'utf8', timeout: 10000, windowsHide: true });
+        return /"Adobe Premiere Pro[^"]*\.exe"/i.test(out);
+      }
+      const out = execSync('ps -Ao comm=', { encoding: 'utf8', timeout: 10000 });
+      return out.split('\n').some((line) => {
+        const name = line.trim().split('/').pop() || '';
+        return /^Adobe Premiere Pro\b/i.test(name);
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Invariant 2. Which project files does Premiere currently have open?
+   *
+   * `known: false` means the answer is unavailable and the caller must refuse — the point of the
+   * invariant is that it is decided by measurement, never by the caller asserting Premiere is closed.
+   * A self-certification argument here would be the same defect as the guard that let a name stand
+   * in for an identity and cost a 111-sequence cut.
+   */
+  private async openProjectRealpaths(): Promise<{ known: boolean; realpaths: string[]; reason?: string; source: string }> {
+    let probe: any = null;
+    try {
+      probe = await this.bridge.executeScript(`
+        try {
+          var out = [];
+          if (app.projects) {
+            for (var i = 0; i < app.projects.numProjects; i++) out.push(String(app.projects[i].path || ''));
+          }
+          return JSON.stringify({ success: true, paths: out });
+        } catch (e) { return JSON.stringify({ success: false, error: e.toString() }); }
+      `);
+    } catch (e: any) {
+      probe = { success: false, error: e?.message || String(e) };
+    }
+
+    if (probe && probe.success !== false && Array.isArray(probe.paths)) {
+      const realpaths: string[] = [];
+      for (const p of probe.paths) {
+        if (!p) continue;
+        try { realpaths.push(fsSync.realpathSync(String(p))); } catch { realpaths.push(String(p)); }
+      }
+      return { known: true, realpaths, source: 'app.projects via the bridge' };
+    }
+
+    const running = this.premiereProcessRunning();
+    if (running === false) {
+      return { known: true, realpaths: [], source: 'no Premiere process is running, so no project can be open' };
+    }
+    return {
+      known: false,
+      realpaths: [],
+      source: running === null ? 'could not determine whether Premiere is running' : 'a Premiere process is running',
+      reason: running === null
+        ? 'Could not reach the bridge panel and could not determine whether Premiere is running, so it is not possible to confirm this file is not open. Refusing.'
+        : `Premiere is running but the bridge panel did not answer${probe && probe.error ? ` (${probe.error})` : ''}, so it is not possible to confirm this file is not open. Start the MCP Bridge panel, or quit Premiere, then retry.`,
+    };
+  }
+
+  private async projectFileInspect(args: ProjectFileInspectArgs): Promise<any> {
+    try {
+      const { file } = readProjectFile(args.projectPath);
+      const census = censusOf(file.xml);
+      const canary = containerCanary(fsSync.readFileSync(file.realpath), file);
+
+      const counts: Record<string, number> = {};
+      for (const needle of args.countStrings ?? []) counts[needle] = countOccurrences(file.xml, needle);
+
+      let excerpt: any;
+      if (args.xmlExcerptAround) {
+        const at = file.xml.indexOf(args.xmlExcerptAround);
+        excerpt = at === -1
+          ? { found: false, note: 'That literal does not appear in this project.' }
+          : { found: true, offset: at, text: file.xml.slice(Math.max(0, at - 300), at + args.xmlExcerptAround.length + 300) };
+      }
+
+      return {
+        success: true,
+        verified: true,
+        verifiedBy: 'the file was read and decoded from disk',
+        projectPath: file.path,
+        realpath: file.realpath,
+        bytes: file.bytes,
+        sha256: file.sha256,
+        compressed: file.compressed,
+        formatVersion: file.formatVersion,
+        formatSupportedForEditing: file.formatVersion !== null && PRPROJ_SUPPORTED_FORMAT_VERSIONS.has(file.formatVersion),
+        xmlLength: file.xml.length,
+        census,
+        containerRoundTrip: canary,
+        ...(args.countStrings?.length ? { stringCounts: counts } : {}),
+        ...(excerpt ? { excerpt } : {}),
+        note: 'census.definitions counts ObjectUID declarations and matches what Premiere reports (e.g. definitions.Sequence is the sequence count). census.nodes counts raw tags including cross-references, so it is higher — it exists to detect structural damage, not to be read as an inventory.',
+      };
+    } catch (error) {
+      if (error instanceof SurgeryRefusal) return { success: false, refused: true, code: error.code, error: error.message };
+      return { success: false, error: `project_file_inspect failed: ${error instanceof Error ? error.message : String(error)}` };
+    }
+  }
+
+  private async projectFileEdit(args: ProjectFileEditArgs): Promise<any> {
+    // Invariant 8, enforced HERE rather than only in the tool profile. A profile is a context-cost
+    // decision that call_tool deliberately reaches past (see router.ts), so a gate that lived only in
+    // the advertised list would be routable. This one is not.
+    if (!surgeryEnabled()) {
+      return {
+        success: false,
+        refused: true,
+        code: 'SURGERY_DISABLED',
+        error: `Project-file surgery is disabled. It rewrites a .prproj outside Premiere, so it is opt-in: set ${SURGERY_ENV_FLAG}=1 in the server's environment and restart. project_file_inspect is read-only and always available.`,
+      };
+    }
+
+    const dryRun = args.dryRun === true;
+
+    try {
+      const { file, raw } = readProjectFile(args.sourcePath);
+      assertSupportedFormat(file);                                    // invariant 3
+      assertOutputWritable(file.realpath, args.outputPath);           // invariant 1
+
+      // Invariant 4. Before touching anything: prove our writer reproduces this file exactly, so the
+      // only difference in the output is the edit.
+      const canary = containerCanary(raw, file);
+      if (!canary.semantic) {
+        throw new SurgeryRefusal('The project XML did not survive a re-encode round trip, so this build cannot write this file losslessly. Nothing was written.', 'CANARY_SEMANTIC_FAILED');
+      }
+      if (!canary.byteIdentical) {
+        throw new SurgeryRefusal(
+          `Re-encoding this file's untouched contents produced ${canary.reencodedBytes} bytes against the original ${file.bytes}, so it was written by a compressor this build has not been verified against. ` +
+          'Refusing: the safe interpretation of an unfamiliar writer is to leave its files alone.',
+          'CANARY_BYTE_MISMATCH',
+        );
+      }
+
+      // Invariant 2. Neither file may be open in Premiere — and if that cannot be established, refuse.
+      const open = await this.openProjectRealpaths();
+      if (!open.known) {
+        throw new SurgeryRefusal(open.reason || 'Could not determine which projects are open in Premiere.', 'OPEN_STATE_UNKNOWN');
+      }
+      const outputResolved = pathSync.resolve(args.outputPath);
+      const collision = open.realpaths.find((p) => p === file.realpath || p === outputResolved);
+      if (collision) {
+        throw new SurgeryRefusal(
+          `"${collision}" is currently open in Premiere. Editing a project file underneath the application means Premiere's in-memory copy wins the moment anyone saves, and the edit is silently lost. Close it in Premiere first.`,
+          'PROJECT_IS_OPEN',
+        );
+      }
+
+      // Invariants 5 and 6.
+      const censusBefore = censusOf(file.xml);
+      const { xml: editedXml, applied } = applyReplacements(file.xml, args.replacements);
+      const censusAfter = censusOf(editedXml);
+
+      // Whole-document damage checks. Both properties were measured on real Premiere output, and both
+      // catch corruption the census is blind to: the census counts known tags, so a stray bracket or a
+      // bare ampersand sails straight past it and only surfaces when Premiere refuses the project.
+      const sanity = documentSanity(editedXml);
+      if (!sanity.angleBalanced) {
+        throw new SurgeryRefusal(
+          `The edited document has ${sanity.openAngles} "<" against ${sanity.closeAngles} ">", so a tag was left unterminated. Nothing was written.`,
+          'ANGLE_BRACKETS_UNBALANCED',
+        );
+      }
+      if (!sanity.entitiesValid) {
+        throw new SurgeryRefusal(
+          'The edited document contains a bare "&" that is not a valid entity reference, which makes it malformed. Nothing was written.',
+          'BARE_AMPERSAND_IN_DOCUMENT',
+        );
+      }
+
+      const diff = censusDiff(censusBefore, censusAfter);
+      if (diff.length > 0 && args.allowCensusChange !== true) {
+        throw new SurgeryRefusal(
+          `The edit changed the structural node census, which a pure text substitution should not do: ${diff.join('; ')}. ` +
+          'Nothing was written. If adding or removing structure is genuinely what you intend, pass allowCensusChange: true.',
+          'CENSUS_CHANGED',
+        );
+      }
+
+      const common = {
+        sourcePath: file.path,
+        sourceRealpath: file.realpath,
+        sourceSha256: file.sha256,
+        sourceBytes: file.bytes,
+        formatVersion: file.formatVersion,
+        replacementsApplied: applied.map((a) => ({ find: a.find, replace: a.replace, matches: a.matches })),
+        censusBefore,
+        censusAfter,
+        censusDiff: diff,
+        documentSanity: sanity,
+        containerRoundTrip: canary,
+        openProjectsCheck: { source: open.source, openRealpaths: open.realpaths },
+      };
+
+      if (dryRun) {
+        return {
+          success: true,
+          dryRun: true,
+          verified: false,
+          verifiedBy: 'nothing was written — every invariant was checked against the source file only',
+          ...common,
+          wouldWrite: pathSync.resolve(args.outputPath),
+          note: 'Every invariant passed and nothing was written. Re-run with dryRun false to produce the file.',
+        };
+      }
+
+      // Invariant 7, in part: the write is verified by re-reading the bytes, not by having called write.
+      const written = writeEditedProject(args.outputPath, editedXml, file.compressed, censusAfter);
+      const sourceAfter = readProjectFile(file.realpath).file.sha256;
+
+      const readbackOk = written.readbackMatches && written.readbackCensusDiff.length === 0;
+      const sourceUntouched = sourceAfter === file.sha256;
+
+      return {
+        success: readbackOk && sourceUntouched,
+        verified: readbackOk && sourceUntouched,
+        verifiedBy: 'the written file was re-read from disk and its XML and census compared; the source was re-hashed to prove it was untouched',
+        ...common,
+        outputPath: written.outputPath,
+        outputBytes: written.outputBytes,
+        outputSha256: written.outputSha256,
+        readbackMatches: written.readbackMatches,
+        readbackCensusDiff: written.readbackCensusDiff,
+        sourceUntouched,
+        sourceSha256After: sourceAfter,
+        // Invariant 7 in full. XML validity is not acceptance, and this is the one claim this tool
+        // cannot make for itself.
+        premiereWillLoad: 'unverified',
+        premiereWillLoadNote: `Whether Premiere accepts this file has NOT been verified — that requires opening it. To verify: open_project with "${written.outputPath}", then read the edited value back (get_bin_tree, list_sequences, or get_project_info). Editing a .prproj by this exact path has been verified to load on Premiere 26.3, but that is evidence about the mechanism, not about this file.`,
+        ...(readbackOk && sourceUntouched ? {} : { error: !sourceUntouched ? 'The source file changed during the edit — treat the output as suspect.' : 'The file written to disk did not read back as the document that was intended.' }),
+      };
+    } catch (error) {
+      if (error instanceof SurgeryRefusal) {
+        return { success: false, refused: true, code: error.code, error: error.message, wrote: false };
+      }
+      return { success: false, error: `project_file_edit failed: ${error instanceof Error ? error.message : String(error)}`, wrote: false };
+    }
   }
 
   private async getPanelVisibility(panels?: string[]): Promise<any> {

@@ -4,7 +4,7 @@
 
 **Operate local Adobe Premiere Pro projects through MCP.**
 
-645 implemented tools — **101 advertised by default**, all 645 reachable through `call_tool` — plus 21 context resources and 16 guided prompts for Codex, Claude Code, Claude Desktop, and other MCP clients. CEP is the supported production bridge; UXP remains experimental.
+647 implemented tools — **101 advertised by default**, all 647 reachable through `call_tool` — plus 21 context resources and 16 guided prompts for Codex, Claude Code, Claude Desktop, and other MCP clients. CEP is the supported production bridge; UXP remains experimental.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-5fd3c6.svg)](LICENSE.md)
 [![Node.js](https://img.shields.io/badge/Node.js-20%2B-339933.svg)](https://nodejs.org/)
@@ -126,17 +126,17 @@ This repository is currently validated for:
 
 Current catalog status as of August 21, 2026:
 
-- `645` MCP tools are implemented for AI-driven video editing. **`101` are advertised by default** (the `core` profile) and **all `645` stay reachable** — advertising every tool costs roughly 103,500 tokens (~52% of a 200k context) before the conversation starts, published guidance puts tool-selection degradation past 30–50 tools, and VS Code / Copilot hard-errors above 128, so a curated menu is a context-cost decision rather than a capability one. Nothing is hidden silently and nothing is out of reach: `find_tool` searches all `645` and reports a profile-hidden match as `exposed: false` **with the reason**, `call_tool` invokes it anyway, and `activate_tools` promotes it into the advertised list mid-session (with a `tools/list_changed` notification). Set `PREMIERE_MCP_PROFILE=all` to advertise everything up front
+- `647` MCP tools are implemented for AI-driven video editing. **`101` are advertised by default** (the `core` profile) and **all `647` stay reachable** — advertising every tool costs roughly 103,500 tokens (~52% of a 200k context) before the conversation starts, published guidance puts tool-selection degradation past 30–50 tools, and VS Code / Copilot hard-errors above 128, so a curated menu is a context-cost decision rather than a capability one. Nothing is hidden silently and nothing is out of reach: `find_tool` searches all `647` and reports a profile-hidden match as `exposed: false` **with the reason**, `call_tool` invokes it anyway, and `activate_tools` promotes it into the advertised list mid-session (with a `tools/list_changed` notification). Set `PREMIERE_MCP_PROFILE=all` to advertise everything up front
 - coverage spans project setup, media ingest, bins, sequences, timeline editing, transitions, effects, keyframes, captions, markers, metadata, proxies, multicam, color, audio, exports, and higher-level assembly workflows
 - the catalog includes practical agent workflows such as product-spot assembly, motion-graphics demos, timeline razoring, caption reads, audio ducking, scene edit detection, EDL import, export readiness validation, and linked audio/video operations
 - local-compute tools that Premiere's scripting API cannot provide: `detect_silence` (ffmpeg), `transcribe_to_srt` (local OpenAI Whisper speech-to-text), `probe_media` (ffprobe ground-truth metadata), and `generate_scope` (ffmpeg waveform / vectorscope / histogram / RGB-parade images) — each probes for its binary and returns install guidance instead of failing silently
 - a recovery boundary — `create_recovery_checkpoint`, `list_recovery_checkpoints`, `restore_recovery_checkpoint` — snapshots a sequence before risky edits; the auto-checkpoint before destructive edits fails **closed** (the edit is refused if the snapshot cannot be taken)
-- **schema-on-demand**: `find_tool` (search) → `get_tool_typings` (exact signature) → `call_tool` (invoke) reaches the whole catalogue through three tool definitions instead of 645, and `activate_tools` / `deactivate_tools` grow or shrink the advertised list at runtime while reporting the measured context cost of the change. The separation between *advertised* and *reachable* stops dead at an authority boundary: `call_tool` refuses to route past `PREMIERE_MCP_PROFILE=read-only`, an explicit `PREMIERE_MCP_TOOLS` allowlist, or a `PREMIERE_MCP_EXCLUDE` veto, and names the setting that refused it. `tools/list` also supports cursor pagination, off unless `PREMIERE_MCP_PAGE_SIZE` is set — paging by default would silently truncate the list for any client that ignores `nextCursor`
+- **schema-on-demand**: `find_tool` (search) → `get_tool_typings` (exact signature) → `call_tool` (invoke) reaches the whole catalogue through three tool definitions instead of 647, and `activate_tools` / `deactivate_tools` grow or shrink the advertised list at runtime while reporting the measured context cost of the change. The separation between *advertised* and *reachable* stops dead at an authority boundary: `call_tool` refuses to route past `PREMIERE_MCP_PROFILE=read-only`, an explicit `PREMIERE_MCP_TOOLS` allowlist, or a `PREMIERE_MCP_EXCLUDE` veto, and names the setting that refused it. `tools/list` also supports cursor pagination, off unless `PREMIERE_MCP_PAGE_SIZE` is set — paging by default would silently truncate the list for any client that ignores `nextCursor`
 - tool profiles (`PREMIERE_MCP_PROFILE=core|all|read-only|audio|color`, or an explicit `PREMIERE_MCP_TOOLS` allowlist) size the menu to the client's tool budget. `core` (101) is the default and is deliberately coherent rather than minimal — it includes `set_effect_property` alongside `apply_effect`, `add_keyframe` alongside `bake_keyframe_ease`, and `undo`/`redo`, because a default that forces a profile switch on the second call is not a default
 
 Most recent completed local live validation:
 
-- `645` tools are implemented and `101` are advertised under the default profile (all 645 reachable); `get_capabilities` reports the active profile, local installation, and optional live connection state, while `verify_premiere_connection` is the canonical read-only bridge and host readiness check
+- `647` tools are implemented and `101` are advertised under the default profile (all 647 reachable); `get_capabilities` reports the active profile, local installation, and optional live connection state, while `verify_premiere_connection` is the canonical read-only bridge and host readiness check
 - `0` known parked or placeholder tools are advertised
 - `import_ae_comps` is intentionally not advertised because Premiere returned `false` for real `.aep` fixtures in this environment and a generic `.aep` import can wedge the CEP bridge
 
@@ -236,7 +236,7 @@ For a real-host sweep, use a disposable Premiere project and run `node scripts/l
 
 ## Tools
 
-All `645` implemented tools have an implementation. Tool schemas are available through MCP discovery; this catalog explains the editing surface in human terms. Start with `verify_premiere_connection`, then inspect the project before asking an agent to mutate it.
+All `647` implemented tools have an implementation. Tool schemas are available through MCP discovery; this catalog explains the editing surface in human terms. Start with `verify_premiere_connection`, then inspect the project before asking an agent to mutate it.
 
 ### Discovery and project inspection
 
@@ -376,6 +376,30 @@ All `645` implemented tools have an implementation. Tool schemas are available t
 | `create_bars_and_tone` / `set_transcode_on_ingest` / `set_scratch_disk_path` | Generate utility media or manage ingest and scratch-disk behavior. |
 | `execute_extendscript` / `evaluate_expression` / `inspect_dom_object` | Advanced diagnostic and scripting operations. Use only with trusted inputs and explicit user intent. |
 | `reflect_dom_object` | Enumerate the callable API surface of any DOM object via ExtendScript's `.reflect` interface — every method with its return type and argument names/types, plus properties — revealing native methods `inspect_dom_object` cannot see. Roots `qe.*` paths at the QE engine (auto-enabled). Read-only; pairs with `execute_extendscript` to discover a hidden capability and then drive it. |
+
+### Project-file surgery (off by default)
+
+A `.prproj` is a gzip'd XML document, so the server can read and edit a project on disk without Premiere running. That reaches state the scripting API does not expose — but it also means a bug corrupts a real cut, so the write side is opt-in and heavily guarded.
+
+| Tools | What they do |
+| :--- | :--- |
+| `project_file_inspect` | Read-only. Reports format version, byte size, SHA-256, a structural census of nodes and `ObjectUID` definitions, optional literal string counts, and an optional XML excerpt. Needs no env flag. |
+| `project_file_edit` | Applies exact literal replacements to a copy of a project. Requires `PREMIERE_MCP_ALLOW_PROJECT_FILE_SURGERY=1` in the server's environment. |
+
+`project_file_edit` refuses rather than guesses, and each refusal returns a `code`:
+
+- never writes in place — `outputPath` must be a new file, and the source is re-hashed afterwards to prove it was untouched
+- refuses if the target's realpath is open in Premiere; if the bridge is down and Premiere may be running, it refuses with `OPEN_STATE_UNKNOWN` rather than assuming
+- refuses an unrecognised `PremiereData Version`
+- runs a per-file container canary (gunzip → gzip must reproduce the input byte-for-byte) before editing
+- exactly-N matches or refuse — there is no replace-all, and every count is checked against the original document before any edit is applied
+- refuses a bare `&` in a replacement (write `&amp;`) and a raw `<`/`>` unless `allowMarkupEdit` is set
+- checks the whole edited document for balanced angle brackets and valid entity references
+- requires the structural census to be unchanged unless `allowCensusChange` is set, and reports the diff either way
+- reports `premiereWillLoad: "unverified"`. XML validity is not acceptance; only opening the file proves that, so use `open_project` and read the result back
+- `dryRun` returns the full report and the census diff without writing anything
+
+Both tools are excluded from the `core` profile, so neither is advertised by default and neither is ever invoked as part of another tool. Reach them with `PREMIERE_MCP_PROFILE=all`, an explicit `PREMIERE_MCP_TOOLS` allowlist, or `call_tool`. The env flag gates the write side specifically: it is enforced inside `project_file_edit` rather than by the profile, because `call_tool` deliberately routes past a cost-shaped profile and an opt-in that a router can reach past is not an opt-in.
 
 ### Additional supported operations
 
