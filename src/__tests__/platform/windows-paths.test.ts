@@ -79,8 +79,8 @@ function loadPanelTempHelpers(platform: 'win32' | 'darwin', env: Record<string, 
       if (name === 'os') {
         return {
           platform: () => platform,
-          tmpdir: () => (platform === 'win32' ? 'C:\\Users\\ben\\AppData\\Local\\Temp' : '/tmp'),
-          homedir: () => (platform === 'win32' ? 'C:\\Users\\ben' : '/Users/testuser'),
+          tmpdir: () => (platform === 'win32' ? 'C:\\Users\\testuser\\AppData\\Local\\Temp' : '/tmp'),
+          homedir: () => (platform === 'win32' ? 'C:\\Users\\testuser' : '/Users/testuser'),
         };
       }
       return {};
@@ -99,10 +99,10 @@ function loadPanelTempHelpers(platform: 'win32' | 'darwin', env: Record<string, 
 
 describe('CEP panel getDefaultTempPath — both platform branches', () => {
   it('uses %TEMP% and backslash separators on win32', () => {
-    const { getDefaultTempPath } = loadPanelTempHelpers('win32', { TEMP: 'C:\\Users\\ben\\AppData\\Local\\Temp' });
+    const { getDefaultTempPath } = loadPanelTempHelpers('win32', { TEMP: 'C:\\Users\\testuser\\AppData\\Local\\Temp' });
     // The whole point: a hardcoded '/tmp' or a posix join here would produce a path
     // Premiere cannot poll, and the failure mode is a silent bridge timeout.
-    expect(getDefaultTempPath()).toBe('C:\\Users\\ben\\AppData\\Local\\Temp\\premiere-mcp-bridge');
+    expect(getDefaultTempPath()).toBe('C:\\Users\\testuser\\AppData\\Local\\Temp\\premiere-mcp-bridge');
   });
 
   it('falls back to TMP when TEMP is unset on win32', () => {
@@ -122,7 +122,7 @@ describe('CEP panel getDefaultTempPath — both platform branches', () => {
 
   it('honours PREMIERE_TEMP_DIR ahead of the platform default on win32', () => {
     const { getDefaultTempPath } = loadPanelTempHelpers('win32', {
-      TEMP: 'C:\\Users\\ben\\AppData\\Local\\Temp',
+      TEMP: 'C:\\Users\\testuser\\AppData\\Local\\Temp',
       PREMIERE_TEMP_DIR: 'E:\\Shows\\bridge',
     });
     expect(getDefaultTempPath()).toBe('E:\\Shows\\bridge');
@@ -191,9 +191,9 @@ describe('createSecureTempDir — win32 branch', () => {
    */
   it('takes its base from %TEMP% on win32', () => {
     setPlatform('win32');
-    process.env.TEMP = 'C:\\Users\\ben\\AppData\\Local\\Temp';
+    process.env.TEMP = 'C:\\Users\\testuser\\AppData\\Local\\Temp';
     const dir = createSecureTempDir('abc123');
-    expect(dir.startsWith('C:\\Users\\ben\\AppData\\Local\\Temp')).toBe(true);
+    expect(dir.startsWith('C:\\Users\\testuser\\AppData\\Local\\Temp')).toBe(true);
     expect(dir).toContain('premiere-bridge-abc123');
   });
 

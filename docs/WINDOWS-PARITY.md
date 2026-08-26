@@ -138,7 +138,7 @@ will tell the truth, and it only tells it when someone runs it.
 
 ---
 
-## 3. What remains UNVERIFIED, and what the maintainer would need to do
+## 3. What remains UNVERIFIED, and what a maintainer would need to do
 
 Everything in this section is unverified because the work was done on macOS with no
 `pwsh` installed. Nothing in `scripts/*.ps1` has been parsed, let alone executed.
@@ -152,7 +152,7 @@ Everything in this section is unverified because the work was done on macOS with
    ```
    pwsh -NoProfile -Command "foreach ($f in Get-ChildItem scripts/*.ps1) { [System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$null, [ref]$e); if ($e) { $f.Name; $e } }"
    ```
-   This is worth doing on the maintainer's Mac if `pwsh` can be installed (`brew install powershell`),
+   This is worth doing on a Mac if `pwsh` can be installed (`brew install powershell`),
    because it would move item 1 from "unverified" to "verified" without any Windows box.
 2. **`Set-StrictMode -Version Latest` behaviour on missing JSON properties.** The
    `Get-Prop` accessor was added because StrictMode 3.0 is documented to make a missing
@@ -179,7 +179,7 @@ Everything in this section is unverified because the work was done on macOS with
    §4.1, `initialize()` should succeed on Windows. That is the gate for testing anything
    else, and until it passes no tool has ever run on Windows.
 
-**Suggested order for the maintainer:** install `pwsh` on the Mac and parse-check the three
+**Suggested order:** install `pwsh` on the Mac and parse-check the three
 scripts (30 seconds, catches the most likely class of error) → apply §4.1 → on a
 Windows box, `npm run setup:win` then `npm run setup:doctor:win` → open the panel and
 call `ping`. Item 3 (the ACL) is the one to watch.
