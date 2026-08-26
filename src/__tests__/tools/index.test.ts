@@ -1564,7 +1564,7 @@ describe('PremiereProTools', () => {
         duration: at(4.97163333333333)
       };
       let sourceOut = at(3604.96803333333);
-      let timelineEnd = at(4.97163333333333);
+      const timelineEnd = at(4.97163333333333);
       Object.defineProperty(clip, 'outPoint', {
         get: () => sourceOut,
         set: (value) => { outPointWrites++; sourceOut = value; }
@@ -1605,6 +1605,9 @@ describe('PremiereProTools', () => {
         return time;
       };
       const clip: any = { inPoint: at(0), outPoint: at(5), start: at(0) };
+      // Reassigned by the setter below, which is why `prefer-const` must not be believed here: the
+      // write happens inside a defineProperty callback, so the rule reports the binding as never
+      // reassigned and "fixing" it turns this test's quantize case into a TypeError.
       let timelineEnd = at(5);
       Object.defineProperty(clip, 'end', {
         get: () => timelineEnd,
