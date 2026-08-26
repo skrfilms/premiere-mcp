@@ -1,537 +1,586 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MCP Bridge (CEP)</title>
-    <style>
-        :root {
-            --bg-0: #0b1218;
-            --bg-1: #121c25;
-            --panel: rgba(20, 31, 41, 0.86);
-            --panel-border: rgba(129, 170, 197, 0.18);
-            --panel-shadow: 0 18px 40px rgba(1, 10, 18, 0.48);
-            --text-0: #f4f8fb;
-            --text-1: #9cb2c3;
-            --text-2: #6e8393;
-            --accent: #5fd3ff;
-            --accent-strong: #11aef0;
-            --accent-soft: rgba(95, 211, 255, 0.16);
-            --success: #61e8a6;
-            --warn: #ffd76b;
-            --error: #ff7b7b;
-            --input: rgba(9, 17, 25, 0.72);
-            --button-dark: rgba(13, 23, 32, 0.72);
-        }
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MCP Bridge (CEP)</title>
+<style>
+/* ==========================================================================
+   MCP BRIDGE (CEP) · LIQUID GLASS  (design g1)
+   Three layers only: an AMBIENT BACKDROP with real structure, translucent
+   GLASS panes floating over it, and INSET WELLS cut into those panes.
+   Every colour that carries meaning is measured against the effective pane
+   at runtime, because Premiere ships four brightness levels.
+   Runtime floor: Chromium 99 (CEF 99.2.15.0).
 
-        * {
-            box-sizing: border-box;
-        }
+   Wiring contract (driven by bridge-cep.js, NOT by any script in this file):
+     #connectionStatus  .className = 'status-dot connected|disconnected'
+     #connectionText     .textContent
+     #serverStatus      .className = 'status-dot connected|disconnected'
+     #serverText         .textContent
+     #startButton / #stopButton  .disabled   (exactly one is shown; see .act)
+     #tempDirectory      .value  (read by saveConfig, written on load)
+     #commandQueue       .innerHTML = <div class="command-item">…</div>
+     #logContainer       appendChild(<div class="log-entry info|warning|error">)
+     globals: startBridge() stopBridge() saveConfig() clearLog()
+   The dots are CONTAINER-scoped below, because the bridge overwrites their
+   className wholesale — the only classes present at runtime are
+   'status-dot connected' and 'status-dot disconnected'.
+   ========================================================================== */
 
-        html,
-        body {
-            margin: 0;
-            min-height: 100%;
-        }
+:root{
+  --r-hero:22px;  --pad-hero:14px;   /* 22 − 14 = 8 */
+  --r-card:20px;  --pad:12px;        /* 20 − 12 = 8 */
+  --r-in:8px;
+  --r-bar:5px;
 
-        body {
-            font-family: "Avenir Next", "Helvetica Neue", "Segoe UI", sans-serif;
-            color: var(--text-0);
-            padding: 16px;
-            background:
-                radial-gradient(circle at top right, rgba(17, 174, 240, 0.2), transparent 34%),
-                radial-gradient(circle at top left, rgba(97, 232, 166, 0.14), transparent 28%),
-                linear-gradient(165deg, var(--bg-0), var(--bg-1));
-        }
+  --blur-pane:22px; --blur-chip:12px;
+  --beat:2400ms; --beat-ease:cubic-bezier(.4,0,.6,1);
 
-        body::before {
-            content: "";
-            position: fixed;
-            inset: 0;
-            pointer-events: none;
-            background-image:
-                linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
-            background-size: 22px 22px;
-            mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.45), transparent 70%);
-        }
+  --fnt:"Adobe Clean",-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;
+  --num:"SF Mono",ui-monospace,"Cascadia Mono","SFMono-Regular",Menlo,Consolas,monospace;
 
-        .shell {
-            max-width: 460px;
-            margin: 0 auto;
-            position: relative;
-            z-index: 1;
-        }
+  --noise:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)'/%3E%3C/svg%3E");
 
-        .hero {
-            position: relative;
-            overflow: hidden;
-            border: 1px solid var(--panel-border);
-            border-radius: 20px;
-            padding: 18px 18px 16px;
-            margin-bottom: 14px;
-            background:
-                linear-gradient(135deg, rgba(95, 211, 255, 0.14), rgba(97, 232, 166, 0.06) 42%, rgba(7, 15, 22, 0.9) 82%),
-                var(--panel);
-            box-shadow: var(--panel-shadow);
-        }
+  /* theme defaults; applyHostTheme() overwrites all of these */
+  --surface:#1e1e1e;
+  --pane-hi:rgba(255,255,255,.115); --pane-lo:rgba(255,255,255,.038);
+  --pane-lift:1.14; --pane-sat:1.5;
+  --solid-hi:#2f2f31; --solid-lo:#252527;
+  --spec-top:rgba(255,255,255,.40); --spec-left:rgba(255,255,255,.15);
+  --spec-bot:rgba(0,0,0,.34); --spec-right:rgba(0,0,0,.16);
+  --rim:rgba(255,255,255,.07);
+  --well:rgba(0,0,0,.32); --well-in:inset 0 1px 3px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.04);
+  --sh-contact:0 1px 0 rgba(0,0,0,.42);
+  --sh-soft:0 10px 24px -12px rgba(0,0,0,.70);
+  --sh-far:0 26px 46px -24px rgba(0,0,0,.55);
+  --ink:#f3f2f0; --ink-2:#b6b5b2; --ink-3:#8a8987;
+  --ok:#5fd3a6; --wait:#6fb6f5; --bad:#ff8a85; --off:#8a8a90; --accent:#ffb259;
+  --key:rgba(255,186,110,.30); --fill:rgba(122,182,255,.18);
+  --band:rgba(255,255,255,.045); --floor:rgba(0,0,0,.50);
+  --hatch:rgba(255,255,255,.11);
+  --grain-stage:.075; --grain-pane:.03;
+  --track:#3f9375; --sheen:rgba(255,255,255,.12);
+  --halo-ok:rgba(95,211,166,.15); --halo-wait:rgba(111,182,245,.15);
+  --halo-bad:rgba(255,138,133,.15); --halo-faint:rgba(95,211,166,.05);
+}
 
-        .hero::after {
-            content: "";
-            position: absolute;
-            width: 140px;
-            height: 140px;
-            border-radius: 999px;
-            right: -32px;
-            top: -46px;
-            background: radial-gradient(circle, rgba(95, 211, 255, 0.34), transparent 70%);
-            pointer-events: none;
-        }
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{
+  min-width:280px; overflow-x:hidden; overflow-y:auto;
+  background:var(--surface); color:var(--ink);
+  font:12px/1.45 var(--fnt); -webkit-font-smoothing:antialiased;
+  user-select:none; position:relative;
+}
+button,input{font:inherit;color:inherit}
+button{-webkit-appearance:none;border:0;background:none;cursor:pointer}
+h1,h2,p,dl,dd,dt{margin:0}
+[hidden]{display:none !important}
 
-        .eyebrow {
-            display: inline-block;
-            font-size: 11px;
-            letter-spacing: 0.18em;
-            text-transform: uppercase;
-            color: var(--accent);
-            margin-bottom: 10px;
-        }
+/* ========================= LAYER 0 · ambient backdrop ==================== */
+.stage{
+  position:fixed; inset:0; z-index:0; pointer-events:none;
+  background:
+    radial-gradient(72% 46% at 15% -8%,  var(--key),  transparent 62%),
+    radial-gradient(66% 44% at 97% 33%,  var(--fill), transparent 66%),
+    radial-gradient(58% 38% at -12% 80%, var(--fill), transparent 68%),
+    linear-gradient(104deg, transparent 20%, var(--band) 47%, transparent 72%),
+    radial-gradient(140% 54% at 50% 120%, var(--floor), transparent 74%);
+}
+.stage::after{
+  content:''; position:absolute; inset:0;
+  background:var(--noise); background-size:180px 180px;
+  opacity:var(--grain-stage); mix-blend-mode:overlay;
+}
 
-        h1 {
-            margin: 0;
-            font-size: 24px;
-            line-height: 1.05;
-            letter-spacing: -0.02em;
-        }
+.shell{position:relative; z-index:1; max-width:1080px; display:flex; flex-direction:column; gap:11px; padding:13px 12px 18px}
 
-        .hero-copy {
-            margin-top: 8px;
-            color: var(--text-1);
-            font-size: 12px;
-            line-height: 1.55;
-            max-width: 330px;
-        }
+/* ============================ LAYER 1 · glass panes ====================== */
+.pane{
+  position:relative; border-radius:var(--r-card); padding:var(--pad);
+  background:linear-gradient(174deg,var(--pane-hi),var(--pane-lo));
+  -webkit-backdrop-filter:blur(var(--blur-pane)) saturate(var(--pane-sat)) brightness(var(--pane-lift));
+  backdrop-filter:blur(var(--blur-pane)) saturate(var(--pane-sat)) brightness(var(--pane-lift));
+  box-shadow:
+    inset 0 1px 0 var(--spec-top),
+    inset 1px 0 0 var(--spec-left),
+    inset 0 -1px 0 var(--spec-bot),
+    inset -1px 0 0 var(--spec-right),
+    inset 0 0 0 1px var(--rim),
+    var(--sh-contact), var(--sh-soft);
+}
+.pane::before{
+  content:''; position:absolute; inset:0; border-radius:inherit; pointer-events:none;
+  background:var(--noise); background-size:180px 180px;
+  opacity:var(--grain-pane); mix-blend-mode:overlay;
+}
+@supports not ((backdrop-filter:blur(2px)) or (-webkit-backdrop-filter:blur(2px))){
+  .pane{background:linear-gradient(174deg,var(--solid-hi),var(--solid-lo))}
+}
+.hero{
+  border-radius:var(--r-hero); padding:var(--pad-hero);
+  box-shadow:
+    inset 0 1px 0 var(--spec-top),
+    inset 1px 0 0 var(--spec-left),
+    inset 0 -1px 0 var(--spec-bot),
+    inset -1px 0 0 var(--spec-right),
+    inset 0 0 0 1px var(--rim),
+    var(--sh-contact), var(--sh-soft), var(--sh-far);
+}
+.hero::after{
+  content:''; position:absolute; inset:0; border-radius:inherit; pointer-events:none;
+  background:linear-gradient(142deg,var(--sheen),transparent 40%);
+}
 
-        .hero-meta {
-            margin-top: 14px;
-            display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: 10px;
-        }
+/* ========================= LAYER 2 · wells cut into glass ================ */
+.well{border-radius:var(--r-in);background:var(--well);box-shadow:var(--well-in)}
 
-        .meta-card {
-            border: 1px solid rgba(129, 170, 197, 0.14);
-            border-radius: 14px;
-            padding: 10px 11px;
-            background: rgba(7, 15, 22, 0.36);
-        }
+/* ---------- shared type roles ---------- */
+.label{display:block;font:700 9px/1 var(--fnt);letter-spacing:.11em;text-transform:uppercase;color:var(--ink-3)}
+.hd{display:flex;align-items:baseline;gap:8px;margin-bottom:10px}
+.hd .label{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hd .when{font:500 9.5px/1 var(--num);color:var(--ink-3);font-variant-numeric:tabular-nums}
+.dim{color:var(--ink-3)}
+.link{font-size:10px;font-weight:600;color:var(--accent);padding:2px 0}
+.link:hover{text-decoration:underline}
 
-        .meta-label {
-            display: block;
-            font-size: 10px;
-            letter-spacing: 0.12em;
-            text-transform: uppercase;
-            color: var(--text-2);
-            margin-bottom: 4px;
-        }
+/* ============================ THE STATUS ================================ */
+.stat{display:flex;align-items:flex-start;gap:11px}
+.beacon{position:relative;flex:0 0 auto;width:12px;height:12px;margin-top:5px}
+/* base dot: colour + shape only. Positioning/sizing is container-scoped so a
+   wholesale className rewrite by the bridge cannot break it. */
+.status-dot{border-radius:50%;background:var(--off)}
+.beacon .status-dot{
+  position:absolute; inset:0;
+  box-shadow:inset 0 -1px 1px rgba(0,0,0,.35), inset 0 1px 1px rgba(255,255,255,.5),
+             0 0 0 4px var(--halo,transparent);
+}
+.host .status-dot{
+  position:static; flex:0 0 auto; width:6px; height:6px;
+  box-shadow:inset 0 -1px 1px rgba(0,0,0,.3),inset 0 1px 1px rgba(255,255,255,.45);
+}
+.status-dot.connected{background:var(--ok);--halo:var(--halo-ok)}
+.status-dot.disconnected{background:var(--off)}
+/* the live connection dot breathes while connected */
+#connectionStatus.connected{animation:breathe var(--beat) var(--beat-ease) infinite}
+@keyframes breathe{0%,100%{box-shadow:inset 0 -1px 1px rgba(0,0,0,.35),inset 0 1px 1px rgba(255,255,255,.5),0 0 0 3px var(--halo-ok)}
+  50%{box-shadow:inset 0 -1px 1px rgba(0,0,0,.35),inset 0 1px 1px rgba(255,255,255,.5),0 0 0 7px var(--halo-faint)}}
 
-        .meta-value {
-            display: block;
-            font-size: 12px;
-            color: var(--text-0);
-            font-weight: 600;
-        }
+.stat-copy{min-width:0;flex:1}
+.stat-copy h1{font-size:20px;font-weight:600;letter-spacing:-.022em;line-height:1.16;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stat-copy .host{display:flex;align-items:center;gap:6px;margin-top:4px;font-size:11.5px;line-height:1.4;color:var(--ink-2)}
+.stat-copy .host span:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
-        .panel {
-            border: 1px solid var(--panel-border);
-            border-radius: 18px;
-            padding: 15px;
-            margin-bottom: 12px;
-            background: var(--panel);
-            box-shadow: var(--panel-shadow);
-            backdrop-filter: blur(8px);
-        }
+.facts{margin-top:12px;padding-top:11px;border-top:1px solid var(--rim)}
+.fact{display:flex;align-items:baseline;gap:10px;padding:3.5px 0}
+.fact dt{flex:1;min-width:0;font-size:10.5px;color:var(--ink-3);white-space:nowrap}
+.fact dd{flex:0 0 auto;max-width:66%;font-size:11px;font-weight:500;font-variant-numeric:tabular-nums;
+  text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fact dd.mono{font-family:var(--num);font-size:10.5px}
+.fact dd.warn{color:var(--wait)}
+.fact dd .sub{display:block;margin-top:1px;font-size:9.5px;font-weight:400;color:var(--ink-3)}
 
-        .panel-title {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 10px;
-            margin-bottom: 12px;
-        }
+/* ---------- the one control ---------- */
+.act{margin-top:12px}
+.btn{
+  display:flex;align-items:center;justify-content:center;gap:8px;width:100%;
+  height:36px;border-radius:var(--r-in);font-size:12px;font-weight:650;letter-spacing:.005em;
+  background:linear-gradient(180deg,var(--ctl-hi,rgba(255,255,255,.20)),var(--ctl-lo,rgba(255,255,255,.085)));
+  box-shadow:
+    inset 0 1px 0 var(--ctl-spec,rgba(255,255,255,.46)),
+    inset 0 -1px 0 var(--spec-bot),
+    inset 0 0 0 1px var(--rim),
+    var(--sh-contact), 0 4px 12px -6px rgba(0,0,0,.5);
+  transition:transform .12s cubic-bezier(.34,1.4,.64,1), filter .14s ease, box-shadow .14s ease;
+}
+.btn:hover{filter:brightness(1.1)}
+.btn:active{transform:translateY(1px) scale(.99);
+  box-shadow:inset 0 2px 5px rgba(0,0,0,.4), inset 0 0 0 1px var(--rim)}
+.btn svg{width:15px;height:15px;fill:currentColor;display:block;opacity:.9}
+/* live-code contract: exactly one visible action, zero JS */
+#startButton:disabled,#stopButton:disabled{display:none}
 
-        .panel-title h2 {
-            margin: 0;
-            font-size: 13px;
-            letter-spacing: 0.12em;
-            text-transform: uppercase;
-            font-weight: 700;
-            color: var(--text-1);
-        }
+/* ==========================================================================
+   IN PREMIERE NOW — the live command + the 8 s-budget meter + the queue.
+   The queue LIST (#commandQueue) is always in the DOM so the bridge can write
+   to it; the pane is visible at all times.
+   ========================================================================== */
+.now .cmdline{display:flex;align-items:flex-end;gap:8px}
+.cmd{flex:1;min-width:0;font-size:16px;font-weight:600;letter-spacing:-.02em;line-height:1.15;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink-2)}
+.cid{flex:0 0 auto;font:500 10px/1.4 var(--num);color:var(--ink-3);padding-bottom:2px;user-select:text}
 
-        .panel-title span {
-            font-size: 11px;
-            color: var(--text-2);
-        }
+.meter{margin-top:11px}
+.gauge{position:relative;height:9px;border-radius:var(--r-bar);overflow:hidden}
+.gauge .fill{position:absolute;left:0;top:0;bottom:0;border-radius:var(--r-bar);width:0;
+  background:linear-gradient(180deg,rgba(255,255,255,.40),rgba(255,255,255,0) 60%),var(--track);
+  transition:width .3s ease}
+.gauge .fill.over{--track:var(--bad)}
+.gauge .tick{position:absolute;top:-1px;bottom:-1px;width:2px;background:var(--ink);opacity:.5;border-radius:2px}
+.gauge.unread{background:repeating-linear-gradient(114deg,var(--hatch) 0 1px,transparent 1px 10px),var(--well)}
+.caps{display:flex;justify-content:space-between;gap:14px;margin-top:7px}
+.caps span{font:500 10px/1.3 var(--num);font-variant-numeric:tabular-nums;color:var(--ink-2);
+  min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.caps span:last-child{text-align:right;color:var(--ink-3)}
+.caps .hot{color:var(--bad)}
 
-        .status-grid {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 10px;
-        }
+.waiting{margin-top:12px;padding-top:10px;border-top:1px solid var(--rim)}
+.waiting .label{margin-bottom:7px}
 
-        .status-card {
-            min-height: 82px;
-            padding: 12px;
-            border-radius: 16px;
-            border: 1px solid rgba(129, 170, 197, 0.12);
-            background:
-                linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 58%),
-                rgba(9, 17, 25, 0.56);
-        }
+/* ==========================================================================
+   COMMAND QUEUE — the bridge writes .command-item rows into #commandQueue.
+   Style THAT exact markup in the glass language.
+   ========================================================================== */
+#commandQueue{display:flex;flex-direction:column;gap:4px}
+.command-item{
+  display:flex;align-items:center;justify-content:space-between;gap:9px;
+  padding:7px 10px;border-radius:var(--r-in);background:var(--well);box-shadow:var(--well-in);
+}
+.command-label{
+  flex:1;min-width:0;font:500 10.5px/1.3 var(--num);color:var(--ink-2);user-select:text;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.command-status{
+  flex:0 0 auto;font:700 8.5px/1 var(--fnt);letter-spacing:.09em;text-transform:uppercase;
+  padding:3px 7px;border-radius:999px;color:var(--ink-3);box-shadow:inset 0 0 0 1px var(--rim);
+}
+.command-status.pending{color:var(--wait)}
+.command-status.executing{color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent-edge,rgba(255,178,96,.4))}
+.command-status.completed{color:var(--ok)}
+.command-status.failed,.command-status.error{color:var(--bad);box-shadow:inset 0 0 0 1px var(--bad)}
 
-        .status-caption {
-            font-size: 10px;
-            letter-spacing: 0.12em;
-            text-transform: uppercase;
-            color: var(--text-2);
-            margin-bottom: 10px;
-        }
+/* ==========================================================================
+   WHAT STOPPED — appears only when the bridge marks a failure.
+   ========================================================================== */
+.fail{overflow:hidden}
+.fail::after{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;
+  background:var(--sev,var(--bad));border-radius:3px 0 0 3px}
+.fail .label{color:var(--sev,var(--bad))}
+.fail h2{font-size:13px;font-weight:650;line-height:1.34;letter-spacing:-.005em}
+.verbatim{margin-top:10px;padding:9px 10px;font:500 10px/1.55 var(--num);color:var(--ink-2);
+  user-select:text;overflow-wrap:break-word}
+.fix{margin-top:9px;font-size:11.5px;line-height:1.5;color:var(--ink-2)}
+.fix b{color:var(--ink);font-weight:650}
 
-        .status-indicator {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
+/* ============================ ACTIVITY LOG =============================== */
+/* the bridge appends .log-entry rows into #logContainer. Style THAT markup. */
+.logs .log-container{display:flex;flex-direction:column;gap:5px;max-height:320px;overflow-y:auto;padding:2px 0}
+.log-entry{
+  font:500 10.5px/1.5 var(--num);color:var(--ink-2);
+  padding:7px 10px 7px 12px;border-radius:var(--r-in);background:var(--well);box-shadow:var(--well-in);
+  border-left:3px solid var(--rim);word-break:break-word;user-select:text;
+}
+.log-entry.info{border-left-color:var(--wait)}
+.log-entry.warning{border-left-color:var(--accent);color:var(--ink)}
+.log-entry.error{border-left-color:var(--bad);color:var(--bad)}
+#logContainer:empty::before{content:"Nothing has happened yet.";color:var(--ink-3);font-size:11px;padding:4px 2px}
 
-        .status-dot {
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-            flex: 0 0 auto;
-            box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.04);
-        }
+/* ============================ THE ONE SETTING ============================ */
+.cfg .row{display:flex;align-items:center;gap:10px}
+.cfg .p{flex:1;min-width:0;font:500 10px/1.35 var(--num);color:var(--ink-3);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cfg .full{display:none}
+.cfg[data-open="1"] .full{display:block;margin-top:11px}
+.cfg h2{font-size:13px;font-weight:650;line-height:1.34;margin-bottom:6px}
+.field{display:flex;gap:8px}
+.field input{
+  flex:1;min-width:0;height:34px;padding:0 11px;border:0;border-radius:var(--r-in);
+  background:var(--well);box-shadow:var(--well-in);color:var(--ink);
+  font:500 10.5px/1 var(--num);user-select:text;outline:none;
+  transition:box-shadow .14s ease;
+}
+.field input::-webkit-input-placeholder{color:var(--ink-3);opacity:.48}
+.field input:focus{box-shadow:var(--well-in),0 0 0 2px var(--accent-wash,rgba(255,178,96,.2))}
+.field .btn{width:auto;flex:0 0 auto;height:34px;padding:0 15px;
+  --ctl-hi:var(--accent-hi,rgba(255,178,96,.9));--ctl-lo:var(--accent-lo,rgba(200,120,20,.9));
+  --ctl-spec:rgba(255,255,255,.55);color:var(--accent-ink,#2a1600)}
+.help{margin-top:9px;font-size:10.5px;line-height:1.5;color:var(--ink-3)}
+.help b{color:var(--ink-2);font-weight:600}
 
-        .status-dot.connected {
-            background: var(--success);
-            box-shadow: 0 0 0 4px rgba(97, 232, 166, 0.12), 0 0 14px rgba(97, 232, 166, 0.35);
-        }
+/* THREE ELEVATIONS: hero=contact+soft+far · card=contact+soft · setting=contact */
+.cfg{
+  box-shadow:
+    inset 0 1px 0 var(--spec-top), inset 1px 0 0 var(--spec-left),
+    inset 0 -1px 0 var(--spec-bot), inset -1px 0 0 var(--spec-right),
+    inset 0 0 0 1px var(--rim), var(--sh-contact);
+}
+.cfg .label{opacity:.8}
 
-        .status-dot.disconnected {
-            background: var(--error);
-            box-shadow: 0 0 0 4px rgba(255, 123, 123, 0.12), 0 0 14px rgba(255, 123, 123, 0.28);
-        }
+/* ---------- order: live state first, the setting last ---------- */
+.colA,.colB{display:contents}
+.hero{order:0} .fail{order:1} .now{order:2} .logs{order:3} .cfg{order:4}
 
-        .status-text {
-            display: block;
-            font-size: 13px;
-            line-height: 1.35;
-            color: var(--text-0);
-        }
+/* ---------- widths ---------- */
+@media (max-width:302px){
+  :root{--r-hero:17px;--pad-hero:11px;--r-card:16px;--pad:10px;--r-in:6px}
+  .shell{padding:11px 10px 15px;gap:9px}
+  .stat-copy h1{font-size:18px}
+  .cmd{font-size:15px}
+}
+@media (min-width:600px){
+  .shell{display:grid;grid-template-columns:minmax(276px,.92fr) minmax(300px,1.08fr);
+    align-content:start;gap:12px;padding:14px 14px 18px}
+  .colA,.colB{display:flex;flex-direction:column;gap:12px;min-width:0;align-self:start}
+  .colA{grid-column:1;grid-row:1}
+  .colB{grid-column:2;grid-row:1}
+  .stat-copy h1{font-size:22px}
+}
 
-        .config-copy,
-        .micro-copy {
-            font-size: 11px;
-            line-height: 1.55;
-            color: var(--text-2);
-            margin-bottom: 10px;
-        }
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
 
-        label {
-            display: block;
-            font-size: 10px;
-            letter-spacing: 0.12em;
-            text-transform: uppercase;
-            color: var(--text-2);
-            margin-bottom: 8px;
-        }
-
-        input[type="text"] {
-            width: 100%;
-            padding: 12px 13px;
-            border: 1px solid rgba(129, 170, 197, 0.14);
-            border-radius: 12px;
-            background: var(--input);
-            color: var(--text-0);
-            font-size: 13px;
-            outline: none;
-            transition: border-color 0.18s ease, box-shadow 0.18s ease;
-        }
-
-        input[type="text"]:focus {
-            border-color: rgba(95, 211, 255, 0.48);
-            box-shadow: 0 0 0 3px rgba(95, 211, 255, 0.1);
-        }
-
-        .button-row,
-        .button-grid {
-            display: grid;
-            gap: 10px;
-        }
-
-        .button-row {
-            grid-template-columns: 1fr;
-            margin-top: 10px;
-        }
-
-        .button-grid {
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-
-        button {
-            appearance: none;
-            border: 0;
-            border-radius: 12px;
-            padding: 12px 14px;
-            font-size: 12px;
-            font-weight: 700;
-            letter-spacing: 0.03em;
-            color: var(--text-0);
-            cursor: pointer;
-            transition: transform 0.16s ease, box-shadow 0.16s ease, background 0.16s ease, opacity 0.16s ease;
-            background: var(--button-dark);
-            box-shadow: inset 0 0 0 1px rgba(129, 170, 197, 0.14);
-        }
-
-        button:hover:enabled {
-            transform: translateY(-1px);
-        }
-
-        button:disabled {
-            cursor: not-allowed;
-            opacity: 0.4;
-        }
-
-        .primary {
-            background:
-                linear-gradient(135deg, var(--accent), var(--accent-strong));
-            color: #081119;
-            box-shadow:
-                inset 0 0 0 1px rgba(255, 255, 255, 0.18),
-                0 10px 20px rgba(17, 174, 240, 0.28);
-        }
-
-        .secondary {
-            background:
-                linear-gradient(135deg, rgba(97, 232, 166, 0.16), rgba(17, 174, 240, 0.08)),
-                var(--button-dark);
-        }
-
-        .utility {
-            background: rgba(8, 17, 26, 0.92);
-        }
-
-        .command-queue,
-        .log-container {
-            border-radius: 14px;
-            border: 1px solid rgba(129, 170, 197, 0.1);
-            background: rgba(8, 15, 22, 0.82);
-            padding: 8px;
-        }
-
-        .command-queue {
-            max-height: 164px;
-            overflow-y: auto;
-        }
-
-        .command-item {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 10px;
-            padding: 10px 11px;
-            margin-bottom: 6px;
-            border-radius: 12px;
-            background: rgba(16, 26, 35, 0.72);
-        }
-
-        .command-item:last-child {
-            margin-bottom: 0;
-        }
-
-        .command-label {
-            flex: 1 1 auto;
-            min-width: 0;
-            color: var(--text-1);
-            font-size: 12px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        .command-status {
-            padding: 4px 8px;
-            border-radius: 999px;
-            font-size: 10px;
-            font-weight: 700;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-        }
-
-        .command-status.pending {
-            background: rgba(255, 215, 107, 0.14);
-            color: var(--warn);
-        }
-
-        .command-status.executing {
-            background: var(--accent-soft);
-            color: var(--accent);
-        }
-
-        .command-status.completed {
-            background: rgba(97, 232, 166, 0.14);
-            color: var(--success);
-        }
-
-        .log-container {
-            max-height: 220px;
-            overflow-y: auto;
-        }
-
-        .log-entry {
-            font-size: 11px;
-            line-height: 1.5;
-            margin-bottom: 7px;
-            padding: 8px 10px;
-            border-radius: 10px;
-            color: var(--text-1);
-            background: rgba(15, 24, 33, 0.5);
-            word-break: break-word;
-        }
-
-        .log-entry:last-child {
-            margin-bottom: 0;
-        }
-
-        .log-entry.info {
-            border-left: 3px solid rgba(95, 211, 255, 0.6);
-        }
-
-        .log-entry.warning {
-            border-left: 3px solid rgba(255, 215, 107, 0.75);
-            color: #f4d889;
-        }
-
-        .log-entry.error {
-            border-left: 3px solid rgba(255, 123, 123, 0.8);
-            color: #ffadad;
-        }
-
-        .footer-note {
-            text-align: center;
-            color: var(--text-2);
-            font-size: 10px;
-            letter-spacing: 0.09em;
-            text-transform: uppercase;
-            padding: 4px 0 2px;
-        }
-    </style>
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none !important;transition:none !important}
+}
+@media (forced-colors:active){
+  .pane,.well,.btn,.field input,.gauge,.command-item,.log-entry{border:1px solid CanvasText}
+  .status-dot{forced-color-adjust:none;border:1px solid CanvasText}
+}
+</style>
 </head>
 <body>
-    <div class="shell">
-        <section class="hero">
-            <div class="eyebrow">Premiere Automation</div>
-            <h1>MCP Bridge (CEP)</h1>
-            <div class="hero-copy">
-                Real-time file bridge for Codex and other MCP clients. Keep the temp path aligned, start the bridge, and the panel will execute commands inside Premiere Pro.
-            </div>
-            <div class="hero-meta">
-                <div class="meta-card">
-                    <span class="meta-label">Mode</span>
-                    <span class="meta-value">CEP Runtime</span>
-                </div>
-                <div class="meta-card">
-                    <span class="meta-label">Path</span>
-                    <span class="meta-value">/tmp bridge</span>
-                </div>
-                <div class="meta-card">
-                    <span class="meta-label">Control</span>
-                    <span class="meta-value">Live Queue</span>
-                </div>
-            </div>
-        </section>
 
-        <section class="panel">
-            <div class="panel-title">
-                <h2>Status</h2>
-                <span>Live bridge + host checks</span>
-            </div>
-            <div class="status-grid">
-                <div class="status-card">
-                    <div class="status-caption">Bridge</div>
-                    <div class="status-indicator">
-                        <div class="status-dot disconnected" id="connectionStatus"></div>
-                        <span class="status-text" id="connectionText">Disconnected</span>
-                    </div>
-                </div>
-                <div class="status-card">
-                    <div class="status-caption">Premiere</div>
-                    <div class="status-indicator">
-                        <div class="status-dot disconnected" id="serverStatus"></div>
-                        <span class="status-text" id="serverText">Start Bridge to enable</span>
-                    </div>
-                </div>
-            </div>
-        </section>
+<div class="stage" aria-hidden="true"></div>
 
-        <section class="panel">
-            <div class="panel-title">
-                <h2>Configuration</h2>
-                <span>Shared temp directory</span>
-            </div>
-            <div class="config-copy">
-                This must match the `PREMIERE_TEMP_DIR` value used by your MCP client.
-            </div>
-            <label for="tempDirectory">Temp Directory</label>
-            <input type="text" id="tempDirectory" placeholder="Temp Directory (e.g. /tmp/premiere-mcp-bridge)">
-            <div class="button-row">
-                <button class="primary" onclick="saveConfig()">Save Configuration</button>
-            </div>
-        </section>
+<main class="shell">
+  <div class="colA">
 
-        <section class="panel">
-            <div class="panel-title">
-                <h2>Controls</h2>
-                <span>Start, stop, inspect</span>
-            </div>
-            <div class="button-grid">
-                <button class="primary" onclick="startBridge()" id="startButton">Start Bridge</button>
-                <button class="secondary" onclick="stopBridge()" id="stopButton" disabled>Stop Bridge</button>
-                <button class="secondary" onclick="runDiagnostics()" id="diagnosticsButton">Run Diagnostics</button>
-                <button class="utility" onclick="clearLog()" id="clearButton">Clear Log</button>
-            </div>
-            <div class="micro-copy" style="margin-top: 10px; margin-bottom: 0;">
-                Reload the panel after updating bridge code so Premiere is not running stale JavaScript in memory. Once Start Bridge is on, connect from Codex, Claude, or another MCP client using the same temp directory. If commands fail, run diagnostics and share the generated JSON report from the temp directory.
-            </div>
-        </section>
-
-        <section class="panel">
-            <div class="panel-title">
-                <h2>Command Queue</h2>
-                <span>Most recent tasks</span>
-            </div>
-            <div class="command-queue" id="commandQueue">
-                <div class="command-item">
-                    <span class="command-label">No commands in queue</span>
-                </div>
-            </div>
-        </section>
-
-        <section class="panel">
-            <div class="panel-title">
-                <h2>Activity Log</h2>
-                <span>Bridge telemetry</span>
-            </div>
-            <div class="log-container" id="logContainer">
-                <div class="log-entry info">MCP Bridge (CEP) loaded. This is the supported release path for Premiere automation.</div>
-                <div class="log-entry info">Set the temp directory to match your MCP client, then click Start Bridge and connect from Codex or Claude.</div>
-            </div>
-        </section>
-
-        <div class="footer-note">MCP Bridge CEP Panel</div>
+  <!-- ============ THE STATUS ============ -->
+  <section class="pane hero" role="status" aria-live="polite" aria-atomic="true">
+    <div class="stat">
+      <span class="beacon" aria-hidden="true"><span class="status-dot disconnected" id="connectionStatus"></span></span>
+      <div class="stat-copy">
+        <h1 id="connectionText">Disconnected</h1>
+        <p class="host">
+          <span class="status-dot disconnected" id="serverStatus" title="Whether Premiere itself is answering"></span>
+          <span id="serverText">Start Bridge to enable</span>
+        </p>
+      </div>
     </div>
 
-    <script src="CSInterface.js"></script>
-    <script src="bridge-cep.js"></script>
+    <dl class="facts">
+      <div class="fact"><dt>Project</dt><dd class="mono dim" id="fProj">—</dd></div>
+      <div class="fact"><dt>Channel</dt><dd class="dim" id="fAuth">—</dd></div>
+      <div class="fact"><dt>Last round trip</dt><dd class="mono dim" id="fRtt">—</dd></div>
+      <div class="fact"><dt>Heartbeat</dt><dd class="dim" id="fBeat">—</dd></div>
+    </dl>
+
+    <div class="act">
+      <button class="btn" id="startButton" type="button" onclick="startBridge()">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7 5 8 5-8 5V5Z"/></svg>Start the bridge
+      </button>
+      <button class="btn" id="stopButton" type="button" onclick="stopBridge()" disabled>
+        <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="5.5" y="5.5" width="9" height="9" rx="2.4"/></svg>Stop the bridge
+      </button>
+    </div>
+  </section>
+
+  <!-- ============ WHAT STOPPED ============ -->
+  <section class="pane fail" id="failCard" hidden aria-live="polite">
+    <div class="hd"><span class="label" id="failKick">What stopped</span><span class="when" id="failWhen"></span></div>
+    <h2 id="failTitle"></h2>
+    <div class="well verbatim" id="failDetail"></div>
+    <p class="fix" id="failFix"></p>
+  </section>
+
+  </div>
+  <div class="colB">
+
+  <!-- ============ IN PREMIERE NOW ============ -->
+  <section class="pane now" id="nowCard">
+    <div class="hd"><span class="label" id="nowKick">In Premiere now</span><span class="when" id="nowWhen"></span></div>
+    <div class="cmdline" id="cmdLine" hidden>
+      <span class="cmd" id="cmdName">—</span><span class="cid" id="cmdId"></span>
+    </div>
+    <div class="meter" id="meterWrap" hidden>
+      <div class="gauge well unread" id="gauge"><div class="fill" id="gFill"></div><div class="tick" id="gTick" hidden></div></div>
+      <div class="caps"><span id="capL">—</span><span id="capR">—</span></div>
+    </div>
+    <div class="waiting" id="waitWrap">
+      <span class="label" id="waitLabel">Command queue</span>
+      <div id="commandQueue"></div>
+    </div>
+  </section>
+
+  <!-- ============ ACTIVITY ============ -->
+  <section class="pane logs">
+    <div class="hd"><span class="label">Activity</span>
+      <button class="link" style="color:var(--ink-3)" type="button" onclick="clearLog()">Clear</button></div>
+    <div class="log-container" id="logContainer" role="log" aria-label="Recent activity"></div>
+  </section>
+
+  <!-- ============ THE ONE SETTING ============ -->
+  <section class="pane cfg" id="cfgCard" data-open="0">
+    <div class="hd" style="margin-bottom:8px">
+      <span class="label" id="cfgLabel">Shared folder</span><span class="when" id="cfgWhen"></span></div>
+    <div class="row">
+      <span class="p" id="cfgPath">—</span>
+      <button class="link" type="button" onclick="toggleCfg()" aria-controls="tempDirectory">Change</button>
+    </div>
+    <div class="full">
+      <label class="sr" for="tempDirectory">Folder this panel and the assistant's server share</label>
+      <div class="field">
+        <input type="text" id="tempDirectory" spellcheck="false" autocomplete="off"
+               placeholder="/tmp/premiere-mcp-bridge" aria-describedby="cfgHelp">
+        <button class="btn" type="button" onclick="saveConfig()">Save</button>
+      </div>
+      <p class="help" id="cfgHelp">Commands and answers pass through this folder. It must match the <b>PREMIERE_TEMP_DIR</b> your MCP client uses. Set it once per machine.</p>
+    </div>
+  </section>
+
+  </div>
+</main>
+
+<script>
+/* ==========================================================================
+   THEME — read the host surface and derive the whole surface/ink/status
+   family from it. Premiere ships four brightness levels; meaning colours are
+   chosen by measured contrast against the EFFECTIVE pane (host composited with
+   the glass), not the raw host colour. This is the ONLY script in this file —
+   all data/behaviour comes from bridge-cep.js.
+   ========================================================================== */
+var ROLE={
+  ok:    {base:'#5fd3a6',deep:'#0d6b4b',pale:'#9fe9c9'},
+  wait:  {base:'#6fb6f5',deep:'#124f85',pale:'#b6dbfb'},
+  bad:   {base:'#ff8a85',deep:'#9d211c',pale:'#ffbdb9'},
+  off:   {base:'#8a8a90',deep:'#4c4c52',pale:'#b8b8be'},
+  accent:{base:'#ffb259',deep:'#7d4600',pale:'#ffd9ac'}
+};
+function h2r(h){h=h.replace('#','');return [parseInt(h.substr(0,2),16),parseInt(h.substr(2,2),16),parseInt(h.substr(4,2),16)];}
+function r2h(r){function p(n){n=Math.max(0,Math.min(255,Math.round(n))).toString(16);return n.length<2?'0'+n:n;}return '#'+p(r[0])+p(r[1])+p(r[2]);}
+function lum(rgb){var c=rgb.map(function(v){v/=255;return v<=.03928?v/12.92:Math.pow((v+.055)/1.055,2.4);});
+  return .2126*c[0]+.7152*c[1]+.0722*c[2];}
+function ratio(a,b){var x=lum(a),y=lum(b);return (Math.max(x,y)+.05)/(Math.min(x,y)+.05);}
+function mix(a,b,t){return [a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t,a[2]+(b[2]-a[2])*t];}
+function rgba(hex,a){var c=h2r(hex);return 'rgba('+c[0]+','+c[1]+','+c[2]+','+a+')';}
+function step(role,pane){
+  var r=ROLE[role];
+  if(ratio(h2r(r.base),pane)>=3) return r.base;
+  return lum(pane)>.18 ? r.deep : r.pale;
+}
+
+function applyHostTheme(surf){
+  var R=document.documentElement.style;
+  if(!surf){
+    surf='#1e1e1e';
+    try{
+      var cs=new CSInterface();
+      var c=cs.hostEnvironment.appSkinInfo.panelBackgroundColor.color;
+      surf=r2h([c.red,c.green,c.blue]);
+      R.setProperty('--fnt','"'+cs.hostEnvironment.appSkinInfo.baseFontFamily+
+        '","Adobe Clean",-apple-system,BlinkMacSystemFont,Arial,sans-serif');
+    }catch(e){}
+  }
+  var s=h2r(surf), light=lum(s)>.18;
+  var pane=light?mix(s,[255,255,255],.46):mix(s,[255,255,255],.10);
+
+  R.setProperty('--surface',surf);
+  R.setProperty('--solid-hi',r2h(light?mix(s,[255,255,255],.52):mix(s,[255,255,255],.12)));
+  R.setProperty('--solid-lo',r2h(light?mix(s,[255,255,255],.36):mix(s,[255,255,255],.05)));
+
+  if(light){
+    R.setProperty('--pane-hi','rgba(255,255,255,.66)');
+    R.setProperty('--pane-lo','rgba(255,255,255,.40)');
+    R.setProperty('--pane-lift','1.03'); R.setProperty('--pane-sat','1.3');
+    R.setProperty('--spec-top','rgba(255,255,255,1)');
+    R.setProperty('--spec-left','rgba(255,255,255,.74)');
+    R.setProperty('--spec-bot','rgba(0,0,0,.15)');
+    R.setProperty('--spec-right','rgba(0,0,0,.07)');
+    R.setProperty('--rim','rgba(0,0,0,.055)');
+    R.setProperty('--sheen','rgba(255,255,255,.46)');
+    R.setProperty('--well','rgba(0,0,0,.075)');
+    R.setProperty('--well-in','inset 0 1px 2px rgba(0,0,0,.20),inset 0 0 0 1px rgba(0,0,0,.05)');
+    R.setProperty('--sh-contact','0 1px 0 rgba(0,0,0,.10)');
+    R.setProperty('--sh-soft','0 8px 20px -10px rgba(0,0,0,.34)');
+    R.setProperty('--sh-far','0 22px 40px -22px rgba(0,0,0,.28)');
+    R.setProperty('--ink','#14141a');
+    R.setProperty('--ink-2',r2h(mix(pane,[0,0,0],.74)));
+    R.setProperty('--ink-3',r2h(mix(pane,[0,0,0],.52)));
+    R.setProperty('--ctl-hi','rgba(255,255,255,.92)');
+    R.setProperty('--ctl-lo','rgba(255,255,255,.58)');
+    R.setProperty('--ctl-spec','rgba(255,255,255,1)');
+    R.setProperty('--key','rgba(255,166,60,.58)');
+    R.setProperty('--fill','rgba(86,156,255,.34)');
+    R.setProperty('--band','rgba(255,255,255,.48)');
+    R.setProperty('--floor','rgba(0,0,0,.17)');
+    R.setProperty('--hatch','rgba(0,0,0,.13)');
+    R.setProperty('--grain-stage','.05'); R.setProperty('--grain-pane','.045');
+  }else{
+    R.setProperty('--pane-hi','rgba(255,255,255,.115)');
+    R.setProperty('--pane-lo','rgba(255,255,255,.038)');
+    R.setProperty('--pane-lift','1.15'); R.setProperty('--pane-sat','1.5');
+    R.setProperty('--spec-top','rgba(255,255,255,.42)');
+    R.setProperty('--spec-left','rgba(255,255,255,.15)');
+    R.setProperty('--spec-bot','rgba(0,0,0,.34)');
+    R.setProperty('--spec-right','rgba(0,0,0,.16)');
+    R.setProperty('--rim','rgba(255,255,255,.065)');
+    R.setProperty('--sheen','rgba(255,255,255,.12)');
+    R.setProperty('--well','rgba(0,0,0,.32)');
+    R.setProperty('--well-in','inset 0 1px 3px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.04)');
+    R.setProperty('--sh-contact','0 1px 0 rgba(0,0,0,.42)');
+    R.setProperty('--sh-soft','0 10px 24px -12px rgba(0,0,0,.70)');
+    R.setProperty('--sh-far','0 26px 46px -24px rgba(0,0,0,.55)');
+    R.setProperty('--ink',r2h(mix(pane,[255,255,255],.94)));
+    R.setProperty('--ink-2',r2h(mix(pane,[255,255,255],.66)));
+    R.setProperty('--ink-3',r2h(mix(pane,[255,255,255],.40)));
+    R.setProperty('--ctl-hi','rgba(255,255,255,.20)');
+    R.setProperty('--ctl-lo','rgba(255,255,255,.085)');
+    R.setProperty('--ctl-spec','rgba(255,255,255,.46)');
+    R.setProperty('--key','rgba(255,178,96,.42)');
+    R.setProperty('--fill','rgba(112,176,255,.21)');
+    R.setProperty('--band','rgba(255,255,255,.075)');
+    R.setProperty('--floor','rgba(0,0,0,.52)');
+    R.setProperty('--hatch','rgba(255,255,255,.11)');
+    R.setProperty('--grain-stage','.08'); R.setProperty('--grain-pane','.03');
+  }
+
+  var ok=step('ok',pane), wt=step('wait',pane), bd=step('bad',pane),
+      of=step('off',pane), ac=step('accent',pane);
+  R.setProperty('--ok',ok); R.setProperty('--wait',wt);
+  R.setProperty('--bad',bd); R.setProperty('--off',of); R.setProperty('--accent',ac);
+  R.setProperty('--halo-ok',rgba(ok,light?.22:.15));
+  R.setProperty('--halo-wait',rgba(wt,light?.22:.15));
+  R.setProperty('--halo-bad',rgba(bd,light?.22:.15));
+  R.setProperty('--halo-faint',rgba(ok,light?.07:.05));
+  R.setProperty('--track',light?r2h(mix(h2r(ok),[0,0,0],.40)):r2h(mix(h2r(ok),[0,0,0],.26)));
+  var aB=h2r(ROLE.accent.base);
+  R.setProperty('--accent-hi',r2h(mix(aB,[255,255,255],light?.16:.08)));
+  R.setProperty('--accent-lo',r2h(mix(aB,[0,0,0],light?.14:.20)));
+  R.setProperty('--accent-edge',rgba(ROLE.accent.base,light?.85:.52));
+  R.setProperty('--accent-wash',rgba(ROLE.accent.base,light?.24:.20));
+  R.setProperty('--accent-ink','#2a1600');
+}
+
+/* the config disclosure is pure UI — the bridge does not know about it */
+function toggleCfg(){
+  var c=document.getElementById('cfgCard');
+  var open=c.getAttribute('data-open')==='1';
+  c.setAttribute('data-open',open?'0':'1');
+  if(!open){var t=document.getElementById('tempDirectory');if(t)t.focus();}
+}
+
+/* keep the collapsed config summary in step with the field */
+function syncCfgPath(){
+  var t=document.getElementById('tempDirectory'), p=document.getElementById('cfgPath');
+  if(!t||!p)return;
+  p.textContent=t.value||'—';
+  p.className='p'+(t.value?'':' dim');
+}
+
+(function boot(){
+  applyHostTheme(null);
+  var t=document.getElementById('tempDirectory');
+  if(t){ t.addEventListener('input',syncCfgPath); }
+  syncCfgPath();
+  /* the field can be populated by the bridge after load; catch that too */
+  setTimeout(syncCfgPath,400);
+  setTimeout(syncCfgPath,1500);
+})();
+</script>
+
+<script src="CSInterface.js"></script>
+<script src="bridge-cep.js"></script>
 </body>
 </html>
