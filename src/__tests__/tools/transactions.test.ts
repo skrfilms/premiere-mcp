@@ -50,6 +50,20 @@ interface FakeOptions {
   results?: Record<string, any>;
   /** Overrides results for the Nth runTool call (1-based). */
   resultByCall?: Record<number, any>;
+  /**
+   * Model Premiere's real behaviour: cloning a sequence makes the CLONE active.
+   *
+   * This is the option the harness was missing, and its absence is why a shipped bug went
+   * unnoticed — the fake's active sequence was a constant, so no test COULD express "the
+   * checkpoint stole the target". Any fake that cannot move is a fake that cannot disagree.
+   */
+  checkpointStealsActive?: boolean;
+  /** setActiveSequence reports failure. */
+  setActiveFails?: boolean;
+  /** The nastier host: setActiveSequence claims success and changes nothing. */
+  setActiveLies?: boolean;
+  /** Steal the active sequence again after the Nth runTool call (1-based) — a mid-plan side effect. */
+  stealActiveAfterCall?: number;
 }
 
 function fake(options: FakeOptions = {}) {
@@ -57,15 +71,23 @@ function fake(options: FakeOptions = {}) {
   let fpCounter = 0;
   let runToolCalls = 0;
   let diffCalls = 0;
+  let activeId = options.active?.id ?? 'SEQ_A';
 
   const resolveActiveSequence = jest.fn(async () => {
     if (options.active === null) return { success: false, error: 'No active sequence' };
     return {
       success: true,
-      id: options.active?.id ?? 'SEQ_A',
       name: options.active?.name ?? 'Reel 1',
       ...(options.active ?? {}),
+      // Last, so the tracked value always wins over the seed in options.active.
+      id: activeId,
     };
+  });
+
+  const setActiveSequence = jest.fn(async (sequenceId: string) => {
+    if (options.setActiveFails) return { success: false, error: 'Premiere refused to activate it' };
+    if (!options.setActiveLies) activeId = sequenceId;
+    return { success: true, verified: true };
   });
 
   const fingerprint = jest.fn(async (_sequenceId?: string) => {
@@ -80,6 +102,7 @@ function fake(options: FakeOptions = {}) {
 
   const createCheckpoint = jest.fn(async (_sequenceId: string, label: string) => {
     if (options.checkpointFails) return { success: false, error: 'clone refused' };
+    if (options.checkpointStealsActive) activeId = 'CP_ID';
     return {
       success: true,
       checkpointSequenceId: 'CP_ID',
@@ -107,8 +130,13 @@ function fake(options: FakeOptions = {}) {
     };
   });
 
+  /** Where each runTool call landed, so a test can prove the edit hit the right sequence. */
+  const runToolActive: Array<{ tool: string; activeId: string }> = [];
+
   const runTool = jest.fn(async (tool: string, _args: Record<string, unknown>) => {
     runToolCalls += 1;
+    runToolActive.push({ tool, activeId });
+    if (options.stealActiveAfterCall === runToolCalls) activeId = 'SOME_OTHER_SEQ';
     if (options.resultByCall && options.resultByCall[runToolCalls] !== undefined) {
       return options.resultByCall[runToolCalls];
     }
@@ -142,6 +170,7 @@ function fake(options: FakeOptions = {}) {
 
   const executor: TransactionExecutor = {
     resolveActiveSequence,
+    setActiveSequence,
     fingerprint,
     createCheckpoint,
     diffSequences,
@@ -154,6 +183,7 @@ function fake(options: FakeOptions = {}) {
   return {
     executor,
     resolveActiveSequence,
+    setActiveSequence,
     fingerprint,
     createCheckpoint,
     diffSequences,
@@ -161,6 +191,7 @@ function fake(options: FakeOptions = {}) {
     restoreCheckpoint,
     deleteSequence,
     renameProjectItem,
+    runToolActive,
   };
 }
 
@@ -414,6 +445,111 @@ describe('refusing before anything happens', () => {
 });
 
 // ── Happy path ─────────────────────────────────────────────────────────────
+
+describe('the edits stay pointed at the sequence that was snapshotted', () => {
+  /*
+   * THE BUG THIS FILE COULD NOT SEE.
+   *
+   * A step that omits a sequence id edits whatever Premiere considers ACTIVE. Taking the
+   * checkpoint clones the sequence, and Premiere activates a fresh clone — so every step after
+   * the snapshot ran against the SNAPSHOT, and the sequence the caller named was never touched.
+   *
+   * Nothing failed. The evidence chain is per-tool: each tool read back the sequence it really
+   * edited and honestly returned verified:true, so the transaction reported committed:true with a
+   * full ledger of verified steps. The only shape that noticed was a step declaring
+   * expectFingerprintChanged:true, because the fingerprint is always taken of the NAMED id — and
+   * that is opt-in, so most plans were silent.
+   *
+   * The harness could not express it either: resolveActiveSequence was a constant, so no test
+   * could model the target moving. `checkpointStealsActive` is that missing degree of freedom.
+   */
+
+  it('re-aims at the target after the checkpoint clone steals the active sequence', async () => {
+    const host = fake({ checkpointStealsActive: true });
+    const result = await runTransaction(
+      host.executor,
+      input({
+        steps: [
+          // No sequence id on either step, which is the whole hazard: both go to whatever is active.
+          { id: 'cut', tool: 'razor_all_tracks', args: { time: 5 } },
+          { id: 'fade', tool: 'fade_in_video', args: { nodeId: 'n1', durationSeconds: 1 } },
+        ],
+      }),
+      CLOCK,
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.committed).toBe(true);
+    // The assertion that fails without the fix: every edit landed on SEQ_A, not on the CP_ID clone.
+    expect(host.runToolActive.map((call) => call.activeId)).toEqual(['SEQ_A', 'SEQ_A']);
+    expect(host.setActiveSequence).toHaveBeenCalledWith('SEQ_A');
+    // Corrected once, before the loop — so no STEP had to be re-aimed and none carries a note.
+    // The per-step note is asserted in the mid-plan-drift case below, where it belongs.
+    expect(host.setActiveSequence).toHaveBeenCalledTimes(1);
+    expect(result.steps.every((step) => step.note === undefined)).toBe(true);
+  });
+
+  it('re-aims again when a step itself moves the active sequence', async () => {
+    // A step is allowed to be a tool that changes the active sequence as a side effect, and the
+    // human can click a different timeline at any point. Guarding once after the snapshot would
+    // leave every later step on the wrong sequence.
+    const host = fake({ stealActiveAfterCall: 1 });
+    const result = await runTransaction(
+      host.executor,
+      input({
+        steps: [
+          { id: 'one', tool: 'razor_all_tracks', args: { time: 5 } },
+          { id: 'two', tool: 'fade_in_video', args: { nodeId: 'n1', durationSeconds: 1 } },
+        ],
+      }),
+      CLOCK,
+    );
+
+    expect(result.committed).toBe(true);
+    expect(host.runToolActive.map((call) => call.activeId)).toEqual(['SEQ_A', 'SEQ_A']);
+    // Step 2 is the one that had to be re-aimed, and it says so. A plan that keeps drifting is a
+    // plan whose own steps are moving the target, which the caller should be able to see.
+    expect(result.steps[0]?.note).toBeUndefined();
+    expect(result.steps[1]?.note).toContain('SOME_OTHER_SEQ');
+  });
+
+  it('runs NOTHING when the target cannot be re-activated', async () => {
+    const host = fake({ checkpointStealsActive: true, setActiveFails: true });
+    const result = await runTransaction(host.executor, input(), CLOCK);
+
+    expect(result.began).toBe(false);
+    expect(result.committed).toBe(false);
+    expect(host.runTool).toHaveBeenCalledTimes(0);
+    expect(result.error).toContain('NO step was run');
+    // The snapshot exists and the caller is told where it is, rather than left to find it.
+    expect(result.checkpoint.retained).toBe(true);
+    expect(result.error).toContain('CP_ID');
+  });
+
+  it('refuses when Premiere claims it activated the sequence but did not', async () => {
+    // The case a bare setActiveSequence call cannot catch, and the reason ensureActive re-reads
+    // instead of trusting the setter's own success flag. A silent no-op here would send the whole
+    // plan into the snapshot with a reassuring log line.
+    const host = fake({ checkpointStealsActive: true, setActiveLies: true });
+    const result = await runTransaction(host.executor, input(), CLOCK);
+
+    expect(result.began).toBe(false);
+    expect(host.runTool).toHaveBeenCalledTimes(0);
+    expect(result.error).toContain('reports');
+    expect(result.error).toContain('CP_ID');
+  });
+
+  it('does not write the active sequence at all when it never drifted', async () => {
+    // The steady-state cost must be a READ per step, not a write: needlessly re-activating a
+    // sequence is a visible UI change and, as a step, would itself be residual risk.
+    const host = fake();
+    const result = await runTransaction(host.executor, input(), CLOCK);
+
+    expect(result.committed).toBe(true);
+    expect(host.setActiveSequence).toHaveBeenCalledTimes(0);
+    expect(result.steps[0]?.note).toBeUndefined();
+  });
+});
 
 describe('commit', () => {
   it('runs every step, verifies each one, reports the diff and drops the snapshot', async () => {
