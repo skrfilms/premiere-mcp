@@ -29,6 +29,7 @@ import { PremiereProBridge } from '../dist/bridge/index.js';
 import { PremiereProTools } from '../dist/tools/index.js';
 import { writeFileSync } from 'node:fs';
 import { requireScratchProject } from './lib/require-scratch-project.mjs';
+import { collectEnvironment, recordSweep } from './lib/verification-ledger.mjs';
 
 const ALLOW_MUTATE = process.argv.includes('--mutate');
 const REPORT_PATH = process.argv.includes('--out')
@@ -204,6 +205,8 @@ async function main() {
 
   const catalogue = tools.getAvailableTools();
   const results = { pass: [], fail: [], skipped: [], noArgs: [], mutateDeferred: [], abortedAfter: null };
+  /** name -> the tool's own `verified` field, for tools that report one. Fed to the ledger. */
+  const verifiedFlag = new Map();
 
   // A tool that opens a modal dialog wedges the ExtendScript engine until a human
   // clicks it. Without this check the sweep keeps firing and every later call piles up
@@ -264,6 +267,7 @@ async function main() {
         }
       } else {
         results.pass.push(name);
+        if (r && typeof r.verified === 'boolean') verifiedFlag.set(name, r.verified);
         process.stdout.write('.');
       }
     } catch (e) {
@@ -294,6 +298,31 @@ async function main() {
   writeFileSync(REPORT_PATH, JSON.stringify(results, null, 2));
   line('');
   line(`full report: ${REPORT_PATH}`);
+
+  // Record the run in the repo's ledger. The /tmp report above is for this run's operator;
+  // this is the durable claim, and docs/LIVE-VERIFICATION.md is generated from it. An aborted
+  // sweep is still recorded — it covered fewer tools, which is a fact, not a reason to file
+  // nothing. Only the tools this run actually reached are written; anything untouched stays
+  // absent, and absence is reported as "never exercised live".
+  const ledgerTools = [
+    ...results.pass.map((name) => {
+      const rec = { name, outcome: 'pass' };
+      if (verifiedFlag.has(name)) rec.verified = verifiedFlag.get(name);
+      return rec;
+    }),
+    ...results.fail.map((f) => ({ name: f.name, outcome: 'fail', detail: f.error })),
+    ...results.noArgs.map((f) => ({ name: f.name, outcome: 'skipped_args', detail: f.error })),
+    ...results.skipped.map((f) => ({ name: f.name, outcome: 'skipped_unsafe', detail: f.reason })),
+    ...results.mutateDeferred.map((name) => ({ name, outcome: 'deferred_mutating' })),
+  ];
+  const environment = await collectEnvironment({
+    tools,
+    harness: 'live-smoke-sweep',
+    mode: ALLOW_MUTATE ? 'mutate' : 'read-only',
+  });
+  const ledgerPath = recordSweep({ environment, tools: ledgerTools });
+  line(`ledger entry:  ${ledgerPath}`);
+  line('regenerate the summary with: npm run verify:report');
   process.exit(0);
 }
 

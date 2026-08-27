@@ -33,10 +33,17 @@ Use this order:
 2. Rebuild with `npm run build`.
 3. If you changed `cep-plugin/bridge-cep.js`, reload the panel in Premiere Pro.
 4. Run tests with `npm test -- --runInBand`.
-5. Run a live sweep against a scratch project with `node scripts/live-tool-sweep.mjs`.
-6. Update docs if behavior or setup changed.
+5. Run a live sweep against a scratch project with `node scripts/live-tool-sweep.mjs`, or
+   `node scripts/live-smoke-sweep.mjs` for the catalogue-wide read-only pass. Close every other
+   project first: the sweep refuses to run while a second project is open, because a tool call
+   that omits an explicit target could land on it.
+6. Commit the sweep's ledger entry from `verification/sweeps/` and regenerate the summary with
+   `npm run verify:report`. `npm run verify:report:check` fails when the summary and the ledger
+   disagree, so `docs/LIVE-VERIFICATION.md` is never written by hand.
+7. Update docs if behavior or setup changed.
 
 Do not ship a new tool that has only been schema-validated if it claims to perform a real edit.
+"Verified live" is not a sentence you write — it is a file a sweep wrote. See `verification/README.md`.
 
 ## Project Layout
 
@@ -44,9 +51,16 @@ Do not ship a new tool that has only been schema-validated if it claims to perfo
 src/
   index.ts                MCP server entry point
   bridge/index.ts         File-based bridge and shared helpers
-  tools/index.ts          Tool catalog and implementations
+  tools/index.ts          PremiereProTools: the dispatcher, the meta/introspection tools,
+                          and the last link of the domain class chain
+  tools/catalogue.ts      Tool registrations (name, description, input schema)
+  tools/domains/          One class per tool domain, chained by inheritance:
+                          base.ts holds the shared state and pure helpers, and each domain
+                          file extends the previous one. Add a tool implementation to the
+                          domain file it belongs to, not to index.ts.
   resources/index.ts      MCP resources
   prompts/index.ts        MCP prompts
+  verification/ledger.ts  Schema for the live-verification ledger and the report renderer
   utils/                  Shared helpers
 
 cep-plugin/
