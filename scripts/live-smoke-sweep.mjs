@@ -32,6 +32,14 @@ import { requireScratchProject } from './lib/require-scratch-project.mjs';
 import { collectEnvironment, recordSweep } from './lib/verification-ledger.mjs';
 
 const ALLOW_MUTATE = process.argv.includes('--mutate');
+
+/** How long one tool gets before the harness gives up on it and records a failure. */
+const TOOL_TIMEOUT_MS = 25_000;
+/**
+ * How long the panel may report "processing" before the sweep calls it wedged and aborts.
+ * Must exceed TOOL_TIMEOUT_MS with margin, or a slow tool aborts the whole run (see below).
+ */
+const WEDGE_MS = 40_000;
 const REPORT_PATH = process.argv.includes('--out')
   ? process.argv[process.argv.indexOf('--out') + 1]
   : '/tmp/live-smoke-report.json';
@@ -214,6 +222,13 @@ async function main() {
   // because the tool left "currently executing" was simply the first one stuck in line,
   // not the one that opened the dialog. Reading the panel heartbeat between calls turns
   // that into an immediate abort that names the actual culprit.
+  //
+  // WEDGE_MS must stay comfortably ABOVE TOOL_TIMEOUT_MS. When it was below (12s vs 25s), any
+  // legitimately slow tool tripped the detector before its own timeout could resolve, and the
+  // sweep aborted on a bridge that was working fine: a --mutate run stopped after 100 of 647
+  // tools blaming get_export_progress, which was simply waiting on the encoder and drained on
+  // its own ~45s later. A false abort is worse than a late one — it reads as a wedged host and
+  // silently costs the other 547 tools their coverage.
   const heartbeatPath = `${process.env.PREMIERE_TEMP_DIR || '/tmp/premiere-mcp-bridge'}/bridge-heartbeat.json`;
   const { readFileSync } = await import('node:fs');
   let stuckSince = null;
@@ -222,7 +237,7 @@ async function main() {
       const hb = JSON.parse(readFileSync(heartbeatPath, 'utf8'));
       if (hb.isProcessing) {
         stuckSince = stuckSince ?? Date.now();
-        return Date.now() - stuckSince > 12000;
+        return Date.now() - stuckSince > WEDGE_MS;
       }
       stuckSince = null;
       return false;
@@ -236,7 +251,7 @@ async function main() {
     if (bridgeWedged()) {
       line('');
       line('');
-      line('!! ABORTED: the CEP bridge has been busy >12s and is not draining.');
+      line(`!! ABORTED: the CEP bridge has been busy >${WEDGE_MS / 1000}s and is not draining.`);
       line(`!! The tool that most likely opened a modal dialog is: ${lastInvoked}`);
       line('!! Dismiss the dialog in Premiere, add that tool to SKIP (or fix it), and re-run.');
       results.abortedAfter = lastInvoked;
@@ -253,7 +268,7 @@ async function main() {
     try {
       const r = await Promise.race([
         tools.executeTool(name, args),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('harness timeout 25s')), 25000)),
+        new Promise((_, rej) => setTimeout(() => rej(new Error(`harness timeout ${TOOL_TIMEOUT_MS / 1000}s`)), TOOL_TIMEOUT_MS)),
       ]);
       if (r && r.success === false) {
         const err = String(r.error ?? 'unknown');
