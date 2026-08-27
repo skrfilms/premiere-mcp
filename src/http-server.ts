@@ -598,7 +598,7 @@ export function createHttpGate(deps: GateDeps): HttpGate {
   const { config, surface, handler, bridgeProbe } = deps;
   const logger = deps.logger ?? new Logger('PremiereHttp');
   const limiter = deps.limiter ?? new RequestLimiter(config.maxConcurrent, config.maxPerMinute);
-  const version = deps.version ?? '1.2.0';
+  const version = deps.version ?? '1.3.0';
   const authGate = config.token !== null ? requireBearerAuth({ verifier: staticTokenVerifier(config.token) }) : null;
 
   const health = async (): Promise<HealthReport> => {

@@ -4,6 +4,10 @@ All notable changes are documented here. Releases use semantic versioning.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [1.3.0] - 2026-08-27
+
 New capabilities that Premiere's scripting API cannot provide on its own, each
 built to the same honesty contract as the rest of the server — probe for the
 dependency, return install guidance instead of failing silently, and verify the
