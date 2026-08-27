@@ -13,9 +13,11 @@
  *  1. The report is a pure function of the ledger plus the catalogue. A test regenerates it
  *     and compares, so a hand-edited claim in the doc fails CI. You cannot promote a tool to
  *     "verified" by typing it.
- *  2. Absence is reported. Every catalogue tool with no ledger entry is counted and named as
- *     never exercised live, and every skip carries the reason it was skipped. A sweep that
- *     covered 40% of the catalogue must read as 40%, not as a green checkmark.
+ *  2. Absence is reported. Every tool no sweep has ever RUN is counted as never executed live --
+ *     a skip is not evidence, and a sweep files a row for every tool in the catalogue, so
+ *     counting only the unmentioned ones would report 0 over a run that executed a quarter of
+ *     them. Every skip carries the reason it was skipped. A sweep that covered 27% of the
+ *     catalogue must read as 27%, not as a green checkmark.
  *
  * Nothing here touches a host or a bridge; it is text in, text out.
  */
@@ -180,7 +182,15 @@ export function renderVerificationReport(sweeps: Sweep[], catalogue: string[]): 
   const standings = currentStandings(sweeps);
   const names = [...catalogue].sort();
   const known = new Set(names);
-  const never = names.filter((n) => !standings.has(n));
+  // "Never executed live" means no sweep has ever RUN it -- not merely that no sweep mentions
+  // it. A sweep records a row for every catalogue tool, most of them skips, so counting only
+  // the absent ones would print "never exercised: 0" over a run that executed 27% of the
+  // catalogue. Absence from the ledger entirely is a separate, smaller fact.
+  const never = names.filter((n) => {
+    const s = standings.get(n);
+    return !s || (s.outcome !== 'pass' && s.outcome !== 'fail');
+  });
+  const unmentioned = names.filter((n) => !standings.has(n));
   const counts = countBy(standings);
   const executed = counts.pass + counts.fail;
   const pct = (n: number): string => (names.length ? ((n / names.length) * 100).toFixed(1) : '0.0');
@@ -217,11 +227,18 @@ export function renderVerificationReport(sweeps: Sweep[], catalogue: string[]): 
   L.push('');
   L.push('| standing | tools | share of catalogue |');
   L.push('| --- | --- | --- |');
-  L.push(`| executed live | ${executed} | ${pct(executed)}% |`);
+  L.push(`| **executed live** | **${executed}** | **${pct(executed)}%** |`);
+  L.push(`| **never executed live** | **${never.length}** | **${pct(never.length)}%** |`);
+  L.push('');
+  L.push('Broken down. Only the first two rows are evidence about a tool; the rest record that we');
+  L.push('looked and did not run it, and why.');
+  L.push('');
+  L.push('| standing | tools | share of catalogue |');
+  L.push('| --- | --- | --- |');
   for (const o of OUTCOMES) {
     L.push(`| ${OUTCOME_LABEL[o]} | ${counts[o]} | ${pct(counts[o])}% |`);
   }
-  L.push(`| **never exercised live** | **${never.length}** | **${pct(never.length)}%** |`);
+  L.push(`| absent from every sweep | ${unmentioned.length} | ${pct(unmentioned.length)}% |`);
   L.push('');
   const unverified = [...standings.values()].filter((s) => s.outcome === 'pass' && s.verified === false);
   if (unverified.length) {
@@ -251,7 +268,7 @@ export function renderVerificationReport(sweeps: Sweep[], catalogue: string[]): 
   for (const name of names) {
     const s = standings.get(name);
     if (!s) {
-      L.push(`| \`${name}\` | never exercised live | — | — | |`);
+      L.push(`| \`${name}\` | absent from every sweep | — | — | |`);
       continue;
     }
     const note = (s.detail ?? '').replace(/\|/g, '\\|').slice(0, 120);

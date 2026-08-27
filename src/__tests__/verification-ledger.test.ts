@@ -121,16 +121,21 @@ describe('docs/LIVE-VERIFICATION.md', () => {
       expect(doc).toMatch(/No sweep has ever been recorded/);
       return;
     }
+    // Never EXECUTED, not merely never mentioned: a sweep files a row for every catalogue tool,
+    // so counting the absent ones would print 0 over a run that executed 27% of the catalogue.
     const standings = currentStandings(sweeps);
-    const never = catalogueNames().filter((n) => !standings.has(n)).length;
-    expect(doc).toContain(`| **never exercised live** | **${never}** |`);
+    const never = catalogueNames().filter((n) => {
+      const s = standings.get(n);
+      return !s || (s.outcome !== 'pass' && s.outcome !== 'fail');
+    }).length;
+    expect(doc).toContain(`| **never executed live** | **${never}** |`);
   });
 
   it('claims a live standing only for tools a sweep actually recorded', () => {
     const doc = readFileSync(DOC, 'utf8');
     const standings = currentStandings(loadSweeps());
     const rows = [...doc.matchAll(/^\| `([a-z0-9_]+)` \| ([^|]+) \|/gm)];
-    const claimed = rows.filter((m) => !m[2]!.includes('never exercised live')).map((m) => m[1]!);
+    const claimed = rows.filter((m) => !m[2]!.includes('absent from every sweep')).map((m) => m[1]!);
     for (const name of claimed) expect(standings.has(name)).toBe(true);
   });
 
