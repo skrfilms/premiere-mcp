@@ -18,6 +18,26 @@ npm run verify:report:check    # exit 1 if the summary and the ledger disagree
 on disk, so the document cannot claim anything a sweep did not observe. To change what it says,
 run a sweep — not an editor.
 
+## The second axis: `test-coverage.json`
+
+`sweeps/` answers "did a real Premiere host run this tool?". `test-coverage.json` answers the
+different and weaker question "did anything run it at all?" — the test suite dispatching a tool
+against a mock bridge proves it is reachable and that its schema accepts arguments, and proves
+nothing whatsoever about Premiere. `docs/TOOL-COVERAGE.md` prints both columns side by side and
+never merges them.
+
+```
+npm run coverage:tools:measure   # instrumented test run, then aggregate and render
+npm run coverage:tools           # aggregate .tool-coverage/*.jsonl and render
+npm run coverage:tools:check     # exit 1 if the document and the data disagree
+```
+
+The measurement is instrumented, not grepped: `src/__tests__/tool-coverage-probe.ts` wraps the
+dispatcher and records real invocations. Grepping test files for tool names gets it wrong in both
+directions — a name in a table of expected strings is not a call, and a name assembled at runtime
+is never a literal — and both errors are silent. `src/__tests__/tool-coverage.test.ts` byte-compares
+the document against the data, the same mechanism as the sweep ledger.
+
 ## Why this exists
 
 "Verified live against Premiere 26.3" used to live in commit messages. A sentence cannot be

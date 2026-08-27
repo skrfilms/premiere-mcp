@@ -41,6 +41,10 @@ Use this order:
    `npm run verify:report`. `npm run verify:report:check` fails when the summary and the ledger
    disagree, so `docs/LIVE-VERIFICATION.md` is never written by hand.
 7. Update docs if behavior or setup changed.
+8. If you added or removed tools, re-measure the suite axis with `npm run coverage:tools:measure`
+   and commit `verification/test-coverage.json` plus the regenerated `docs/TOOL-COVERAGE.md`.
+   `npm run coverage:tools:check` fails when they disagree. That document is how many tools
+   nothing has ever run, measured by instrumenting the dispatcher — not by grepping for names.
 
 Do not ship a new tool that has only been schema-validated if it claims to perform a real edit.
 "Verified live" is not a sentence you write — it is a file a sweep wrote. See `verification/README.md`.

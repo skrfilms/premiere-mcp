@@ -762,16 +762,32 @@ describe('the real scratch fixture in this repo', () => {
   /**
    * Read-only, and the only test here that touches a file Premiere wrote. It is what turns the
    * fixture-based tests above from "our own encoder agrees with itself" into evidence about a real
-   * .prproj — including the ObjectUID count, which matched what Premiere reported for this project.
+   * .prproj.
+   *
+   * This used to assert `definitions.Sequence === 2`, the number Premiere reported for the project
+   * at the time it was written. That is a fixture-coupled claim, and it broke exactly as you would
+   * expect: a live mutate sweep added a sequence to this scratch project and the suite went red
+   * over a file the code under test handles correctly. The scratch project is a mutable working
+   * file — the sweeps write to it on purpose — so no literal count belongs here.
+   *
+   * What survives is the part that is actually about the parser: the census finds at least one
+   * Sequence definition in a real Premiere-written file, and every definition it counts carries a
+   * distinct ObjectUID (found by an independent scan, so a double-count or an off-by-one in
+   * countDefinition still fails).
    */
   const maybe = existsSync(scratch) ? it : it.skip;
 
-  maybe('round-trips byte-identically and its ObjectUID count matches Premiere', () => {
+  maybe('round-trips byte-identically and its Sequence definitions are distinct', () => {
     const { file, raw } = readProjectFile(scratch);
     expect(file.formatVersion).toBe('3');
     expect(containerCanary(raw, file)).toMatchObject({ byteIdentical: true, semantic: true });
-    // Premiere reported 2 sequences for this project via list_open_projects.
-    expect(censusOf(file.xml).definitions.Sequence).toBe(2);
+
+    const counted = censusOf(file.xml).definitions.Sequence;
+    const uids = new Set(
+      [...file.xml.matchAll(/<Sequence\s+ObjectUID="([^"]*)"/g)].map((m) => m[1]),
+    );
+    expect(counted).toBeGreaterThanOrEqual(1);
+    expect(uids.size).toBe(counted);
   });
 });
 

@@ -114,7 +114,35 @@ result on disk before reporting success:
   optional local backends (ffmpeg/ffprobe/whisper) are present. Blocking failures
   and non-blocking warnings are now tallied separately in the verdict.
 
-Catalogue grew to `296` tools.
+- Added `get_autosave_settings` and `set_autosave_settings`, which read and write
+  Premiere's autosave interval, copy count and destination folder through the
+  preference keys the application itself uses.
+- Added `project_file_inspect` and `project_file_edit`: read and edit a `.prproj`
+  **on disk**, closing the class of jobs no live API can do (a project nobody has
+  open, a path rewrite across a whole archive). The container is gzipped XML, and
+  the writer reproduces Premiere's own byte layout, so a round trip with no edit
+  is byte-identical. Every edit is refused unless an ObjectUID census before and
+  after agrees, and the original is kept.
+- Made "verified live" a machine-written artifact instead of a sentence in a
+  commit message. A sweep in `scripts/` now files a ledger entry under
+  `verification/sweeps/` recording the UTC time, harness and mutate mode, commit
+  and dirtiness, the Premiere version the host reported, and one row per tool it
+  reached; `docs/LIVE-VERIFICATION.md` is generated from those files and a test
+  byte-compares the two, so a tool cannot be promoted to "verified" by editing
+  the document. A skip is recorded as a skip and never counted as evidence.
+- Added the second, weaker axis alongside it: `docs/TOOL-COVERAGE.md` reports how
+  much of the catalogue anything has ever run, measured by instrumenting the
+  dispatcher during a test run rather than by grepping test files for tool names
+  (a name in a table of expected strings is not a call; a name assembled at
+  runtime is never a literal — and both errors are silent). Mock-bridge dispatch
+  and live-host execution are printed as separate columns and never merged.
+- Split the 21,849-line `src/tools/index.ts` — 55% of all source — into
+  `tools/catalogue.ts` (the registrations) and 20 domain classes under
+  `tools/domains/`, chained by inheritance in dependency order. `index.ts` keeps
+  the dispatcher and the meta tools. All 647 registrations were proven identical
+  in name, description and schema, in the same order, before and after.
+
+Catalogue grew to `647` tools.
 
 ## [1.2.0] - 2026-08-17
 
