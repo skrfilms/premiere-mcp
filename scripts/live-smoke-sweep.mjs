@@ -25,11 +25,19 @@
  *   PREMIERE_TEMP_DIR=/tmp/premiere-mcp-bridge node scripts/live-smoke-sweep.mjs
  *   PREMIERE_TEMP_DIR=/tmp/premiere-mcp-bridge node scripts/live-smoke-sweep.mjs --mutate
  */
-import { PremiereProBridge } from '../dist/bridge/index.js';
-import { PremiereProTools } from '../dist/tools/index.js';
+// The catalogue this harness measures is decided by PREMIERE_MCP_PROFILE, which the tools module
+// reads AT IMPORT TIME — so the default has to be set before that import, which is why these two
+// are dynamic. Left to its own devices the server defaults to the `core` profile: 104 of 647 tools.
+// A sweep that quietly measures a sixth of the catalogue and reports "real coverage 32.7%" is the
+// exact failure this harness exists to prevent, so breadth is the default here and a narrower
+// profile has to be asked for out loud.
+if (!process.env.PREMIERE_MCP_PROFILE) process.env.PREMIERE_MCP_PROFILE = 'all';
+const { PremiereProBridge } = await import('../dist/bridge/index.js');
+const { PremiereProTools } = await import('../dist/tools/index.js');
 import { writeFileSync } from 'node:fs';
 import { requireScratchProject } from './lib/require-scratch-project.mjs';
 import { collectEnvironment, recordSweep } from './lib/verification-ledger.mjs';
+import { buildContext, synthesizeArgs } from './lib/synthesize-args.mjs';
 
 const ALLOW_MUTATE = process.argv.includes('--mutate');
 
@@ -166,50 +174,20 @@ async function main() {
   await requireScratchProject(bridge, 'live-smoke-sweep');
   const version = await bridge.executeScript('return JSON.stringify({ version: String(app.version) });');
   line(`host: Premiere ${version.version}`);
+  line(`tool profile: ${process.env.PREMIERE_MCP_PROFILE}`);
   line(`mutating tools: ${ALLOW_MUTATE ? 'ENABLED (--mutate)' : 'disabled'}`);
   line('');
 
-  // Real ids/paths so read tools get plausible arguments instead of undefined.
-  const ctx = await bridge.executeScript(`
-    var out = { sequenceId: null, itemId: null, mediaPath: null, trackCount: 0, clipCount: 0 };
-    try {
-      var seq = app.project.activeSequence;
-      if (seq) {
-        out.sequenceId = String(seq.sequenceID);
-        out.trackCount = seq.videoTracks.numTracks;
-        if (seq.videoTracks.numTracks > 0) out.clipCount = seq.videoTracks[0].clips.numItems;
-        if (out.clipCount > 0) {
-          var c = seq.videoTracks[0].clips[0];
-          out.itemId = String(c.projectItem.nodeId);
-          out.mediaPath = String(c.projectItem.getMediaPath());
-        }
-      }
-    } catch (e) { out.error = e.toString(); }
-    return JSON.stringify(out);
-  `);
-  line(`context: seq=${ctx.sequenceId} tracks=${ctx.trackCount} clips=${ctx.clipCount}`);
+  // Real ids/paths/names so tools get arguments the host can actually resolve, built by reading
+  // the fixture rather than by pattern-matching parameter names. The eight-regex version this
+  // replaced could not name a bin, a marker guid, an installed transition, or a file on disk, so
+  // 93 tools bounced off our own validator and were filed as `skipped_args` — counted as "not
+  // looked at", which was honest but was also two thirds of the breadth we could defend.
+  const ctx = await buildContext(bridge);
+  line(`context: seq=${ctx.sequenceId} tracks=${ctx.videoTracks} clips=${ctx.clips.length} items=${ctx.itemIds.length} markers=${ctx.markers.length}`);
+  line(`side fixtures: ${ctx.files.outDir}`);
+  if (ctx.raw?.error) line(`context WARNING: ${ctx.raw.error}`);
   line('');
-
-  // Best-effort arguments by parameter name. A read tool that needs an id it cannot be
-  // given is reported as skipped-for-args rather than counted as a failure.
-  function argsFor(tool) {
-    const shape = tool.inputSchema?._def?.shape ?? tool.inputSchema?.shape;
-    let keys = [];
-    try { keys = Object.keys(typeof shape === 'function' ? shape() : (shape ?? {})); } catch { keys = []; }
-    const a = {};
-    for (const k of keys) {
-      if (/sequenceId|seqId/i.test(k)) a[k] = ctx.sequenceId ?? undefined;
-      else if (/projectItemId|itemId/i.test(k)) a[k] = ctx.itemId ?? undefined;
-      else if (/(file|media|clip|source|input)Path$/i.test(k)) a[k] = ctx.mediaPath ?? undefined;
-      else if (/trackIndex/i.test(k)) a[k] = 0;
-      else if (/clipIndex/i.test(k)) a[k] = 0;
-      else if (/^(count|limit)$/i.test(k)) a[k] = 3;
-      else if (/panelName/i.test(k)) a[k] = 'Timeline';
-      else if (/effectName/i.test(k)) a[k] = 'Gaussian Blur';
-    }
-    for (const k of Object.keys(a)) if (a[k] === undefined) delete a[k];
-    return { args: a, required: keys };
-  }
 
   const catalogue = tools.getAvailableTools();
   const results = { pass: [], fail: [], skipped: [], noArgs: [], mutateDeferred: [], abortedAfter: null };
@@ -263,7 +241,17 @@ async function main() {
     const readOnly = isReadOnly(name);
     if (!readOnly && !ALLOW_MUTATE) { results.mutateDeferred.push(name); continue; }
 
-    const { args } = argsFor(tool);
+    // Build arguments and check them against the tool's OWN schema before spending a host round
+    // trip. A candidate our validator would reject never reaches Premiere, so recording it as a
+    // failure would blame the tool for the harness's gap; it is filed as skipped_args naming the
+    // keys we could not build.
+    const synth = synthesizeArgs(tool, ctx);
+    if (!synth.ok) {
+      results.noArgs.push({ name, error: String(synth.error ?? 'unsynthesisable').slice(0, 140) });
+      process.stdout.write('·');
+      continue;
+    }
+    const args = synth.args;
     lastInvoked = name;
     try {
       const r = await Promise.race([
