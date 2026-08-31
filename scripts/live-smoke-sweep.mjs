@@ -38,16 +38,26 @@ import { writeFileSync } from 'node:fs';
 import { requireScratchProject } from './lib/require-scratch-project.mjs';
 import { collectEnvironment, recordSweep } from './lib/verification-ledger.mjs';
 import { buildContext, synthesizeArgs } from './lib/synthesize-args.mjs';
+import { ensureHealthy } from './lib/host-recovery.mjs';
 
 const ALLOW_MUTATE = process.argv.includes('--mutate');
+/**
+ * Let the harness clear a wedge by pressing Escape and, failing that, relaunching Premiere.
+ * OFF by default because the underlying probe is only valid when this process is the panel's
+ * only client — see the long note in main(). Use it for unattended runs, not while an agent is
+ * driving the same bridge.
+ */
+const ALLOW_RECOVER = process.argv.includes('--recover');
 
 /** How long one tool gets before the harness gives up on it and records a failure. */
 const TOOL_TIMEOUT_MS = 25_000;
+
 /**
- * How long the panel may report "processing" before the sweep calls it wedged and aborts.
- * Must exceed TOOL_TIMEOUT_MS with margin, or a slow tool aborts the whole run (see below).
+ * The panel's own words when it rejects a call because a PREVIOUS script is still outstanding.
+ * The same message continues: "Nothing was run for this command", which is what makes this
+ * rejection safe to treat as "never executed" rather than as a failure of the tool named.
  */
-const WEDGE_MS = 40_000;
+const WEDGE_REJECTION = /already executing command ([0-9a-f-]{36})/i;
 const REPORT_PATH = process.argv.includes('--out')
   ? process.argv[process.argv.indexOf('--out') + 1]
   : '/tmp/live-smoke-report.json';
@@ -176,6 +186,7 @@ async function main() {
   line(`host: Premiere ${version.version}`);
   line(`tool profile: ${process.env.PREMIERE_MCP_PROFILE}`);
   line(`mutating tools: ${ALLOW_MUTATE ? 'ENABLED (--mutate)' : 'disabled'}`);
+  line(`wedge recovery: ${ALLOW_RECOVER ? 'ENABLED (--recover)' : 'disabled (abort on a wedge instead)'}`);
   line('');
 
   // Real ids/paths/names so tools get arguments the host can actually resolve, built by reading
@@ -190,51 +201,93 @@ async function main() {
   line('');
 
   const catalogue = tools.getAvailableTools();
-  const results = { pass: [], fail: [], skipped: [], noArgs: [], mutateDeferred: [], abortedAfter: null };
+  const results = { pass: [], fail: [], skipped: [], noArgs: [], wedged: [], mutateDeferred: [], abortedAfter: null };
   /** name -> the tool's own `verified` field, for tools that report one. Fed to the ledger. */
   const verifiedFlag = new Map();
 
-  // A tool that opens a modal dialog wedges the ExtendScript engine until a human
-  // clicks it. Without this check the sweep keeps firing and every later call piles up
-  // behind the modal — one run reached 398 queued commands and reported nothing useful,
-  // because the tool left "currently executing" was simply the first one stuck in line,
-  // not the one that opened the dialog. Reading the panel heartbeat between calls turns
-  // that into an immediate abort that names the actual culprit.
+  // A tool that opens a modal dialog wedges the ExtendScript engine until the modal is cleared,
+  // and every later call is then rejected before it runs. Recovering from that is a solved
+  // problem in this repo — scripts/lib/host-recovery.mjs probes the engine, clears a modal with
+  // Escape, and relaunches only as a fallback — but this harness was not using it. It carried its
+  // own heartbeat/wall-clock guard instead, and that guard could not fire:
   //
-  // WEDGE_MS must stay comfortably ABOVE TOOL_TIMEOUT_MS. When it was below (12s vs 25s), any
-  // legitimately slow tool tripped the detector before its own timeout could resolve, and the
-  // sweep aborted on a bridge that was working fine: a --mutate run stopped after 100 of 647
-  // tools blaming get_export_progress, which was simply waiting on the encoder and drained on
-  // its own ~45s later. A false abort is worse than a late one — it reads as a wedged host and
-  // silently costs the other 547 tools their coverage.
+  //   It waited for WEDGE_MS (40s) of OBSERVED processing, on the assumption that a wedge makes
+  //   calls HANG. A wedged panel does the opposite — it rejects each call instantly — so all 647
+  //   tools burned through in well under 40s and the abort never triggered. The 2026-08-31 mutate
+  //   run recorded 393 failures, 347 of which were this rejection, for tools that never executed.
+  //
+  // It also could not have named the culprit if it had fired: the rejection cites the command id
+  // of an EARLIER script, so `lastInvoked` at abort time is the first victim, not the cause.
+  //
+  // Both problems go away by using the shared recovery guard after every call, exactly as
+  // coverage-sweep.mjs does, so a wedge is attributed to the tool that caused it and cleared
+  // before the next one runs. This is the second time an inline copy of a shared helper in this
+  // file has diverged from the real one (see requireScratchProject above); prefer ./lib.
+  const recoveryState = { recoveries: [], maxRecoveries: 6, probeTimeoutMs: 12_000 };
+
+  // ---------------------------------------------------------------------------------------------
+  // WHY THIS DOES NOT PROBE THE ENGINE BY DEFAULT.
+  //
+  // probeEngine() (scripts/engine-sentinel.mjs) writes a command file into PREMIERE_TEMP_DIR and
+  // waits for the panel to answer THAT file. It is only a valid probe when this process is the
+  // panel's only client. When an MCP server is also attached to the same directory — i.e. whenever
+  // an agent is driving Premiere in the same session, which is the normal case here — the two race
+  // for the response, the sentinel sees "consumed but never answered", and reports ENGINE_DEAD for
+  // a host that is perfectly healthy.
+  //
+  // Measured on 2026-08-31: a pre-flight probeEngine() returned ENGINE_DEAD while the live MCP
+  // session was answering ping and honesty_selftest normally, and the recovery it triggered
+  // force-quit Premiere and relaunched it on the wrong scratch project. A false ENGINE_DEAD is
+  // worse than no probe at all, because recovery acts on it destructively.
+  //
+  // So detection here uses the two signals that cost nothing and cannot be raced:
+  //   1. the heartbeat FILE, which the panel writes and no client consumes; and
+  //   2. the panel's own rejection message, which names the outstanding command id.
+  // Sentinel-based recovery is still available, behind --recover, for an unattended run where
+  // this process really is the only client.
+  // ---------------------------------------------------------------------------------------------
   const heartbeatPath = `${process.env.PREMIERE_TEMP_DIR || '/tmp/premiere-mcp-bridge'}/bridge-heartbeat.json`;
   const { readFileSync } = await import('node:fs');
-  let stuckSince = null;
-  function bridgeWedged() {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  /** Read-only view of the panel beacon. null when it is missing or unparseable. */
+  function heartbeat() {
     try {
       const hb = JSON.parse(readFileSync(heartbeatPath, 'utf8'));
-      if (hb.isProcessing) {
-        stuckSince = stuckSince ?? Date.now();
-        return Date.now() - stuckSince > WEDGE_MS;
-      }
-      stuckSince = null;
-      return false;
-    } catch { return false; }
+      return { ...hb, ageMs: Date.now() - Number(hb.ts) };
+    } catch { return null; }
   }
 
-  let lastInvoked = null;
+  // PRE-FLIGHT. The 16:47:39Z run on 2026-08-31 started one minute after the 16:46:15Z run and
+  // inherited its still-outstanding host command, so from its second tool onward the panel
+  // rejected everything. A sweep that begins against a busy panel measures the panel, not the
+  // catalogue — so wait for idle, and refuse rather than produce a run that proves nothing.
+  const PREFLIGHT_WAIT_MS = 60_000;
+  const waitedUntil = Date.now() + PREFLIGHT_WAIT_MS;
+  let hb = heartbeat();
+  while (hb && hb.ageMs < 10_000 && hb.isProcessing && Date.now() < waitedUntil) {
+    line(`pre-flight: panel is busy on ${hb.currentCommandId} (queue ${hb.queueLength}) — waiting`);
+    await sleep(3000);
+    hb = heartbeat();
+  }
+  if (!hb || hb.ageMs >= 10_000) {
+    line('');
+    line(`!! REFUSING TO START: no fresh panel heartbeat (${hb ? `${hb.ageMs}ms stale` : 'file missing'}).`);
+    line('!! The CEP panel is not running. Open Window > Extensions > MCP Bridge (CEP) and start it.');
+    process.exit(1);
+  }
+  if (hb.isProcessing) {
+    line('');
+    line(`!! REFUSING TO START: the panel has been busy on ${hb.currentCommandId} for >${PREFLIGHT_WAIT_MS / 1000}s.`);
+    line('!! Every tool would be rejected unrun, so the whole run would describe the wedge.');
+    line('!! Clear the modal in Premiere (or restart the panel), then re-run.');
+    process.exit(1);
+  }
+  line('pre-flight: panel is live and idle');
+  line('');
+
   for (const tool of catalogue) {
     const name = tool.name;
-
-    if (bridgeWedged()) {
-      line('');
-      line('');
-      line(`!! ABORTED: the CEP bridge has been busy >${WEDGE_MS / 1000}s and is not draining.`);
-      line(`!! The tool that most likely opened a modal dialog is: ${lastInvoked}`);
-      line('!! Dismiss the dialog in Premiere, add that tool to SKIP (or fix it), and re-run.');
-      results.abortedAfter = lastInvoked;
-      break;
-    }
 
     if (SKIP[name]) { results.skipped.push({ name, reason: SKIP[name] }); continue; }
 
@@ -252,31 +305,88 @@ async function main() {
       continue;
     }
     const args = synth.args;
-    lastInvoked = name;
+    /**
+     * File one result for this tool. Split out so the wedge rejection is classified identically
+     * whether the bridge reported it as a failed result or threw it.
+     */
+    const record = (err) => {
+      const wedge = WEDGE_REJECTION.exec(err);
+      if (wedge) {
+        // The panel rejected this before running it. Blaming the tool would be a fabricated
+        // failure, so record what actually happened and whose command was in the way.
+        results.wedged.push({ name, error: err.slice(0, 240), blockingCommandId: wedge[1] });
+        process.stdout.write('W');
+        return;
+      }
+      // Missing-required-argument is the harness's shortcoming, not the tool's.
+      if (/Invalid arguments|expected .*received undefined|required/i.test(err)) {
+        results.noArgs.push({ name, error: err.slice(0, 140) });
+        process.stdout.write('·');
+        return;
+      }
+      results.fail.push({ name, error: err.slice(0, 240) });
+      process.stdout.write('F');
+    };
+
     try {
       const r = await Promise.race([
         tools.executeTool(name, args),
         new Promise((_, rej) => setTimeout(() => rej(new Error(`harness timeout ${TOOL_TIMEOUT_MS / 1000}s`)), TOOL_TIMEOUT_MS)),
       ]);
       if (r && r.success === false) {
-        const err = String(r.error ?? 'unknown');
-        // Missing-required-argument is the harness's shortcoming, not the tool's.
-        if (/Invalid arguments|expected .*received undefined|required/i.test(err)) {
-          results.noArgs.push({ name, error: err.slice(0, 140) });
-          process.stdout.write('·');
-        } else {
-          results.fail.push({ name, error: err.slice(0, 240) });
-          process.stdout.write('F');
-        }
+        record(String(r.error ?? 'unknown'));
       } else {
         results.pass.push(name);
         if (r && typeof r.verified === 'boolean') verifiedFlag.set(name, r.verified);
         process.stdout.write('.');
       }
     } catch (e) {
-      results.fail.push({ name, error: String(e.message).slice(0, 240) });
-      process.stdout.write('F');
+      record(String(e.message));
     }
+
+    // A wedge is not hypothetical any more: the rejection above tells us the panel is stuck on a
+    // specific command. Escalate only then, so the common case costs nothing and the sentinel is
+    // never spawned into a race it cannot win (see the pre-flight note above).
+    const stuck = results.wedged.length && results.wedged[results.wedged.length - 1].name === name;
+    if (!stuck) continue;
+
+    // Give the panel a moment to drain on its own. Plenty of legitimate host calls outlive one
+    // tool's turn — the 16:46:15Z run took exactly one such rejection (diff_sequences) and
+    // recovered without help, so treating the first rejection as fatal would throw away a
+    // perfectly good run.
+    let drained = false;
+    for (let i = 0; i < 5 && !drained; i++) {
+      await sleep(2000);
+      const now = heartbeat();
+      drained = Boolean(now && now.ageMs < 10_000 && !now.isProcessing);
+    }
+    if (drained) { process.stdout.write('~'); continue; }
+
+    // Still stuck. Something is holding the engine, and every remaining tool would be rejected
+    // unrun — which is precisely the 347-fabricated-failures outcome this rewrite exists to
+    // prevent. Recovery can clear a modal with Escape, but it spawns the sentinel, so it stays
+    // opt-in; without it, stop and say so.
+    if (!ALLOW_RECOVER) {
+      const blocking = results.wedged[results.wedged.length - 1].blockingCommandId;
+      line('');
+      line(`!! ABORTED: the panel is wedged on command ${blocking} and is not draining.`);
+      line(`!! The last tool to actually reach the host was: ${name}`);
+      line('!! Clear the modal in Premiere and re-run, or pass --recover to let the harness');
+      line('!! Escape/relaunch it — only safe when no MCP client is attached to the bridge.');
+      results.abortedAfter = name;
+      break;
+    }
+
+    const health = await ensureHealthy(name, recoveryState);
+    if (health.ok) {
+      process.stdout.write(`[WEDGED-BY:${name}]`);
+      continue;
+    }
+    line('');
+    line(`!! ABORTED after ${name}: ${health.error ?? health.verdict?.state}`);
+    line('!! Stopping rather than thrashing Premiere. Remaining tools are recorded as unexercised.');
+    results.abortedAfter = name;
+    break;
   }
 
   line('');
@@ -287,6 +397,7 @@ async function main() {
   line(`invoked & FAILED:     ${results.fail.length}`);
   line(`skipped (unsafe):     ${results.skipped.length}  <- NOT tested`);
   line(`skipped (needs args): ${results.noArgs.length}  <- NOT tested`);
+  line(`rejected (wedged):    ${results.wedged.length}  <- NOT tested, nothing ran`);
   if (!ALLOW_MUTATE) line(`deferred (mutating):  ${results.mutateDeferred.length}  <- NOT tested`);
   const attempted = results.pass.length + results.fail.length;
   line('');
@@ -296,6 +407,20 @@ async function main() {
     line('');
     line('--- FAILURES (real defects) ---');
     for (const f of results.fail) line(`  ${f.name}\n      ${f.error}`);
+  }
+
+  // Surfaced separately and never as failures. If this list is long, the run is not evidence
+  // about those tools — it is evidence that something wedged the panel and stayed wedged.
+  if (results.wedged.length) {
+    const blockers = [...new Set(results.wedged.map((w) => w.blockingCommandId))];
+    line('');
+    line(`--- REJECTED BY A WEDGED PANEL (${results.wedged.length} tools, nothing ran) ---`);
+    line(`  outstanding command id(s) in the way: ${blockers.join(', ')}`);
+    line(`  ${results.wedged.map((w) => w.name).join(', ')}`);
+    if (recoveryState.recoveries.length) {
+      line('  tools that wedged the host this run:');
+      for (const r of recoveryState.recoveries) line(`    ${r.culprit} -> ${r.verdictBefore}, recovered=${r.recovered}`);
+    }
   }
 
   writeFileSync(REPORT_PATH, JSON.stringify(results, null, 2));
@@ -316,6 +441,11 @@ async function main() {
     ...results.fail.map((f) => ({ name: f.name, outcome: 'fail', detail: f.error })),
     ...results.noArgs.map((f) => ({ name: f.name, outcome: 'skipped_args', detail: f.error })),
     ...results.skipped.map((f) => ({ name: f.name, outcome: 'skipped_unsafe', detail: f.reason })),
+    ...results.wedged.map((f) => ({
+      name: f.name,
+      outcome: 'skipped_wedged',
+      detail: `nothing ran: panel was executing ${f.blockingCommandId}`,
+    })),
     ...results.mutateDeferred.map((name) => ({ name, outcome: 'deferred_mutating' })),
   ];
   const environment = await collectEnvironment({

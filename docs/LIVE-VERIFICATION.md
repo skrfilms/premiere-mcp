@@ -33,6 +33,7 @@ looked and did not run it, and why.
 | executed live, FAILED | 19 | 2.9% |
 | not executed — harness could not build arguments | 93 | 14.4% |
 | not executed — unsafe for an unattended sweep | 81 | 12.5% |
+| not executed — panel was wedged by an earlier tool | 0 | 0.0% |
 | not executed — mutating, sweep was read-only | 247 | 38.2% |
 | absent from every sweep | 0 | 0.0% |
 

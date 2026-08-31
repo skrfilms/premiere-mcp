@@ -32,6 +32,14 @@ export type ToolOutcome =
   | 'skipped_args'
   /** Not invoked: destructive, dialog-blocking, long-running or reaches an external service. */
   | 'skipped_unsafe'
+  /**
+   * Reached the panel but nothing ran: an EARLIER tool left a host script outstanding, so the
+   * bridge rejected this call before executing it. The panel says so itself ("Nothing was run
+   * for this command"), which makes this the one rejection that is evidence about the host's
+   * state and NOT about the tool. Filing it as `fail` is how one wedge became 347 fabricated
+   * failures on 2026-08-31; it is not evidence, so it counts as never executed.
+   */
+  | 'skipped_wedged'
   /** Not invoked: mutating, and the sweep ran without --mutate. */
   | 'deferred_mutating';
 
@@ -40,6 +48,7 @@ export const OUTCOMES: ToolOutcome[] = [
   'fail',
   'skipped_args',
   'skipped_unsafe',
+  'skipped_wedged',
   'deferred_mutating',
 ];
 
@@ -49,6 +58,7 @@ export const OUTCOME_LABEL: Record<ToolOutcome, string> = {
   fail: 'executed live, FAILED',
   skipped_args: 'not executed — harness could not build arguments',
   skipped_unsafe: 'not executed — unsafe for an unattended sweep',
+  skipped_wedged: 'not executed — panel was wedged by an earlier tool',
   deferred_mutating: 'not executed — mutating, sweep was read-only',
 };
 

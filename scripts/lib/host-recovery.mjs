@@ -49,12 +49,17 @@ export function probeEngine(timeoutMs = 12_000) {
   }
 }
 
-function heartbeatAgeMs() {
+function heartbeatTs() {
   try {
-    return Date.now() - Number(JSON.parse(readFileSync(HEARTBEAT, 'utf8')).ts);
+    return Number(JSON.parse(readFileSync(HEARTBEAT, 'utf8')).ts);
   } catch {
-    return Infinity;
+    return 0;
   }
+}
+
+function heartbeatAgeMs() {
+  const ts = heartbeatTs();
+  return ts ? Date.now() - ts : Infinity;
 }
 
 /**
@@ -155,11 +160,15 @@ async function launchPremiereWithScratch() {
  * arrive on its own no matter how long the timeout is, so waiting passively is indistinguishable
  * from a failed launch.
  */
-async function waitForPanel(timeoutMs = 240_000) {
+async function waitForPanel(timeoutMs = 240_000, notBefore = 0) {
   const deadline = Date.now() + timeoutMs;
   let escapes = 0;
   while (Date.now() < deadline) {
-    if (heartbeatAgeMs() < 8000) return true;
+    // The beacon must be NEWER than the relaunch, not merely recent. The killed panel leaves its
+    // last heartbeat on disk, and if the quit took under 8s that corpse satisfied an age-only
+    // check — so recovery announced "panel heartbeat is live" against a panel that no longer
+    // existed, then spent six probe attempts blaming the engine. Observed 2026-08-31.
+    if (heartbeatTs() > notBefore && heartbeatAgeMs() < 8000) return true;
     // Premiere takes ~45-90s to be interactive; start clearing dialogs after that and keep
     // doing it periodically, since Link Media can appear late in the open sequence.
     if (Date.now() > deadline - timeoutMs + 45_000 && escapes < 12) {
@@ -180,6 +189,13 @@ export async function recoverHost({ rebuildFixture = true } = {}) {
   // Ask first: a still-answering engine lets us save and quit cleanly, which avoids both the
   // "Save changes?" modal and the crash dump that SIGKILL leaves behind.
   const pre = probeEngine(6000);
+  // Same refusal as ensureHealthy, repeated because this function is also called directly (by
+  // `live-smoke-sweep.mjs --recover`) and it force-quits Premiere unconditionally from here on.
+  if (pre.contendedBy?.length) {
+    return { recovered: false, contended: true, elapsedMs: Date.now() - started,
+      error: `Refusing to quit Premiere: host reads ${pre.state} but pid ${pre.contendedBy.join(', ')} `
+        + 'also share this bridge temp directory and can produce that verdict on a healthy host.' };
+  }
   log(`recovering: host is ${pre.state}; quitting Premiere`);
   const killed = await killPremiere({ engineHealthy: pre.state === 'HEALTHY' });
   if (!killed) {
@@ -188,10 +204,19 @@ export async function recoverHost({ rebuildFixture = true } = {}) {
 
   await sleep(3000);
   log(`relaunching with ${SCRATCH_PROJECT}`);
+  const relaunchedAt = Date.now();
   await launchPremiereWithScratch();
 
-  if (!(await waitForPanel())) {
-    return { recovered: false, elapsedMs: Date.now() - started, error: 'Panel never produced a heartbeat after relaunch (a modal may still be up).' };
+  if (!(await waitForPanel(240_000, relaunchedAt))) {
+    return {
+      recovered: false,
+      elapsedMs: Date.now() - started,
+      // Naming the manual step matters: the CEP panel does NOT come back on its own unless
+      // Premiere restores it with the workspace, so an operator reading "never produced a
+      // heartbeat" otherwise goes looking for a modal that is not there.
+      error: 'Panel never produced a heartbeat after relaunch. Either a modal is still up, or the '
+        + 'CEP panel did not reopen — it is a manual step: Window > Extensions > MCP Bridge (CEP).',
+    };
   }
   log('panel heartbeat is live; confirming the engine executes');
 
@@ -252,6 +277,19 @@ export async function ensureHealthy(culprit, state) {
     state.modalsCleared.push({ culprit, verdictBefore: verdict.state });
     process.stdout.write(`\n[recovery] "${culprit}" left a modal up; Escape cleared it (no restart needed)\n`);
     return { ok: true, verdict: afterEscape, clearedModal: true };
+  }
+
+  // REFUSE TO RESTART ON A CONTENDED VERDICT. Force-quitting Premiere is the most destructive
+  // thing in this file, and another client sharing the temp directory can manufacture the exact
+  // verdict that triggers it by deleting this probe's response. On 2026-08-31 that closed the
+  // user's open project on a host that was answering tools normally. A verdict that cannot
+  // distinguish "engine dead" from "peer raced me" is not grounds for a restart.
+  if (verdict.contendedBy?.length) {
+    return { ok: false, verdict, contended: true,
+      error: `Host looks ${verdict.state}, but ${verdict.contendedBy.length} other bridge client(s) `
+        + `(pid ${verdict.contendedBy.join(', ')}) share this temp directory, which can fake that `
+        + 'verdict. Refusing to restart Premiere. Re-run with no other client attached to get a '
+        + 'trustworthy reading.' };
   }
 
   state.recoveries = state.recoveries || [];

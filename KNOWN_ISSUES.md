@@ -204,6 +204,56 @@ Fix:
 
 Use a scratch project if you do not want those fixtures in a working edit.
 
+### FIXED: the engine sentinel reported ENGINE_DEAD on every healthy host
+
+Status: fixed; recorded because the failure mode was the health check causing the outage
+
+`scripts/engine-sentinel.mjs` never sent an auth token. The CEP panel enforces authorisation
+whenever a token file exists, so it rejected every probe with `code: UNAUTHORIZED`. The sentinel
+saw a reply whose nonce did not match and classified that as `ENGINE_DEAD`. The probe had been
+broken in that direction since authorisation was added — it could not return `HEALTHY` at all.
+
+That verdict is acted on destructively: `ensureHealthy()` force-quits Premiere and relaunches on
+`.scratch/premiere-mcp-scratch.prproj`. Measured 2026-08-31 — a pre-flight probe returned
+`ENGINE_DEAD` while the live MCP session was answering `ping` and `honesty_selftest` normally, and
+the recovery it triggered closed the project the user had open.
+
+Fixed by:
+
+- reading the token from `auth-token.json` or any `auth-session-*.json` (the panel accepts any of
+  them). Verified `HEALTHY` in 304ms with an MCP client attached.
+- classifying an `UNAUTHORIZED` reply as `SENTINEL_ERROR`, never `ENGINE_DEAD`. A rejection proves
+  the panel is alive and watching the directory; it says nothing about the engine, because the
+  script was never handed to it.
+- reporting `BUSY` instead of `PANEL_DEAD` when the probe was never consumed and the heartbeat
+  names a different command in flight. A busy panel does not scan for new command files at all
+  (`if (!this.isProcessing && this.isConnected)` in `cep-plugin/bridge-cep.js`), so contention
+  looks exactly like a panel that has stopped polling.
+
+### The bridge temp directory is shared, and startup used to wipe a peer's in-flight files
+
+Status: fixed
+
+`PremiereProBridge.sweepStaleCommands()` deleted **every** `command-*.json`, `response-*.json` and
+`.tmp-*` file in `PREMIERE_TEMP_DIR` on `initialize()`. The intent is right — an abandoned command
+file executes when the panel next starts — but the directory is shared by every client pointed at
+it, so a second server starting up destroyed the first one's in-flight command, its response, or
+the `.tmp-` staging file the panel was renaming into place. The victim then observed "consumed but
+never answered", which is indistinguishable from a dead engine.
+
+Each client now publishes `client-<pid>.json` and refreshes it every 30s. With no live peer the
+sweep behaves as before; with a live peer it spares anything younger than the longest command
+timeout. `engine-sentinel.mjs` claims a slot too, since it speaks the file protocol directly.
+
+Remaining limits to keep in mind:
+
+- `scripts/coverage-sweep.mjs` calls `ensureHealthy()` after **every** tool, so it restarts the
+  host on any bad verdict. Prefer running it with no other client attached.
+- `ensureHealthy()` and `recoverHost()` now refuse to quit Premiere when the verdict is contended
+  by a live peer, because a peer can imitate a fault on a healthy host.
+- A relaunch does not restore the bridge on its own: the CEP panel is a manual step
+  (`Window > Extensions > MCP Bridge (CEP)`), so unattended recovery cannot complete without it.
+
 ## Recently Fixed
 
 These issues were real and are now resolved in the current code:

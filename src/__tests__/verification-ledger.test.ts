@@ -18,6 +18,7 @@ import { join } from 'node:path';
 import {
   LedgerFormatError,
   OUTCOMES,
+  OUTCOME_LABEL,
   currentStandings,
   renderVerificationReport,
   validateSweep,
@@ -148,6 +149,14 @@ describe('outcome vocabulary', () => {
   it('keeps the not-executed outcomes distinguishable from a pass', () => {
     // Collapsing skips into "pass" or dropping them entirely is how a 40%-coverage sweep
     // starts reading as a green checkmark.
-    expect(OUTCOMES).toEqual(['pass', 'fail', 'skipped_args', 'skipped_unsafe', 'deferred_mutating']);
+    expect(OUTCOMES).toEqual(['pass', 'fail', 'skipped_args', 'skipped_unsafe', 'skipped_wedged', 'deferred_mutating']);
+  });
+
+  it('does not count a wedge-rejected tool as evidence about that tool', () => {
+    // A wedged panel rejects a call without running it and says so. Filing that as `fail` turned
+    // one wedge into 347 fabricated failures on 2026-08-31, so `skipped_wedged` must stay on the
+    // not-executed side of the ledger — never `pass`, and never `fail`.
+    expect(OUTCOMES).toContain('skipped_wedged');
+    expect(OUTCOME_LABEL.skipped_wedged).toMatch(/not executed/);
   });
 });

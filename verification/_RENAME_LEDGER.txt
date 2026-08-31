@@ -1,0 +1,35 @@
+2026-08-31  DELETED  /Users/kahanben/Documents/Space_Heist/tools/premiere-mcp/verification/sweeps/20260831T163656Z-live-smoke-sweep.json
+2026-08-31  DELETED  /Users/kahanben/Documents/Space_Heist/tools/premiere-mcp/verification/sweeps/20260831T163802Z-live-smoke-sweep.json
+   Reason: both were exploratory runs made WHILE debugging scripts/lib/synthesize-args.mjs, before
+   the empty-args and snake_case-key fixes landed. They recorded get_item_info,
+   get_project_item_info, has_proxy, get_bin_contents and get_value_at_time as live FAILURES for a
+   harness reason (the tools were invoked with {} because every field is declared optional), and all
+   five pass once handed the id the fixture already reported. The first of the two also ran under the
+   default `core` profile, so it claimed a 104-tool catalogue instead of 647. Leaving them in the
+   ledger would have made docs/LIVE-VERIFICATION.md assert five defects that do not exist.
+   Replaced by the clean full-catalogue sweeps recorded the same day.
+
+2026-08-31  DELETED  /Users/kahanben/Documents/Space_Heist/tools/premiere-mcp/verification/sweeps/20260831T164413Z-live-smoke-sweep.json
+   Reason: same class of harness artefact as the two above. This run was clean on the five
+   optional-key tools but recorded reflect_dom_object ("Path did not resolve to a value") and
+   search_footage ("No footage index found") as live FAILURES, both caused by the widening step
+   filling a key with a semantically wrong value — object_path is a dot-path into the Premiere DOM,
+   not a file, and a footage index is a JSON document, not a .mp4. Both resolvers are fixed and a
+   probed footage-index fixture now exists, so the run misattributes two harness bugs to two working
+   tools. Superseded by the final sweeps of the same day.
+
+2026-08-31  DELETED  /Users/kahanben/Documents/Space_Heist/tools/premiere-mcp/verification/sweeps/20260831T164615Z-live-smoke-sweep.json
+2026-08-31  DELETED  /Users/kahanben/Documents/Space_Heist/tools/premiere-mcp/verification/sweeps/20260831T164739Z-live-smoke-sweep.json
+   Reason: both measured a WEDGED PANEL rather than the catalogue. The 16:47:39Z mutate run started
+   one minute after the 16:46:15Z read-only run and inherited its still-outstanding host command
+   177c32de-33bc-4f4b-bf7f-4703e0a53b8f, so from its second tool onward the panel rejected every
+   call with "already executing command ... Nothing was run for this command". That produced 393
+   recorded failures of which 347 were this rejection — tools that never executed, filed as live
+   defects. The 16:46:15Z run shows the same rejection once (diff_sequences, command
+   6dbb4c1f-8bee-4db6-8590-cb94871cc568) and is deleted alongside it because a fresh full run
+   supersedes its 190 passes anyway.
+   Neither was ever published: docs/LIVE-VERIFICATION.md still described the 08-27 sweeps, so no
+   false claim escaped the ledger. Fixed at the source rather than only by deleting the evidence —
+   live-smoke-sweep.mjs now pre-flights the engine, classifies this rejection as `skipped_wedged`
+   instead of `fail`, and uses the shared ensureHealthy() guard after every call so a wedge is
+   attributed to the tool that caused it and cleared before the next one runs.
