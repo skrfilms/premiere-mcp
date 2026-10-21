@@ -100,7 +100,7 @@ describe('reading a project file', () => {
     expect(read.compressed).toBe(true);
     expect(read.formatVersion).toBe('3');
     expect(read.xml).toBe(FIXTURE_XML);
-    expect(read.realpath).toBe(require('node:fs').realpathSync(file));
+    expect(read.realpath).toBe(require('node:fs').realpathSync.native(file));
     expect(read.sha256).toBe(sha256(raw));
     expect(read.bytes).toBe(raw.length);
   });
@@ -410,7 +410,7 @@ describe('invariant 1 — never in place, never overwrite', () => {
   it('refuses the source as its own output', () => {
     const source = writeFixture();
     try {
-      assertOutputWritable(require('node:fs').realpathSync(source), source);
+      assertOutputWritable(require('node:fs').realpathSync.native(source), source);
       throw new Error('should have refused');
     } catch (e) {
       expect(['OUTPUT_EXISTS', 'IN_PLACE_REFUSED']).toContain((e as SurgeryRefusal).code);
@@ -529,7 +529,7 @@ describe('project_file_edit as a tool', () => {
   it('refuses when the source is open in Premiere', async () => {
     process.env[SURGERY_ENV_FLAG] = '1';
     const source = writeFixture();
-    const realpath = require('node:fs').realpathSync(source);
+    const realpath = require('node:fs').realpathSync.native(source);
     const tools = new PremiereProTools(fakeHost([realpath]).transport);
     const output = path.join(dir, 'out.prproj');
 
