@@ -19,7 +19,7 @@
  * where the response is built.
  */
 
-import { normalize, isAbsolute, resolve } from 'path';
+import { normalize, isAbsolute, resolve, posix as pathPosix, win32 as pathWin32 } from 'path';
 
 /**
  * Validates file paths to prevent path traversal attacks
@@ -78,15 +78,28 @@ export function validateFilePath(filePath: string, allowedDirs?: string[]): { va
 }
 
 /**
- * Creates a safe temp directory with proper permissions
+ * Creates a safe temp directory with proper permissions.
+ *
+ * The win32 fallback order matches the CEP panel's (TEMP -> TMP -> C:\Temp, see
+ * bridge-cep.js). It used to skip TMP, so a machine with only TMP set sent the panel to
+ * %TMP%\premiere-mcp-bridge and the server to C:\Temp\premiere-bridge-<id> — possibly a
+ * different drive. That presents as the worst symptom available: a panel that looks
+ * connected and every tool call timing out.
+ *
+ * Each branch joins with its OWN path flavour rather than the host's. Building the path
+ * with a template literal and the host `normalize` meant the win32 branch emitted forward
+ * slashes when run from macOS and the posix branch emitted backslashes when run from
+ * Windows — a non-canonical path returned to the caller, which then fails any comparison
+ * against a properly joined one.
+ *
+ * C:\Temp is documented, not endorsed: it is machine-wide, and this directory holds the
+ * bridge auth token and the command files that execute ExtendScript inside Premiere. Set
+ * PREMIERE_TEMP_DIR (on both the server and the panel) rather than relying on it.
  */
 export function createSecureTempDir(sessionId: string): string {
-  const tempBase = process.platform === 'win32'
-    ? process.env.TEMP || 'C:\\Temp'
-    : '/tmp';
-
-  // Use session-specific directory
-  const secureDir = normalize(`${tempBase}/premiere-bridge-${sessionId}`);
-
-  return secureDir;
+  if (process.platform === 'win32') {
+    const tempBase = process.env.TEMP || process.env.TMP || 'C:\\Temp';
+    return pathWin32.join(tempBase, `premiere-bridge-${sessionId}`);
+  }
+  return pathPosix.join('/tmp', `premiere-bridge-${sessionId}`);
 }

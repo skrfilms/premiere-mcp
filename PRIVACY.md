@@ -20,4 +20,4 @@ The released MCP server and CEP bridge do not include usage analytics or telemet
 
 ## Contact
 
-For privacy questions, open a GitHub issue at https://github.com/hetpatel-11/Adobe_Premiere_Pro_MCP/issues.
+For privacy questions, open a GitHub issue at https://github.com/skrfilms/premiere-mcp/issues.

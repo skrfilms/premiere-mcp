@@ -7,8 +7,8 @@ Contrôlez Adobe Premiere Pro via MCP avec Codex, Claude Code, Claude Desktop ou
 ## Démarrage rapide
 
 ```bash
-git clone https://github.com/hetpatel-11/Adobe_Premiere_Pro_MCP.git
-cd Adobe_Premiere_Pro_MCP
+git clone https://github.com/skrfilms/premiere-mcp.git
+cd premiere-mcp
 npm run setup:mac
 ```
 

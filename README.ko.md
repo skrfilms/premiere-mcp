@@ -7,8 +7,8 @@ Codex, Claude Code, Claude Desktop 또는 다른 MCP 클라이언트를 통해 M
 ## 빠른 시작
 
 ```bash
-git clone https://github.com/hetpatel-11/Adobe_Premiere_Pro_MCP.git
-cd Adobe_Premiere_Pro_MCP
+git clone https://github.com/skrfilms/premiere-mcp.git
+cd premiere-mcp
 npm run setup:mac
 ```
 

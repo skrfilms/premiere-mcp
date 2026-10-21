@@ -1,0 +1,18 @@
+# Line endings, pinned. Without this, Git's Windows default core.autocrlf=true
+# checks every .ts and cep-plugin/bridge-cep.js out as CRLF, and the suites that
+# compare generated text exactly (docs-drift, generated-script-syntax) fail on a
+# Windows clone for a reason that has nothing to do with the code. Pinning LF is
+# a prerequisite for Windows CI, not a style preference.
+* text=auto eol=lf
+
+# CRLF is the PowerShell convention and PowerShell reads either, so the scripts
+# match what a Windows maintainer's editor will produce.
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+*.png binary
+*.jpg binary
+*.zxp binary
+*.mcpb binary
+*.p12 binary

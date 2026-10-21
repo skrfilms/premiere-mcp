@@ -25,7 +25,28 @@
  * precisely because it could not tell the two apart. Driving the tools and capturing what they
  * emit removes the ambiguity.
  */
+import { tmpdir } from 'node:os';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { PremiereProTools } from '../../tools/index.js';
+
+// A few tools (e.g. consolidate_and_transfer) do real Node-side filesystem work at a
+// caller-supplied, cwd-relative path, so driving the whole catalogue from the repo root scattered
+// directories named after the seeded path values ("x", and the hostile values the sibling sweeps
+// use) through the working tree. Run from a throwaway temp cwd instead; the generated
+// ExtendScript — the only thing this suite reads — does not depend on cwd. The same guard is in
+// injection-guard.test.ts, undefined-identifiers.test.ts and generated-script-syntax.test.ts.
+let originalCwd: string;
+let scratchCwd: string;
+beforeAll(() => {
+  originalCwd = process.cwd();
+  scratchCwd = mkdtempSync(join(tmpdir(), 'skry-es3-sweep-'));
+  process.chdir(scratchCwd);
+});
+afterAll(() => {
+  process.chdir(originalCwd);
+  try { rmSync(scratchCwd, { recursive: true, force: true }); } catch { /* best effort */ }
+});
 
 /** Methods the host engine does not have. Adding one here is a claim that must be measured. */
 const ABSENT: Array<{ pattern: RegExp; name: string; use: string }> = [

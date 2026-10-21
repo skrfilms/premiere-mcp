@@ -247,27 +247,51 @@ describe('hardcoded /tmp in src — ratchet, not a clean bill of health', () => 
     return out;
   };
 
+  /**
+   * Literals that are CORRECT: each sits on the non-win32 side of an explicit platform
+   * branch, so on Windows it is never reached.
+   *
+   * Named individually rather than folded into the count. The count used to be 11 with a
+   * note that "one of them is legitimate", which conflated two opposite things — a bug
+   * waiting to be fixed and a deliberate posix branch — and meant the number could only
+   * ever be read as an upper bound on the bug. Splitting them lets the bug count ratchet
+   * down honestly, and makes ADDING a posix branch a deliberate edit here rather than
+   * something that silently spends the budget.
+   */
+  const PLATFORM_BRANCHED = new Set([
+    // createSecureTempDir: the win32 branch is directly above this line.
+    "utils/security.ts '/tmp'",
+    // bridgeTempDirForDocs: returns early for win32 before reaching this.
+    "resources/index.ts '/tmp/premiere-mcp-bridge'",
+  ]);
+
   it('has not grown past the recorded baseline', () => {
     const hits: string[] = [];
+    const branched: string[] = [];
     for (const file of sourceFiles(SRC)) {
       readFileSync(file, 'utf8').split('\n').forEach((line, i) => {
         for (const match of line.matchAll(/'\/tmp[^']*'/g)) {
-          hits.push(`${path.relative(SRC, file)}:${i + 1} ${match[0]}`);
+          const where = `${path.relative(SRC, file)}:${i + 1} ${match[0]}`;
+          const key = `${path.relative(SRC, file)} ${match[0]}`;
+          (PLATFORM_BRANCHED.has(key) ? branched : hits).push(where);
         }
       });
     }
 
     /*
-     * 11 at the time of writing. These are POSIX-only defaults for outputDir and
-     * asset scratch space; on Windows '/tmp/...' resolves to <current drive>:\tmp\...,
-     * which does not exist, so the render-truth tools that write there return
-     * verified:false on every Windows call. One of the 11 (utils/security.ts) is a
-     * legitimate platform-branched literal.
+     * 10 at the time of writing. These are POSIX-only defaults for outputDir and asset
+     * scratch space; on Windows '/tmp/...' resolves to <current drive>:\tmp\..., which
+     * does not exist, so the render-truth tools that write there return verified:false
+     * on every Windows call.
      *
      * This is a RATCHET and nothing more: it stops new ones landing. It does not claim
      * the existing ones are acceptable. tmpdir() is already imported in tools/index.ts.
      * When they are fixed, lower this number — do not delete the test.
      */
-    expect(hits.length).toBeLessThanOrEqual(11);
+    expect(hits.length).toBeLessThanOrEqual(10);
+
+    // Every allowlisted entry must still exist. Otherwise a deleted posix branch leaves a
+    // stale exemption behind, and the next literal added at that path inherits it.
+    expect(branched.length).toBe(PLATFORM_BRANCHED.size);
   });
 });

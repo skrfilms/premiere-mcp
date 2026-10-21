@@ -65,13 +65,23 @@ afterEach(async () => {
 });
 
 describe('the endpoint file', () => {
-  it('publishes an ephemeral loopback port, owner-readable only', async () => {
+  /**
+   * POSIX-only, and skipped rather than weakened on Windows: NTFS stores no POSIX mode, so
+   * `mode & 0o777` there reports 0o666 whatever the server asked for, and asserting 0o600
+   * would be testing the filesystem instead of the server. What protects this file on
+   * Windows is the directory's inherited ACL — see docs/WINDOWS-PARITY.md section 2.
+   */
+  const itPosixMode = process.platform === 'win32' ? it.skip : it;
+
+  itPosixMode('publishes the endpoint file mode 0600, since it carries the session token', async () => {
+    await startTransport();
+    expect(statSync(join(dir, ENDPOINT_FILE)).mode & 0o777).toBe(0o600);
+  });
+
+  it('publishes an ephemeral loopback port', async () => {
     const started = await startTransport();
     const endpointFile = join(dir, ENDPOINT_FILE);
     expect(existsSync(endpointFile)).toBe(true);
-
-    // 0600, for the same reason auth-token.json is: it carries the session token.
-    expect(statSync(endpointFile).mode & 0o777).toBe(0o600);
 
     const payload = JSON.parse(readFileSync(endpointFile, 'utf8'));
     expect(payload.port).toBe(started.listeningPort());

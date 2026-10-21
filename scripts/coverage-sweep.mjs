@@ -28,7 +28,8 @@
  */
 import { PremiereProBridge } from '../dist/bridge/index.js';
 import { PremiereProTools } from '../dist/tools/index.js';
-import { ensureHealthy, probeEngine } from './lib/host-recovery.mjs';
+import { ensureHealthy, probeEngine, trackOwnCommands } from './lib/host-recovery.mjs';
+import { requireScratchProject, checkStillScratch, needsScratchRecheck } from './lib/require-scratch-project.mjs';
 import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join, resolve, dirname } from 'node:path';
@@ -40,6 +41,10 @@ const OUT_DIR = join(REPO, '.scratch', 'sweep');
 const OUT_JSON = join(OUT_DIR, 'coverage-results.json');
 
 process.env.PREMIERE_TEMP_DIR = process.env.PREMIERE_TEMP_DIR || '/tmp/premiere-mcp-bridge';
+// Tools run in-process, and persistPrefToFile (src/tools/index.ts) reads this on every call, so
+// setting it here — before the first tool — is enough to stop any tool rewriting Adobe's prefs
+// file. Those prefs are the user's, global to every project, and outlive the scratch fixture.
+process.env.PREMIERE_MCP_NO_PREFS_WRITE = '1';
 
 const ALLOW_DESTRUCTIVE = process.argv.includes('--destructive');
 const LIMIT = Number((process.argv.find((a) => a.startsWith('--limit=')) || '').split('=')[1] || 0);
@@ -105,6 +110,11 @@ const GATE = {
   open_fcp_xml_project: ['host-state', 'swaps/creates project state'],
   set_workspace: ['host-state', 'rearranges the UI the panel lives in'],
   quit_premiere: ['host-state', 'ends the run'],
+  create_project: ['host-state', 'opens a second project and makes it active, escaping the scratch guard'],
+
+  // ---- USER-STATE: changes the user's machine, not the project. Disposable fixtures do not help.
+  set_autosave_settings: ['user-state', 'rewrites the user\'s global Auto Save preferences'],
+  write_clipboard: ['user-state', 'overwrites the user\'s system clipboard'],
 
   // ---- PLAYBACK: starts audio on an unattended machine at night.
   play_timeline: ['playback', 'starts playback'],
@@ -146,14 +156,17 @@ function resetFixture(why) {
 const bridge = new PremiereProBridge();
 await bridge.initialize();
 const tools = new PremiereProTools(bridge);
+// Before the first command, so every id this process publishes is known to recovery: a BUSY panel
+// on one of ours is this sweep's own wedge, on any other id it is somebody else's work.
+const ownsCommand = trackOwnCommands(bridge);
 
+// The shared guard, not the name-only regex this used to carry inline. A name is not an identity,
+// and this sweep runs destructive tools: it needs the path pin and the one-project-open rule the
+// other harnesses already enforce, and the pinned path for the re-checks below.
+const pinned = await requireScratchProject(bridge, 'coverage-sweep');
 const state = await bridge.executeScript(
   '(function(){ return JSON.stringify({ project: String(app.project.name), path: String(app.project.path), version: String(app.version) }); })();',
 );
-if (!/test|scratch|untitled|fixture/i.test(String(state.project))) {
-  line(`REFUSING: "${state.project}" is not a scratch project. Nothing was run.`);
-  process.exit(2);
-}
 line(`host: Premiere ${state.version}`);
 line(`project: ${state.project}`);
 line(`destructive tier: ${ALLOW_DESTRUCTIVE ? 'ENABLED' : 'disabled (pass --destructive)'}`);
@@ -360,13 +373,17 @@ function argsFor(tool) {
 
 const results = [];
 let destructiveCount = 0;
-const recoveryState = { recoveries: [], maxRecoveries: 6, probeTimeoutMs: 12_000 };
+const recoveryState = { recoveries: [], maxRecoveries: 6, probeTimeoutMs: 12_000, ownsCommand, pinned };
+/** Host calls since the scratch project was last re-pinned. */
+let callsSinceScratchCheck = 0;
+/** Why the run stopped early because the target moved, or null. */
+let scratchDrift = null;
 
 function flush() {
   if (!existsSync(OUT_DIR)) mkdirSync(OUT_DIR, { recursive: true });
   const tally = results.reduce((m, r) => { m[r.outcome] = (m[r.outcome] || 0) + 1; return m; }, {});
   writeFileSync(OUT_JSON, JSON.stringify({
-    host: state, startedAtIso: STARTED_ISO, tally,
+    host: state, startedAtIso: STARTED_ISO, tally, scratchDrift,
     recoveries: recoveryState.recoveries, results,
   }, null, 2));
 }
@@ -419,9 +436,19 @@ for (let i = 0; i < catalogue.length; i++) {
   // The health check runs after EVERY call so a wedge is attributed to the tool that caused it
   // rather than to the next innocent one — the single most common misdiagnosis in this project.
   const health = await ensureHealthy(name, recoveryState);
+  /** Set when the host was Escaped, relaunched or rebuilt, any of which can change the active project. */
+  let hostDisturbed = Boolean(health.clearedModal || health.recovery);
   if (!health.ok) {
-    record.killedEngine = true;
     record.engineVerdict = health.verdict?.state;
+    // A refusal is not a kill: the host was left alone because someone else is using it. Stop
+    // rather than keep sweeping into a panel another client is driving.
+    if (health.contended) {
+      results.push(record); flush();
+      line(`\n!! ${name}: ${health.error}`);
+      line('!! Stopping: another client is using this host, so nothing more here is trustworthy or safe.');
+      break;
+    }
+    record.killedEngine = true;
     if (health.gaveUp) {
       results.push(record); flush();
       line(`\n!! ${name}: ${health.error}`);
@@ -443,11 +470,30 @@ for (let i = 0; i < catalogue.length; i++) {
     destructiveCount++;
     if (destructiveCount % RESET_EVERY === 0) {
       resetFixture(`after ${RESET_EVERY} destructive calls`);
+      hostDisturbed = true;
     }
     // Re-read after EVERY mutating call. Ids are not stable across edits, and a stale id is
     // indistinguishable in the results from a tool that cannot find its target — six tools
     // reported "Project item not found" in the first run for exactly this reason.
     ctx = await readContext();
+  }
+
+  // RE-PIN THE TARGET. The startup guard only speaks for the moment it ran, and this sweep calls
+  // hundreds of tools that act on whichever project is ACTIVE. Re-checked every few calls, straight
+  // after anything whose name says it touches projects, and after any Escape, relaunch or fixture
+  // rebuild. A failed check stops the run with the results already flushed.
+  callsSinceScratchCheck++;
+  if (hostDisturbed || needsScratchRecheck(name, callsSinceScratchCheck)) {
+    const pin = await checkStillScratch(bridge, pinned);
+    if (!pin.ok) {
+      scratchDrift = pin.reason;
+      flush();
+      line(`\n!! ${name}: the scratch project is no longer the target.`);
+      line(`!! ${pin.reason}`);
+      line('!! Nothing further was run. Check Premiere by hand before saving anything.');
+      break;
+    }
+    callsSinceScratchCheck = 0;
   }
   flush();
 }

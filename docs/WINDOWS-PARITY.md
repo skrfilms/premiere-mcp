@@ -1,6 +1,10 @@
 # Windows parity — audit, fixes, and what is still not true
 
 **Date:** 2026-08-25 · **Branch:** `improve/m1-honesty-and-core-bugs` · **Audited at tip:** `b28c7af`
+**Updated:** 2026-08-26 — all three **P0s are now patched in code** (§4.1, §4.2, §4.3), plus
+P1 #5/#6 (§4.4), #25 (§4.8), #28 (§4.6) and the missing `uninstall:win` (§4.7). The headline
+below is kept as written because it is the audit's finding, not a status line; what is true
+today is in **§0**.
 
 Windows is a stated hard requirement. Every line of this project was written and
 exercised on macOS, and **no Windows code path in this repository has ever been
@@ -22,6 +26,35 @@ mac logic, not executed*.
 
 ---
 
+## 0. Status as of 2026-08-26
+
+**Fixed in code, and locked by tests that run on every CI job:**
+
+| Was | Now | Locked by |
+|---|---|---|
+| P0 #1 — `initialize()` threw on Windows before contacting Premiere; the server did not start at all. | The ownership assertion runs only where a uid exists (`process.getuid?.() !== undefined`). Absent a uid it is *no check*, which is a different claim from *a failed check*, so it no longer refuses. Windows takes an explicit branch stating the mode is unenforced on NTFS. | `windows-paths.test.ts` — "initialises instead of refusing the directory as foreign-owned", plus a sibling that still refuses a genuinely foreign uid so the fix cannot be "achieved" by deleting the check. |
+| P0 #2 — the in-product setup resource told every reader to type `/tmp/premiere-mcp-bridge`, the one input the panel rejects on win32. | `bridgeTempDirForDocs(platform, env)` in `src/resources/index.ts`, interpolated at all four sites. On win32 it emits the panel's own default, **expanded** — not `%TEMP%\…`, which the panel would `path.resolve` into a literal `%TEMP%` directory. (§4.2's suggested `%TEMP%` literal was wrong for that reason.) | `windows-paths.test.ts` — the emitted value is fed through the panel's real `sanitizeTempDirectoryInput` and compared against the panel's real `getDefaultTempPath`, so the two cannot drift apart silently. |
+| P0 #3 — server and panel disagreed on the Windows temp base (`%TEMP%` → `C:\Temp` vs `%TEMP%` → `%TMP%` → `C:\Temp`), so a `TMP`-only machine put them on different drives. Healthy-looking panel, every call timing out. | `createSecureTempDir` adds the `TMP` step and joins with `path.win32` / `path.posix` per branch instead of the host's flavour. | `windows-paths.test.ts` — exact-string assertions on both branches, written so they hold whichever platform runs the suite. |
+| P1 #4/#5/#6 — a `Tightened <dir> … to 700` log for an operation NTFS cannot perform, and a macOS threat model presented as platform-independent. | The Windows branch says the directory and `auth-token.json` are protected only by their inherited NTFS ACL and names `npm run setup:doctor:win`. The doc comment now scopes its claim to macOS. | POSIX-mode assertions in `auth.test.ts` / `socket-transport.test.ts` are `it.skip` on win32 rather than weakened, so a Windows run reports *not run* instead of a green tick under a "mode 700" title. |
+| #25 — no `.gitattributes`, so a Windows clone checks out CRLF and the exact-text suites fail. | Added: `* text=auto eol=lf`, CRLF for `.ps1`/`.cmd`/`.bat`, binary for images and bundles. | The Windows CI job itself. |
+| #28 — `powershell.exe` (5.1) only. | `pwsh` first, falling back to `powershell.exe`. The fallback keys on spawn's ENOENT, never on an exit code, so a script that ran and failed is never re-run. | — (`runPlatformScript` is module-local; see #28.) |
+| `uninstall:win` missing from `package.json` while `uninstall-windows.ps1` existed. | Added. | — |
+
+**Also fixed, not a Windows bug but found by Windows CI:** the two catalogue-sweep suites
+were timing out on the Windows runner. Measuring both platforms showed only ~1.35x
+difference, so the cause was not the runner: `executeTool` rebuilt the ~640-tool Zod
+schema registry on every call. Memoizing it took `injection-guard` 966s → ~104s and
+`undefined-identifiers` 308s → ~25s with identical coverage, and the same saving lands on
+every real tool call in production. Both ceilings were therefore lowered rather than
+raised.
+
+**Still true, and not fixed by any of the above:** every P1 from #7 down and every P2/P3
+in §1 remains open, and **no Windows code path has still ever executed against a real
+Premiere.** §3 is unchanged apart from where it is explicitly marked. P0 #1 being fixed
+means Windows can now be *tested*; it does not mean Windows works.
+
+---
+
 ## 1. Findings
 
 Severity: **P0** = Windows cannot work at all · **P1** = a feature is silently broken
@@ -35,17 +68,17 @@ quotes the offending text verbatim to stay greppable if lines drift.
 
 | # | File:line | Finding | Status |
 |---|---|---|---|
-| 1 | `src/bridge/index.ts:729` | `if (stats.uid !== process.getuid?.())` — `process.getuid` **does not exist on Windows** and `fs.stat().uid` is always `0` there, so this is `0 !== undefined`, always true. It throws `Refusing to use <dir>… owned by uid 0`, the catch at `:743` deliberately re-throws it, and `initialize()` propagates. **The server never starts on Windows.** The message also misreports: "owned by uid 0, not by this process (uid undefined)". | **FLAGGED** — patch §4.1. Reproduced from macOS and locked by a test. |
-| 2 | `src/resources/index.ts:693`, `:785` | The in-product setup resource tells every user, on every platform, to `Set Temp Directory to /tmp/premiere-mcp-bridge`. On Windows the panel *rejects* exactly that input (`cep-plugin/bridge-cep.js:266` returns `''` for any `/tmp…` path when `os.platform() === 'win32'`), so `startBridge()` bails. A Windows user who follows the documentation cannot start the bridge. | **FLAGGED** — patch §4.2. |
-| 3 | `src/utils/security.ts:83-91` vs `cep-plugin/bridge-cep.js:211-217` | Server default temp dir is `%TEMP%\premiere-bridge-<uuid>`; panel default is `%TEMP%\premiere-mcp-bridge`. They can never agree. Worse on Windows: the panel falls back `%TEMP% → %TMP% → C:\Temp`, the server only `%TEMP% → C:\Temp`, so a machine with only `TMP` set sends them to different drives. Symptom is the worst one available — a healthy-looking panel and every tool call timing out. | **FLAGGED** — patch §4.3. Locked by tests. |
+| 1 | `src/bridge/index.ts:729` | `if (stats.uid !== process.getuid?.())` — `process.getuid` **does not exist on Windows** and `fs.stat().uid` is always `0` there, so this is `0 !== undefined`, always true. It throws `Refusing to use <dir>… owned by uid 0`, the catch at `:743` deliberately re-throws it, and `initialize()` propagates. **The server never starts on Windows.** The message also misreports: "owned by uid 0, not by this process (uid undefined)". | **FIXED 2026-08-26** (§4.1, re-keyed on `getuid` presence rather than platform name). Locked by a test. |
+| 2 | `src/resources/index.ts:693`, `:785` | The in-product setup resource tells every user, on every platform, to `Set Temp Directory to /tmp/premiere-mcp-bridge`. On Windows the panel *rejects* exactly that input (`cep-plugin/bridge-cep.js:266` returns `''` for any `/tmp…` path when `os.platform() === 'win32'`), so `startBridge()` bails. A Windows user who follows the documentation cannot start the bridge. | **FIXED 2026-08-26** — §4.2, but with the expanded path, not a literal `%TEMP%`; see §0. |
+| 3 | `src/utils/security.ts:83-91` vs `cep-plugin/bridge-cep.js:211-217` | Server default temp dir is `%TEMP%\premiere-bridge-<uuid>`; panel default is `%TEMP%\premiere-mcp-bridge`. They can never agree. Worse on Windows: the panel falls back `%TEMP% → %TMP% → C:\Temp`, the server only `%TEMP% → C:\Temp`, so a machine with only `TMP` set sends them to different drives. Symptom is the worst one available — a healthy-looking panel and every tool call timing out. | **FIXED 2026-08-26** (§4.3, plus per-branch `path.win32`/`path.posix`). Locked by tests. |
 
 ### P1 — silently broken features, and false security claims
 
 | # | File:line | Finding | Status |
 |---|---|---|---|
-| 4 | `src/bridge/index.ts:725`, `735-739` | `mkdir(mode: 0o700)` — mode is **ignored on Windows**. `stats.mode & 0o777` reports `0o777` for a directory, so the "tighten" branch fires every startup and `fs.chmod` only toggles the read-only attribute. The log line then says `Tightened <dir> from mode 777 to 700`, which **did not happen**. A fake-success log in a codebase whose thesis is honest verification. | **FLAGGED** — patch §4.1. |
-| 5 | `src/bridge/index.ts:799, 810-811`; `src/bridge/socket-transport.ts:292-295` | `auth-token.json` (32 random bytes) and `bridge-endpoint.json` (loopback port **plus the token**) are written `{ mode: 0o600 }` + `chmod(0o600)`. **Both are no-ops on NTFS.** See §2 for the full truth. | **PARTLY FIXED** in `install-windows.ps1` / `doctor-windows.ps1`; code comment still wrong — patch §4.4. |
-| 6 | `src/bridge/index.ts:706-722` | The doc comment states "The protection against other users is the 0700 directory and the ownership check, not the token." **Both mechanisms are inoperative on Windows.** A correct macOS threat model presented as platform-independent. | **FLAGGED** — patch §4.4. |
+| 4 | `src/bridge/index.ts:725`, `735-739` | `mkdir(mode: 0o700)` — mode is **ignored on Windows**. `stats.mode & 0o777` reports `0o777` for a directory, so the "tighten" branch fires every startup and `fs.chmod` only toggles the read-only attribute. The log line then says `Tightened <dir> from mode 777 to 700`, which **did not happen**. A fake-success log in a codebase whose thesis is honest verification. | **FIXED 2026-08-26** — §4.1; the Windows branch no longer claims a chmod it cannot perform. |
+| 5 | `src/bridge/index.ts:799, 810-811`; `src/bridge/socket-transport.ts:292-295` | `auth-token.json` (32 random bytes) and `bridge-endpoint.json` (loopback port **plus the token**) are written `{ mode: 0o600 }` + `chmod(0o600)`. **Both are no-ops on NTFS.** See §2 for the full truth. | **FIXED 2026-08-26** in `install-windows.ps1` / `doctor-windows.ps1` and the code comment (§4.4). The underlying platform fact is unchanged — see §2. |
+| 6 | `src/bridge/index.ts:706-722` | The doc comment states "The protection against other users is the 0700 directory and the ownership check, not the token." **Both mechanisms are inoperative on Windows.** A correct macOS threat model presented as platform-independent. | **FIXED 2026-08-26** — §4.4; the comment now scopes its claim to macOS. |
 | 7 | `cep-plugin/bridge-cep.js:484` (also `:464`, `:504`) | `try { fs.unlinkSync(filePath); } catch (eUnlink) {}` — deletes the command file after execution. On POSIX unlink always succeeds. On Windows it throws `EBUSY`/`EACCES` while an AV scanner or the Search indexer holds a handle. The catch is empty, so the 250 ms poller finds the same `command-*.json` next tick and **re-executes the same mutating ExtendScript**. Silent duplicate `insertClip` / `ripple_delete`. Windows-only, steady-state. | **FLAGGED** — patch §4.5. Highest-consequence finding after P0 #1. |
 | 8 | `src/tools/index.ts:6717, 6755, 7944, 7689, 15555` | `execSync` shell strings using `/dev/null`, `\| tail`, `\| grep`, `\| head`. `execSync` runs `cmd.exe` on Windows: `'tail' is not recognized`. | FLAGGED |
 | 9 | `src/tools/index.ts:19850` | `execSync(\`cp "${f.path}" "${dest}"\`)` — `cp` does not exist in `cmd.exe`. Breaks `consolidate_and_transfer` and `archive_master`. | FLAGGED |
@@ -69,10 +102,10 @@ quotes the offending text verbatim to stay greppable if lines drift.
 | 22 | ~18 sites incl. `src/tools/index.ts:7687, 7689, 15575, 19246, 19850` | `JSON.stringify(path)` and naked `"${path}"` used as **shell** quoting. JSON escaping emits `"C:\\a\\b"`, which `cmd.exe` passes through with doubled backslashes. A path ending in `\` turns `"C:\out\"` into an escaped quote under MSVCRT argv parsing and swallows the next argument. | FLAGGED — fixed as a class by converting to `spawn` + argv. |
 | 23 | `cep-plugin/bridge-cep.js:474` | `filePath.replace('command-', 'response-')` replaces the first occurrence **anywhere in the absolute path**. A temp dir containing `command-` corrupts the response path. Not Windows-specific; Windows profile names make it likelier. | FLAGGED |
 | 24 | `src/bridge/index.ts:1056-1058` | Premiere install search checks `%ProgramFiles%\Adobe` but not `%ProgramFiles(x86)%`. Note `findInstalledMediaEncoder` at `:2257-2287` checks **both** — inconsistent. | FLAGGED (minor) |
-| 25 | repo root | **No `.gitattributes`.** With Git's Windows default `core.autocrlf=true`, every `.ts` and `cep-plugin/bridge-cep.js` checks out CRLF. Runtime impact is nil (escapers are built from `String.fromCharCode`; all `join('\n')` happen at runtime), but `docs-drift.test.ts` and `generated-script-syntax.test.ts` do exact-text comparisons and will fail on a Windows clone. `* text=auto eol=lf` is a cheap prerequisite for Windows CI. | FLAGGED |
+| 25 | repo root | **No `.gitattributes`.** With Git's Windows default `core.autocrlf=true`, every `.ts` and `cep-plugin/bridge-cep.js` checks out CRLF. Runtime impact is nil (escapers are built from `String.fromCharCode`; all `join('\n')` happen at runtime), but `docs-drift.test.ts` and `generated-script-syntax.test.ts` do exact-text comparisons and will fail on a Windows clone. `* text=auto eol=lf` is a cheap prerequisite for Windows CI. | **FIXED 2026-08-26** — §4.8. |
 | 26 | `src/tools/srt.ts:144, 203, 206` | **No defect.** Reads normalize BOM + CRLF/CR (`:144`, `:203`); writes are LF-only (`:206`). Premiere and mainstream players accept LF, and the round-trip check at `src/tools/index.ts:9605` is self-consistent. Flagged only so LF stays a conscious choice. Same for the EDL at `:15819` and CSVs at `:6794`, `:7166` — Excel on Windows prefers CRLF; worth a real-world check, not a blind change. | NOTED |
 | 27 | ExtendScript path escaping (category audited in full) | **No defect.** Every interpolation site goes through `JSON.stringify` (~24 sites in `tools/index.ts`, plus `bridge/index.ts:1397, 1525`), and both escapers handle backslash explicitly (`bridge/index.ts:53`, `cep-plugin/bridge-cep.js:22`, parser at `:101`). A Windows `getMediaPath()` round-trips correctly. | NOTED — do not "fix" |
-| 28 | `src/cli.ts:22-48` | **No defect.** `runPlatformScript` branches darwin/win32/throw correctly, uses `join()` throughout, and `spawn('powershell.exe', …)` resolves without a shell. The `#!/usr/bin/env node` shebang is irrelevant because `package.json` declares `bin` and npm generates a `.cmd` shim. Only gap: no `pwsh` (PowerShell 7) fallback — patch §4.6. `run` and `runPlatformScript` are module-local, so not unit-testable. | NOTED |
+| 28 | `src/cli.ts:22-48` | **No defect.** `runPlatformScript` branches darwin/win32/throw correctly, uses `join()` throughout, and `spawn('powershell.exe', …)` resolves without a shell. The `#!/usr/bin/env node` shebang is irrelevant because `package.json` declares `bin` and npm generates a `.cmd` shim. Only gap: no `pwsh` (PowerShell 7) fallback — **FIXED 2026-08-26**, §4.6. `run` and `runPlatformScript` are module-local, so not unit-testable. | NOTED |
 
 ### Fixed in the files this change owns
 
@@ -145,7 +178,12 @@ Everything in this section is unverified because the work was done on macOS with
 
 **Not verified at all — needs a Windows machine with Premiere 26.x:**
 
-1. **That the three `.ps1` files parse.** They were written and reviewed by eye. A
+1. ~~**That the three `.ps1` files parse.**~~ **Now checked on every CI run**
+   (2026-08-26): `.github/workflows/windows-setup.yml` has a `pwsh` step that
+   `ParseFile`s each of `scripts/*.ps1` and fails the job on any parse error. It covers
+   `uninstall-windows.ps1`, which the smoke steps never execute because doing so would
+   tear down the install they just made. The original note is kept below because it
+   states why this was worth doing at all. A
    PowerShell syntax error would surface on the first run and nowhere earlier.
    Cheapest check, no Premiere needed:
    `Get-Command -Syntax`, or better, on any machine with PowerShell 7 —
@@ -175,9 +213,11 @@ Everything in this section is unverified because the work was done on macOS with
    shell's `%TEMP%`.** If it does not, the default temp dir silently diverges. The
    installer now tells the user to type the path rather than trust the default, which
    sidesteps it without answering it.
-7. **Every P0/P1 code finding above**, once patched. In particular P0 #1: after applying
-   §4.1, `initialize()` should succeed on Windows. That is the gate for testing anything
-   else, and until it passes no tool has ever run on Windows.
+7. **Every P0/P1 code finding above**, once patched. All three P0s were patched on
+   2026-08-26 (§0), so this item is now specifically: *does `initialize()` in fact
+   succeed on a real Windows host?* The macOS reproduction (deleting `process.getuid`)
+   shows the throw is gone, which is a different and weaker claim. That is still the gate
+   for testing anything else, and until it passes no tool has ever run on Windows.
 
 **Suggested order:** install `pwsh` on the Mac and parse-check the three
 scripts (30 seconds, catches the most likely class of error) → apply §4.1 → on a
@@ -190,13 +230,30 @@ platform at import time. From macOS, `isAbsolute('C:\\Windows\\System32\\x')` is
 **false**, so `resolve()` prepends the macOS cwd and the forbidden-path guard misses for
 a reason that has nothing to do with the real Windows bug. A test written from macOS
 would pass or fail for the wrong reason, so `windows-paths.test.ts` deliberately makes
-no behavioural assertion there and instead asserts the structural cause (host-bound path
-helpers, no `path.win32`). That test is the marker; delete it only when the module
-selects its path flavour explicitly.
+no behavioural assertion there and instead asserts the structural cause: `validateFilePath`
+uses host-bound `normalize`/`isAbsolute`/`resolve`. That test is the marker; delete it only
+when the guard itself selects its path flavour explicitly.
+
+Its scope was narrowed on 2026-08-26. It used to assert that the whole module contained no
+`path.win32`, which the §4.3 fix made false — `createSecureTempDir` now selects
+`path.win32`/`path.posix` per branch. Rather than delete the marker (the finding is still
+open) or relax it into something an unrelated edit could satisfy, it now reads only
+`validateFilePath`'s own body. **Finding #18 itself is unchanged and still open.**
 
 ---
 
 ## 4. Patches for files this change does not own
+
+> **All of §4 has been APPLIED as of 2026-08-26** (§0 records what landed and where the
+> applied version differs from the suggestion below). The patches are kept verbatim as
+> written on 2026-08-25 so the reasoning stays readable next to the diff, and so the two
+> places the applied fix DEPARTS from the suggestion are visible rather than quietly
+> overwritten: §4.1 was re-keyed on `process.getuid` being present rather than on
+> `platform !== 'win32'` (a runtime with no `getuid` failed identically, and “I cannot
+> verify the owner” is not the same claim as “the owner is wrong”), and §4.2's suggested
+> `'%TEMP%\\premiere-mcp-bridge'` literal was **wrong** — the panel expands nothing and
+> would `path.resolve` it into a directory literally named `%TEMP%`, so the applied fix
+> emits the expanded path.
 
 ### 4.1 — P0 #1 + P1 #4: `src/bridge/index.ts:727-745`
 

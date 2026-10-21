@@ -8,4 +8,4 @@ The software can read and modify the active Adobe Premiere Pro project when an M
 
 The software is provided "as is", without warranty. The project is independent software and is not affiliated with, endorsed by, or sponsored by Adobe.
 
-Support is provided through GitHub issues at https://github.com/hetpatel-11/Adobe_Premiere_Pro_MCP/issues.
+Support is provided through GitHub issues at https://github.com/skrfilms/premiere-mcp/issues.

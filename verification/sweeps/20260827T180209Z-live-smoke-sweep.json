@@ -1,0 +1,2710 @@
+{
+  "environment": {
+    "ranAt": "2026-08-27T18:02:09Z",
+    "harness": "live-smoke-sweep",
+    "mode": "read-only",
+    "gitSha": "2259e06518c141c338cdf4459e922315591c9a6b",
+    "gitDirty": false,
+    "premiereVersion": "26.3.2 (build 2)",
+    "platform": "darwin 25.5.0 arm64",
+    "catalogueSize": 647
+  },
+  "tools": [
+    {
+      "name": "activate_tools",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "add_adjustment_layer",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "add_audio_keyframes",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "add_custom_metadata_field",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "add_keyframe",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "add_marker",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "add_marker_to_project_item",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "add_metadata_schema_field",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "add_text_overlay",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "add_to_render_queue",
+      "outcome": "skipped_unsafe",
+      "detail": "launches AME"
+    },
+    {
+      "name": "add_to_timeline",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "add_to_timeline_batch",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "add_track",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "add_tracks",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "add_transition",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "add_transition_to_clip",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "adjust_audio_levels",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "align_clips_spatial",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "api_surface_report",
+      "outcome": "pass"
+    },
+    {
+      "name": "apply_audio_effect",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "apply_audio_effect_qe",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "apply_audio_effect_to_all_clips",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "apply_dynamics",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "apply_effect",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "apply_lumetri_preset",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "apply_lut",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "apply_lut_to_clip",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "apply_morph_cut",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "apply_video_effect",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "archive_master",
+      "outcome": "skipped_unsafe",
+      "detail": "copies media on disk"
+    },
+    {
+      "name": "assemble_product_spot",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "assemble_review_reel",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "assert_clips_unchanged",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "attach_custom_property",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "attach_sequence_custom_property",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "audio_crossfade_at_cut",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "audio_peaks_report",
+      "outcome": "pass"
+    },
+    {
+      "name": "audio_silence_scan",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "auto_reframe_sequence",
+      "outcome": "skipped_unsafe",
+      "detail": "long-running, creates sequences"
+    },
+    {
+      "name": "auto_white_balance",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "bake_keyframe_ease",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "bake_speed_change",
+      "outcome": "skipped_unsafe",
+      "detail": "long ffmpeg render"
+    },
+    {
+      "name": "batch_add_audio_crossfades",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "batch_add_transitions",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "batch_apply_effect",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "batch_enable_disable",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "batch_enable_disable_clips",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "batch_execute",
+      "outcome": "skipped_unsafe",
+      "detail": "arbitrary code; tested separately"
+    },
+    {
+      "name": "batch_export_sequences",
+      "outcome": "skipped_unsafe",
+      "detail": "launches AME repeatedly"
+    },
+    {
+      "name": "batch_log_from_csv",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "batch_mogrt_from_data",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "batch_relink_by_pattern",
+      "outcome": "skipped_unsafe",
+      "detail": "rewrites media links in bulk"
+    },
+    {
+      "name": "batch_relink_by_prefix",
+      "outcome": "skipped_unsafe",
+      "detail": "rewrites media links in bulk"
+    },
+    {
+      "name": "batch_rename_clips",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "batch_rename_project_items",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "batch_replace_clips",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive swap"
+    },
+    {
+      "name": "batch_set_label",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "black_frame_scan",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "blur_clip",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "broadcast_safe_check",
+      "outcome": "pass"
+    },
+    {
+      "name": "build_brand_spot_from_mogrt_and_assets",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "build_motion_graphics_demo",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "call_tool",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "caption_qc_fix",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "caption_qc_report",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'caption_qc_report': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"srtPath\"\n  "
+    },
+    {
+      "name": "captions_from_transcript_json",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "captions_to_markers",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "capture_frame",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "capture_program_output",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "change_list_report",
+      "outcome": "pass"
+    },
+    {
+      "name": "channel_remap_report",
+      "outcome": "pass"
+    },
+    {
+      "name": "chapter_markers_to_youtube",
+      "outcome": "pass"
+    },
+    {
+      "name": "check_offline_media",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "clear_item_in_out",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "clear_sequence_in_out",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "clear_work_area",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "close_all_gaps",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "close_all_source_clips",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "close_gap_at",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "close_project",
+      "outcome": "skipped_unsafe",
+      "detail": "closes the project out from under the sweep"
+    },
+    {
+      "name": "close_sequence",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "close_source_monitor",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "color_correct",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "compare_takes",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "conform_sequence_settings",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "consolidate_and_transfer",
+      "outcome": "skipped_unsafe",
+      "detail": "copies media on disk"
+    },
+    {
+      "name": "consolidate_duplicates",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "convert_project_to_production",
+      "outcome": "skipped_unsafe",
+      "detail": "mutates Creative Cloud production state"
+    },
+    {
+      "name": "copy_effect_values",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "copy_effects_between_clips",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "copy_grade",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "copy_markers_between_sequences",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "count_tracks_used",
+      "outcome": "pass"
+    },
+    {
+      "name": "countdown_leader",
+      "outcome": "skipped_unsafe",
+      "detail": "dialog: newUniversalCountingLeader prompts"
+    },
+    {
+      "name": "create_adjustment_layer_at",
+      "outcome": "skipped_unsafe",
+      "detail": "dialog: newTransparentVideo prompts"
+    },
+    {
+      "name": "create_bars_and_tone",
+      "outcome": "skipped_unsafe",
+      "detail": "dialog: newBarsAndTone prompts"
+    },
+    {
+      "name": "create_bin",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "create_bin_qe",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "create_caption_track",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "create_custom_export_preset",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "create_marker",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "create_multicam_from_clips",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "create_multicam_source_sequence",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "create_project",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "create_proxy_qe",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "create_recovery_checkpoint",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "create_sequence",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "create_sequence_from_bin",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "create_sequence_from_clips",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "create_sequence_from_preset",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "create_smart_bin",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "create_subclip",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "create_subclips_from_markers",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "create_subsequence",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "crop_clip",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "cut_list_csv",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'cut_list_csv': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"outputPath\"\n    "
+    },
+    {
+      "name": "deactivate_tools",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "delete_bin",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive"
+    },
+    {
+      "name": "delete_empty_tracks",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive (removes tracks)"
+    },
+    {
+      "name": "delete_marker",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "delete_multiple_project_items",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive"
+    },
+    {
+      "name": "delete_preview_files",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive (throws away renders)"
+    },
+    {
+      "name": "delete_project_item",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive"
+    },
+    {
+      "name": "delete_sequence",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive"
+    },
+    {
+      "name": "delete_track",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive"
+    },
+    {
+      "name": "delivery_qc",
+      "outcome": "pass"
+    },
+    {
+      "name": "denoise_clip",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "dereverb_clip",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "deselect_all_clips",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "detach_proxy",
+      "outcome": "skipped_unsafe",
+      "detail": "mutates proxy attachment"
+    },
+    {
+      "name": "detect_scene_edits",
+      "outcome": "skipped_unsafe",
+      "detail": "long-running analysis"
+    },
+    {
+      "name": "detect_settings_mismatch",
+      "outcome": "pass"
+    },
+    {
+      "name": "detect_silence",
+      "outcome": "pass"
+    },
+    {
+      "name": "diff_sequences",
+      "outcome": "pass"
+    },
+    {
+      "name": "distribute_clips_evenly",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "duplicate_clip",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "duplicate_sequence",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "duration_marker_add",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "effect_stack_report",
+      "outcome": "pass"
+    },
+    {
+      "name": "enable_disable_all_effects",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "enable_disable_clip",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "enable_disable_effect",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "enable_multicam",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "encode_file",
+      "outcome": "skipped_unsafe",
+      "detail": "launches AME"
+    },
+    {
+      "name": "encode_project_item",
+      "outcome": "skipped_unsafe",
+      "detail": "launches AME"
+    },
+    {
+      "name": "evaluate_expression",
+      "outcome": "skipped_unsafe",
+      "detail": "arbitrary code; tested separately"
+    },
+    {
+      "name": "execute_extendscript",
+      "outcome": "skipped_unsafe",
+      "detail": "arbitrary code; tested separately"
+    },
+    {
+      "name": "export_aaf",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "export_aaf_with_settings",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "export_as_fcp_xml",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "export_as_project",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "export_audio_only",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "export_captions_to_srt",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "export_edl",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "export_frame",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "export_gif",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "export_in_out_range",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "export_omf",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "export_omf_with_settings",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "export_per_marker_range",
+      "outcome": "skipped_unsafe",
+      "detail": "many long exports"
+    },
+    {
+      "name": "export_per_marker_segments",
+      "outcome": "skipped_unsafe",
+      "detail": "many long exports"
+    },
+    {
+      "name": "export_project_as_fcp_xml",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "export_sequence",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "export_sequence_as_project",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "export_social_preset",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "export_stills_batch",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "export_thumbnail",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "export_with_burn_ins",
+      "outcome": "skipped_unsafe",
+      "detail": "long render + mutates then restores effects"
+    },
+    {
+      "name": "extend_edit",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "extract_palette",
+      "outcome": "pass"
+    },
+    {
+      "name": "extract_selection",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "fade_in_audio",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "fade_in_video",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "fade_out_audio",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "fade_out_video",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "false_color_frame",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "fill_room_tone",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "find_clips_by_source",
+      "outcome": "pass"
+    },
+    {
+      "name": "find_clips_with_effect",
+      "outcome": "pass"
+    },
+    {
+      "name": "find_items_by_media_path",
+      "outcome": "pass"
+    },
+    {
+      "name": "find_items_matching_media_path",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'find_items_matching_media_path': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n     "
+    },
+    {
+      "name": "find_keyframe_near_time",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'find_keyframe_near_time': [\n  {\n    \"expected\": \"number\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"compo"
+    },
+    {
+      "name": "find_project_item_by_name",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'find_project_item_by_name': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"nam"
+    },
+    {
+      "name": "find_tool",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'find_tool': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"query\"\n    ],\n    \""
+    },
+    {
+      "name": "find_unused_sequences",
+      "outcome": "pass"
+    },
+    {
+      "name": "fit_clip_duration",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "flash_frame_scan",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "flatten_multicam",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "flip_horizontal",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "flip_vertical",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "flush_sequence_cache",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "frame_diff",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "frame_io_notes_to_markers",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "frames_to_timecode",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'frames_to_timecode': [\n  {\n    \"expected\": \"number\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"frames\"\n  "
+    },
+    {
+      "name": "freeze_frame",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "freeze_frame_scan",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "generate_scope",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "get_active_sequence",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_all_clip_effects",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_all_markers",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_all_project_paths",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_app_property",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'get_app_property': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"key\"\n    ],\n"
+    },
+    {
+      "name": "get_app_state",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_autosave_settings",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_bin_contents",
+      "outcome": "fail",
+      "detail": "Bin not found"
+    },
+    {
+      "name": "get_bin_contents_recursive",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_bin_tree",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_capabilities",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_clip_adjustment_layer",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_clip_at_playhead",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_clip_at_position",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'get_clip_at_position': [\n  {\n    \"code\": \"invalid_value\",\n    \"values\": [\n      \"video\",\n      \"audio\"\n    ],\n  "
+    },
+    {
+      "name": "get_clip_color_space",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_clip_flags",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_clip_info_extended",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_clip_links",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_clip_markers",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_clip_properties",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'get_clip_properties': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"clipId\"\n "
+    },
+    {
+      "name": "get_clip_speed",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_clip_speed_info",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_cloud_queue_info",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_color_label",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_color_management_options",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_color_space",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_conflicts",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_duplicate_media",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_ea_login_status",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_ea_status",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_ea_user_info",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_edit_point_list",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_effect_properties",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_encoder_presets",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_encoder_state",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_export_file_extension",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_export_progress",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_footage_interpretation",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_full_clip_info",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_full_project_overview",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_full_sequence_info",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_graphics_white_luminance",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_insertion_bin",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_item_color_management",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_item_info",
+      "outcome": "fail",
+      "detail": "Project item not found"
+    },
+    {
+      "name": "get_item_metadata_columns",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_item_treepath",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_item_video_components",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_item_xmp_metadata",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_keyframes",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'get_keyframes': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"clipId\"\n    ],\n"
+    },
+    {
+      "name": "get_linked_items",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_location_copy_settings",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_lumetri_preset_list",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_media_processing_status",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_metadata",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_mogrt_component",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_mogrt_text_all",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_multicam_angle_count",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_next_edit_point",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_offline_media",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_open_project_count",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_panel_visibility",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_playback_state",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_playhead_position",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_premiere_state",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_production_info",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_production_list",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_project_info",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_project_item_info",
+      "outcome": "fail",
+      "detail": "Project item not found"
+    },
+    {
+      "name": "get_project_item_info_extended",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_project_panel_columns",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_project_panel_metadata",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_project_panel_selection",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_project_property",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'get_project_property': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"key\"\n   "
+    },
+    {
+      "name": "get_project_scratch_disks",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_project_stats",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_proxies_enabled",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "get_proxy_status",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_qe_clip_info",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_qe_clip_settings",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_qe_component_params",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'get_qe_component_params': [\n  {\n    \"expected\": \"number\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"compo"
+    },
+    {
+      "name": "get_qe_project_info",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_qe_sequence_props",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_qe_sequence_settings",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_render_queue_status",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_renderer_names",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_selected_clips",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_sequence_count",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_sequence_duration",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_sequence_gaps",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_sequence_in_out_points",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_sequence_info_extended",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_sequence_markers_by_type",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_sequence_render_status",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_sequence_selection",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_sequence_settings",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_sequence_structure",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_source_clip_info",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_source_clip_info_qe",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_source_monitor_info",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_source_monitor_position",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_source_position",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_target_tracks",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_timeline_gaps",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_timeline_render_status",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_timeline_summary",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_tool_typings",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_total_clip_count",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_track_info",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_unused_media",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_used_media_report",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_value_at_time",
+      "outcome": "fail",
+      "detail": "get_value_at_time requires clipId."
+    },
+    {
+      "name": "get_version_info",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_work_area",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_workspaces",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_xmp_metadata",
+      "outcome": "pass"
+    },
+    {
+      "name": "go_to_in_point",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "go_to_next_marker",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "go_to_out_point",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "go_to_prev_marker",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "go_to_sequence_end",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "go_to_sequence_start",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "go_to_timecode",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "grade_snapshot",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "grid_layout",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "has_proxy",
+      "outcome": "pass"
+    },
+    {
+      "name": "honesty_selftest",
+      "outcome": "skipped_unsafe",
+      "detail": "would recurse into this sweep"
+    },
+    {
+      "name": "hover_scrub_frames",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "import_edl",
+      "outcome": "skipped_unsafe",
+      "detail": "dialog: EDL import prompts for sequence/source media"
+    },
+    {
+      "name": "import_fcp_xml",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "import_folder",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "import_image_sequence",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "import_media",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "import_media_qe",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "import_mogrt",
+      "outcome": "skipped_unsafe",
+      "detail": "dialog risk + writes to project"
+    },
+    {
+      "name": "import_mogrt_from_library",
+      "outcome": "skipped_unsafe",
+      "detail": "dialog risk + writes to project"
+    },
+    {
+      "name": "import_project_items",
+      "outcome": "skipped_unsafe",
+      "detail": "mutates project structure"
+    },
+    {
+      "name": "import_sequences",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "import_sequences_from_project",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "index_footage",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "insert_from_source",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "insert_srt_cue",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "inspect_dom_object",
+      "outcome": "pass"
+    },
+    {
+      "name": "invert_selection",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "is_work_area_enabled",
+      "outcome": "pass"
+    },
+    {
+      "name": "j_cut",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "ken_burns",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "keyframe_zoom_in",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "keyframe_zoom_out",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "l_cut",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "letterbox",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "lift_selection",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "link_audio_video",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "link_media_qe",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "link_selection",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "lint_timeline",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_all_encoder_presets",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_audio_effects_on_clip",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_audio_transitions",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_available_audio_effects",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_available_audio_transitions",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_available_effects",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_available_transitions",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_clip_effects",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_effects_on_clip_qe",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_export_presets",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_lumetri_presets",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_markers",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_open_projects",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_project_items",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_recent_projects",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_recovery_checkpoints",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_sequence_tracks",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_sequences",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_sequences_by_name",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'list_sequences_by_name': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"patter"
+    },
+    {
+      "name": "list_video_transitions",
+      "outcome": "pass"
+    },
+    {
+      "name": "lock_track",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "log_clip",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "loudness_report",
+      "outcome": "pass"
+    },
+    {
+      "name": "lower_third_preset",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "lumetri_basic_set",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "lumetri_creative_set",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "lumetri_hsl_secondary_set",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "lumetri_report",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "lumetri_vignette_set",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "manage_proxies",
+      "outcome": "skipped_unsafe",
+      "detail": "mutates proxy attachment"
+    },
+    {
+      "name": "marker_to_subclip",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "markers_from_csv",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "markers_to_csv",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "markers_to_notes",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "match_frame",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "match_shot_color",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "match_transform",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "mogrt_params_report",
+      "outcome": "fail",
+      "detail": "Clip is not a MOGRT — check isMGT()"
+    },
+    {
+      "name": "move_clip",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "move_clip_to_track",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "move_item_to_bin",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "move_items_to_bin",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "move_playhead_to_edit",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "multicam_info",
+      "outcome": "pass"
+    },
+    {
+      "name": "multiple_undo",
+      "outcome": "skipped_unsafe",
+      "detail": "rewinds the sweep"
+    },
+    {
+      "name": "mute_clip_audio",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "mute_track",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "nest_all_v1_clips",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive restructure"
+    },
+    {
+      "name": "nest_clips",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive restructure"
+    },
+    {
+      "name": "normalize_clip_peaks",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "normalize_loudness",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "normalize_track_peaks",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "notes_to_markers",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "nudge_clip",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "open_fcp_xml",
+      "outcome": "skipped_unsafe",
+      "detail": "swaps/creates project state"
+    },
+    {
+      "name": "open_fcp_xml_project",
+      "outcome": "skipped_unsafe",
+      "detail": "swaps/creates project state"
+    },
+    {
+      "name": "open_file_in_source",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "open_in_source",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "open_item_in_source_qe",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "open_project",
+      "outcome": "skipped_unsafe",
+      "detail": "swaps the project mid-sweep"
+    },
+    {
+      "name": "open_project_item_in_source",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "overwrite_clip",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "overwrite_from_source",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "paste_grade_to_clips",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "pause_growing_file",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "ping",
+      "outcome": "pass"
+    },
+    {
+      "name": "pip_layout",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "play_in_to_out",
+      "outcome": "skipped_unsafe",
+      "detail": "starts playback"
+    },
+    {
+      "name": "play_source_monitor",
+      "outcome": "skipped_unsafe",
+      "detail": "starts playback"
+    },
+    {
+      "name": "play_timeline",
+      "outcome": "skipped_unsafe",
+      "detail": "starts playback"
+    },
+    {
+      "name": "probe_media",
+      "outcome": "pass"
+    },
+    {
+      "name": "production_sync_status",
+      "outcome": "pass"
+    },
+    {
+      "name": "project_file_edit",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "project_file_inspect",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "project_media_report",
+      "outcome": "pass"
+    },
+    {
+      "name": "qe_sequence_info",
+      "outcome": "pass"
+    },
+    {
+      "name": "rate_stretch_to_fill",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "razor_all_tracks",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "razor_timeline_at_time",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "read_clipboard",
+      "outcome": "pass"
+    },
+    {
+      "name": "read_sequence_captions",
+      "outcome": "pass"
+    },
+    {
+      "name": "read_srt",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'read_srt': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"srtPath\"\n    ],\n    "
+    },
+    {
+      "name": "redo",
+      "outcome": "skipped_unsafe",
+      "detail": "replays unknown state"
+    },
+    {
+      "name": "reflect_dom_object",
+      "outcome": "pass"
+    },
+    {
+      "name": "refresh_media",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "refresh_ui",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "relink_media",
+      "outcome": "skipped_unsafe",
+      "detail": "rewrites media links"
+    },
+    {
+      "name": "remove_all_effects",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive"
+    },
+    {
+      "name": "remove_all_effects_qe",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive"
+    },
+    {
+      "name": "remove_effect",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive"
+    },
+    {
+      "name": "remove_effect_at_index",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive"
+    },
+    {
+      "name": "remove_effect_by_name",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive"
+    },
+    {
+      "name": "remove_from_timeline",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive"
+    },
+    {
+      "name": "remove_keyframe",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive"
+    },
+    {
+      "name": "remove_keyframe_range",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive"
+    },
+    {
+      "name": "remove_mogrt_clip",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive"
+    },
+    {
+      "name": "remove_selected_clips",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive"
+    },
+    {
+      "name": "remove_srt_cue",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive to file"
+    },
+    {
+      "name": "remove_time_remap",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive"
+    },
+    {
+      "name": "rename_bin",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "rename_clip",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "rename_project_item",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "rename_timeline_clip",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "rename_track",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "render_audio",
+      "outcome": "skipped_unsafe",
+      "detail": "long render"
+    },
+    {
+      "name": "render_needs_preview",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "render_sequence_previews",
+      "outcome": "skipped_unsafe",
+      "detail": "long render"
+    },
+    {
+      "name": "reorder_effects",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "replace_clip",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive swap"
+    },
+    {
+      "name": "replace_clip_media",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive swap"
+    },
+    {
+      "name": "reset_motion_to_defaults",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "reset_transform",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "resolve_conflict",
+      "outcome": "skipped_unsafe",
+      "detail": "mutates shared production"
+    },
+    {
+      "name": "restore_recovery_checkpoint",
+      "outcome": "skipped_unsafe",
+      "detail": "replaces sequence state"
+    },
+    {
+      "name": "reverse_clip",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "ripple_delete",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive"
+    },
+    {
+      "name": "ripple_trim_in",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "ripple_trim_out",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "roll_edit",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "safe_area_check",
+      "outcome": "pass"
+    },
+    {
+      "name": "save_project",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "save_project_as",
+      "outcome": "skipped_unsafe",
+      "detail": "writes a new project file"
+    },
+    {
+      "name": "scene_edit_detection",
+      "outcome": "skipped_unsafe",
+      "detail": "long-running analysis"
+    },
+    {
+      "name": "scrub_source_to",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "search_footage",
+      "outcome": "fail",
+      "detail": "No footage index found at ~/.premiere-mcp/footage-index.json. Build one first with index_footage (pass the folder as rootPath), or point indexPath / PREMIERE_MCP_FOOTAGE_INDEX at an existing index."
+    },
+    {
+      "name": "search_project_items",
+      "outcome": "pass"
+    },
+    {
+      "name": "select_all_clips",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "select_all_on_track",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "select_clips_by_color",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "select_clips_by_name",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "select_clips_in_range",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "select_clips_in_time_range",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "select_disabled_clips",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "select_item",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "send_to_after_effects",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "sequence_from_markers",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "sequence_thumbnail_strip",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_active_sequence",
+      "outcome": "skipped_unsafe",
+      "detail": "moves the target out from under later probes"
+    },
+    {
+      "name": "set_all_tracks_targeted",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_anti_alias_quality",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_app_property",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_autosave_settings",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_blend_mode",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_clip_anchor_point",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_clip_border_color",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_clip_border_width",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_clip_color_space",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_clip_crop",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_clip_gain",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_clip_opacity",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_clip_pan",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_clip_position",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_clip_properties",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_clip_properties_batch",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_clip_reverse",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_clip_rotation",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_clip_scale",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_clip_scale_to_frame_size",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_clip_selection",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_clip_speed_qe",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_clip_start_time",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_clip_volume",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_color_label",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_color_space_override",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_color_value",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_compressor",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_effect_property",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_encoder_xmp_options",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_essential_sound_category",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_footage_interpretation",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_frame_blend",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_frame_blend_qe",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_graphics_white_luminance",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_interpretation_frame_rate",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_item_in_out",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_item_metadata",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_item_pixel_aspect_ratio",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_item_poster_frame",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_keyframe_interpolation",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_limiter",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_location_copy_settings",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_log_color_management",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_lut_interpolation",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_marker_type",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_metadata",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_mogrt_color",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_mogrt_param",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_mogrt_text",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_multicam_angle",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_offline",
+      "outcome": "skipped_unsafe",
+      "detail": "breaks media links"
+    },
+    {
+      "name": "set_override_frame_rate",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_override_pixel_aspect_ratio",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_parametric_eq",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_playhead_position",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_poster_frame",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_preview_quality",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_project_panel_columns",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_project_panel_metadata",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_project_panel_selection",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_project_property",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_project_scratch_disk",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_proxies_enabled",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_qe_component_param",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_render_preview_quality",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_renderer",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_scale_to_frame_size",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_scale_width_height",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_scratch_disk_path",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_sequence_audio_settings",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_sequence_display_format",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_sequence_field_type",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_sequence_frame_rate",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_sequence_in_out_from_clips",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_sequence_in_out_points",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_sequence_in_out_qe",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_sequence_pixel_aspect_ratio",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_sequence_resolution",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_sequence_selection",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_sequence_settings",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_sequence_start_timecode",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_sequence_zero_point",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_source_in_out",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_source_in_out_qe",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_start_time",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_target_track",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_time_interpolation",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_time_interpolation_type",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_track_lock_qe",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_track_volume_keyframes",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_transcode_on_ingest",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_uniform_scale",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_work_area",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_workspace",
+      "outcome": "skipped_unsafe",
+      "detail": "rearranges the UI"
+    },
+    {
+      "name": "set_xmp_metadata",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "set_zero_point",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "setup_ducking",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "share_production",
+      "outcome": "skipped_unsafe",
+      "detail": "publishes to team"
+    },
+    {
+      "name": "sharpen_clip",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "shift_srt_timing",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "shot_status_report",
+      "outcome": "pass"
+    },
+    {
+      "name": "shotgrid_status_sync",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "slide_edit",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "slip_edit",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "slowmo_quality_report",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'slowmo_quality_report': [\n  {\n    \"expected\": \"number\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"sourceF"
+    },
+    {
+      "name": "snap_clips_to_grid",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "snapshot_state",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "speed_change",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "speed_ramp_bake",
+      "outcome": "skipped_unsafe",
+      "detail": "long ffmpeg render"
+    },
+    {
+      "name": "split_clip",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "split_screen_layout",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "srt_diff",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'srt_diff': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"srtPathA\"\n    ],\n   "
+    },
+    {
+      "name": "stabilize_clip",
+      "outcome": "skipped_unsafe",
+      "detail": "long-running warp analysis"
+    },
+    {
+      "name": "start_batch_encode",
+      "outcome": "skipped_unsafe",
+      "detail": "launches AME"
+    },
+    {
+      "name": "start_encode_and_monitor",
+      "outcome": "skipped_unsafe",
+      "detail": "launches AME"
+    },
+    {
+      "name": "stem_export",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "step_frames",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "step_source_monitor",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "stop_playback",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "stop_source_monitor",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "storyboard_bin_to_sequence",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "sync_lock_track",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "sync_production",
+      "outcome": "skipped_unsafe",
+      "detail": "syncs to server"
+    },
+    {
+      "name": "three_point_edit",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "timecode_burn_in",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "timecode_to_frames",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'timecode_to_frames': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"timecode\"\n"
+    },
+    {
+      "name": "timeline_fingerprint",
+      "outcome": "pass"
+    },
+    {
+      "name": "title_card",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "todo_marker_report",
+      "outcome": "pass"
+    },
+    {
+      "name": "toggle_track_visibility",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "toggle_uniform_scale",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "transact_sequence_edits",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "transcribe_to_srt",
+      "outcome": "skipped_unsafe",
+      "detail": "long-running ML transcription"
+    },
+    {
+      "name": "trim_clip",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "undo",
+      "outcome": "skipped_unsafe",
+      "detail": "rewinds the sweep"
+    },
+    {
+      "name": "unlink_selection",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "unnest_sequence",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive restructure"
+    },
+    {
+      "name": "update_marker",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "update_srt_cue",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "validate_project_for_export",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "validate_srt",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "verify_clip_visible",
+      "outcome": "pass"
+    },
+    {
+      "name": "verify_color_grade",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'verify_color_grade': [\n  {\n    \"expected\": \"object\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"gradeParam"
+    },
+    {
+      "name": "verify_effect_rendered",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "verify_export",
+      "outcome": "pass"
+    },
+    {
+      "name": "verify_export_file",
+      "outcome": "pass"
+    },
+    {
+      "name": "verify_media_online",
+      "outcome": "pass"
+    },
+    {
+      "name": "verify_premiere_connection",
+      "outcome": "pass"
+    },
+    {
+      "name": "verify_speed_duration",
+      "outcome": "pass"
+    },
+    {
+      "name": "version_up_sequence",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "vfx_pull_list",
+      "outcome": "pass"
+    },
+    {
+      "name": "watermark_apply",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "write_clipboard",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "write_sidecar_file",
+      "outcome": "deferred_mutating"
+    },
+    {
+      "name": "write_srt",
+      "outcome": "deferred_mutating"
+    }
+  ]
+}

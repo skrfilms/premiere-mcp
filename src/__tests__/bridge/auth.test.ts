@@ -36,6 +36,23 @@ afterEach(() => {
   try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
 });
 
+/**
+ * POSIX file modes are not a thing on NTFS, and pretending otherwise here would test the
+ * filesystem rather than the server.
+ *
+ * On Windows `fs.chmod` can only toggle the read-only attribute, so `mode & 0o777` reports
+ * 0o666 for a file and 0o777 for a directory whatever the server asked for. These
+ * assertions are therefore POSIX-only, and they are SKIPPED rather than weakened, so a
+ * Windows run reports them as not-run instead of showing a green tick under a title that
+ * says "mode 700" on a platform where no such mode was set.
+ *
+ * What protects these files on Windows is the directory's NTFS ACL, which
+ * scripts/install-windows.ps1 sets and scripts/doctor-windows.ps1 re-checks. That is not
+ * verifiable from this suite; it is stated in docs/WINDOWS-PARITY.md section 2 and covered
+ * by the installer's own readback.
+ */
+const itPosixMode = process.platform === 'win32' ? it.skip : it;
+
 /** Initialise a bridge against the scratch dir. Premiere need not be installed or running. */
 async function initBridge(): Promise<PremiereProBridge> {
   const bridge = new PremiereProBridge();
@@ -44,13 +61,16 @@ async function initBridge(): Promise<PremiereProBridge> {
 }
 
 describe('per-session auth token', () => {
-  it('is written to the shared directory, owner-readable only', async () => {
+  itPosixMode('is written mode 0600, so it is not readable by group or world', async () => {
+    await initBridge();
+    // 0600: not group- or world-readable even if the directory mode is loosened later.
+    expect(statSync(join(dir, 'auth-token.json')).mode & 0o777).toBe(0o600);
+  });
+
+  it('is written to the shared directory, as 32 random bytes tagged with the owning pid', async () => {
     await initBridge();
     const tokenFile = join(dir, 'auth-token.json');
     expect(existsSync(tokenFile)).toBe(true);
-
-    // 0600: not group- or world-readable even if the directory mode is loosened later.
-    expect(statSync(tokenFile).mode & 0o777).toBe(0o600);
 
     const payload = JSON.parse(readFileSync(tokenFile, 'utf8'));
     // 32 random bytes as hex. Long enough that guessing is not a strategy.
@@ -71,7 +91,7 @@ describe('per-session auth token', () => {
     expect(second).not.toBe(first);
   });
 
-  it('keeps the shared directory at mode 700 even when it already existed', async () => {
+  itPosixMode('keeps the shared directory at mode 700 even when it already existed', async () => {
     // mkdir's mode argument is ignored for an existing directory, which is ALWAYS the case when
     // PREMIERE_TEMP_DIR points at a fixed path — so the previous code protected only a machine's
     // first ever run.
@@ -110,14 +130,19 @@ describe('many servers, one bridge directory', () => {
    * each can delete its own credential on the way out without touching anyone else's.
    */
 
-  it('publishes a token file of its own, owner-readable only, matching the shared one', async () => {
+  itPosixMode('publishes its own token file mode 0600', async () => {
+    await initBridge();
+    const files = sessionFiles();
+    expect(files).toHaveLength(1);
+    expect(statSync(join(dir, files[0] as string)).mode & 0o777).toBe(0o600);
+  });
+
+  it('publishes a token file of its own, matching the shared one', async () => {
     await initBridge();
     const files = sessionFiles();
     expect(files).toHaveLength(1);
 
     const sessionPath = join(dir, files[0] as string);
-    expect(statSync(sessionPath).mode & 0o777).toBe(0o600);
-
     const session = JSON.parse(readFileSync(sessionPath, 'utf8'));
     const shared = JSON.parse(readFileSync(join(dir, 'auth-token.json'), 'utf8'));
     expect(session.token).toMatch(/^[0-9a-f]{64}$/);

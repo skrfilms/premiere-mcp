@@ -1,0 +1,335 @@
+/**
+ * SpeedTimeTools -- the Speed & Time tool domain.
+ *
+ * One link in the chain that composes PremiereProTools. Split out of tools/index.ts, which
+ * had grown to 19k lines; the method bodies are unchanged.
+ */
+import { SourceMonitorTools } from './source-monitor.js';
+import { spawn } from 'child_process';
+import { constants as fsConstants, promises as fs } from 'node:fs';
+import { basename, dirname, extname, join } from 'node:path';
+
+export class SpeedTimeTools extends SourceMonitorTools {
+  protected async setClipReverse(trackIndex: number, clipIndex: number, _reverse: boolean, sequenceId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      app.enableQE(); ${this.qeClipScript(trackIndex, clipIndex, sequenceId)}
+      if (!__clip) return JSON.stringify({success:false,error:'Clip not found'});
+      // qeClip.setReverse TERMINATES the entire evalScript on 26.3.2 — not a catchable exception,
+      // so this tool could only ever return the generic "ExtendScript execution failed". Measured
+      // one-call-per-script. Reading clip.reverse is fatal in the same way, though clip.reversed
+      // (one letter different) is safe to read.
+      //
+      // There IS a working alternative, so route the caller to it instead of failing blankly:
+      // qeClip.setSpeed takes reverse as its third argument and is verified working.
+      var currentlyReversed = null;
+      try { currentlyReversed = !!__clip.reversed; } catch (eRev) {}
+      return JSON.stringify({
+        success:false, verified:true, available:false,
+        currentlyReversed: currentlyReversed,
+        error:'qeClip.setReverse terminates the ExtendScript engine on this build (26.3.2), so this tool cannot run. Use set_clip_speed_qe with reverse: true instead (it takes clipId, not trackIndex/clipIndex — get_qe_clip_info returns the nodeId). Verified working on this build. The clip is currently reversed=' + currentlyReversed + '.'
+      });
+    `);
+  }
+
+  /**
+   * Bake a constant speed change to a NEW media file with ffmpeg. This is the
+   * honest escape hatch for Premiere's never-scriptable time-remap graph: rather
+   * than writing speed keyframes the renderer ignores, produce a real retimed
+   * clip on disk the caller can import and place. Same honesty contract as
+   * generate_scope: resolve the source, fail with install guidance if ffmpeg is
+   * absent, and verify-after-write (the output must exist and be non-empty)
+   * before claiming success.
+   */
+  protected async bakeSpeedChange(
+    mediaPath?: string,
+    projectItemId?: string,
+    speed?: number,
+    outputPath?: string,
+    includeAudio = true,
+    preservePitch = true,
+  ): Promise<any> {
+    if (typeof speed !== 'number' || !Number.isFinite(speed) || speed <= 0) {
+      return { success: false, error: 'Provide a speed multiplier greater than 0 (e.g. 0.5 for half speed, 2 for double).' };
+    }
+
+    let resolvedPath = mediaPath;
+    if (!resolvedPath && projectItemId) {
+      const resolved = await this.resolveProjectItemMediaPath(projectItemId);
+      if (resolved.error) return { success: false, error: resolved.error };
+      resolvedPath = resolved.path;
+    }
+    if (!resolvedPath) return { success: false, error: 'Provide either mediaPath or projectItemId' };
+
+    try {
+      await fs.access(resolvedPath, fsConstants.R_OK);
+    } catch {
+      return { success: false, error: `Media file not found or unreadable: ${resolvedPath}` };
+    }
+
+    const ffmpeg = this.ffmpegCmd();
+    const available = await this.checkCommandAvailable(ffmpeg, ['-version']);
+    if (!available) {
+      return {
+        success: false,
+        error: `ffmpeg ('${ffmpeg}') was not found on PATH. bake_speed_change retimes clips with ffmpeg because Premiere's time-remap graph cannot be scripted. Install ffmpeg (e.g. \`brew install ffmpeg\` on macOS) or set PREMIERE_MCP_FFMPEG_CMD to the binary name, then try again.`,
+      };
+    }
+
+    const ext = extname(resolvedPath) || '.mp4';
+    const speedLabel = String(speed).replace(/\./g, '_');
+    const outFile = (outputPath && outputPath.trim())
+      || join(dirname(resolvedPath), `${basename(resolvedPath, extname(resolvedPath))}_${speedLabel}x${ext}`);
+
+    // Video: setpts scales presentation timestamps by 1/speed.
+    const argv: string[] = ['-y', '-i', resolvedPath as string, '-vf', `setpts=${(1 / speed).toFixed(6)}*PTS`];
+    if (includeAudio) {
+      const audioFilter = preservePitch
+        ? this.buildAtempoChain(speed)
+        // Pitch shifts with speed: resample the sample clock then reset to 48k.
+        : `asetrate=48000*${speed},aresample=48000`;
+      argv.push('-af', audioFilter);
+    } else {
+      argv.push('-an');
+    }
+    argv.push(outFile);
+
+    return await new Promise((resolve) => {
+      const proc = spawn(ffmpeg, argv);
+      let stderr = '';
+      proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+      proc.on('error', (err) => {
+        resolve({ success: false, error: `Failed to run ffmpeg ('${ffmpeg}'): ${err.message}`, mediaPath: resolvedPath });
+      });
+      proc.on('close', async (code) => {
+        let sizeBytes = 0;
+        try {
+          await fs.access(outFile, fsConstants.R_OK);
+          sizeBytes = (await fs.stat(outFile)).size;
+        } catch {
+          resolve({
+            success: false,
+            error: `ffmpeg exited with code ${code} but no retimed file was written to ${outFile}. The source may be unreadable or the codec unsupported.`,
+            mediaPath: resolvedPath,
+            ffmpegStderr: stderr.slice(-2000),
+          });
+          return;
+        }
+        if (sizeBytes === 0) {
+          resolve({
+            success: false,
+            error: `ffmpeg wrote an empty file to ${outFile} (0 bytes). The retime did not produce usable output.`,
+            mediaPath: resolvedPath,
+            ffmpegStderr: stderr.slice(-2000),
+          });
+          return;
+        }
+        resolve({
+          success: true,
+          speed,
+          includeAudio,
+          preservePitch: includeAudio ? preservePitch : undefined,
+          outputPath: outFile,
+          sizeBytes,
+          mediaPath: resolvedPath,
+          note: `Retimed clip written at ${speed}x. Import it with import_media and place it on a timeline. This is a constant time-scale (not optical-flow interpolation); for a ramp, bake segments and butt them together.`,
+        });
+      });
+    });
+  }
+
+  protected async speedChange(clipId: string, speed: number, maintainAudio = true): Promise<any> {
+    const script = `
+      try {
+        app.enableQE();
+        var info = __findClip(${JSON.stringify(clipId)});
+        if (!info) return JSON.stringify({ success: false, error: "Clip not found" });
+        var oldSpeed = info.clip.getSpeed();
+        // Addressed by id, not by whatever is on screen. __findClip() searches every
+        // sequence in the project, so a clip can be resolved out of one sequence and
+        // then, through getActiveSequence(), have the effect applied to whichever
+        // clip sits at the same track and index in a different one.
+        var qeSeq = __qeSequenceFor(info.sequence);
+        if (!qeSeq) return JSON.stringify({ success: false, error: "Could not address sequence '" + info.sequenceName + "' through the QE API." });
+        var qeTrack = info.trackType === 'video' ? qeSeq.getVideoTrackAt(info.trackIndex) : qeSeq.getAudioTrackAt(info.trackIndex);
+        var qeClip = __findQeClipByDomClip(qeTrack, info.clip);
+        if (!qeClip) return JSON.stringify({ success: false, error: "Could not resolve the QE clip for this item." });
+        // QE setSpeed's signature is (rate, durationTimecodeString, reverse,
+        // maintainAudioPitch, ripple). Passing a boolean where the duration
+        // string belongs throws "Illegal Parameter type" — that was the bug
+        // (the old call was setSpeed(rate, maintainAudio)). rate is a ratio
+        // (0.5 = 50%, 2.0 = 200%), matching this tool's schema. Verified live
+        // on 26.3.2: this call retimes the clip and getSpeed() reflects it.
+        try { qeClip.setSpeed(${speed}, "00:00:00:00", false, ${maintainAudio ? true : false}, false); } catch(e2) {
+          return JSON.stringify({ success: false, error: "Speed change via QE DOM failed: " + e2.toString(), oldSpeed: oldSpeed, requestedSpeed: ${speed} });
+        }
+        // Verify-after-write: read the speed back and only report success when
+        // the clip is actually at (approximately) the requested rate.
+        var newSpeed = info.clip.getSpeed();
+        if (Math.abs(Number(newSpeed) - Number(${speed})) > 0.02) {
+          return JSON.stringify({ success: false, verified: false, error: "Premiere did not apply the requested speed (clip is at " + newSpeed + "x, requested " + ${speed} + "x).", oldSpeed: oldSpeed, requestedSpeed: ${speed}, actualSpeed: newSpeed });
+        }
+        return JSON.stringify({ success: true, verified: true, oldSpeed: oldSpeed, newSpeed: newSpeed, requestedSpeed: ${speed} });
+      } catch (e) {
+        return JSON.stringify({ success: false, error: e.toString() });
+      }
+    `;
+
+    return await this.bridge.executeScript(script);
+  }
+
+  protected async reverseClip(clipId: string, maintainAudioPitch?: boolean): Promise<any> {
+    const script = `
+      try {
+        var info = __findClip(${JSON.stringify(clipId)});
+        if (!info) return JSON.stringify({ success: false, error: "Clip not found" });
+        var mediaPath = "";
+        try { mediaPath = info.clip.projectItem && info.clip.projectItem.getMediaPath ? String(info.clip.projectItem.getMediaPath()) : ""; } catch (pathError) {}
+        if (/\\.(png|jpg|jpeg|gif|tif|tiff)$/i.test(mediaPath)) {
+          return JSON.stringify({ success: true, clipId: ${JSON.stringify(clipId)}, reversed: true, changed: false, method: "still image already visually reversible" });
+        }
+        app.enableQE();
+        // Addressed by id, not by whatever is on screen. __findClip() searches every
+        // sequence in the project, so a clip can be resolved out of one sequence and
+        // then, through getActiveSequence(), have the effect applied to whichever
+        // clip sits at the same track and index in a different one.
+        var qeSeq = __qeSequenceFor(info.sequence);
+        if (!qeSeq) return JSON.stringify({ success: false, error: "Could not address sequence '" + info.sequenceName + "' through the QE API." });
+        var qeTrack = info.trackType === 'video' ? qeSeq.getVideoTrackAt(info.trackIndex) : qeSeq.getAudioTrackAt(info.trackIndex);
+        var qeClip = __findQeClipByDomClip(qeTrack, info.clip);
+        if (!qeClip || !qeClip.setReverse) return JSON.stringify({ success: false, error: "QE setReverse API unavailable" });
+        try { qeClip.setReverse(true); } catch (reverseError) { return JSON.stringify({ success: false, error: "Reverse via QE DOM not available: " + reverseError.toString() }); }
+        // No QE/DOM property reliably reports playback reversal on 26.x, so success
+        // here means setReverse() was accepted without throwing -- not an independent
+        // confirmation. Reported honestly as verified:false rather than overstated.
+        return JSON.stringify({ success: true, verified: false, clipId: ${JSON.stringify(clipId)}, reversed: true, changed: true, maintainAudioPitch: ${maintainAudioPitch !== false}, note: "setReverse() accepted; no readback API to confirm the clip now plays reversed." });
+      } catch (e) {
+        return JSON.stringify({ success: false, error: e.toString() });
+      }
+    `;
+    return await this.bridge.executeScript(script);
+  }
+
+  protected async rateStretchToFill(trackIndex: number, clipIndex: number, targetDurationSecs?: number, seqId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var seq=qe.project.getActiveSequence();
+        var domSeq=${this.buildSeqRes(seqId)};
+        var clip=domSeq.videoTracks[${trackIndex}].clips[${clipIndex}];
+        if(!clip)return JSON.stringify({success:false,error:'Clip not found'});
+        var currentDur=clip.duration.seconds;
+        var targetDur=${targetDurationSecs ?? 'null'};
+        if(!targetDur){
+          var nextClip=domSeq.videoTracks[${trackIndex}].clips[${clipIndex+1}];
+          targetDur=nextClip?nextClip.start.seconds-clip.start.seconds:currentDur;
+        }
+        var ratio=currentDur/targetDur;
+        var qeClip=seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        var oldSpeed=null; try{ oldSpeed=Number(clip.getSpeed()); }catch(eB){}
+        var oldDur=Number(clip.duration.seconds);
+        var setError=null;
+        try{ qeClip.setSpeed(ratio,'00:00:00:00',false,true,false); }catch(eS){ setError=eS.toString(); }
+        var newSpeed=null; try{ newSpeed=Number(clip.getSpeed()); }catch(eA){}
+        var newDur=Number(clip.duration.seconds);
+        if(newSpeed===null||isNaN(newSpeed)){
+          return JSON.stringify({success:true,verified:false,ratio:ratio,targetDurationSecs:targetDur,oldSpeedRatio:oldSpeed,durationBefore:oldDur,durationAfter:newDur,setError:setError,
+            unverifiedReason:'TrackItem.getSpeed() is not readable after the write, so the rate stretch cannot be confirmed. Read it with get_clip_speed.'});
+        }
+        var onTarget=Math.abs(newSpeed-ratio)<0.05;
+        var durOnTarget=Math.abs(newDur-targetDur)<0.05;
+        if(onTarget&&durOnTarget){
+          return JSON.stringify({success:true,verified:true,verifiedBy:'TrackItem.getSpeed() and TrackItem.duration readback',changed:oldSpeed!==newSpeed,ratio:ratio,targetDurationSecs:targetDur,oldSpeedRatio:oldSpeed,newSpeedRatio:newSpeed,durationBefore:oldDur,durationAfter:newDur});
+        }
+        // Speed and duration are two separate readbacks and they can disagree: a speed change
+        // that Premiere applies without re-timing the clip leaves the gap this tool exists to
+        // fill still open. Reporting only the speed hid that.
+        return JSON.stringify({success:false,verified:true,verifiedBy:'TrackItem.getSpeed() and TrackItem.duration readback',changed:oldSpeed!==newSpeed,ratio:ratio,targetDurationSecs:targetDur,oldSpeedRatio:oldSpeed,newSpeedRatio:newSpeed,durationBefore:oldDur,durationAfter:newDur,setError:setError,
+          error: !onTarget
+            ? ('Clip speed reads ' + newSpeed + ' instead of the requested ' + ratio + ', so the clip was not rate stretched to fill ' + targetDur + 's.')
+            : ('The speed landed at ' + newSpeed + ' but the clip duration reads ' + newDur + 's instead of ' + targetDur + 's, so the gap it was meant to fill is still open. setSpeed changes the rate without necessarily re-timing the clip on the timeline.')});
+      }catch(e){return JSON.stringify({success:false,error:e.toString()});}
+    `);
+  }
+
+  protected async fitClipDuration(trackIndex: number, clipIndex: number, targetSeconds: number, method: string, seqId?: string): Promise<any> {
+    if (method === 'speed') return this.rateStretchToFill(trackIndex, clipIndex, targetSeconds, seqId);
+    return await this.bridge.executeScript(`
+      try {
+        var clip=${this.buildSeqRes(seqId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
+        var newEndSecs=clip.start.seconds+${targetSeconds};
+        var t=new Time();t.seconds=clip.outPoint.seconds+(newEndSecs-clip.end.seconds);
+        clip.outPoint=t;
+        return JSON.stringify({success:true,method:'trim',targetSeconds:${targetSeconds},newEnd:newEndSecs});
+      }catch(e){return JSON.stringify({success:false,error:e.toString()});}
+    `);
+  }
+
+  protected async verifySpeedDuration(trackIndex: number, clipIndex: number, expectedSpeedPercent?: number, seqId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var clip=${this.buildSeqRes(seqId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
+        var speed=clip.getSpeed?clip.getSpeed():1;
+        var dur=clip.duration.seconds;
+        var expected=${expectedSpeedPercent ?? 'null'};
+        var matches=expected?Math.abs(speed*100-expected)<1:true;
+        return JSON.stringify({success:true,speedRatio:speed,speedPercent:speed*100,durationSecs:dur,expectedSpeedPercent:expected,matches:matches});
+      }catch(e){return JSON.stringify({success:false,error:e.toString()});}
+    `);
+  }
+
+  protected async getClipSpeedInfo(trackIndex: number, clipIndex: number, seqId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var clip=${this.buildSeqRes(seqId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
+        var qeClip=qe.project.getActiveSequence().getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        return JSON.stringify({success:true,speed:clip.getSpeed?clip.getSpeed():1,durationSecs:clip.duration.seconds,isReversed:qeClip?qeClip.reversed:false,frameBlend:qeClip?qeClip.frameBlend:false,timeInterpolation:qeClip?qeClip.timeInterpolationType:0});
+      }catch(e){return JSON.stringify({success:false,error:e.toString()});}
+    `);
+  }
+
+  protected async removeTimeRemap(trackIndex: number, clipIndex: number, seqId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var qeClip=qe.project.getActiveSequence().getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        if(!qeClip)return JSON.stringify({success:false,error:'Clip not found'});
+        var clip=${this.buildSeqRes(seqId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
+        if(!clip)return JSON.stringify({success:false,error:'Clip not found on the DOM sequence at video track ${trackIndex} index ${clipIndex}'});
+        var oldSpeed=null; try{ oldSpeed=Number(clip.getSpeed()); }catch(eB){}
+        var setError=null;
+        try{ qeClip.setSpeed(1.0,'00:00:00:00',false,false,false); }catch(eS){ setError=eS.toString(); }
+        var newSpeed=null; try{ newSpeed=Number(clip.getSpeed()); }catch(eA){}
+        if(newSpeed===null||isNaN(newSpeed)){
+          return JSON.stringify({success:true,verified:false,oldSpeed:oldSpeed,setError:setError,
+            unverifiedReason:'TrackItem.getSpeed() is not readable after the write, so the speed reset cannot be confirmed. Read it with get_clip_speed.'});
+        }
+        if(Math.abs(newSpeed-1)>=0.02){
+          return JSON.stringify({success:false,verified:true,verifiedBy:'TrackItem.getSpeed() readback',changed:oldSpeed!==newSpeed,oldSpeed:oldSpeed,newSpeed:newSpeed,setError:setError,
+            error:'The clip speed still reads ' + newSpeed + ' rather than 1.0, so the time remap was not removed.'});
+        }
+        // A clip that was never remapped reads 1.0 both before and after, which is a no-op
+        // rather than a removal. The old bare comparison called both of those verified.
+        return JSON.stringify({success:true,verified:true,verifiedBy:'TrackItem.getSpeed() readback',changed:oldSpeed!==newSpeed,oldSpeed:oldSpeed,newSpeed:newSpeed,
+          note: (oldSpeed !== null && Math.abs(oldSpeed-1) < 0.02) ? 'This clip was already at 1.0x, so there was no time remap to remove. Note that setSpeed resets the RATE; keyframed Time Remapping keyframes are not cleared by it — use remove_keyframe_range on the Time Remapping parameter for those.' : 'Speed reset to 1.0x. Keyframed Time Remapping keyframes are not cleared by this call — use remove_keyframe_range on the Time Remapping parameter if the clip carries any.'});
+      }catch(e){return JSON.stringify({success:false,error:e.toString()});}
+    `);
+  }
+
+  protected slowmoQualityReport(sourceFps: number, targetSpeedPercent: number): any {
+    const effectiveFps = sourceFps * (targetSpeedPercent / 100);
+    const willJudder = effectiveFps < 24;
+    return { success: true, sourceFps, targetSpeedPercent, effectiveFps: Math.round(effectiveFps * 100) / 100, willJudder, recommendation: willJudder ? 'Use Optical Flow time interpolation for smooth slow-motion' : 'Frame sample or frame blend will work fine', minimumSpeedForSmooth: Math.ceil(2400 / sourceFps) };
+  }
+
+  protected async speedRampBake(trackIndex: number, clipIndex: number, speedPercent: number, _outputDir: string, seqId?: string): Promise<any> {
+    return await this.bridge.executeScript(`
+      try {
+        var clip=${this.buildSeqRes(seqId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
+        var srcPath=clip.projectItem.getMediaPath();
+        var dur=clip.duration.seconds;
+        return JSON.stringify({success:false,note:'speedRampBake requires ffmpeg bake — use bake_speed_change tool instead',srcPath:String(srcPath),durationSecs:dur,speedPercent:${speedPercent}});
+      }catch(e){return JSON.stringify({success:false,error:e.toString()});}
+    `);
+  }
+}

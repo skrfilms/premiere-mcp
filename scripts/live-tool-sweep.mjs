@@ -5,8 +5,13 @@ import fsSync from 'node:fs';
 import path from 'node:path';
 import { PremiereProBridge } from '../dist/bridge/index.js';
 import { PremiereProTools } from '../dist/tools/index.js';
+import { requireScratchProject } from './lib/require-scratch-project.mjs';
 
 process.env.PREMIERE_TEMP_DIR = process.env.PREMIERE_TEMP_DIR || '/tmp/premiere-mcp-bridge';
+// Tools run in-process, and persistPrefToFile (src/tools/index.ts) reads this on every call. A
+// harness has no business making a change to the user's global Premiere prefs that survives a
+// force-quit, so it is refused here before any tool can run.
+process.env.PREMIERE_MCP_NO_PREFS_WRITE = '1';
 
 const bridge = new PremiereProBridge();
 const tools = new PremiereProTools(bridge);
@@ -50,6 +55,66 @@ const externalFixtureSkips = new Set([
   'import_mogrt_from_library',
   'import_sequences_from_project',
 ]);
+
+/**
+ * Tools that put a MODAL dialog on screen, which no script can dismiss.
+ *
+ * A modal wedges the CEP panel: it stops polling, every subsequent tool call times out, and the
+ * dialogs stack up one per call for the rest of the run. Measured on 2026-08-26 — a full-catalogue
+ * sweep (PREMIERE_MCP_PROFILE=all) reached export_as_fcp_xml and import_fcp_xml, and Premiere threw
+ * a "Translation Report" alert for each, dozens deep, until the sweep was killed by hand.
+ *
+ * Separate from externalFixtureSkips because the reason differs and so does the remedy: a missing
+ * fixture is fixable by supplying one, whereas these two cannot be swept unattended AT ALL. Their
+ * coverage is owed to a human sitting in front of Premiere, and the census must say so rather than
+ * quietly attempt them.
+ */
+const modalDialogSkips = new Set([
+  // Measured: each of these produced a "Translation Report" alert.
+  'export_as_fcp_xml',
+  'import_fcp_xml',
+  'export_project_as_fcp_xml',
+  'open_fcp_xml',
+  'open_fcp_xml_project',
+  // Not measured — listed on the same reasoning that the FCP pair was reachable at all, which is
+  // that the fallback path invokes anything whose schema accepts {}. These write or switch projects,
+  // or reach Productions, and all three routes are known to prompt. Listed pre-emptively rather
+  // than discovered on someone's screen; the census reports them as owed coverage, not as passing.
+  'export_as_project',
+  'export_sequence_as_project',
+  'share_production',
+  'sync_production',
+  'convert_project_to_production',
+  'import_image_sequence',
+  'send_to_after_effects',
+]);
+
+/**
+ * Tools that change the user's machine rather than the project, so a disposable fixture does not
+ * make them safe. The fallback loop calls anything whose schema accepts {}, so they are listed
+ * here rather than trusted to need arguments the loop cannot supply.
+ */
+const userStateSkips = new Set([
+  'set_autosave_settings',
+  'write_clipboard',
+]);
+
+/**
+ * The single gate every invocation path must consult.
+ *
+ * The skip sets used to be checked ONLY in the trailing fallback loop, so any tool that also had
+ * curated sample args was invoked regardless — which is exactly how the FCP pair ran despite the
+ * sweep already carrying a "can open modal Premiere flows" skip list.
+ *
+ * @returns {string|null} the reason to skip, or null to proceed
+ */
+function skipReason(name) {
+  if (modalDialogSkips.has(name)) return 'opens a modal Premiere dialog that wedges the panel; needs a human at the keyboard';
+  if (externalFixtureSkips.has(name)) return 'requires external project/interchange/MOGRT assets or can open modal Premiere flows';
+  if (mutatingNoArgSkips.has(name)) return 'intentionally skipped because it mutates or saves the active project';
+  if (userStateSkips.has(name)) return 'changes user state outside the project (global Auto Save prefs or the system clipboard)';
+  return null;
+}
 
 async function writeTextFixture(fileName, contents) {
   const outputDir = process.env.PREMIERE_TEMP_DIR || '/tmp/premiere-mcp-bridge';
@@ -167,6 +232,29 @@ function writeCheckpoint() {
   }
 }
 
+/**
+ * Abort the sweep once the panel stops answering at all.
+ *
+ * modalDialogSkips names the tools KNOWN to raise a dialog. This is the backstop for the ones that
+ * are not on the list yet: a modal wedges the panel, so every remaining call times out, and each
+ * one leaves another alert on screen. On 2026-08-26 that meant dozens of stacked "Translation
+ * Report" alerts over an editor's session before the run was killed by hand.
+ *
+ * Consecutive timeouts, not total ones — a single slow tool is normal, three in a row is not a slow
+ * tool, it is a host that has stopped listening. Continuing past that point cannot produce coverage
+ * anyway: every subsequent result would be a timeout recorded as a runtime_failure, which would
+ * read in the census as "the tool is broken" when the truth is "the tool was never reached".
+ */
+const WEDGE_LIMIT = 3;
+let consecutiveTimeouts = 0;
+
+class PanelWedged extends Error {}
+
+function looksLikeTimeout(result) {
+  const text = `${result?.error ?? ''} ${result?.message ?? ''}`;
+  return result?.success === false && /timed out|timeout|no response from/i.test(text);
+}
+
 async function invoke(name, args, note) {
   const result = await tools.executeTool(name, args);
   const errorText = typeof result?.error === 'string' ? result.error : '';
@@ -181,6 +269,20 @@ async function invoke(name, args, note) {
   }
 
   record(name, status, args, result, note);
+
+  if (looksLikeTimeout(result)) {
+    consecutiveTimeouts += 1;
+    if (consecutiveTimeouts >= WEDGE_LIMIT) {
+      throw new PanelWedged(
+        `${WEDGE_LIMIT} consecutive timeouts, last at "${name}". The panel has stopped answering — ` +
+        'most likely a modal dialog is open in Premiere. Dismiss it, add the offending tool to ' +
+        'modalDialogSkips, and re-run. Partial results are already on disk.',
+      );
+    }
+  } else {
+    consecutiveTimeouts = 0;
+  }
+
   return result;
 }
 
@@ -190,6 +292,12 @@ function getTool(name) {
 
 async function main() {
   await bridge.initialize();
+
+  // This sweep is intentionally mutating — it creates `Sweep ...` sequences, imports generated
+  // assets and exercises destructive tools — and it had NO guard on which project it was pointed
+  // at. Run once against an editor's open cut it would have scattered sweep artefacts through it.
+  // The guard exits rather than warns, and it runs before the first invoke().
+  await requireScratchProject(bridge, 'live-tool-sweep');
 
   const catalog = tools.getAvailableTools();
   const catalogNames = new Set(catalog.map((tool) => tool.name));
@@ -577,15 +685,23 @@ async function main() {
   }
 
   for (const [name, args] of sampleArgs.entries()) {
-    if (catalogNames.has(name) && !executed.has(name)) {
-      await invoke(name, args, 'live invocation with discovered test context');
+    if (!catalogNames.has(name) || executed.has(name)) continue;
+    const skip = skipReason(name);
+    if (skip) {
+      record(name, 'skipped', args, undefined, skip);
+      continue;
     }
+    await invoke(name, args, 'live invocation with discovered test context');
   }
 
   for (const [name, args] of finalArgs.entries()) {
-    if (catalogNames.has(name) && !executed.has(name)) {
-      await invoke(name, args, 'final live invocation after dependent checks');
+    if (!catalogNames.has(name) || executed.has(name)) continue;
+    const skip = skipReason(name);
+    if (skip) {
+      record(name, 'skipped', args, undefined, skip);
+      continue;
     }
+    await invoke(name, args, 'final live invocation after dependent checks');
   }
 
   for (const tool of catalog) {
@@ -593,14 +709,18 @@ async function main() {
       continue;
     }
 
-    if (externalFixtureSkips.has(tool.name)) {
-      record(tool.name, 'skipped', {}, undefined, 'requires external project/interchange/MOGRT assets or can open modal Premiere flows');
+    const skip = skipReason(tool.name);
+    if (skip && !mutatingNoArgSkips.has(tool.name)) {
+      record(tool.name, 'skipped', {}, undefined, skip);
       continue;
     }
 
     if (tool.inputSchema.safeParse({}).success) {
-      if (mutatingNoArgSkips.has(tool.name)) {
-        record(tool.name, 'skipped', {}, undefined, 'intentionally skipped because it mutates or saves the active project');
+      // The mutating set is only dangerous when the empty object is ACCEPTED. When the schema
+      // requires args, an empty call is rejected before the bridge is touched, and that rejection
+      // is real coverage of the schema path — recording it as "skipped" would lose it.
+      if (skip) {
+        record(tool.name, 'skipped', {}, undefined, skip);
         continue;
       }
 
@@ -622,6 +742,18 @@ async function main() {
 
 try {
   await main();
+} catch (error) {
+  // A wedged panel is a real, reportable outcome, not a crash: the checkpoint file already holds
+  // every result up to the wedge, and exiting 3 distinguishes it from an ordinary failure so a
+  // caller can tell "go dismiss a dialog" from "the sweep is broken".
+  if (error instanceof PanelWedged) {
+    console.error(`\nSWEEP ABORTED: ${error.message}`);
+    console.error(`partial results: ${outputPath}`);
+    console.error(JSON.stringify(currentCounts(), null, 2));
+    process.exitCode = 3;
+  } else {
+    throw error;
+  }
 } finally {
   await bridge.cleanup();
 }

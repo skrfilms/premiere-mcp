@@ -4,6 +4,41 @@ All notable changes are documented here. Releases use semantic versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- `move_clip_to_track` no longer overwrites or loses clips. The fallback used to
+  delete the source first, then lay the full untrimmed item over the destination,
+  which could overwrite a neighbour and lost the clip on any later failure. It now
+  refuses an occupied span unless `overwrite:true`, parks a copy on empty space,
+  restores in/out and duration, clears sanctioned occupants only right before the
+  final slide, and removes the source last. A native move is read back rather than
+  trusted. The fallback re-creates the clip (effects, keyframes, speed, static
+  property values, markers and name do not carry over), so it now requires
+  `allowLossyMove:true`. Ported from upstream edc0b0f.
+- `get_encoder_presets` also scans `~/Documents/Adobe/Adobe Media Encoder/<ver>/Presets`,
+  where AME saves user presets. Ported from upstream 5528abb.
+- `project_file_edit`: replacements apply in one pass, so chained finds can no
+  longer interact; markup in `find` is gated like markup in `replace`, and any
+  change to the document's tag structure is refused without `allowMarkupEdit`;
+  the output is written without ever clobbering an existing file; `wrote` is
+  reported accurately on every failure path; the open-in-Premiere check ignores
+  case on macOS and Windows; both tools require a `.prproj` path.
+- MCP `initialize` reported version 1.2.0; it now reports the package version.
+
+### Live harnesses
+
+- Mutating sweeps skip `set_autosave_settings`, `create_project` and
+  `write_clipboard`, and never write Premiere's preferences file. A sweep used to
+  set every project's Auto Save to one version every minute.
+- Sweeps re-check the scratch project every 10 calls and after any recovery, and
+  recovery never saves or quits a project that is not the verified scratch file.
+- Recovery fails closed: it never presses Escape or quits Premiere when the panel
+  is busy on another client's command, when a peer shares the bridge directory,
+  when a response vanished, or when health is unknown. The sentinel no longer
+  counts its own parent harness as a peer, which had silently disabled recovery.
+
+## [1.3.0] - 2026-08-27
+
 New capabilities that Premiere's scripting API cannot provide on its own, each
 built to the same honesty contract as the rest of the server — probe for the
 dependency, return install guidance instead of failing silently, and verify the
@@ -114,7 +149,35 @@ result on disk before reporting success:
   optional local backends (ffmpeg/ffprobe/whisper) are present. Blocking failures
   and non-blocking warnings are now tallied separately in the verdict.
 
-Catalogue grew to `296` tools.
+- Added `get_autosave_settings` and `set_autosave_settings`, which read and write
+  Premiere's autosave interval, copy count and destination folder through the
+  preference keys the application itself uses.
+- Added `project_file_inspect` and `project_file_edit`: read and edit a `.prproj`
+  **on disk**, closing the class of jobs no live API can do (a project nobody has
+  open, a path rewrite across a whole archive). The container is gzipped XML, and
+  the writer reproduces Premiere's own byte layout, so a round trip with no edit
+  is byte-identical. Every edit is refused unless an ObjectUID census before and
+  after agrees, and the original is kept.
+- Made "verified live" a machine-written artifact instead of a sentence in a
+  commit message. A sweep in `scripts/` now files a ledger entry under
+  `verification/sweeps/` recording the UTC time, harness and mutate mode, commit
+  and dirtiness, the Premiere version the host reported, and one row per tool it
+  reached; `docs/LIVE-VERIFICATION.md` is generated from those files and a test
+  byte-compares the two, so a tool cannot be promoted to "verified" by editing
+  the document. A skip is recorded as a skip and never counted as evidence.
+- Added the second, weaker axis alongside it: `docs/TOOL-COVERAGE.md` reports how
+  much of the catalogue anything has ever run, measured by instrumenting the
+  dispatcher during a test run rather than by grepping test files for tool names
+  (a name in a table of expected strings is not a call; a name assembled at
+  runtime is never a literal — and both errors are silent). Mock-bridge dispatch
+  and live-host execution are printed as separate columns and never merged.
+- Split the 21,849-line `src/tools/index.ts` — 55% of all source — into
+  `tools/catalogue.ts` (the registrations) and 20 domain classes under
+  `tools/domains/`, chained by inheritance in dependency order. `index.ts` keeps
+  the dispatcher and the meta tools. All 647 registrations were proven identical
+  in name, description and schema, in the same order, before and after.
+
+Catalogue grew to `647` tools.
 
 ## [1.2.0] - 2026-08-17
 

@@ -12,7 +12,7 @@ const zxpSignCommand = process.env.ZXP_SIGN_CMD;
 if (!zxpSignCommand) throw new Error('Set ZXP_SIGN_CMD to the Adobe ZXPSignCmd executable.');
 
 const certificatePath = process.env.ZXP_CERT_PATH || join(homedir(), 'Library', 'Application Support', 'Adobe_Premiere_Pro_MCP', 'signing', 'premiere-mcp-self-signed.p12');
-const service = 'adobe-premiere-pro-mcp-zxp-signing';
+const service = 'premiere-mcp-zxp-signing';
 const account = 'certificate-password';
 const password = randomBytes(32).toString('base64url');
 

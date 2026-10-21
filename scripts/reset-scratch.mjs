@@ -27,6 +27,7 @@ import { PremiereProBridge } from '../dist/bridge/index.js';
 import { writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
+import { requireScratchProject } from './lib/require-scratch-project.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCRATCH_DIR = resolve(HERE, '..', '.scratch');
@@ -60,16 +61,11 @@ async function host(label, body) {
 
 // ---------------------------------------------------------------------------------------------
 // Guard: never operate on anything but the scratch project.
+//
+// Shared with the other live harnesses rather than restated here, so the three cannot drift apart
+// on what counts as disposable — the same drift docs/WINDOWS-PARITY.md records for the doctors.
 // ---------------------------------------------------------------------------------------------
-const state = await host('probe', `(function(){
-  return JSON.stringify({ name: String(app.project.name), path: String(app.project.path) });
-})();`);
-
-if (!/test|scratch|untitled|fixture/i.test(String(state.name))) {
-  console.error(`REFUSING: "${state.name}" is not a scratch project. Nothing was changed.`);
-  process.exit(2);
-}
-console.log(`target: ${state.name}\n  at ${state.path}\n`);
+await requireScratchProject(bridge, 'reset-scratch');
 
 if (verifyOnly) {
   const s = await summarise();

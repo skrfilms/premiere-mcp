@@ -5,8 +5,8 @@ This is the shortest path to a working install.
 ## Claude Desktop (macOS)
 
 ```bash
-git clone https://github.com/hetpatel-11/Adobe_Premiere_Pro_MCP.git
-cd Adobe_Premiere_Pro_MCP
+git clone https://github.com/skrfilms/premiere-mcp.git
+cd premiere-mcp
 npm run setup:mac
 ```
 
@@ -36,8 +36,8 @@ For better editing behavior, attach `premiere://config/get_instructions` before 
 ## GitHub Copilot / Claude Desktop (Windows)
 
 ```powershell
-git clone https://github.com/hetpatel-11/Adobe_Premiere_Pro_MCP.git
-cd Adobe_Premiere_Pro_MCP
+git clone https://github.com/skrfilms/premiere-mcp.git
+cd premiere-mcp
 npm run setup:win
 ```
 
@@ -63,7 +63,7 @@ npm run build
 Add the MCP entry on one line:
 
 ```bash
-codex mcp add premiere_pro --env PREMIERE_TEMP_DIR=/tmp/premiere-mcp-bridge -- node /absolute/path/to/Adobe_Premiere_Pro_MCP/dist/index.js
+codex mcp add premiere_pro --env PREMIERE_TEMP_DIR=/tmp/premiere-mcp-bridge -- node /absolute/path/to/premiere-mcp/dist/index.js
 ```
 
 Then:

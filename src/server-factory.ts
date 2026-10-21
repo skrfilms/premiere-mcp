@@ -32,6 +32,7 @@ import { attachImageForResult } from './tools/image-content.js';
 import type { PremiereProResources } from './resources/index.js';
 import type { PremiereProPrompts } from './prompts/index.js';
 import { Logger } from './utils/logger.js';
+import { PACKAGE_VERSION } from './version.js';
 
 type ObjectJsonSchema = Record<string, unknown> & { type: 'object' };
 
@@ -96,8 +97,8 @@ export function buildPremiereMcpServer(
 
   const server = new Server(
     {
-      name: options.name ?? 'adobe-premiere-pro-mcp',
-      version: options.version ?? '1.2.0',
+      name: options.name ?? 'premiere-mcp',
+      version: options.version ?? PACKAGE_VERSION,
       description: 'Model Context Protocol tools for Adobe Premiere Pro - AI-powered video editing',
     },
     {

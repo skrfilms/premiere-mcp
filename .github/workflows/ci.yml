@@ -1,9 +1,8 @@
 # WHAT THIS WORKFLOW PROVES, AND WHAT IT DOES NOT
 #
-# Proves: the TypeScript compiles, eslint reports no errors, and the
-# host-independent unit suite passes on Node 20 and 22 on Linux. (The lint step is
-# red at time of writing — see the comment above it; that is a real bug in the tree,
-# not a broken workflow.)
+# Proves: the TypeScript compiles, eslint reports no errors, the host-independent
+# unit suite passes on Node 20 and 22 on Linux, and no install path in the tree
+# names the upstream package this one was forked from.
 #
 # Does NOT prove: that any tool works against Adobe Premiere Pro. There is no
 # Premiere and no CEP bridge on a GitHub runner. Every suite here uses a stub
@@ -54,25 +53,57 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
 
+      # WHY THIS GATE EXISTS.
+      #
+      # This project is a fork. For a period after the repository went public, every
+      # install path in the README, both plugin marketplaces, the .mcpb manifest and
+      # the server's own advertised name still carried the UPSTREAM package id
+      # `adobe-premiere-pro-mcp` — which is a real, different package on npm owned by
+      # the upstream author. The public artifact therefore sent every install and every
+      # star to the project this one was forked from, and no test could see it.
+      #
+      # Crediting upstream in prose is required by the MIT licence and is correct.
+      # Naming upstream in an INSTALL COMMAND is the bug. This step enforces exactly
+      # that line: the allowlist below is the set of files where attribution belongs.
+      - name: Identity guard (no upstream package id in install paths)
+        shell: bash
+        run: |
+          set -uo pipefail
+
+          # Attribution is legitimate in these files and nowhere else.
+          ALLOWED='^(LICENSE\.md|CHANGELOG\.md|docs/BRIDGE-COMPARISON\.md|\.github/workflows/ci\.yml)$'
+
+          OFFENDERS=$(git grep -lE 'adobe-premiere-pro-mcp|hetpatel-11' -- . ':!node_modules' ':!dist' \
+            | grep -vE "$ALLOWED" || true)
+
+          if [ -n "$OFFENDERS" ]; then
+            echo "::error::upstream package id or owner appears outside the attribution allowlist"
+            echo "$OFFENDERS" | while read -r f; do
+              echo "--- $f"
+              git grep -nE 'adobe-premiere-pro-mcp|hetpatel-11' -- "$f"
+            done
+            exit 1
+          fi
+          echo "identity guard: clean — no upstream package id outside the attribution allowlist"
+
       - name: Install dependencies
         run: npm ci
 
       - name: Build (tsc)
         run: npm run build
 
-      # KNOWN RED AS OF 2026-08-25, and deliberately left gating.
+      # GREEN AS OF 2026-08-26. This gate earned its keep, so the story stays recorded.
       #
-      # eslint reports two `no-useless-escape` errors in src/tools/index.ts, and they
-      # are not cosmetic. `versionUpSequence` builds ExtendScript in a template literal
-      # containing /(.*[_\-v])(\d+)$/i — but `\d` inside a template literal evaluates to
-      # a bare `d`, so the string handed to Premiere is /(.*[_-v])(d+)$/i. The version
-      # regex matches a literal "d" instead of digits, "SEQ_v001" never matches, and
-      # version_up_sequence appends "_v002" every time instead of incrementing. The fix
-      # is one character (`\\d`), in a file this branch has three people editing.
+      # It was red from the day it was added (2026-08-21) until the escape-collapse fix
+      # landed. eslint's two `no-useless-escape` errors in src/tools/index.ts were not
+      # cosmetic: `versionUpSequence` built ExtendScript inside a template literal
+      # containing /(.*[_\-v])(\d+)$/i, and `\d` in a template literal collapses to a
+      # bare `d`, so Premiere received /(.*[_-v])(d+)$/i. The regex matched a literal
+      # "d" instead of a digit, "SEQ_v001" never matched, and version_up_sequence
+      # appended "_v002" every time instead of incrementing.
       #
-      # This step has been red since the workflow was first added on 2026-08-21, which
-      # is itself the finding: the gate was never actually run. Suppressing the rule to
-      # get a green tick would delete a real bug report, so it stays.
+      # The lesson worth keeping: `no-useless-escape` is the only detector for that
+      # class of bug, so it stays gating and must never be suppressed to buy a tick.
       - name: Lint (eslint)
         run: npm run lint
 

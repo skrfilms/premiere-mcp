@@ -17,3 +17,6 @@ release-artifacts/
 # Worktrees
 .worktrees/
 .scratch/
+
+# Instrumented tool-coverage scratch (aggregated into verification/test-coverage.json)
+.tool-coverage/
