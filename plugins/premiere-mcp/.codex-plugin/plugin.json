@@ -1,0 +1,41 @@
+{
+  "name": "premiere-mcp",
+  "version": "1.3.0",
+  "description": "Inspect, edit, verify, and export local Adobe Premiere Pro projects through the MCP Bridge.",
+  "author": {
+    "name": "Skry",
+    "url": "https://github.com/skrfilms"
+  },
+  "homepage": "https://github.com/skrfilms/premiere-mcp",
+  "repository": "https://github.com/skrfilms/premiere-mcp",
+  "license": "MIT",
+  "keywords": [
+    "premiere-pro",
+    "video-editing",
+    "mcp",
+    "timeline",
+    "export"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "MCP Bridge for Adobe Premiere Pro",
+    "shortDescription": "Operate local Premiere projects through MCP",
+    "longDescription": "Install the local Premiere MCP server, verify the CEP bridge, and perform evidence-based editing workflows from Codex.",
+    "developerName": "Skry",
+    "category": "Creativity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/skrfilms/premiere-mcp",
+    "privacyPolicyURL": "https://github.com/skrfilms/premiere-mcp/blob/main/PRIVACY.md",
+    "termsOfServiceURL": "https://github.com/skrfilms/premiere-mcp/blob/main/TERMS.md",
+    "defaultPrompt": [
+      "Verify my local Premiere connection without making changes.",
+      "Inspect my active Premiere sequence and summarize its tracks.",
+      "Create a rough cut from these local media files and verify it."
+    ],
+    "brandColor": "#5FD3C6"
+  }
+}

@@ -292,12 +292,16 @@ describe('generated scripts cannot be broken out of', () => {
     expect(checked).toBeGreaterThan(900);
     expect([...new Set(escaped)]).toEqual([]);
     expect([...new Set(unparseable)]).toEqual([]);
-    // Budget crept 537s -> 549s -> 600s -> 966s (standalone) as the catalogue grew. For a
-    // SECURITY sweep, full coverage beats speed, so the ceiling is raised again rather than
-    // trimming payloads/positions. The real lever is NOT another raise or thinner coverage:
-    // each of the O(tools x positions x payloads) iterations calls executeTool, which rebuilds
-    // the ~600-tool schema registry from scratch. Memoizing that registry (production side,
-    // infra-owned) makes the whole sweep cheap without touching what it checks. Do that before
-    // the next raise.
-  }, 1_500_000);
+    // Budget crept 537s -> 549s -> 600s -> 966s (standalone) as the catalogue grew, and then
+    // blew a 1500s ceiling on the Windows runner, which failed the whole suite. The note here
+    // named the real lever rather than raising the number again: each of the
+    // O(tools x positions x payloads) iterations calls executeTool, which rebuilt the
+    // ~640-tool schema registry from scratch.
+    //
+    // That registry is now memoized in src/tools/index.ts and this sweep runs in ~104s
+    // locally -- 9x faster with identical coverage, and the same saving lands on every real
+    // tool call in production. So the ceiling comes DOWN rather than up: 600s is ~6x headroom
+    // over the slowest platform measured, and a genuine regression now surfaces in minutes
+    // instead of hiding under a 25-minute budget. If it creeps again, profile before raising.
+  }, 600_000);
 });

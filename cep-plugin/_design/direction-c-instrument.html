@@ -326,7 +326,7 @@ var ERRS=[0,0,0,1,0,0,0,2,1,0,0,1];
 var HIST_OK=[['add_to_timeline','completed','412'],['set_clip_scale','completed','188'],['get_full_sequence_info','completed','96'],['create_bin','completed','133'],['list_sequences','completed','74'],['bake_keyframe_ease','completed','655']];
 var HIST_BUSY=[['export_sequence','executing','2140'],['add_transition','pending','—'],['set_clip_opacity','pending','—'],['add_to_timeline','completed','412'],['set_clip_scale','completed','188']];
 var HIST_ERR=[['apply_effect','failed','8004'],['list_available_effects','completed','221'],['add_to_timeline','completed','412'],['set_clip_scale','completed','188']];
-var LOG_OK=[['info','Bridge started · polling /tmp/premiere-mcp-bridge every 250ms'],['info','Host: Premiere Pro 26.3.1 · project graveyard_chase.prproj'],['info','add_to_timeline verified:true (412ms)']];
+var LOG_OK=[['info','Bridge started · polling /tmp/premiere-mcp-bridge every 250ms'],['info','Host: Premiere Pro 26.3.1 · project feature_cut.prproj'],['info','add_to_timeline verified:true (412ms)']];
 var LOG_ERR=[['error','apply_effect failed: QE effect add rejected by host (8004ms, budget 8000ms) verified:false'],['warning','Retry 1 of 1 for apply_effect'],['info','list_available_effects verified:true (221ms)']];
 
 var STATES={
@@ -338,14 +338,14 @@ var STATES={
     fig:{l:'Commands run this session',v:'0'},
     tiles:[{l:'Queue depth',v:'0'},{l:'Round-trip',v:'—'},{l:'Uptime',v:'0:02'},{l:'Errors (session)',v:'0'}],
     meter:null,hist:[],log:[['info','Creating bridge directories in /tmp/premiere-mcp-bridge'],['info','Opening command watcher…']]},
-  'connected-idle':{level:'good',icon:'i-good',title:'Bridge live · idle',server:'Premiere ready · graveyard_chase.prproj',control:'stop',temp:'/tmp/premiere-mcp-bridge',
+  'connected-idle':{level:'good',icon:'i-good',title:'Bridge live · idle',server:'Premiere ready · feature_cut.prproj',control:'stop',temp:'/tmp/premiere-mcp-bridge',
     fig:{l:'Commands run this session',v:'1,284',d:{dir:'up',t:'+18 in the last 5 min',good:true}},
     tiles:[{l:'Queue depth',v:'0',spark:QUE,delta:{dir:'flat',t:'no backlog'}},
            {l:'Round-trip',v:'144',u:'ms',spark:LAT,delta:{dir:'down',t:'8 ms faster',good:true}},
            {l:'Uptime',v:'2:14:36',delta:{dir:'flat',t:'no restarts'}},
            {l:'Errors (session)',v:'0',delta:{dir:'flat',t:'0 in last hour'}}],
     meter:{ms:144,budget:8000},hist:HIST_OK,log:LOG_OK},
-  'processing':{level:'good',icon:'i-good',title:'Bridge live · executing',server:'Premiere ready · graveyard_chase.prproj',control:'stop',temp:'/tmp/premiere-mcp-bridge',
+  'processing':{level:'good',icon:'i-good',title:'Bridge live · executing',server:'Premiere ready · feature_cut.prproj',control:'stop',temp:'/tmp/premiere-mcp-bridge',
     now:{cmd:'export_sequence',el:'2.1s'},
     fig:{l:'Commands run this session',v:'1,291',d:{dir:'up',t:'+7 in the last minute',good:true}},
     tiles:[{l:'Queue depth',v:'3',spark:QUE,delta:{dir:'up',t:'+3 vs 1 min'}},

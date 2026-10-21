@@ -11,11 +11,11 @@ function printHelp(): void {
   console.log(`Premiere Pro MCP
 
 Usage:
-  premiere-pro-mcp                 Start the MCP stdio server
-  premiere-pro-mcp --install-cep   Install the CEP bridge and configure supported MCP clients
-  premiere-pro-mcp --doctor        Check the local server, CEP bridge, and client configuration
-  premiere-pro-mcp --version       Print the installed package version
-  premiere-pro-mcp --help          Show this help
+  premiere-mcp                 Start the MCP stdio server
+  premiere-mcp --install-cep   Install the CEP bridge and configure supported MCP clients
+  premiere-mcp --doctor        Check the local server, CEP bridge, and client configuration
+  premiere-mcp --version       Print the installed package version
+  premiere-mcp --help          Show this help
 `);
 }
 
@@ -32,14 +32,27 @@ async function runPlatformScript(macScript: string, windowsScript: string, windo
   if (process.platform === 'darwin') {
     code = await run('bash', [join(packageRoot, 'scripts', macScript), '--skip-build']);
   } else if (process.platform === 'win32') {
-    code = await run('powershell.exe', [
+    const args = [
       '-NoProfile',
       '-ExecutionPolicy',
       'Bypass',
       '-File',
       join(packageRoot, 'scripts', windowsScript),
       ...windowsArgs,
-    ]);
+    ];
+    // PowerShell 7 first, Windows PowerShell 5.1 as the fallback. 5.1 ships with every
+    // current Windows but is not guaranteed on future images, and pwsh is what a builder
+    // who installed PowerShell deliberately expects to run.
+    //
+    // The fallback is keyed on spawn's own error rather than on an exit code, and that
+    // distinction is what makes retrying safe: ENOENT means the executable was never
+    // launched, so the script cannot have run once already. A non-zero EXIT code is a
+    // script that DID run and failed; that is returned as-is and never retried.
+    try {
+      code = await run('pwsh', args);
+    } catch {
+      code = await run('powershell.exe', args);
+    }
   } else {
     throw new Error('Premiere Pro MCP setup is supported on macOS and Windows only.');
   }

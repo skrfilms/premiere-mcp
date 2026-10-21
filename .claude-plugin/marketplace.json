@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
-  "name": "adobe-premiere-pro-mcp",
+  "name": "premiere-mcp",
   "owner": {
     "name": "Skry",
     "url": "https://github.com/skrfilms"
@@ -10,10 +10,10 @@
   },
   "plugins": [
     {
-      "name": "premiere-pro-mcp",
-      "source": "./claude-plugins/premiere-pro-mcp",
+      "name": "premiere-mcp",
+      "source": "./claude-plugins/premiere-mcp",
       "description": "Inspect, edit, verify, and export local Adobe Premiere Pro projects through MCP.",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "category": "creative",
       "tags": [
         "premiere-pro",

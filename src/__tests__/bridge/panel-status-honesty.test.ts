@@ -60,7 +60,7 @@ describe('the Premiere light is earned, not assumed', () => {
     const panel = panelWithDom();
     // Stub the round trip so both outcomes can be driven deterministically.
     panel.bridge.executeExtendScript = (_script: string, cb: (err: unknown, result: unknown) => void) => {
-      cb(null, { appVersion: '26.3.2', projectName: 'graveyard_chase_v2.prproj' });
+      cb(null, { appVersion: '26.3.2', projectName: 'feature_cut_v2.prproj' });
     };
 
     panel.bridge.testPremiereConnection();

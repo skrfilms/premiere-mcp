@@ -56,6 +56,7 @@ import { PremiereProBridge } from './bridge/index.js';
 import { resolveProfile, type ProfileEnv } from './tools/profiles.js';
 import { buildPremiereMcpServer, BRIDGE_BACKED_METHODS, type PremiereMcpSurface } from './server-factory.js';
 import { Logger } from './utils/logger.js';
+import { PACKAGE_VERSION } from './version.js';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -598,7 +599,7 @@ export function createHttpGate(deps: GateDeps): HttpGate {
   const { config, surface, handler, bridgeProbe } = deps;
   const logger = deps.logger ?? new Logger('PremiereHttp');
   const limiter = deps.limiter ?? new RequestLimiter(config.maxConcurrent, config.maxPerMinute);
-  const version = deps.version ?? '1.2.0';
+  const version = deps.version ?? PACKAGE_VERSION;
   const authGate = config.token !== null ? requireBearerAuth({ verifier: staticTokenVerifier(config.token) }) : null;
 
   const health = async (): Promise<HealthReport> => {
@@ -617,7 +618,7 @@ export function createHttpGate(deps: GateDeps): HttpGate {
     return {
       server: 'up',
       transport: 'http',
-      name: 'adobe-premiere-pro-mcp',
+      name: 'premiere-mcp',
       version,
       bind: `${config.host}:${deps.boundPort?.port ?? config.port}`,
       auth: config.token === null ? 'disabled' : 'bearer-token',

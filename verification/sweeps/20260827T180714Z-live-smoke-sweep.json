@@ -1,0 +1,928 @@
+{
+  "environment": {
+    "ranAt": "2026-08-27T18:07:14Z",
+    "harness": "live-smoke-sweep",
+    "mode": "mutate",
+    "gitSha": "05766235e796f35942b60c25e2fdcb2601866b5d",
+    "gitDirty": false,
+    "premiereVersion": null,
+    "platform": "darwin 25.5.0 arm64",
+    "catalogueSize": 647
+  },
+  "tools": [
+    {
+      "name": "add_metadata_schema_field",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'add_metadata_schema_field': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"col"
+    },
+    {
+      "name": "align_clips_spatial",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'align_clips_spatial': [\n  {\n    \"expected\": \"array\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"clips\"\n   "
+    },
+    {
+      "name": "apply_audio_effect_qe",
+      "outcome": "fail",
+      "detail": "Effect not found on this build: Gaussian Blur"
+    },
+    {
+      "name": "apply_dynamics",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "apply_lut_to_clip",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'apply_lut_to_clip': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"lutPath\"\n  "
+    },
+    {
+      "name": "assemble_product_spot",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'assemble_product_spot': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"sequenc"
+    },
+    {
+      "name": "assemble_review_reel",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'assemble_review_reel': [\n  {\n    \"expected\": \"array\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"sequenceI"
+    },
+    {
+      "name": "audio_crossfade_at_cut",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "audio_peaks_report",
+      "outcome": "pass"
+    },
+    {
+      "name": "auto_white_balance",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "batch_add_audio_crossfades",
+      "outcome": "fail",
+      "detail": "No crossfade could be added at any of the 3 audio cuts. See failures[]."
+    },
+    {
+      "name": "batch_relink_by_pattern",
+      "outcome": "skipped_unsafe",
+      "detail": "rewrites media links in bulk"
+    },
+    {
+      "name": "batch_rename_project_items",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'batch_rename_project_items': [\n  {\n    \"expected\": \"array\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"ren"
+    },
+    {
+      "name": "batch_set_label",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'batch_set_label': [\n  {\n    \"expected\": \"array\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"projectItemIds"
+    },
+    {
+      "name": "blur_clip",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'blur_clip': [\n  {\n    \"expected\": \"number\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"amount\"\n    ],\n    "
+    },
+    {
+      "name": "broadcast_safe_check",
+      "outcome": "pass"
+    },
+    {
+      "name": "build_brand_spot_from_mogrt_and_assets",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'build_brand_spot_from_mogrt_and_assets': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\":"
+    },
+    {
+      "name": "build_motion_graphics_demo",
+      "outcome": "pass"
+    },
+    {
+      "name": "caption_qc_fix",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'caption_qc_fix': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"srtPath\"\n    ]"
+    },
+    {
+      "name": "caption_qc_report",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'caption_qc_report': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"srtPath\"\n  "
+    },
+    {
+      "name": "captions_from_transcript_json",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'captions_from_transcript_json': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      "
+    },
+    {
+      "name": "captions_to_markers",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'captions_to_markers': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"srtPath\"\n"
+    },
+    {
+      "name": "change_list_report",
+      "outcome": "pass"
+    },
+    {
+      "name": "chapter_markers_to_youtube",
+      "outcome": "pass"
+    },
+    {
+      "name": "close_all_gaps",
+      "outcome": "pass"
+    },
+    {
+      "name": "close_gap_at",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'close_gap_at': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"timecode\"\n    ],"
+    },
+    {
+      "name": "close_project",
+      "outcome": "skipped_unsafe",
+      "detail": "closes the project out from under the sweep"
+    },
+    {
+      "name": "copy_grade",
+      "outcome": "pass"
+    },
+    {
+      "name": "copy_markers_between_sequences",
+      "outcome": "fail",
+      "detail": "harness timeout 25s"
+    },
+    {
+      "name": "count_tracks_used",
+      "outcome": "pass"
+    },
+    {
+      "name": "create_custom_export_preset",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'create_custom_export_preset': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"f"
+    },
+    {
+      "name": "create_marker",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'create_marker': [\n  {\n    \"expected\": \"number\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"timecode\"\n    ]"
+    },
+    {
+      "name": "create_project",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'create_project': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"name\"\n    ],\n "
+    },
+    {
+      "name": "cut_list_csv",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'cut_list_csv': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"outputPath\"\n    "
+    },
+    {
+      "name": "delete_empty_tracks",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive (removes tracks)"
+    },
+    {
+      "name": "delivery_qc",
+      "outcome": "pass"
+    },
+    {
+      "name": "denoise_clip",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "detect_settings_mismatch",
+      "outcome": "pass"
+    },
+    {
+      "name": "distribute_clips_evenly",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'distribute_clips_evenly': [\n  {\n    \"expected\": \"array\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"clipIn"
+    },
+    {
+      "name": "duration_marker_add",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'duration_marker_add': [\n  {\n    \"expected\": \"number\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"startSecs"
+    },
+    {
+      "name": "effect_stack_report",
+      "outcome": "pass"
+    },
+    {
+      "name": "enable_disable_all_effects",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'enable_disable_all_effects': [\n  {\n    \"expected\": \"boolean\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"e"
+    },
+    {
+      "name": "enable_disable_effect",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'enable_disable_effect': [\n  {\n    \"expected\": \"boolean\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"enable"
+    },
+    {
+      "name": "export_audio_only",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'export_audio_only': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"outputPath\""
+    },
+    {
+      "name": "export_captions_to_srt",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'export_captions_to_srt': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"output"
+    },
+    {
+      "name": "export_gif",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'export_gif': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"outputPath\"\n    ],"
+    },
+    {
+      "name": "export_in_out_range",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'export_in_out_range': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"outputPat"
+    },
+    {
+      "name": "export_sequence_as_project",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'export_sequence_as_project': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"ou"
+    },
+    {
+      "name": "export_social_preset",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'export_social_preset': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"outputPa"
+    },
+    {
+      "name": "export_stills_batch",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'export_stills_batch': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"outputDir"
+    },
+    {
+      "name": "export_thumbnail",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'export_thumbnail': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"outputPath\"\n"
+    },
+    {
+      "name": "extend_edit",
+      "outcome": "fail",
+      "detail": "The in edge did not move. The playhead may already be at that edge, or the clip has no room to extend in that direction (check the adjacent clip and available source handles)."
+    },
+    {
+      "name": "extract_palette",
+      "outcome": "pass"
+    },
+    {
+      "name": "fade_in_audio",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'fade_in_audio': [\n  {\n    \"expected\": \"number\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"durationFrames\""
+    },
+    {
+      "name": "fade_in_video",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'fade_in_video': [\n  {\n    \"expected\": \"number\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"durationFrames\""
+    },
+    {
+      "name": "fade_out_audio",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'fade_out_audio': [\n  {\n    \"expected\": \"number\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"durationFrames"
+    },
+    {
+      "name": "fade_out_video",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'fade_out_video': [\n  {\n    \"expected\": \"number\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"durationFrames"
+    },
+    {
+      "name": "false_color_frame",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'false_color_frame': [\n  {\n    \"expected\": \"number\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"timeSecs\"\n "
+    },
+    {
+      "name": "find_clips_with_effect",
+      "outcome": "pass"
+    },
+    {
+      "name": "fit_clip_duration",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'fit_clip_duration': [\n  {\n    \"expected\": \"number\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"targetSecon"
+    },
+    {
+      "name": "flip_horizontal",
+      "outcome": "fail",
+      "detail": "The Transform effect was ADDED to this clip but exposes no horizontal flip parameter, so the clip now carries an inert effect and is not flipped. Parameters present are listed in transformParameters. Remove it with remove_effect_by_name."
+    },
+    {
+      "name": "flip_vertical",
+      "outcome": "fail",
+      "detail": "The Transform effect was ADDED to this clip but exposes no vertical flip parameter, so the clip now carries an inert effect and is not flipped. Parameters present are listed in transformParameters. Remove it with remove_effect_by_name."
+    },
+    {
+      "name": "flush_sequence_cache",
+      "outcome": "pass"
+    },
+    {
+      "name": "frames_to_timecode",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'frames_to_timecode': [\n  {\n    \"expected\": \"number\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"frames\"\n  "
+    },
+    {
+      "name": "get_bin_tree",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_capabilities",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_clip_color_space",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_clip_info_extended",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_clip_speed_info",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_ea_login_status",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_edit_point_list",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_encoder_presets",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_export_progress",
+      "outcome": "fail",
+      "detail": "harness timeout 25s"
+    },
+    {
+      "name": "get_item_metadata_columns",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_item_treepath",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_lumetri_preset_list",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_playback_state",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_production_list",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_project_info",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_project_stats",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_qe_component_params",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'get_qe_component_params': [\n  {\n    \"expected\": \"number\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"compo"
+    },
+    {
+      "name": "get_qe_sequence_props",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_renderer_names",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_sequence_render_status",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_sequence_selection",
+      "outcome": "pass"
+    },
+    {
+      "name": "go_to_in_point",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "go_to_next_marker",
+      "outcome": "pass"
+    },
+    {
+      "name": "go_to_out_point",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "go_to_prev_marker",
+      "outcome": "pass"
+    },
+    {
+      "name": "go_to_sequence_end",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "go_to_sequence_start",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "go_to_timecode",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'go_to_timecode': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"timecode\"\n    "
+    },
+    {
+      "name": "grade_snapshot",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'grade_snapshot': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"outputPath\"\n  "
+    },
+    {
+      "name": "grid_layout",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'grid_layout': [\n  {\n    \"expected\": \"array\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"clips\"\n    ],\n    "
+    },
+    {
+      "name": "j_cut",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'j_cut': [\n  {\n    \"expected\": \"number\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"frames\"\n    ],\n    \"mes"
+    },
+    {
+      "name": "ken_burns",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "keyframe_zoom_in",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "keyframe_zoom_out",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "l_cut",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'l_cut': [\n  {\n    \"expected\": \"number\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"frames\"\n    ],\n    \"mes"
+    },
+    {
+      "name": "letterbox",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "list_all_encoder_presets",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_audio_effects_on_clip",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_effects_on_clip_qe",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_export_presets",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_open_projects",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_project_items",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_recent_projects",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_sequence_tracks",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_sequences",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_sequences_by_name",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'list_sequences_by_name': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"patter"
+    },
+    {
+      "name": "loudness_report",
+      "outcome": "pass"
+    },
+    {
+      "name": "lumetri_basic_set",
+      "outcome": "fail",
+      "detail": "No Lumetri basic parameters provided. Supply at least one of: temperature, tint, saturation, exposure, contrast, highlights, shadows, whites, blacks."
+    },
+    {
+      "name": "lumetri_creative_set",
+      "outcome": "fail",
+      "detail": "No Lumetri creative parameters provided. Supply at least one of: fadedFilm, sharpen, vibrance, saturation."
+    },
+    {
+      "name": "lumetri_hsl_secondary_set",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "lumetri_report",
+      "outcome": "pass"
+    },
+    {
+      "name": "lumetri_vignette_set",
+      "outcome": "fail",
+      "detail": "No Lumetri vignette parameters provided. Supply at least one of: amount, midpoint, roundness, feather."
+    },
+    {
+      "name": "marker_to_subclip",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'marker_to_subclip': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"markerName\""
+    },
+    {
+      "name": "markers_from_csv",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'markers_from_csv': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"csvPath\"\n   "
+    },
+    {
+      "name": "markers_to_csv",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'markers_to_csv': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"outputPath\"\n  "
+    },
+    {
+      "name": "markers_to_notes",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'markers_to_notes': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"outputPath\"\n"
+    },
+    {
+      "name": "match_shot_color",
+      "outcome": "pass"
+    },
+    {
+      "name": "match_transform",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'match_transform': [\n  {\n    \"expected\": \"array\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"targets\"\n    ]"
+    },
+    {
+      "name": "mogrt_params_report",
+      "outcome": "fail",
+      "detail": "Clip is not a MOGRT — check isMGT()"
+    },
+    {
+      "name": "mute_clip_audio",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "normalize_clip_peaks",
+      "outcome": "fail",
+      "detail": "Gain param not found"
+    },
+    {
+      "name": "notes_to_markers",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'notes_to_markers': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"notesPath\"\n "
+    },
+    {
+      "name": "nudge_clip",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'nudge_clip': [\n  {\n    \"expected\": \"number\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"frames\"\n    ],\n   "
+    },
+    {
+      "name": "open_fcp_xml",
+      "outcome": "skipped_unsafe",
+      "detail": "swaps/creates project state"
+    },
+    {
+      "name": "open_project",
+      "outcome": "skipped_unsafe",
+      "detail": "swaps the project mid-sweep"
+    },
+    {
+      "name": "open_project_item_in_source",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "paste_grade_to_clips",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'paste_grade_to_clips': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"gradeJso"
+    },
+    {
+      "name": "pip_layout",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "play_in_to_out",
+      "outcome": "skipped_unsafe",
+      "detail": "starts playback"
+    },
+    {
+      "name": "rate_stretch_to_fill",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "read_clipboard",
+      "outcome": "pass"
+    },
+    {
+      "name": "remove_all_effects_qe",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive"
+    },
+    {
+      "name": "remove_effect_at_index",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive"
+    },
+    {
+      "name": "remove_time_remap",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive"
+    },
+    {
+      "name": "rename_timeline_clip",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'rename_timeline_clip': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"name\"\n  "
+    },
+    {
+      "name": "render_audio",
+      "outcome": "skipped_unsafe",
+      "detail": "long render"
+    },
+    {
+      "name": "render_sequence_previews",
+      "outcome": "skipped_unsafe",
+      "detail": "long render"
+    },
+    {
+      "name": "reorder_effects",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'reorder_effects': [\n  {\n    \"expected\": \"array\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"newOrder\"\n    "
+    },
+    {
+      "name": "reset_motion_to_defaults",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "reset_transform",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "ripple_trim_in",
+      "outcome": "fail",
+      "detail": "The source in-point moved but the clip did not ripple on the timeline, so this edit is half-applied: clip.inPoint is now 508032000000 ticks while clip.start is unchanged at 0. Undo before retrying."
+    },
+    {
+      "name": "ripple_trim_out",
+      "outcome": "fail",
+      "detail": "The source out-point moved but the clip end did not change on the timeline, so this edit is half-applied: clip.outPoint is now 508032000000 ticks while clip.end is unchanged at 1524096000000. Undo before retrying."
+    },
+    {
+      "name": "safe_area_check",
+      "outcome": "pass"
+    },
+    {
+      "name": "save_project",
+      "outcome": "pass"
+    },
+    {
+      "name": "save_project_as",
+      "outcome": "skipped_unsafe",
+      "detail": "writes a new project file"
+    },
+    {
+      "name": "sequence_thumbnail_strip",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_clip_border_color",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'set_clip_border_color': [\n  {\n    \"expected\": \"number\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"r\"\n    "
+    },
+    {
+      "name": "set_clip_border_width",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'set_clip_border_width': [\n  {\n    \"expected\": \"number\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"width\"\n"
+    },
+    {
+      "name": "set_clip_color_space",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'set_clip_color_space': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"colorSpa"
+    },
+    {
+      "name": "set_clip_crop",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "set_clip_gain",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'set_clip_gain': [\n  {\n    \"expected\": \"number\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"gainDb\"\n    ],\n"
+    },
+    {
+      "name": "set_clip_reverse",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'set_clip_reverse': [\n  {\n    \"expected\": \"boolean\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"reverse\"\n  "
+    },
+    {
+      "name": "set_clip_scale_to_frame_size",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "set_color_space_override",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'set_color_space_override': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"colo"
+    },
+    {
+      "name": "set_essential_sound_category",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'set_essential_sound_category': [\n  {\n    \"code\": \"invalid_value\",\n    \"values\": [\n      \"dialog\",\n      \"music\","
+    },
+    {
+      "name": "set_frame_blend_qe",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'set_frame_blend_qe': [\n  {\n    \"expected\": \"boolean\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"enabled\"\n"
+    },
+    {
+      "name": "set_item_metadata",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'set_item_metadata': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"key\"\n    ],"
+    },
+    {
+      "name": "set_item_poster_frame",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'set_item_poster_frame': [\n  {\n    \"expected\": \"number\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"timeSec"
+    },
+    {
+      "name": "set_lut_interpolation",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'set_lut_interpolation': [\n  {\n    \"expected\": \"number\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"method\""
+    },
+    {
+      "name": "set_marker_type",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'set_marker_type': [\n  {\n    \"expected\": \"number\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"timeSecs\"\n   "
+    },
+    {
+      "name": "set_mogrt_param",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'set_mogrt_param': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"paramName\"\n  "
+    },
+    {
+      "name": "set_mogrt_text",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'set_mogrt_text': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"paramName\"\n   "
+    },
+    {
+      "name": "set_qe_component_param",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'set_qe_component_param': [\n  {\n    \"expected\": \"number\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"compon"
+    },
+    {
+      "name": "set_render_preview_quality",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_renderer",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'set_renderer': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"rendererName\"\n  "
+    },
+    {
+      "name": "set_sequence_in_out_from_clips",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_sequence_in_out_qe",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_sequence_selection",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'set_sequence_selection': [\n  {\n    \"expected\": \"array\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"clips\"\n"
+    },
+    {
+      "name": "set_time_interpolation_type",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'set_time_interpolation_type': [\n  {\n    \"expected\": \"number\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"t"
+    },
+    {
+      "name": "set_track_volume_keyframes",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'set_track_volume_keyframes': [\n  {\n    \"expected\": \"array\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"key"
+    },
+    {
+      "name": "sharpen_clip",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "shot_status_report",
+      "outcome": "pass"
+    },
+    {
+      "name": "slowmo_quality_report",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'slowmo_quality_report': [\n  {\n    \"expected\": \"number\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"sourceF"
+    },
+    {
+      "name": "speed_ramp_bake",
+      "outcome": "skipped_unsafe",
+      "detail": "long ffmpeg render"
+    },
+    {
+      "name": "split_screen_layout",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'split_screen_layout': [\n  {\n    \"expected\": \"array\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"clips\"\n   "
+    },
+    {
+      "name": "srt_diff",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'srt_diff': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"srtPathA\"\n    ],\n   "
+    },
+    {
+      "name": "step_frames",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'step_frames': [\n  {\n    \"expected\": \"number\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"frames\"\n    ],\n  "
+    },
+    {
+      "name": "sync_lock_track",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'sync_lock_track': [\n  {\n    \"code\": \"invalid_value\",\n    \"values\": [\n      \"video\",\n      \"audio\"\n    ],\n    \"pa"
+    },
+    {
+      "name": "three_point_edit",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "timecode_burn_in",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "timecode_to_frames",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'timecode_to_frames': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"timecode\"\n"
+    },
+    {
+      "name": "todo_marker_report",
+      "outcome": "pass"
+    },
+    {
+      "name": "toggle_uniform_scale",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'toggle_uniform_scale': [\n  {\n    \"expected\": \"boolean\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"uniform"
+    },
+    {
+      "name": "validate_project_for_export",
+      "outcome": "pass"
+    },
+    {
+      "name": "verify_export",
+      "outcome": "pass"
+    },
+    {
+      "name": "verify_premiere_connection",
+      "outcome": "pass"
+    },
+    {
+      "name": "verify_speed_duration",
+      "outcome": "pass"
+    },
+    {
+      "name": "version_up_sequence",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "vfx_pull_list",
+      "outcome": "pass"
+    },
+    {
+      "name": "write_clipboard",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'write_clipboard': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"text\"\n    ],\n"
+    },
+    {
+      "name": "write_sidecar_file",
+      "outcome": "skipped_args",
+      "detail": "Invalid arguments for tool 'write_sidecar_file': [\n  {\n    \"expected\": \"string\",\n    \"code\": \"invalid_type\",\n    \"path\": [\n      \"fileName\"\n"
+    }
+  ]
+}

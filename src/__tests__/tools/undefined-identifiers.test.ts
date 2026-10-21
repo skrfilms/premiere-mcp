@@ -226,6 +226,11 @@ describe('generated scripts declare everything they reference', () => {
     expect(localToolsSeen.size).toBeGreaterThan(60);
     expect(checked).toBeGreaterThan(100);
     expect([...new Set(offenders)]).toEqual([]);
-    // Walks every generated script; the default 5s limit is not enough.
-  }, 300_000);
+    // Walks every generated script, so the default limit is not enough. 300s was not
+    // enough either on a Windows runner, where this took 308s and failed the whole suite.
+    // The cause was not the walk: executeTool rebuilt the ~640-tool schema registry on
+    // every call. With that registry memoized (src/tools/index.ts) the sweep runs in ~25s
+    // locally, so 120s is roughly 5x headroom on the slowest platform measured -- close
+    // enough that a real regression trips it instead of hiding behind a five-minute budget.
+  }, 120_000);
 });

@@ -9,6 +9,41 @@ import type { PremiereProTransport } from '../bridge/types.js';
 import { Logger } from '../utils/logger.js';
 import { BUNDLE_BUDGETS, TASK_BUNDLES } from '../tools/profiles.js';
 
+/**
+ * The temp directory this text tells the reader to type into the CEP panel.
+ *
+ * It has to be platform-conditional. The panel REJECTS a posix `/tmp…` path when
+ * `os.platform() === 'win32'` (`sanitizeTempDirectoryInput` in cep-plugin/bridge-cep.js
+ * returns `''`), so `startBridge()` bails — a Windows reader who followed this
+ * documentation literally could not start the bridge at all. That was the whole of
+ * docs/WINDOWS-PARITY.md P0 #2.
+ *
+ * EXPANDED, not `%TEMP%\premiere-mcp-bridge`. The panel expands nothing: it hands the
+ * string to `path.resolve`, so a literal `%TEMP%` would create a directory actually
+ * named `%TEMP%` under Premiere's working directory and the server would poll somewhere
+ * else entirely — the same healthy-panel-and-every-call-times-out symptom P0 #3 was.
+ *
+ * The fallback order (`TEMP` → `TMP` → `C:\Temp`) and the leaf name are the panel's own
+ * default, so on the common setup this string is the value already in the field. Where
+ * the server's `%TEMP%` differs from the one Premiere inherited the two can still
+ * disagree; that is recorded as unverified in docs/WINDOWS-PARITY.md section 3 item 6,
+ * and it is why the installer tells the user to type the path rather than trust the
+ * default.
+ *
+ * Exported as a function of (platform, env) rather than read off `process` inline so the
+ * win32 branch is reachable from a macOS test: the module-level constant below binds at
+ * import time and a test that stubs `process.platform` afterwards would assert nothing.
+ */
+export function bridgeTempDirForDocs(
+  platform: string,
+  env: Record<string, string | undefined>,
+): string {
+  if (platform !== 'win32') return '/tmp/premiere-mcp-bridge';
+  return `${env.TEMP || env.TMP || 'C:\\Temp'}\\premiere-mcp-bridge`;
+}
+
+const DEFAULT_BRIDGE_TEMP_DIR = bridgeTempDirForDocs(process.platform, process.env);
+
 export interface MCPResource {
   uri: string;
   name: string;
@@ -59,7 +94,7 @@ const RECIPES: Recipe[] = [
         '1. ping',
         '   Is the bridge answering at all? A timeout means the CEP panel is not running:',
         '   in Premiere, Window > Extensions > MCP Bridge (CEP), set the temp directory to',
-        '   /tmp/premiere-mcp-bridge, Start Bridge. Premiere with NO project open never loads the',
+        `   ${DEFAULT_BRIDGE_TEMP_DIR}, Start Bridge. Premiere with NO project open never loads the`,
         '   panel at all, so "the app is running" is not "the bridge is up".',
         '',
         '2. get_capabilities',
@@ -394,7 +429,7 @@ const RECIPES: Recipe[] = [
         '   alone leaves the bridge down. Report which project path to reopen.',
         '',
         'C. THE PANEL IS NOT RUNNING. Nothing answers, including ping, and there is no partial state.',
-        '   Window > Extensions > MCP Bridge (CEP), temp directory /tmp/premiere-mcp-bridge,',
+        `   Window > Extensions > MCP Bridge (CEP), temp directory ${DEFAULT_BRIDGE_TEMP_DIR},`,
         '   Start Bridge. If a timeout message blames the temp directory, check that first: the server',
         '   and the panel must agree on the path.',
         '',
@@ -1235,7 +1270,7 @@ export class PremiereProResources {
       '',
       '## Before you start',
       '- The CEP bridge panel must be open in Premiere (Window > Extensions > MCP Bridge (CEP)), started,',
-      '  and pointed at /tmp/premiere-mcp-bridge. If tools time out, the bridge is not running.',
+      `  and pointed at ${DEFAULT_BRIDGE_TEMP_DIR}. If tools time out, the bridge is not running.`,
       '- Call get_premiere_state or ping first to confirm the connection.',
       '- Call list_sequences or get_active_sequence to orient before editing.',
       '',
@@ -1327,7 +1362,7 @@ export class PremiereProResources {
       '',
       '## Bridge setup (if tools time out)',
       '1. In Premiere: Window > Extensions > MCP Bridge (CEP)',
-      '2. Set Temp Directory to /tmp/premiere-mcp-bridge',
+      `2. Set Temp Directory to ${DEFAULT_BRIDGE_TEMP_DIR}`,
       '3. Click Start Bridge',
       '4. Confirm with ping or verify_premiere_connection',
     ].join('\n');

@@ -33,10 +33,21 @@ Use this order:
 2. Rebuild with `npm run build`.
 3. If you changed `cep-plugin/bridge-cep.js`, reload the panel in Premiere Pro.
 4. Run tests with `npm test -- --runInBand`.
-5. Run a live sweep against a scratch project with `node scripts/live-tool-sweep.mjs`.
-6. Update docs if behavior or setup changed.
+5. Run a live sweep against a scratch project with `node scripts/live-tool-sweep.mjs`, or
+   `node scripts/live-smoke-sweep.mjs` for the catalogue-wide read-only pass. Close every other
+   project first: the sweep refuses to run while a second project is open, because a tool call
+   that omits an explicit target could land on it.
+6. Commit the sweep's ledger entry from `verification/sweeps/` and regenerate the summary with
+   `npm run verify:report`. `npm run verify:report:check` fails when the summary and the ledger
+   disagree, so `docs/LIVE-VERIFICATION.md` is never written by hand.
+7. Update docs if behavior or setup changed.
+8. If you added or removed tools, re-measure the suite axis with `npm run coverage:tools:measure`
+   and commit `verification/test-coverage.json` plus the regenerated `docs/TOOL-COVERAGE.md`.
+   `npm run coverage:tools:check` fails when they disagree. That document is how many tools
+   nothing has ever run, measured by instrumenting the dispatcher — not by grepping for names.
 
 Do not ship a new tool that has only been schema-validated if it claims to perform a real edit.
+"Verified live" is not a sentence you write — it is a file a sweep wrote. See `verification/README.md`.
 
 ## Project Layout
 
@@ -44,9 +55,16 @@ Do not ship a new tool that has only been schema-validated if it claims to perfo
 src/
   index.ts                MCP server entry point
   bridge/index.ts         File-based bridge and shared helpers
-  tools/index.ts          Tool catalog and implementations
+  tools/index.ts          PremiereProTools: the dispatcher, the meta/introspection tools,
+                          and the last link of the domain class chain
+  tools/catalogue.ts      Tool registrations (name, description, input schema)
+  tools/domains/          One class per tool domain, chained by inheritance:
+                          base.ts holds the shared state and pure helpers, and each domain
+                          file extends the previous one. Add a tool implementation to the
+                          domain file it belongs to, not to index.ts.
   resources/index.ts      MCP resources
   prompts/index.ts        MCP prompts
+  verification/ledger.ts  Schema for the live-verification ledger and the report renderer
   utils/                  Shared helpers
 
 cep-plugin/
@@ -60,7 +78,15 @@ scripts/
   doctor-macos.sh         local installation verifier
   doctor-windows.ps1      Windows installation verifier
   uninstall-macos.sh      macOS uninstall helper
-  live-tool-sweep.mjs     end-to-end live tool verifier
+  uninstall-windows.ps1   Windows uninstall helper
+  reset-scratch.mjs       rebuild the disposable fixture project from synthesised media
+  live-tool-sweep.mjs     end-to-end live tool verifier (the execution census)
+  live-smoke-sweep.mjs    faster read-mostly sweep; --mutate opts into write tools
+  live-verify-honesty.mjs re-asks the real host the claims a mock cannot answer
+  live-verify-cleanup.mjs in-place restore of the fixture after the verifier
+  live-verify-tier1.mjs   read-only Tier-1 / footage-index verifier
+  lib/
+    require-scratch-project.mjs  shared guard: refuse to mutate a non-scratch project
 ```
 
 ## Tool Design Rules
@@ -100,15 +126,23 @@ Minimum bar before merging:
 Release bar:
 
 - `npm run setup:doctor`
+- `node scripts/reset-scratch.mjs`
 - `node scripts/live-tool-sweep.mjs`
+- `node scripts/live-verify-honesty.mjs`, then `node scripts/live-verify-cleanup.mjs`
 
-The live sweep is intentionally mutating. Use a disposable project because it creates `Sweep ...` sequences and imports generated assets.
+### The live harnesses mutate the open project
+
+They create `Sweep ...` sequences, import generated assets, add markers and delete sequences. Open the disposable fixture first, never an edit you care about.
+
+Every mutating harness calls `requireScratchProject()` from [scripts/lib/require-scratch-project.mjs](scripts/lib/require-scratch-project.mjs), which refuses any project whose name does not read as disposable and exits rather than warning. `src/__tests__/platform/live-harness-guards.test.ts` pins that each of them still calls it — add a new mutating harness to that list when you write one.
+
+The guard is a backstop, not permission to be careless. It matches on the project NAME, so a real project that happens to be called `colour_test` passes it.
 
 ## Editing the CEP Bridge
 
 The CEP code is loaded directly by Premiere and has no build step.
 
-If you change [bridge-cep.js](/Users/hetpatel/Desktop/Adobe_Premiere_Pro_MCP/Adobe_Premiere_Pro_MCP/Adobe_Premiere_Pro_MCP/cep-plugin/bridge-cep.js):
+If you change [cep-plugin/bridge-cep.js](cep-plugin/bridge-cep.js):
 
 1. Re-run `npm run setup:mac`, or manually copy the updated file into the installed extension.
 2. Right-click the Premiere panel and choose `Reload`, or restart Premiere Pro.

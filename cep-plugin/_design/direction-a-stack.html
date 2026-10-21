@@ -437,7 +437,7 @@ var HIST_ERR=[
 ];
 var LOG_OK=[
   ['info','Bridge started · polling /tmp/premiere-mcp-bridge every 250ms'],
-  ['info','Premiere Pro 26.3.1 · project graveyard_chase.prproj'],
+  ['info','Premiere Pro 26.3.1 · project feature_cut.prproj'],
   ['info','add_to_timeline verified:true (412ms)']
 ];
 var LOG_ERR=[
@@ -473,7 +473,7 @@ var STATES={
   },
   'connected-idle':{
     level:'good', icon:'i-good', title:'Bridge live · idle',
-    server:{icon:'i-good',text:'Premiere ready · graveyard_chase.prproj'},
+    server:{icon:'i-good',text:'Premiere ready · feature_cut.prproj'},
     control:'stop', temp:'/tmp/premiere-mcp-bridge',
     tiles:[
       {l:'Queue depth',v:'0',spark:QUE,delta:{dir:'flat',t:'no backlog'}},
@@ -486,7 +486,7 @@ var STATES={
   },
   'processing':{
     level:'good', icon:'i-good', title:'Bridge live · executing',
-    server:{icon:'i-good',text:'Premiere ready · graveyard_chase.prproj'},
+    server:{icon:'i-good',text:'Premiere ready · feature_cut.prproj'},
     now:{cmd:'export_sequence',elapsed:'2.1s'},
     control:'stop', temp:'/tmp/premiere-mcp-bridge',
     tiles:[

@@ -20,9 +20,10 @@
  *    `reset-scratch.mjs` guarantees this and fails loudly if an offline item survives.
  */
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { SCRATCH_PROBE, driftReason } from './require-scratch-project.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
@@ -35,12 +36,20 @@ const HEARTBEAT = join(TEMP_DIR, 'bridge-heartbeat.json');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (msg) => process.stdout.write(`[recovery] ${msg}\n`);
 
-/** Run the dependency-free sentinel and return its verdict object. */
+/**
+ * Run the dependency-free sentinel and return its verdict object.
+ *
+ * This process's pid is passed down so the sentinel does not count us as a competing client. Every
+ * caller of this module runs a bridge in-process, which holds a `client-<pid>.json` slot, and
+ * without the exclusion every verdict came back contended and recovery refused unconditionally.
+ * Excluding ourselves is only sound because spawnSync blocks our event loop for the whole probe, so
+ * our own bridge cannot touch the directory while the sentinel is reading it.
+ */
 export function probeEngine(timeoutMs = 12_000) {
   const out = spawnSync(
     process.execPath,
     [join(REPO, 'scripts', 'engine-sentinel.mjs'), '--json', `--timeout=${timeoutMs}`],
-    { encoding: 'utf8', env: { ...process.env, PREMIERE_TEMP_DIR: TEMP_DIR } },
+    { encoding: 'utf8', env: { ...process.env, PREMIERE_TEMP_DIR: TEMP_DIR, PREMIERE_MCP_SENTINEL_PARENT_PID: String(process.pid) } },
   );
   try {
     return JSON.parse(String(out.stdout).trim().split('\n').pop());
@@ -49,12 +58,115 @@ export function probeEngine(timeoutMs = 12_000) {
   }
 }
 
-function heartbeatAgeMs() {
-  try {
-    return Date.now() - Number(JSON.parse(readFileSync(HEARTBEAT, 'utf8')).ts);
-  } catch {
-    return Infinity;
+/**
+ * Why a verdict must not lead to Escape or a restart, or null when acting on it is allowed.
+ *
+ * Pure, so the policy can be tested without a host. Three refusals:
+ *   - CONTENDED: another live client shares the directory and the verdict is one a peer can fake.
+ *   - RESPONSE_LOST: the panel answered and something removed the answer. The engine is alive.
+ *   - BUSY on a command this process did not issue. Escape goes to whatever app is frontmost, so
+ *     it can cancel another client's export or a user's dialog, and a restart kills their work.
+ *     BUSY on a command we DID issue is our own wedge — the modal case Escape exists for — so
+ *     `ownsCommand` decides; without one, every BUSY is treated as somebody else's.
+ *
+ * @param {{ state: string, contendedBy?: number[], busyWith?: string }} verdict
+ * @param {(id: string) => boolean} [ownsCommand]
+ * @returns {string|null}
+ */
+export function recoveryRefusal(verdict, ownsCommand) {
+  if (!verdict || verdict.state === 'HEALTHY') return null;
+  if (verdict.state === 'RESPONSE_LOST') {
+    return 'Refusing to Escape or restart Premiere: the probe\'s command vanished without a response, '
+      + 'which means the panel answered and another client removed the files. The engine is not dead. '
+      + `${verdict.detail ?? ''}`.trim();
   }
+  if (verdict.state === 'BUSY') {
+    const busyWith = verdict.busyWith ?? null;
+    if (busyWith && typeof ownsCommand === 'function' && ownsCommand(busyWith)) return null;
+    return `Refusing to Escape or restart Premiere: the panel is busy on command ${busyWith ?? '(unnamed)'}, `
+      + 'which this process did not issue. It belongs to another client (an agent session, a second '
+      + 'server, or the user), and pressing Escape or force-quitting would cancel that work. Re-run '
+      + 'when the panel is idle.';
+  }
+  if (verdict.contendedBy?.length) {
+    return `Host looks ${verdict.state}, but ${verdict.contendedBy.length} other bridge client(s) `
+      + `(pid ${verdict.contendedBy.join(', ')}) share this temp directory, which can fake that `
+      + 'verdict. Refusing to restart Premiere. Re-run with no other client attached to get a '
+      + 'trustworthy reading.';
+  }
+  // Fail closed on everything else. Only a reading that positively says the host is wedged on
+  // our own work justifies a keystroke or a restart; SENTINEL_ERROR means health is UNKNOWN (the
+  // sentinel crashed or printed something unparseable), and an unrecognised state is the same.
+  // Treating either as "dead" force-quit a host nobody had shown to be broken.
+  if (verdict.state === 'ENGINE_DEAD' || verdict.state === 'PANEL_DEAD' || verdict.state === 'BUSY') return null;
+  return `Refusing to Escape or restart Premiere: host health is unknown (${verdict.state}). `
+    + `${verdict.detail ?? ''}`.trim();
+}
+
+/**
+ * Remember every command id this process's bridge publishes, so a BUSY verdict can be attributed.
+ *
+ * The heartbeat names the command the panel is inside, and the only way to know whether that is
+ * ours is to have seen the id go out. Both transports (socket and file IPC) go through the bridge's
+ * publishCommand, so wrapping that one method sees every id. If the method is ever renamed the
+ * wrapper installs nothing and the predicate owns nothing, which degrades to "every BUSY is
+ * somebody else's" — the refusing direction — instead of silently trusting a guess.
+ *
+ * @param {object} bridge an initialised PremiereProBridge
+ * @param {number} [keep] how many recent ids to remember
+ * @returns {(id: string) => boolean}
+ */
+export function trackOwnCommands(bridge, keep = 64) {
+  const seen = [];
+  const original = bridge && bridge.publishCommand;
+  if (typeof original !== 'function') {
+    log('cannot see this bridge\'s command ids; every BUSY verdict will be treated as another client\'s');
+    return () => false;
+  }
+  bridge.publishCommand = function trackedPublishCommand(commandId, ...rest) {
+    seen.push(String(commandId));
+    if (seen.length > keep) seen.shift();
+    return original.call(this, commandId, ...rest);
+  };
+  return (id) => seen.includes(String(id));
+}
+
+/**
+ * The ExtendScript that saves the active project only if it is still the one that was verified.
+ *
+ * Re-checked inside the host, in the same script as the save, so the project cannot change between
+ * the node-side verification and the save itself.
+ *
+ * @param {string} expectedPath the exact `app.project.path` string the verification accepted
+ */
+export function guardedSaveScript(expectedPath) {
+  return `(function(){
+  try {
+    if (!app.projects || app.projects.numProjects !== 1) return JSON.stringify({ saved: false, reason: 'open project count changed' });
+    if (String(app.project.path) !== ${JSON.stringify(String(expectedPath))}) return JSON.stringify({ saved: false, reason: 'active project changed' });
+    app.project.save();
+    return JSON.stringify({ saved: true });
+  } catch (e) { return JSON.stringify({ saved: false, reason: String(e) }); }
+})();`;
+}
+
+/** The project recovery is allowed to save: the caller's pinned one, else the repo scratch file. */
+function savePin(pinned) {
+  if (pinned?.realpath) return pinned;
+  try { return { realpath: realpathSync(SCRATCH_PROJECT) }; } catch { return null; }
+}
+
+function heartbeatTs() {
+  try {
+    return Number(JSON.parse(readFileSync(HEARTBEAT, 'utf8')).ts);
+  } catch {
+    return 0;
+  }
+}
+
+function heartbeatAgeMs() {
+  const ts = heartbeatTs();
+  return ts ? Date.now() - ts : Infinity;
 }
 
 /**
@@ -114,20 +226,51 @@ function pidsOf(pattern) {
  * escalating to SIGKILL from there produces a crash dump and the `UE` state above. Saving first
  * makes the graceful path actually graceful. Nothing here needs the project's contents; it is
  * saved purely so Premiere has no reason to ask a question.
+ *
+ * The save is only made into the VERIFIED scratch project. This used to save whatever was active,
+ * so a run whose target had drifted onto a real cut would write the sweep's edits into it. When the
+ * active project is not the pinned scratch file, this neither saves nor quits: quitting from there
+ * means SIGKILL on unsaved work, which discards it. Returns `{ killed, refused?, reason? }`.
  */
-async function killPremiere({ engineHealthy }) {
+async function killPremiere({ engineHealthy, pinned }) {
   if (engineHealthy) {
     try {
       const { PremiereProBridge } = await import('../../dist/bridge/index.js');
       const bridge = new PremiereProBridge();
       await bridge.initialize();
-      await bridge.executeScript(`(function(){ try { app.project.save(); } catch(e){} return JSON.stringify({saved:true}); })();`);
-      log('project saved, so quitting cannot raise a save prompt');
-    } catch { log('could not save before quitting; continuing'); }
+      const pin = savePin(pinned);
+      const state = await bridge.executeScript(SCRATCH_PROBE);
+      const drift = pin ? driftReason(state, pin) : 'no scratch project was verified for this run';
+      if (drift) {
+        log(`NOT saving and NOT quitting: ${drift}`);
+        return { killed: false, refused: true,
+          reason: `Refusing to save or quit Premiere: ${drift}. Nothing was saved or discarded; `
+            + 'resolve it in Premiere by hand.' };
+      }
+      const saved = await bridge.executeScript(guardedSaveScript(state.path));
+      if (!(saved && saved.saved)) {
+        // The in-host guard refused (the active project changed after driftReason looked) or the
+        // save failed. Either way the open project is not known to be the saved scratch file, and
+        // the quit below escalates to SIGKILL, which would discard its unsaved work.
+        const why = saved?.reason ?? saved?.error ?? 'no answer';
+        log(`NOT quitting: scratch project was not saved (${why})`);
+        return { killed: false, refused: true,
+          reason: `Refusing to quit Premiere: the scratch project could not be saved (${why}). `
+            + 'Nothing was discarded; resolve it in Premiere by hand.' };
+      }
+      log('scratch project saved, so quitting cannot raise a save prompt');
+    } catch (error) {
+      // Same reasoning: an engine that answered the probe but not the verify-and-save leaves us
+      // unable to say what is open, so do not quit it.
+      const why = error instanceof Error ? error.message : String(error);
+      log(`NOT quitting: could not verify and save before quitting (${why})`);
+      return { killed: false, refused: true,
+        reason: `Refusing to quit Premiere: could not verify and save the scratch project (${why}).` };
+    }
     spawnSync('/usr/bin/pkill', ['-f', `MacOS/${PREMIERE_APP}`], { stdio: 'ignore' });
     const soft = Date.now() + 25_000;
     while (Date.now() < soft && !premiereGone()) spawnSync('/bin/sleep', ['1']);
-    if (premiereGone()) { reapCrashReporters(); return true; }
+    if (premiereGone()) { reapCrashReporters(); return { killed: true }; }
     log('graceful quit did not complete — escalating');
   }
 
@@ -138,7 +281,7 @@ async function killPremiere({ engineHealthy }) {
     spawnSync('/bin/sleep', ['1']);
   }
   reapCrashReporters();
-  return premiereGone();
+  return { killed: premiereGone() };
 }
 
 async function launchPremiereWithScratch() {
@@ -155,11 +298,15 @@ async function launchPremiereWithScratch() {
  * arrive on its own no matter how long the timeout is, so waiting passively is indistinguishable
  * from a failed launch.
  */
-async function waitForPanel(timeoutMs = 240_000) {
+async function waitForPanel(timeoutMs = 240_000, notBefore = 0) {
   const deadline = Date.now() + timeoutMs;
   let escapes = 0;
   while (Date.now() < deadline) {
-    if (heartbeatAgeMs() < 8000) return true;
+    // The beacon must be NEWER than the relaunch, not merely recent. The killed panel leaves its
+    // last heartbeat on disk, and if the quit took under 8s that corpse satisfied an age-only
+    // check — so recovery announced "panel heartbeat is live" against a panel that no longer
+    // existed, then spent six probe attempts blaming the engine. Observed 2026-08-31.
+    if (heartbeatTs() > notBefore && heartbeatAgeMs() < 8000) return true;
     // Premiere takes ~45-90s to be interactive; start clearing dialogs after that and keep
     // doing it periodically, since Link Media can appear late in the open sequence.
     if (Date.now() > deadline - timeoutMs + 45_000 && escapes < 12) {
@@ -174,24 +321,47 @@ async function waitForPanel(timeoutMs = 240_000) {
 /**
  * Bring the host back to a known-good state. Returns a result object rather than throwing, so a
  * sweep can record the failure against the tool that caused it and keep going.
+ *
+ * `ownsCommand` attributes a BUSY verdict (see recoveryRefusal); `pinned` is the scratch project the
+ * caller verified, and the only one this is allowed to save before quitting.
  */
-export async function recoverHost({ rebuildFixture = true } = {}) {
+export async function recoverHost({ rebuildFixture = true, ownsCommand, pinned } = {}) {
   const started = Date.now();
   // Ask first: a still-answering engine lets us save and quit cleanly, which avoids both the
   // "Save changes?" modal and the crash dump that SIGKILL leaves behind.
   const pre = probeEngine(6000);
+  // Same refusal as ensureHealthy, repeated on this function's OWN probe because it is also called
+  // directly and it force-quits Premiere unconditionally from here on. The host may have changed
+  // since the caller looked: a panel that has since picked up another client's command reads BUSY
+  // here, and killing it would take that client's work down with it.
+  const refusal = recoveryRefusal(pre, ownsCommand);
+  if (refusal) {
+    return { recovered: false, contended: true, busy: pre.state === 'BUSY', elapsedMs: Date.now() - started, error: refusal };
+  }
   log(`recovering: host is ${pre.state}; quitting Premiere`);
-  const killed = await killPremiere({ engineHealthy: pre.state === 'HEALTHY' });
-  if (!killed) {
+  const kill = await killPremiere({ engineHealthy: pre.state === 'HEALTHY', pinned });
+  if (kill.refused) {
+    return { recovered: false, refused: true, elapsedMs: Date.now() - started, error: kill.reason };
+  }
+  if (!kill.killed) {
     return { recovered: false, elapsedMs: Date.now() - started, error: 'Premiere would not exit even after SIGKILL.' };
   }
 
   await sleep(3000);
   log(`relaunching with ${SCRATCH_PROJECT}`);
+  const relaunchedAt = Date.now();
   await launchPremiereWithScratch();
 
-  if (!(await waitForPanel())) {
-    return { recovered: false, elapsedMs: Date.now() - started, error: 'Panel never produced a heartbeat after relaunch (a modal may still be up).' };
+  if (!(await waitForPanel(240_000, relaunchedAt))) {
+    return {
+      recovered: false,
+      elapsedMs: Date.now() - started,
+      // Naming the manual step matters: the CEP panel does NOT come back on its own unless
+      // Premiere restores it with the workspace, so an operator reading "never produced a
+      // heartbeat" otherwise goes looking for a modal that is not there.
+      error: 'Panel never produced a heartbeat after relaunch. Either a modal is still up, or the '
+        + 'CEP panel did not reopen — it is a manual step: Window > Extensions > MCP Bridge (CEP).',
+    };
   }
   log('panel heartbeat is live; confirming the engine executes');
 
@@ -200,7 +370,10 @@ export async function recoverHost({ rebuildFixture = true } = {}) {
   for (let attempt = 0; attempt < 6; attempt++) {
     verdict = probeEngine();
     if (verdict.state === 'HEALTHY') break;
-    pressEscape(1);
+    // Another client can start using the relaunched host before we do. Any refusable reading —
+    // busy on its command, contended, a vanished response, unknown health — means Escape could
+    // land on that work, so wait instead of pressing it.
+    if (!recoveryRefusal(verdict, ownsCommand)) pressEscape(1);
     await sleep(5000);
   }
   if (!verdict || verdict.state !== 'HEALTHY') {
@@ -229,13 +402,27 @@ export async function recoverHost({ rebuildFixture = true } = {}) {
  * which is data no other Premiere bridge collects because nobody else can afford to.
  */
 export async function ensureHealthy(culprit, state) {
-  const verdict = probeEngine(state.probeTimeoutMs ?? 12_000);
+  let verdict = probeEngine(state.probeTimeoutMs ?? 12_000);
   if (verdict.state === 'HEALTHY') return { ok: true, verdict };
 
+  // One patient re-probe for BUSY: plenty of legitimate host calls outlive a single probe window.
+  // The latest reading is the one acted on below, so a panel that has moved on is judged as it is
+  // now rather than as it was five seconds ago.
   if (verdict.state === 'BUSY') {
     await sleep(5000);
-    const second = probeEngine(20_000);
-    if (second.state === 'HEALTHY') return { ok: true, verdict: second };
+    verdict = probeEngine(20_000);
+    if (verdict.state === 'HEALTHY') return { ok: true, verdict };
+  }
+
+  // REFUSE BEFORE ESCAPE, NOT AFTER. Escape is a keystroke to the frontmost application, not to
+  // Premiere's scripting host, so on a host somebody else is using it can cancel their export or
+  // dismiss their dialog. Three verdicts say "somebody else is using it": BUSY on a command we did
+  // not issue, a contended reading, and a vanished response. Force-quitting is worse still — on
+  // 2026-08-31 a contended verdict closed the user's open project on a host that was answering tools
+  // normally — so none of the three is grounds for either action.
+  const refusal = recoveryRefusal(verdict, state.ownsCommand);
+  if (refusal) {
+    return { ok: false, verdict, contended: true, busy: verdict.state === 'BUSY', error: refusal };
   }
 
   // ESCAPE FIRST, KILL SECOND. Most apparent engine deaths are a native modal holding the
@@ -253,6 +440,12 @@ export async function ensureHealthy(culprit, state) {
     process.stdout.write(`\n[recovery] "${culprit}" left a modal up; Escape cleared it (no restart needed)\n`);
     return { ok: true, verdict: afterEscape, clearedModal: true };
   }
+  // The same refusal again on the post-Escape reading: the host may now be answering another
+  // client, and that is not a host to restart.
+  const refusalAfterEscape = recoveryRefusal(afterEscape, state.ownsCommand);
+  if (refusalAfterEscape) {
+    return { ok: false, verdict: afterEscape, contended: true, busy: afterEscape.state === 'BUSY', error: refusalAfterEscape };
+  }
 
   state.recoveries = state.recoveries || [];
   if (state.recoveries.length >= (state.maxRecoveries ?? 5)) {
@@ -261,7 +454,7 @@ export async function ensureHealthy(culprit, state) {
   }
 
   process.stdout.write(`\n[recovery] host is ${verdict.state} after "${culprit}" — recovering\n`);
-  const result = await recoverHost();
+  const result = await recoverHost({ ownsCommand: state.ownsCommand, pinned: state.pinned });
   state.recoveries.push({ culprit, verdictBefore: verdict.state, detail: verdict.detail, ...result });
   return { ok: result.recovered, verdict, recovery: result };
 }

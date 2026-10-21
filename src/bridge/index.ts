@@ -41,6 +41,19 @@ const HEARTBEAT_STALE_MS = 4000;
 // server is willing to declare the panel dead.
 const HEARTBEAT_GRACE_MS = 3000;
 
+// The temp directory is SHARED by every bridge client pointed at it. Each server instance
+// announces itself with `client-<pid>.json` so a peer's startup sweep can tell "abandoned by a
+// crashed session" from "in flight for a process that is still running". Without this, the sweep
+// deletes a live peer's command and response files, and the victim reports a dead ExtendScript
+// engine on a completely healthy host.
+const CLIENT_FILE_PREFIX = 'client-';
+// A client file whose process is gone is worthless; one that has not been touched in this long is
+// treated as abandoned even if some unrelated process now holds that pid.
+const CLIENT_STALE_MS = 120_000;
+// How recent a command/response file must be to be presumed in flight for a live peer. Longer than
+// the 60s default command timeout, with room for the slow export/render paths that raise it.
+const FOREIGN_FILE_GRACE_MS = 300_000;
+
 interface BridgeHeartbeat {
   ageMs: number;
   connected: boolean;
@@ -650,6 +663,8 @@ export class PremiereProBridge implements PremiereProTransport {
   private readonly usesExternalTempDir: boolean;
   private uxpProcess?: ChildProcess;
   private isInitialized = false;
+  /** Keeps `client-<pid>.json` fresh so peers can tell this process apart from a crashed one. */
+  private clientBeacon: NodeJS.Timeout | null = null;
   private sessionId: string;
   /** Per-session token the panel must echo on every command. Null when it could not be written. */
   private authToken: string | null = null;
@@ -719,32 +734,71 @@ export class PremiereProBridge implements PremiereProTransport {
    * Its real jobs are to block BLIND writes into the directory, to keep two concurrent server
    * instances from consuming each other's commands, and to make the trust boundary explicit. The
    * protection against other users is the 0700 directory and the ownership check, not the token.
+   *
+   * ON WINDOWS THAT MODE IS NOT ENFORCED, so the sentence above describes macOS only. NTFS stores
+   * no POSIX mode: both the 0700 directory and the 0600 token file are inert, and the ownership
+   * check is skipped because process.getuid does not exist there. The token is protected only by
+   * the ACL the directory inherited. scripts/install-windows.ps1 restricts that ACL and
+   * scripts/doctor-windows.ps1 verifies it; a server started without those having run has no
+   * equivalent protection. See docs/WINDOWS-PARITY.md section 2.
    */
   private async setupTempDirectory(): Promise<void> {
     try {
       await fs.mkdir(this.tempDir, { recursive: true, mode: 0o700 });
-      // mkdir's mode is ignored for an existing directory, so assert it every time.
-      try {
-        const stats = await fs.stat(this.tempDir);
-        if (stats.uid !== process.getuid?.()) {
-          throw new Error(
-            `Refusing to use ${this.tempDir}: it is owned by uid ${stats.uid}, not by this process (uid ${process.getuid?.()}). ` +
-            'A directory owned by someone else can feed arbitrary ExtendScript into Premiere.',
-          );
+      // POSIX only. mkdir's mode is ignored for an existing directory, so assert it every
+      // time -- but only where a mode and a uid mean something.
+      //
+      // The gate is the presence of a uid, not the platform name, because that is the thing
+      // the comparison actually needs. On Windows process.getuid does not exist and
+      // fs.Stats.uid is always 0, so this read `0 !== undefined`: always true. It threw
+      // before the bridge ever reached Premiere, which made every tool in the catalogue
+      // unreachable on Windows. Any other runtime without getuid failed the same way, and
+      // "I cannot verify the owner" is not the same claim as "the owner is wrong".
+      const processUid = process.getuid?.();
+      if (processUid !== undefined) {
+        try {
+          const stats = await fs.stat(this.tempDir);
+          if (stats.uid !== processUid) {
+            throw new Error(
+              `Refusing to use ${this.tempDir}: it is owned by uid ${stats.uid}, not by this process (uid ${processUid}). ` +
+              'A directory owned by someone else can feed arbitrary ExtendScript into Premiere.',
+            );
+          }
+          const mode = stats.mode & 0o777;
+          if (mode !== 0o700) {
+            await fs.chmod(this.tempDir, 0o700);
+            this.logger.warn(`Tightened ${this.tempDir} from mode ${mode.toString(8)} to 700`);
+          }
+        } catch (statError) {
+          // An ownership mismatch must abort; a stat/chmod failure for any other reason should not
+          // take the bridge down, since the directory may still be perfectly usable.
+          if (statError instanceof Error && statError.message.startsWith('Refusing to use')) throw statError;
+          this.logger.warn(`Could not verify temp directory permissions: ${statError}`);
         }
-        const mode = stats.mode & 0o777;
-        if (mode !== 0o700) {
-          await fs.chmod(this.tempDir, 0o700);
-          this.logger.warn(`Tightened ${this.tempDir} from mode ${mode.toString(8)} to 700`);
-        }
-      } catch (statError) {
-        // An ownership mismatch must abort; a stat/chmod failure for any other reason should not
-        // take the bridge down, since the directory may still be perfectly usable.
-        if (statError instanceof Error && statError.message.startsWith('Refusing to use')) throw statError;
-        this.logger.warn(`Could not verify temp directory permissions: ${statError}`);
+      } else if (process.platform === 'win32') {
+        // NTFS stores no POSIX mode, so the 0o700 above did nothing and a chmod here would
+        // only toggle the read-only attribute. Saying so is the honest move: the previous
+        // code logged `Tightened <dir> ... to 700` for an operation that cannot happen on
+        // this platform. The directory and auth-token.json are protected by the ACL the
+        // directory inherited and by nothing else -- scripts/install-windows.ps1 restricts
+        // it and scripts/doctor-windows.ps1 re-checks it. See docs/WINDOWS-PARITY.md §2.
+        this.logger.warn(
+          `${this.tempDir}: POSIX permissions are not enforced on Windows, so this directory and ` +
+          'auth-token.json are protected only by their inherited NTFS ACL. Run ' +
+          '`npm run setup:doctor:win` to check it.',
+        );
+      } else {
+        // Neither a uid nor a documented alternative: report the gap rather than imply a
+        // check happened.
+        this.logger.warn(
+          `${this.tempDir}: this runtime exposes no process.getuid, so the directory's owner ` +
+          'could not be verified and its permissions were not asserted.',
+        );
       }
 
       await this.sweepStaleCommands();
+      // Announce AFTER sweeping, so this instance never has to reason about its own beacon.
+      await this.announceClient();
       await this.writeAuthToken();
       // After the token, never before: the socket publishes that same token in its endpoint file,
       // so binding first would advertise a port with a null token and force the panel to reconnect.
@@ -764,26 +818,114 @@ export class PremiereProBridge implements PremiereProTransport {
    * when Premiere next starts. Orphaned `response-*` and `.tmp-*` files go too — a stale response
    * could satisfy a future command that reuses its id (astronomically unlikely with UUIDs, but
    * free to rule out).
+   *
+   * SCOPED BY PEER LIVENESS, because the temp directory is SHARED and we are not necessarily its
+   * only client. This used to delete every matching file unconditionally, which meant starting a
+   * second client silently destroyed the first one's in-flight command and response files. The
+   * victim then saw its command consumed and never answered — indistinguishable from a dead
+   * ExtendScript engine.
+   *
+   * That is not hypothetical: on 2026-08-31 a harness pre-flight reported ENGINE_DEAD, and the
+   * recovery it triggered force-quit a perfectly healthy Premiere and closed the open project.
+   *
+   * So: with no live peer, sweep everything (the original behaviour, and the common case). With a
+   * live peer, spare anything young enough to still be in flight for it. A crashed session's
+   * leftovers are older than any command timeout, so the original purpose survives either way.
    */
   private async sweepStaleCommands(): Promise<void> {
     try {
       const entries = await fs.readdir(this.tempDir);
-      const stale = entries.filter((name) =>
+      const peers = await this.livePeers(entries);
+      const candidates = entries.filter((name) =>
         (name.startsWith('command-') && name.endsWith('.json')) ||
         (name.startsWith('response-') && name.endsWith('.json')) ||
         name.startsWith('.tmp-'));
-      for (const name of stale) {
-        try { await fs.unlink(join(this.tempDir, name)); } catch { /* another instance won the race */ }
+
+      const swept: string[] = [];
+      const spared: string[] = [];
+      for (const name of candidates) {
+        const path = join(this.tempDir, name);
+        if (peers.length > 0) {
+          let ageMs = Infinity;
+          try {
+            ageMs = Date.now() - (await fs.stat(path)).mtimeMs;
+          } catch {
+            continue; // vanished under us; nothing to do
+          }
+          if (ageMs < FOREIGN_FILE_GRACE_MS) { spared.push(name); continue; }
+        }
+        try { await fs.unlink(path); swept.push(name); } catch { /* another instance won the race */ }
       }
-      if (stale.length > 0) {
+
+      if (swept.length > 0) {
         this.logger.warn(
-          `Swept ${stale.length} leftover command/response file(s) from ${this.tempDir}. ` +
+          `Swept ${swept.length} leftover command/response file(s) from ${this.tempDir}. ` +
           'A stale command file would have executed when the panel next started.',
+        );
+      }
+      if (peers.length > 0) {
+        // Worth saying out loud even when nothing was spared: a shared panel means any health
+        // verdict derived from round-tripping a file through this directory can be another
+        // client's race rather than a real fault.
+        this.logger.warn(
+          `Another bridge client is live on ${this.tempDir} (pid ${peers.join(', ')})` +
+          (spared.length > 0 ? `; left ${spared.length} recent file(s) alone` : '') +
+          '. The panel is shared, so file round-trip health probes (scripts/engine-sentinel.mjs) ' +
+          'can report a dead engine for a healthy host.',
         );
       }
     } catch (error) {
       this.logger.warn(`Could not sweep stale commands: ${error}`);
     }
+  }
+
+  /**
+   * Publish `client-<pid>.json` and keep it fresh, so a peer's startup sweep spares our in-flight
+   * files. Best effort by design: failing to announce must not stop the bridge from working, it
+   * only costs us the protection above.
+   */
+  private async announceClient(): Promise<void> {
+    const path = join(this.tempDir, `${CLIENT_FILE_PREFIX}${process.pid}.json`);
+    const touch = async () => {
+      try {
+        await fs.writeFile(path, JSON.stringify({
+          pid: process.pid, sessionId: this.sessionId, ts: Date.now(),
+        }), { mode: 0o600 });
+      } catch { /* best effort */ }
+    };
+    await touch();
+    // Comfortably inside CLIENT_STALE_MS so a busy event loop cannot make us look abandoned.
+    this.clientBeacon = setInterval(touch, 30_000);
+    this.clientBeacon.unref?.();
+  }
+
+  /**
+   * Other bridge servers currently sharing this temp directory, by pid.
+   *
+   * Liveness is `kill(pid, 0)` rather than file age alone: a peer that is merely idle still owns
+   * its in-flight files, and a peer that crashed stops owning them the instant it dies. The age
+   * check only guards against a pid that has since been recycled by an unrelated process.
+   */
+  private async livePeers(entries: string[]): Promise<number[]> {
+    const alive: number[] = [];
+    for (const name of entries) {
+      if (!name.startsWith(CLIENT_FILE_PREFIX) || !name.endsWith('.json')) continue;
+      const pid = Number(name.slice(CLIENT_FILE_PREFIX.length, -'.json'.length));
+      if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) continue;
+      const path = join(this.tempDir, name);
+      try {
+        if (Date.now() - (await fs.stat(path)).mtimeMs > CLIENT_STALE_MS) {
+          await fs.unlink(path).catch(() => {});
+          continue;
+        }
+        process.kill(pid, 0);
+        alive.push(pid);
+      } catch {
+        // ESRCH (process gone) or the file vanished — either way it is not a live peer.
+        await fs.unlink(path).catch(() => {});
+      }
+    }
+    return alive;
   }
 
   /** Our own token file — exclusively ours, so we can delete it on exit without a race. */
@@ -2426,6 +2568,15 @@ export class PremiereProBridge implements PremiereProTransport {
     // in place and reject a live one. This is symmetric with the socket transport retiring
     // bridge-endpoint.json above; the asymmetry was the bug.
     await this.retireAuthToken();
+
+    // Retire the peer beacon for the same reason the token and endpoint files are retired: a
+    // leftover beacon makes the next client spare files nobody owns, which reintroduces exactly
+    // the stale-command execution this sweep exists to prevent.
+    if (this.clientBeacon) {
+      clearInterval(this.clientBeacon);
+      this.clientBeacon = null;
+    }
+    await fs.unlink(join(this.tempDir, `${CLIENT_FILE_PREFIX}${process.pid}.json`)).catch(() => {});
 
     // Only remove temp dirs created by this server. The shared bridge directory is
     // configured externally and should persist across restarts.
