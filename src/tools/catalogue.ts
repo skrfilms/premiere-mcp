@@ -1512,7 +1512,7 @@ export function buildToolCatalogue(): MCPTool[] {
       },
       {
         name: 'move_clip',
-        description: 'Moves a clip along the timeline, keeping it on its current track. To move a clip to a different track, use move_clip_to_track: on this Premiere build that is a remove-and-reinsert, which can overwrite whatever occupies the destination and gives the clip a new id, so it is deliberately a separate call rather than an option here.',
+        description: 'Moves a clip along the timeline, keeping it on its current track. To move a clip to a different track, use move_clip_to_track: on this Premiere build that is a reinsert that gives the clip a new id and refuses an occupied destination unless overwrite:true, so it is deliberately a separate call rather than an option here.',
         inputSchema: z.object({
           clipId: z.string().describe('The ID of the clip to move'),
           newTime: z.number().describe('The new time position in seconds')

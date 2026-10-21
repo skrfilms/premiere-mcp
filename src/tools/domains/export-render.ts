@@ -801,6 +801,8 @@ export class ExportRenderTools extends PlaybackTools {
 
   private async defaultEncoderPresetDirectories(): Promise<string[]> {
     const baseDirs = [
+      // Where AME saves user presets on both macOS and Windows.
+      join(homedir(), 'Documents', 'Adobe', 'Adobe Media Encoder'),
       join(homedir(), 'Library', 'Application Support', 'Adobe', 'Common', 'AME'),
     ];
     if (process.env.APPDATA) {

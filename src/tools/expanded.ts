@@ -2354,21 +2354,106 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           if (!args.clipId && !args.node_id && !args.nodeId) return fail("move_clip_to_track requires clipId.");
           var moveTrackClip = findClip(args.clipId || args.node_id || args.nodeId);
           if (!moveTrackClip) return fail(pendingSequenceError || "Clip not found");
-          var moveTrackResult = tryCall(moveTrackClip.clip, ["moveToTrack", "setTrack"], [Number(args.trackIndex || args.newTrackIndex || 0)]);
-          if (moveTrackResult.called) return ok({ moved: true, trackIndex: Number(args.trackIndex || args.newTrackIndex || 0), method: moveTrackResult.method });
           var moveTargetIndex = Number(args.trackIndex || args.newTrackIndex || 0);
-          var moveStart = valueOfTime(moveTrackClip.clip.start);
-          var moveItem = moveTrackClip.clip.projectItem;
-          if (!moveItem) return fail("Clip has no projectItem for move fallback");
           if (moveTrackClip.trackType === "video" && moveTargetIndex >= moveTrackClip.sequence.videoTracks.numTracks) return fail("Target video track out of range");
           if (moveTrackClip.trackType === "audio" && moveTargetIndex >= moveTrackClip.sequence.audioTracks.numTracks) return fail("Target audio track out of range");
-          var beforeTargetCount = moveTrackClip.trackType === "video" ? moveTrackClip.sequence.videoTracks[moveTargetIndex].clips.numItems : moveTrackClip.sequence.audioTracks[moveTargetIndex].clips.numItems;
+          if (moveTargetIndex === moveTrackClip.trackIndex) {
+            return ok({ moved: true, changed: false, trackIndex: moveTargetIndex, method: "already on requested track", clipId: moveTrackClip.clip.nodeId });
+          }
+          var moveItem = moveTrackClip.clip.projectItem;
+          if (!moveItem) return fail("Clip has no projectItem for move fallback");
+          var allowOverwrite = Boolean(args.overwrite);
+          var moveStart = valueOfTime(moveTrackClip.clip.start);
+          var moveEnd = valueOfTime(moveTrackClip.clip.end);
+          var moveDur = moveEnd - moveStart;
+          var moveIn = valueOfTime(moveTrackClip.clip.inPoint);
+          var moveOut = valueOfTime(moveTrackClip.clip.outPoint);
+          var moveDisabled = false;
+          try { moveDisabled = Boolean(moveTrackClip.clip.disabled); } catch (eDis) {}
+          var destTrack = moveTrackClip.trackType === "video" ? moveTrackClip.sequence.videoTracks[moveTargetIndex] : moveTrackClip.sequence.audioTracks[moveTargetIndex];
+          var occupants = [];
+          var moveLastEnd = 0;
+          for (var oi = 0; oi < destTrack.clips.numItems; oi++) {
+            var other = destTrack.clips[oi];
+            if (other.nodeId === moveTrackClip.clip.nodeId) continue;
+            var otherStart = valueOfTime(other.start);
+            var otherEnd = valueOfTime(other.end);
+            if (otherEnd > moveLastEnd) moveLastEnd = otherEnd;
+            if (moveStart < otherEnd && otherStart < moveEnd) occupants.push(other);
+          }
+          if (occupants.length && !allowOverwrite) {
+            return fail("Destination track is occupied at that time. Pass overwrite:true to replace the occupant, or pick another track/time.", {
+              occupantId: occupants[0].nodeId,
+              occupantName: occupants[0].name,
+              occupantStart: valueOfTime(occupants[0].start),
+              occupantEnd: valueOfTime(occupants[0].end)
+            });
+          }
+          // Nothing is mutated before this point. overwrite:true is the caller's
+          // sanction to clear the span; lift every overlapping occupant without
+          // ripple so the track's timing holds.
+          if (occupants.length) {
+            for (var ori = occupants.length - 1; ori >= 0; ori--) occupants[ori].remove(false, true);
+          }
+          var nativeMove = tryCall(moveTrackClip.clip, ["moveToTrack", "setTrack"], [moveTargetIndex]);
+          if (nativeMove.called) {
+            return ok({ moved: true, trackIndex: moveTargetIndex, method: nativeMove.method, clipId: moveTrackClip.clip.nodeId, clearedOccupants: occupants.length });
+          }
+          // Fallback: overwriteClip lays the projectItem down at its OWN duration,
+          // not the trimmed timeline length, so writing at the destination can
+          // destroy a neighbour past [start, end). Park past the last clip on the
+          // target track (guaranteed empty), restore the trim there, slide into
+          // the verified span, and only then lift the source.
+          var moveParkTime = moveLastEnd + 1.0;
+          var moveCleanupParked = function (parkedClip) {
+            try {
+              if (parkedClip) { parkedClip.remove(false, true); return; }
+            } catch (eClean) {}
+            for (var ci = destTrack.clips.numItems - 1; ci >= 0; ci--) {
+              var leftover = destTrack.clips[ci];
+              try { if (leftover && valueOfTime(leftover.start) > moveLastEnd + 0.5) leftover.remove(false, true); } catch (eSweep) {}
+            }
+          };
+          destTrack.overwriteClip(moveItem, moveParkTime);
+          var placed = null;
+          for (var pi = 0; pi < destTrack.clips.numItems; pi++) {
+            var candidate = destTrack.clips[pi];
+            // By identity, not nearest start: a silent no-op must not hand back a bystander.
+            if (candidate && candidate.projectItem && candidate.projectItem.nodeId === moveItem.nodeId && Math.abs(valueOfTime(candidate.start) - moveParkTime) < 0.2) { placed = candidate; break; }
+          }
+          if (!placed) {
+            moveCleanupParked(null);
+            return fail("Move fallback did not create a clip on the target track; the source clip was left in place.", { clearedOccupants: occupants.length });
+          }
+          // Order the trim so inPoint never transiently exceeds outPoint.
+          try {
+            if (moveIn <= valueOfTime(placed.outPoint)) {
+              placed.inPoint = secondsToTime(moveIn);
+              placed.outPoint = secondsToTime(moveOut);
+            } else {
+              placed.outPoint = secondsToTime(moveOut);
+              placed.inPoint = secondsToTime(moveIn);
+            }
+          } catch (eTrim) {}
+          // In/out alone do not shrink the timeline clip; set duration relative to the PARKED start.
+          try { placed.end = secondsToTime(valueOfTime(placed.start) + moveDur); } catch (eEnd) {}
+          try { placed.disabled = moveDisabled; } catch (eEn) {}
+          var trimRestored = Math.abs(valueOfTime(placed.inPoint) - moveIn) < 0.05 && Math.abs(valueOfTime(placed.outPoint) - moveOut) < 0.05 && Math.abs(valueOfTime(placed.end) - valueOfTime(placed.start) - moveDur) < 0.05;
+          if (!trimRestored) {
+            var placedIn = valueOfTime(placed.inPoint);
+            var placedOut = valueOfTime(placed.outPoint);
+            var placedDur = valueOfTime(placed.end) - valueOfTime(placed.start);
+            moveCleanupParked(placed);
+            return fail("Source trim could not be restored on the target track; the source clip was left in place.", { requestedIn: moveIn, requestedOut: moveOut, requestedDuration: moveDur, actualIn: placedIn, actualOut: placedOut, actualDuration: placedDur, clearedOccupants: occupants.length });
+          }
+          placed.move(moveStart - valueOfTime(placed.start));
+          if (Math.abs(valueOfTime(placed.start) - moveStart) > 0.05) {
+            var placedStart = valueOfTime(placed.start);
+            moveCleanupParked(placed);
+            return fail("Clip could not be slid into the destination span; the source clip was left in place.", { requestedStart: moveStart, actualStart: placedStart, clearedOccupants: occupants.length });
+          }
           moveTrackClip.clip.remove(false, true);
-          if (moveTrackClip.trackType === "video") moveTrackClip.sequence.overwriteClip(moveItem, secondsToTicks(moveStart), moveTargetIndex, 0);
-          else moveTrackClip.sequence.overwriteClip(moveItem, secondsToTicks(moveStart), 0, moveTargetIndex);
-          var afterTargetCount = moveTrackClip.trackType === "video" ? moveTrackClip.sequence.videoTracks[moveTargetIndex].clips.numItems : moveTrackClip.sequence.audioTracks[moveTargetIndex].clips.numItems;
-          if (afterTargetCount <= beforeTargetCount) return fail("Move fallback did not create a clip on the target track", { beforeTargetCount: beforeTargetCount, afterTargetCount: afterTargetCount });
-          return ok({ moved: true, trackIndex: moveTargetIndex, method: "remove+overwriteClip", start: moveStart, beforeTargetCount: beforeTargetCount, afterTargetCount: afterTargetCount });
+          return ok({ moved: true, verified: true, trackIndex: moveTargetIndex, method: "park+trim+slide", start: moveStart, clipId: placed.nodeId, oldClipId: args.clipId || args.node_id || args.nodeId, trimRestored: true, clearedOccupants: occupants.length });
 
         case "remove_all_effects":
           var removeAllNodeId = args.clipId || args.node_id || args.nodeId;
