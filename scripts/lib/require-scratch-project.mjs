@@ -40,8 +40,11 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..
  */
 export const SCRATCH_NAME_PATTERN = /test|scratch|untitled|fixture/i;
 
-/** Read the active project plus the full open set. One round trip, so the two cannot disagree. */
-const PROBE = `(function(){
+/**
+ * Read the active project plus the full open set. One round trip, so the two cannot disagree.
+ * Exported so host recovery can verify the target with the same probe before it saves anything.
+ */
+export const SCRATCH_PROBE = `(function(){
   var out = { count: app.projects ? app.projects.numProjects : -1, open: [] };
   out.name = app.project ? String(app.project.name) : '';
   out.path = app.project ? String(app.project.path) : '';
@@ -68,7 +71,7 @@ function refuse(label, message) {
  * @returns {Promise<{ name: string, path: string, realpath: string }>} the pinned scratch project
  */
 export async function requireScratchProject(bridge, label) {
-  const state = await bridge.executeScript(PROBE);
+  const state = await bridge.executeScript(SCRATCH_PROBE);
 
   // A failed probe is not a pass. Without an answer there is nothing to check, so refuse.
   if (!state || state.success === false || typeof state.count !== 'number' || state.count < 0) {
@@ -142,14 +145,66 @@ export async function requireScratchProject(bridge, label) {
  * @param {string} label harness name, used in the refusal message
  */
 export async function assertStillScratch(bridge, pinned, label) {
-  const state = await bridge.executeScript(PROBE);
+  const { ok, reason } = await checkStillScratch(bridge, pinned);
+  if (!ok) refuse(label, reason);
+}
+
+/**
+ * The same re-check as assertStillScratch, but it reports instead of exiting.
+ *
+ * For a sweep that has results to write when it stops: exiting from inside the guard throws away
+ * the partial report and ledger entry, which are the evidence of how far the run got before the
+ * target moved. The caller MUST stop on `ok: false`; this only changes how it stops.
+ *
+ * @returns {Promise<{ ok: boolean, reason: string|null }>}
+ */
+export async function checkStillScratch(bridge, pinned) {
+  let state;
+  try { state = await bridge.executeScript(SCRATCH_PROBE); } catch (e) { state = { success: false, error: e?.message || String(e) }; }
+  const reason = driftReason(state, pinned);
+  return { ok: reason === null, reason };
+}
+
+/**
+ * Why `state` (an answer to SCRATCH_PROBE) is no longer the pinned project, or null if it still is.
+ * Pure apart from resolving the reported path on disk, so it is testable without a host.
+ *
+ * @param {any} state
+ * @param {{ realpath: string }} pinned
+ * @returns {string|null}
+ */
+export function driftReason(state, pinned) {
   if (!state || state.success === false || typeof state.count !== 'number') {
-    refuse(label, `could not re-read Premiere's open projects to confirm the target had not drifted — ${state && state.error ? state.error : 'no response from Premiere'}.`);
+    return `could not re-read Premiere's open projects to confirm the target had not drifted — ${state && state.error ? state.error : 'no response from Premiere'}.`;
   }
   if (state.count !== 1) {
-    refuse(label, `the number of open projects changed to ${state.count} during the run. The active target is no longer pinned.`);
+    return `the number of open projects changed to ${state.count} during the run. The active target is no longer pinned.`;
   }
-  if (!state.path || !existsSync(state.path) || realpathSync(state.path) !== pinned.realpath) {
-    refuse(label, `the active project drifted mid-run.\n  Expected: ${pinned.realpath}\n  Now:      ${state.path || '(unsaved)'}`);
+  let now = null;
+  try { now = state.path && existsSync(state.path) ? realpathSync(state.path) : null; } catch { now = null; }
+  if (!now || now !== pinned.realpath) {
+    return `the active project drifted mid-run.\n  Expected: ${pinned.realpath}\n  Now:      ${state.path || '(unsaved)'}`;
   }
+  return null;
+}
+
+/** How many tool calls a sweep may make between scratch re-checks. */
+export const SCRATCH_RECHECK_EVERY = 10;
+
+/**
+ * Tools whose names say they can open, close, create or switch a project. Any of them can move
+ * ACTIVE off the scratch file in one call, so the sweep re-checks straight after each rather than
+ * waiting for the periodic check. Deliberately broad: a needless re-check costs one round trip.
+ */
+export const PROJECT_SWITCH_RISK = /project|production|fcp_xml|^open_|^close_|^quit_/;
+
+/**
+ * Whether a sweep should re-pin the scratch project after calling `toolName`.
+ *
+ * @param {string} toolName the tool that just ran
+ * @param {number} callsSinceCheck host calls made since the last successful check, including this one
+ * @param {number} [every]
+ */
+export function needsScratchRecheck(toolName, callsSinceCheck, every = SCRATCH_RECHECK_EVERY) {
+  return PROJECT_SWITCH_RISK.test(String(toolName)) || callsSinceCheck >= every;
 }

@@ -35,6 +35,9 @@ const MUTATING_HARNESSES = [
   'live-tool-sweep.mjs',
   // Had an inline copy of the guard that was missing 'fixture'.
   'live-smoke-sweep.mjs',
+  // Had only a name regex, inline — no path pin and no one-project-open rule — while sweeping
+  // destructive tools.
+  'coverage-sweep.mjs',
 ];
 
 describe('mutating live harnesses are gated on a scratch project', () => {
@@ -70,10 +73,10 @@ describe('the shipped scratch-name pattern', () => {
   })();
 
   it.each([
-    // Real work on this machine. The first is the project that was open while the harnesses ran.
-    'graveyard_chase_v2.prproj',
-    '20260819_SPHE_PC_CUT_V30',
-    'SPHE_008_0080.prproj',
+    // Shaped like real production cuts: a show project, a dated picture cut, and a shot file.
+    'client_feature_v2.prproj',
+    '20260101_SHOW_PC_CUT_V30',
+    'SHOW_008_0080.prproj',
   ])('refuses %s', (name) => {
     expect(pattern.test(name)).toBe(false);
   });
@@ -141,13 +144,13 @@ describe('requireScratchProject (run for real against a fake bridge)', () => {
       count: 2,
       open: [
         { name: 'trowel_scratch.prproj', path: IN_REPO_FILE },
-        { name: 'graveyard_chase_v2.prproj', path: '/Users/somebody/cuts/graveyard_chase_v2.prproj' },
+        { name: 'client_feature_v2.prproj', path: '/Users/somebody/cuts/client_feature_v2.prproj' },
       ],
     }));
     expect(r.status).toBe(2);
     expect(r.stderr).toMatch(/2 projects are open/);
     // The refusal has to name the project at risk, or the operator cannot act on it.
-    expect(r.stderr).toContain('graveyard_chase_v2.prproj');
+    expect(r.stderr).toContain('client_feature_v2.prproj');
   });
 
   it('refuses a scratch-NAMED project whose file lives outside the repo', () => {
@@ -157,7 +160,7 @@ describe('requireScratchProject (run for real against a fake bridge)', () => {
   });
 
   it('refuses an in-repo file carrying a real cut name', () => {
-    const r = runGuard(scratch({ name: 'graveyard_chase_v2.prproj' }));
+    const r = runGuard(scratch({ name: 'client_feature_v2.prproj' }));
     expect(r.status).toBe(2);
     expect(r.stderr).toMatch(/not a scratch project name/);
   });

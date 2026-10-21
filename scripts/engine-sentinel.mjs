@@ -13,16 +13,22 @@
  * when you most want to know whether the host is alive.
  *
  * The classification hinges on one fact the normal timeout path throws away: whether the panel
- * **consumed** the command file. Consumed-but-silent and never-consumed are completely
- * different failures, and only one of them is safe to retry.
+ * PICKED UP the command. The panel does not delete a command file when it starts work on it — it
+ * reads it, names it as `currentCommandId` in the heartbeat, and unlinks it only AFTER the response
+ * has been renamed into place (cep-plugin/bridge-cep.js, processCommandFile). So pickup is read
+ * from the heartbeat, not from the file disappearing, and a command file that disappears without a
+ * response ever appearing is its own verdict: the panel answered and something else took the answer.
  *
- *   HEALTHY      nonce round-tripped; engine executes ExtendScript
- *   ENGINE_DEAD  panel consumed the command, then never answered  -> relaunch Premiere
- *   PANEL_DEAD   command never consumed and heartbeat is stale    -> panel/bridge not running
- *   BUSY         panel is mid-command on something else            -> wait and re-probe
+ *   HEALTHY        nonce round-tripped; engine executes ExtendScript
+ *   ENGINE_DEAD    panel picked up OUR command and is still inside it -> Escape a modal, else relaunch
+ *   PANEL_DEAD     command never picked up and panel not processing   -> panel/bridge not running
+ *   BUSY           panel is mid-command on something else              -> wait and re-probe
+ *   SENTINEL_ERROR internal error, or the panel rejected our token     -> health UNKNOWN
+ *   RESPONSE_LOST  command vanished but no response was ever seen      -> engine answered; a peer
+ *                  sharing the directory removed the files. Never grounds for a restart.
  *
- * Exit codes are the same order (0/1/2/3) so a shell loop can branch on them, plus 4 for an
- * internal error. `--json` prints one machine-readable line.
+ * Exit codes are the same order (0/1/2/3/4/5) so a shell loop can branch on them. `--json` prints
+ * one machine-readable line.
  */
 import { writeFileSync, renameSync, readFileSync, existsSync, unlinkSync, mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -34,6 +40,21 @@ const TEMP_DIR =
   process.env.PREMIERE_TEMP_DIR || process.env.PREMIERE_MCP_TEMP_DIR || '/tmp/premiere-mcp-bridge';
 const HEARTBEAT = join(TEMP_DIR, 'bridge-heartbeat.json');
 const CLIENT_FILE = join(TEMP_DIR, `client-${process.pid}.json`);
+
+/**
+ * The process that spawned this probe, which is never a competing client.
+ *
+ * Every sweep harness runs its own bridge in-process, and that bridge announces itself with
+ * `client-<harnessPid>.json`. The harness then runs this file as a child, through spawnSync, so for
+ * the whole probe its event loop is blocked and it cannot touch the directory. Counting it as a peer
+ * made every verdict a harness produced look contended, so recovery refused every time it was asked.
+ * host-recovery.mjs passes its pid explicitly; process.ppid is the fallback for a caller that does
+ * not, and for a probe run by hand it is a shell, which holds no client slot anyway.
+ */
+const PARENT_PID = (() => {
+  const fromEnv = Number(process.env.PREMIERE_MCP_SENTINEL_PARENT_PID);
+  return Number.isInteger(fromEnv) && fromEnv > 0 ? fromEnv : process.ppid;
+})();
 
 /** A heartbeat older than this is not evidence of a live panel. */
 const HEARTBEAT_STALE_MS = 10_000;
@@ -111,13 +132,14 @@ function publishCommand(id, script, token) {
 /**
  * Claim ownership of our in-flight files before writing any.
  *
- * A bridge server's `initialize()` sweeps the shared temp directory, and it spares files only
- * while a live peer has announced itself with `client-<pid>.json`. Without this claim, a server
- * starting up mid-probe deletes our response (or the `.tmp-` staging file the panel is renaming
- * into place) and the probe concludes "the panel consumed the command and never answered" — a
- * false ENGINE_DEAD, which recovery then acts on by force-quitting a healthy Premiere. Measured
- * 2026-08-31; the panel unlinks a command only AFTER publishing its response, so a vanished
- * response can only mean somebody else deleted it.
+ * A bridge server's `initialize()` sweeps the shared temp directory (`command-*`, `response-*` and
+ * `.tmp-*`), and it spares files only while a live peer has announced itself with
+ * `client-<pid>.json`. Without this claim, a server starting up mid-probe deletes our command or
+ * our published response, and the probe used to conclude "the panel consumed the command and never
+ * answered" — a false ENGINE_DEAD, which recovery then acted on by force-quitting a healthy
+ * Premiere. Measured 2026-08-31. The panel stages its response as `response-<id>.json.part`, which
+ * the sweep does not match, and unlinks the command only AFTER renaming the response into place, so
+ * a command that vanishes with no response behind it means somebody else deleted something.
  */
 function claimClientSlot() {
   try {
@@ -151,12 +173,17 @@ async function probe() {
   const responsePath = join(TEMP_DIR, `response-${id}.json`);
 
   const started = Date.now();
-  let consumedAt = null;
+  // Two separate observations, because the panel makes them at different times. Pickup is when
+  // the heartbeat first names our command as the one in flight; that is the panel's own statement
+  // that the engine has been handed our script. Vanishing is when the command file disappears,
+  // which the panel only does after our response is already published — so a vanish is evidence
+  // the engine ANSWERED, not that it started.
+  let pickedUpAt = null;
+  let vanishedAt = null;
 
   while (Date.now() - started < timeoutMs) {
-    // Consumption is the load-bearing observation: the panel unlinks the command file when it
-    // picks the work up. Record when, because it separates "never ran" from "may have run".
-    if (consumedAt === null && !existsSync(commandPath)) consumedAt = Date.now() - started;
+    if (pickedUpAt === null && namesOurCommand(readHeartbeat(), nonce)) pickedUpAt = Date.now() - started;
+    if (vanishedAt === null && !existsSync(commandPath)) vanishedAt = Date.now() - started;
 
     if (existsSync(responsePath)) {
       let payload = null;
@@ -181,7 +208,7 @@ async function probe() {
       } catch {}
 
       if (payload.success && echoed === nonce) {
-        return { state: 'HEALTHY', code: 0, rttMs: rtt, consumedAfterMs: consumedAt,
+        return { state: 'HEALTHY', code: 0, rttMs: rtt, pickedUpAfterMs: pickedUpAt,
           detail: `engine executed ExtendScript and echoed the nonce in ${rtt}ms` };
       }
       // AUTH REJECTION IS NOT ENGINE DEATH. A rejection proves the panel is running, watching the
@@ -190,7 +217,7 @@ async function probe() {
       // that verdict makes ensureHealthy() force-quit Premiere. Report it as a sentinel problem,
       // which is what an unusable token is.
       if (payload.code === 'UNAUTHORIZED' || /carried no token|token did not match|nothing can be authorised/i.test(String(payload.error || ''))) {
-        return { state: 'SENTINEL_ERROR', code: 4, rttMs: rtt, consumedAfterMs: consumedAt,
+        return { state: 'SENTINEL_ERROR', code: 4, rttMs: rtt, pickedUpAfterMs: pickedUpAt,
           detail: 'the panel is alive and answering, but it rejected this probe\'s credentials, so '
             + 'the engine was never exercised and its health is UNKNOWN — not dead. Check that '
             + `auth-token.json or an auth-session-*.json in ${TEMP_DIR} is readable. Panel said: `
@@ -198,71 +225,86 @@ async function probe() {
       }
       // A response that is not our nonce means the channel works but the engine misbehaved —
       // still a real failure, and not one to paper over as healthy.
-      return { state: 'ENGINE_DEAD', code: 1, rttMs: rtt, consumedAfterMs: consumedAt,
+      return { state: 'ENGINE_DEAD', code: 1, rttMs: rtt, pickedUpAfterMs: pickedUpAt,
         detail: `panel answered but the nonce did not round-trip: ${JSON.stringify(payload).slice(0, 200)}` };
     }
     await sleep(POLL_MS);
   }
 
-  // Timed out. Clean up our own command so it cannot execute later against a different project
-  // state — a leftover command file runs when the panel next starts.
-  const wasConsumed = consumedAt !== null || !existsSync(commandPath);
+  // Timed out. Read the panel's last word BEFORE touching our command file, then clean the command
+  // up so it cannot execute later against a different project state — a leftover command file runs
+  // when the panel next starts. Deleting it is safe even if the panel is still inside it: the
+  // panel's own unlink after answering is guarded and tolerates the file being gone.
+  const hbAfter = readHeartbeat();
+  const heartbeatLive = Boolean(hbAfter && hbAfter.ageMs < HEARTBEAT_STALE_MS);
+  if (vanishedAt === null && !existsSync(commandPath)) vanishedAt = Date.now() - started;
   try { if (existsSync(commandPath)) unlinkSync(commandPath); } catch {}
 
-  const hbAfter = readHeartbeat();
-  const heartbeatLive = hbAfter && hbAfter.ageMs < HEARTBEAT_STALE_MS;
-
-  if (!wasConsumed) {
-    // BUSY BEFORE PANEL_DEAD. The panel only scans for new command files while idle
-    // (`if (!this.isProcessing && this.isConnected)` in cep-plugin/bridge-cep.js), so a panel
-    // working on somebody else's command leaves ours untouched. That is indistinguishable from
-    // "alive and not polling" by consumption alone — but the heartbeat names the command in
-    // flight, which settles it. Reporting PANEL_DEAD here sends the caller to restart a panel
-    // whose only problem is that it is mid-command for another client.
-    if (heartbeatLive && hbAfter.isProcessing && hbAfter.currentCommandId
-        && !String(hbAfter.currentCommandId).includes(nonce)) {
-      return { state: 'BUSY', code: 3, consumedAfterMs: null,
-        detail: `panel is executing a different command (${hbAfter.currentCommandId}) and does not scan `
-          + `for new commands while busy, so ours was never picked up in ${timeoutMs}ms; re-probe when idle` };
-    }
-    // Nobody picked the file up. If the heartbeat is also stale the panel is gone; if the
-    // heartbeat is fresh the panel is alive but not polling, which is its own bug worth naming.
-    return heartbeatLive
-      ? { state: 'PANEL_DEAD', code: 2, consumedAfterMs: null,
-          detail: `heartbeat is fresh (${hbAfter.ageMs}ms) but the command was never consumed in ${timeoutMs}ms — the panel is running and not polling` }
-      : { state: 'PANEL_DEAD', code: 2, consumedAfterMs: null,
-          detail: hbAfter ? `heartbeat stale by ${hbAfter.ageMs}ms and command never consumed` : 'no heartbeat file and command never consumed' };
+  // ENGINE_DEAD: the panel is, right now, inside OUR command. The heartbeat is written by the panel
+  // and read by nobody else, so no peer can fake this observation — which is why it carries no
+  // contention caveat. The cheapest possible script has outlived the whole timeout, so the engine
+  // is either blocked on a modal or not executing at all.
+  if (heartbeatLive && hbAfter.isProcessing && namesOurCommand(hbAfter, nonce)) {
+    return {
+      state: 'ENGINE_DEAD', code: 1, pickedUpAfterMs: pickedUpAt,
+      detail:
+        `the panel picked up the probe after ${msLabel(pickedUpAt)} and the heartbeat still names it as `
+        + `in flight after ${timeoutMs}ms (connected=${hbAfter.connected}, age=${hbAfter.ageMs}ms). `
+        + 'The ExtendScript engine is blocked (most often a native modal) or not executing.',
+      heartbeatBefore: hbBefore,
+      heartbeatAfter: hbAfter,
+    };
   }
 
-  if (hbAfter && hbAfter.isProcessing && hbAfter.currentCommandId && !String(hbAfter.currentCommandId).includes(nonce)) {
-    return { state: 'BUSY', code: 3, consumedAfterMs: consumedAt,
-      detail: `panel is executing a different command (${hbAfter.currentCommandId}); re-probe when idle` };
+  // RESPONSE_LOST: the command file disappeared and no response ever appeared. The panel removes a
+  // command only after publishing its answer, so this is NOT a silent engine — it means the engine
+  // answered and another client sharing the directory (a starting server's sweep, an older peer)
+  // deleted the answer or the command. This used to be reported as ENGINE_DEAD, and that verdict
+  // is the one recovery acts on by force-quitting Premiere.
+  if (vanishedAt !== null) {
+    const peers = otherClientPids();
+    return {
+      state: 'RESPONSE_LOST', code: 5, pickedUpAfterMs: pickedUpAt,
+      contendedBy: peers,
+      detail:
+        `the command file disappeared after ${msLabel(vanishedAt)} but no response was ever seen. The panel `
+        + 'deletes a command only after publishing its response, so the engine most likely answered and '
+        + 'something else removed the files. Engine health is UNKNOWN, not dead; do not restart on this.'
+        + (peers.length
+          ? ` ${peers.length} other bridge client(s) share ${TEMP_DIR} (pid ${peers.join(', ')}).`
+          : ' No other live client holds a slot now, so the remover has already exited or never claimed one.'),
+      heartbeatBefore: hbBefore,
+      heartbeatAfter: hbAfter,
+    };
   }
 
-  // The honest verdict, and the one the whole file exists to produce: the panel took the work
-  // and went silent. The beacon will keep saying "connected".
-  //
-  // This is also the verdict that gets acted on destructively, so it names the one benign cause
-  // that can imitate it: another client deleting our response out from under us. That is much less
-  // likely now that both sides claim a client slot, but a peer old enough to predate the claim
-  // still behaves the old way, and a wrong restart costs the user their open project.
-  const peers = otherClientPids();
-  return {
-    state: 'ENGINE_DEAD', code: 1, consumedAfterMs: consumedAt,
-    contendedBy: peers,
-    detail:
-      `panel consumed the command after ${consumedAfterMsLabel(consumedAt)} and never answered within ${timeoutMs}ms, ` +
-      `while the heartbeat still reports connected=${hbAfter ? hbAfter.connected : 'n/a'} ` +
-      `isProcessing=${hbAfter ? hbAfter.isProcessing : 'n/a'} age=${hbAfter ? hbAfter.ageMs : 'n/a'}ms. ` +
-      'The ExtendScript engine is not executing. Restart Premiere Pro.' +
-      (peers.length
-        ? ` CAUTION: ${peers.length} other bridge client(s) share ${TEMP_DIR} (pid ${peers.join(', ')}); `
-          + 'a peer that deletes this probe\'s response produces exactly this verdict on a healthy '
-          + 'host, so confirm before restarting anything.'
-        : ''),
-    heartbeatBefore: hbBefore,
-    heartbeatAfter: hbAfter,
-  };
+  // BUSY BEFORE PANEL_DEAD. The panel only scans for new command files while idle
+  // (`if (!this.isProcessing && this.isConnected)` in cep-plugin/bridge-cep.js), so a panel working
+  // on somebody else's command leaves ours untouched. The heartbeat names the command in flight,
+  // which settles it. Reporting PANEL_DEAD here sends the caller to restart a panel whose only
+  // problem is that it is mid-command for another client. `busyWith` is surfaced so a caller can
+  // tell a command it issued itself (its own wedge) from somebody else's work.
+  if (heartbeatLive && hbAfter.isProcessing && hbAfter.currentCommandId) {
+    return { state: 'BUSY', code: 3, pickedUpAfterMs: null, busyWith: String(hbAfter.currentCommandId),
+      detail: `panel is executing a different command (${hbAfter.currentCommandId}) and does not scan `
+        + `for new commands while busy, so ours was never picked up in ${timeoutMs}ms; re-probe when idle` };
+  }
+
+  // Nobody picked the file up. If the heartbeat is also stale the panel is gone; if the heartbeat
+  // is fresh the panel is alive but not polling, which is its own bug worth naming.
+  return heartbeatLive
+    ? { state: 'PANEL_DEAD', code: 2, pickedUpAfterMs: pickedUpAt,
+        detail: `heartbeat is fresh (${hbAfter.ageMs}ms) but the command was never picked up in ${timeoutMs}ms — the panel is running and not polling` }
+    : { state: 'PANEL_DEAD', code: 2, pickedUpAfterMs: pickedUpAt,
+        detail: (hbAfter ? `heartbeat stale by ${hbAfter.ageMs}ms` : 'no heartbeat file')
+          + (pickedUpAt !== null
+            ? ` after the panel had picked the command up at ${pickedUpAt}ms — the panel died mid-command`
+            : ' and the command was never picked up') };
+}
+
+/** True when the heartbeat names this probe's command as the one in flight. */
+function namesOurCommand(hb, nonce) {
+  return Boolean(hb && hb.currentCommandId && String(hb.currentCommandId).includes(nonce));
 }
 
 /** Pids of other processes that have claimed a slot in this temp directory. */
@@ -271,14 +313,14 @@ function otherClientPids() {
     return readdirSync(TEMP_DIR)
       .filter((n) => n.startsWith('client-') && n.endsWith('.json'))
       .map((n) => Number(n.slice('client-'.length, -'.json'.length)))
-      .filter((pid) => Number.isInteger(pid) && pid > 0 && pid !== process.pid)
+      .filter((pid) => Number.isInteger(pid) && pid > 0 && pid !== process.pid && pid !== PARENT_PID)
       .filter((pid) => { try { process.kill(pid, 0); return true; } catch { return false; } });
   } catch {
     return [];
   }
 }
 
-function consumedAfterMsLabel(v) {
+function msLabel(v) {
   return v === null ? 'an unobserved interval' : `${v}ms`;
 }
 

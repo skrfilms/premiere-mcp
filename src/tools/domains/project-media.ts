@@ -13,7 +13,7 @@ import * as pathSync from 'node:path';
 import { promises as fs } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
-import { SurgeryRefusal, applyReplacements, assertOutputWritable, assertSupportedFormat, censusDiff, censusOf, containerCanary, countOccurrences, documentSanity, readProjectFile, surgeryEnabled, writeEditedProject, PRPROJ_SUPPORTED_FORMAT_VERSIONS, SURGERY_ENV_FLAG } from '../prproj-surgery.js';
+import { SurgeryRefusal, ProjectWriteError, applyReplacements, assertOutputWritable, assertSupportedFormat, censusDiff, censusOf, containerCanary, countOccurrences, documentSanity, readProjectFile, surgeryEnabled, writeEditedProject, PRPROJ_SUPPORTED_FORMAT_VERSIONS, SURGERY_ENV_FLAG } from '../prproj-surgery.js';
 import type { ProjectFileEditArgs, ProjectFileInspectArgs } from './shared.js';
 
 export class ProjectMediaTools extends CaptionTools {
@@ -1694,7 +1694,12 @@ export class ProjectMediaTools extends CaptionTools {
       const realpaths: string[] = [];
       for (const p of probe.paths) {
         if (!p) continue;
-        try { realpaths.push(fsSync.realpathSync(String(p))); } catch { realpaths.push(String(p)); }
+        // .native resolves through the OS, which is what canonicalises case on macOS; the JS
+        // implementation only walks symlinks and keeps whatever case the host reported.
+        // A path that does not exist (yet) cannot be resolved itself, so resolve its directory.
+        try { realpaths.push(fsSync.realpathSync.native(String(p))); } catch {
+          try { realpaths.push(pathSync.join(fsSync.realpathSync.native(pathSync.dirname(String(p))), pathSync.basename(String(p)))); } catch { realpaths.push(String(p)); }
+        }
       }
       return { known: true, realpaths, source: 'app.projects via the bridge' };
     }
@@ -1768,6 +1773,8 @@ export class ProjectMediaTools extends CaptionTools {
     }
 
     const dryRun = args.dryRun === true;
+    // Set once the output file exists, so a failure after that point cannot report wrote:false.
+    let wroteOutput: string | null = null;
 
     try {
       const { file, raw } = readProjectFile(args.sourcePath);
@@ -1793,8 +1800,16 @@ export class ProjectMediaTools extends CaptionTools {
       if (!open.known) {
         throw new SurgeryRefusal(open.reason || 'Could not determine which projects are open in Premiere.', 'OPEN_STATE_UNKNOWN');
       }
-      const outputResolved = pathSync.resolve(args.outputPath);
-      const collision = open.realpaths.find((p) => p === file.realpath || p === outputResolved);
+      // The output does not exist yet, so resolve its directory instead: a host reporting
+      // /private/var/... must still collide with an output given as /var/....
+      const outputLexical = pathSync.resolve(args.outputPath);
+      let outputResolved = outputLexical;
+      try { outputResolved = pathSync.join(fsSync.realpathSync.native(pathSync.dirname(outputLexical)), pathSync.basename(outputLexical)); } catch { /* keep the lexical form */ }
+      // macOS and Windows volumes are case-insensitive by default, so "Cut.prproj" open in Premiere is
+      // the same file as "cut.prproj" here. Over-matching on a case-sensitive volume only refuses.
+      const caseless = process.platform === 'darwin' || process.platform === 'win32';
+      const samePath = (a: string, b: string) => (caseless ? a.toLowerCase() === b.toLowerCase() : a === b);
+      const collision = open.realpaths.find((p) => samePath(p, file.realpath) || samePath(p, outputResolved) || samePath(p, outputLexical));
       if (collision) {
         throw new SurgeryRefusal(
           `"${collision}" is currently open in Premiere. Editing a project file underneath the application means Premiere's in-memory copy wins the moment anyone saves, and the edit is silently lost. Close it in Premiere first.`,
@@ -1862,10 +1877,13 @@ export class ProjectMediaTools extends CaptionTools {
       }
 
       // Invariant 7, in part: the write is verified by re-reading the bytes, not by having called write.
+      // The existence check above is stale by now (the open-projects probe awaited the host), so the
+      // writer itself refuses to clobber — see writeEditedProject.
       const written = writeEditedProject(args.outputPath, editedXml, file.compressed, censusAfter);
+      wroteOutput = written.outputPath;
       const sourceAfter = readProjectFile(file.realpath).file.sha256;
 
-      const readbackOk = written.readbackMatches && written.readbackCensusDiff.length === 0;
+      const readbackOk = written.readbackMatches && written.readbackCensusDiff.length === 0 && !written.readbackError;
       const sourceUntouched = sourceAfter === file.sha256;
 
       return {
@@ -1881,6 +1899,7 @@ export class ProjectMediaTools extends CaptionTools {
         outputSha256: written.outputSha256,
         readbackMatches: written.readbackMatches,
         readbackCensusDiff: written.readbackCensusDiff,
+        ...(written.readbackError ? { readbackError: written.readbackError } : {}),
         sourceUntouched,
         sourceSha256After: sourceAfter,
         // Invariant 7 in full. XML validity is not acceptance, and this is the one claim this tool
@@ -1891,9 +1910,22 @@ export class ProjectMediaTools extends CaptionTools {
       };
     } catch (error) {
       if (error instanceof SurgeryRefusal) {
-        return { success: false, refused: true, code: error.code, error: error.message, wrote: false };
+        // A refusal can come AFTER the write: the post-write source re-hash re-reads the source,
+        // which refuses if it vanished mid-call. The output exists then, so say so.
+        return {
+          success: false, refused: true, code: error.code, error: error.message, wrote: wroteOutput !== null,
+          ...(wroteOutput !== null ? { outputPath: wroteOutput, outputSuspect: true } : {}),
+        };
       }
-      return { success: false, error: `project_file_edit failed: ${error instanceof Error ? error.message : String(error)}`, wrote: false };
+      if (error instanceof ProjectWriteError) {
+        return { success: false, code: 'WRITE_FAILED', error: error.message, wrote: error.outputCreated, ...(error.outputCreated ? { outputPath: error.outputPath, outputSuspect: true } : {}) };
+      }
+      return {
+        success: false,
+        error: `project_file_edit failed: ${error instanceof Error ? error.message : String(error)}`,
+        wrote: wroteOutput !== null,
+        ...(wroteOutput !== null ? { outputPath: wroteOutput, outputSuspect: true } : {}),
+      };
     }
   }
 

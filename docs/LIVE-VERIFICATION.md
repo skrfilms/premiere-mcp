@@ -59,7 +59,7 @@ looked and did not run it, and why.
 | `normalize_clip_peaks` | 2026-08-27T18:07:14Z | Gain param not found |
 | `ripple_trim_in` | 2026-08-27T18:07:14Z | The source in-point moved but the clip did not ripple on the timeline, so this edit is half-applied: clip.inPoint is now 508032000000 ticks while clip.start is  |
 | `ripple_trim_out` | 2026-08-27T18:07:14Z | The source out-point moved but the clip end did not change on the timeline, so this edit is half-applied: clip.outPoint is now 508032000000 ticks while clip.end |
-| `search_footage` | 2026-08-27T18:02:09Z | No footage index found at /Users/kahanben/.premiere-mcp/footage-index.json. Build one first with index_footage (pass the folder as rootPath), or point indexPath |
+| `search_footage` | 2026-08-27T18:02:09Z | No footage index found at ~/.premiere-mcp/footage-index.json. Build one first with index_footage (pass the folder as rootPath), or point indexPath / PREMIERE_MC |
 
 ## Per-tool standing
 
@@ -821,7 +821,7 @@ looked and did not run it, and why.
 | `save_project_as` | not executed — unsafe for an unattended sweep | 2026-08-27T18:07:14Z | `live-smoke-sweep` | writes a new project file |
 | `scene_edit_detection` | not executed — unsafe for an unattended sweep | 2026-08-27T18:02:09Z | `live-smoke-sweep` | long-running analysis |
 | `scrub_source_to` | not executed — mutating, sweep was read-only | 2026-08-27T18:02:09Z | `live-smoke-sweep` |  |
-| `search_footage` | executed live, FAILED | 2026-08-27T18:02:09Z | `live-smoke-sweep` | No footage index found at /Users/kahanben/.premiere-mcp/footage-index.json. Build one first with index_footage (pass the |
+| `search_footage` | executed live, FAILED | 2026-08-27T18:02:09Z | `live-smoke-sweep` | No footage index found at ~/.premiere-mcp/footage-index.json. Build one first with index_footage (pass the folder as roo |
 | `search_project_items` | executed live, reported success | 2026-08-27T18:02:09Z | `live-smoke-sweep` |  |
 | `select_all_clips` | not executed — mutating, sweep was read-only | 2026-08-27T18:02:09Z | `live-smoke-sweep` |  |
 | `select_all_on_track` | not executed — mutating, sweep was read-only | 2026-08-27T18:02:09Z | `live-smoke-sweep` |  |

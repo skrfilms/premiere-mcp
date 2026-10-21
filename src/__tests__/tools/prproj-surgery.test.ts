@@ -25,7 +25,7 @@
  * writer itself has been proven: the evidence is about the writer, not about any given file.
  */
 
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, mkdirSync, readdirSync, chmodSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -42,6 +42,9 @@ import {
   countOccurrences,
   documentSanity,
   hasOnlyValidEntities,
+  markupDiff,
+  markupSignature,
+  ProjectWriteError,
   parseFormatVersion,
   readProjectFile,
   serializeProjectFile,
@@ -211,7 +214,7 @@ describe('invariant 4 — container canary', () => {
 describe('the census', () => {
   /**
    * The number that would have been a lie. Six `<Sequence` tags in the real scratch project meant two
-   * sequences; on the graveyard cut, 333 meant 111. Reporting the tag count as a sequence count is
+   * sequences; on a real 111-sequence cut, 333 meant 111. Reporting the tag count as a sequence count is
    * exactly the kind of confident-and-wrong number this codebase treats as a defect.
    */
   it('separates ObjectUID definitions from cross-references', () => {
@@ -795,5 +798,240 @@ describe('a fresh directory is genuinely fresh', () => {
   it('does not leak state between tests', () => {
     mkdirSync(path.join(dir, 'sub'));
     expect(existsSync(path.join(dir, 'sub'))).toBe(true);
+  });
+});
+
+/**
+ * Replacements are counted against the original AND applied in one pass over it. Applying them one
+ * after another used to let [A->B, B->C] turn both into C while reporting [1, 1].
+ */
+describe('one-pass replacement', () => {
+  it('applies a chain against the original, so replaced text is never rescanned', () => {
+    const { xml, applied } = applyReplacements(FIXTURE_XML, [
+      { find: 'fixture_bin', replace: 'fixture_seq_a' },
+      { find: 'fixture_seq_a', replace: 'final_seq' },
+    ]);
+    expect(applied.map((a) => a.matches)).toEqual([1, 1]);
+    // Exactly what the census validated: one of each, not two final_seq.
+    expect(xml).toContain('<Name>final_seq</Name>');
+    expect(xml).toContain('<Name>fixture_seq_a</Name>');
+    expect(countOccurrences(xml, 'final_seq')).toBe(1);
+  });
+
+  it('swaps two values, which sequential application cannot do', () => {
+    const { xml } = applyReplacements(FIXTURE_XML, [
+      { find: 'fixture_bin', replace: 'fixture_seq_a' },
+      { find: 'fixture_seq_a', replace: 'fixture_bin' },
+    ]);
+    expect(xml).toBe(FIXTURE_XML.replace('<Name>fixture_seq_a</Name>', '<Name>@@</Name>').replace('<Name>fixture_bin</Name>', '<Name>fixture_seq_a</Name>').replace('@@', 'fixture_bin'));
+  });
+
+  it.each([
+    ['one find contained in another', [{ find: 'fixture_bin', replace: 'x' }, { find: 'xture_bin', replace: 'y' }]],
+    ['the same find twice', [{ find: 'fixture_bin', replace: 'x' }, { find: 'fixture_bin', replace: 'y' }]],
+  ])('refuses %s rather than picking a winner', (_label, replacements) => {
+    try {
+      applyReplacements(FIXTURE_XML, replacements);
+      throw new Error('should have refused');
+    } catch (e) {
+      expect((e as SurgeryRefusal).code).toBe('FIND_CONTAINS_FIND');
+    }
+  });
+
+  it('refuses two finds whose matches overlap in the original', () => {
+    try {
+      // "fixture_s" and "e_seq" both sit inside "fixture_seq_a", sharing "e_s".
+      applyReplacements(FIXTURE_XML, [{ find: 'fixture_s', replace: 'x' }, { find: 'e_seq', replace: 'y' }]);
+      throw new Error('should have refused');
+    } catch (e) {
+      expect((e as SurgeryRefusal).code).toBe('OVERLAPPING_FINDS');
+    }
+  });
+});
+
+describe('markup in a find', () => {
+  it('refuses a find that carries a closing tag, which would delete it', () => {
+    try {
+      applyReplacements(FIXTURE_XML, [{ find: 'fixture_bin</Name>', replace: 'fixture_bin' }]);
+      throw new Error('should have refused');
+    } catch (e) {
+      expect((e as SurgeryRefusal).code).toBe('MARKUP_IN_FIND');
+    }
+  });
+
+  /** No bracket in find or replace, yet it renames an element — and Name is not a census tag. */
+  it('refuses a bracket-free find that matches inside tag names', () => {
+    const renamed = FIXTURE_XML.split('Name').join('Nom');
+    expect(censusDiff(censusOf(FIXTURE_XML), censusOf(renamed))).toEqual([]);
+    expect(markupDiff(markupSignature(FIXTURE_XML), markupSignature(renamed))).toContain('open:Name: 2 -> 0');
+    try {
+      applyReplacements(FIXTURE_XML, [{ find: 'Name', replace: 'Nom', expectedMatches: 4 }]);
+      throw new Error('should have refused');
+    } catch (e) {
+      expect((e as SurgeryRefusal).code).toBe('MARKUP_CHANGED');
+    }
+  });
+
+  it('refuses it through the tool and writes nothing', async () => {
+    const before = process.env[SURGERY_ENV_FLAG];
+    process.env[SURGERY_ENV_FLAG] = '1';
+    try {
+      const tools = new PremiereProTools(fakeHost([]).transport);
+      const output = path.join(dir, 'out.prproj');
+      const result: any = await tools.executeTool('project_file_edit', {
+        sourcePath: writeFixture(), outputPath: output,
+        replacements: [{ find: 'fixture_bin</Name>', replace: 'fixture_bin' }],
+      });
+      expect(result).toMatchObject({ success: false, code: 'MARKUP_IN_FIND', wrote: false });
+      expect(existsSync(output)).toBe(false);
+    } finally {
+      if (before === undefined) delete process.env[SURGERY_ENV_FLAG]; else process.env[SURGERY_ENV_FLAG] = before;
+    }
+  });
+});
+
+describe('the write never clobbers and reports wrote honestly', () => {
+  const ORIGINAL_FLAG = process.env[SURGERY_ENV_FLAG];
+  beforeEach(() => { process.env[SURGERY_ENV_FLAG] = '1'; });
+  afterEach(() => {
+    if (ORIGINAL_FLAG === undefined) delete process.env[SURGERY_ENV_FLAG];
+    else process.env[SURGERY_ENV_FLAG] = ORIGINAL_FLAG;
+  });
+
+  it('refuses an output that appeared after the check, leaving it and no temp file behind', () => {
+    const output = path.join(dir, 'out.prproj');
+    writeFileSync(output, 'someone else');
+    try {
+      writeEditedProject(output, FIXTURE_XML, true, censusOf(FIXTURE_XML));
+      throw new Error('should have refused');
+    } catch (e) {
+      expect((e as SurgeryRefusal).code).toBe('OUTPUT_EXISTS');
+    }
+    expect(readFileSync(output, 'utf8')).toBe('someone else');
+    expect(readdirSync(dir)).toEqual(['out.prproj']);
+  });
+
+  /** The real race: the existence check passes, then the open-projects probe awaits the host. */
+  it('refuses through the tool when the output appears during the host probe', async () => {
+    const source = writeFixture();
+    const output = path.join(dir, 'out.prproj');
+    const transport = {
+      executeScript: async () => {
+        writeFileSync(output, 'arrived mid-edit');
+        return { success: true, paths: [] };
+      },
+    } as any;
+
+    const result: any = await new PremiereProTools(transport).executeTool('project_file_edit', {
+      sourcePath: source, outputPath: output, replacements: [{ find: 'fixture_bin', replace: 'renamed_bin' }],
+    });
+
+    expect(result).toMatchObject({ success: false, code: 'OUTPUT_EXISTS', wrote: false });
+    expect(readFileSync(output, 'utf8')).toBe('arrived mid-edit');
+    expect(readdirSync(dir).sort()).toEqual(['fixture.prproj', 'out.prproj']);
+  });
+
+  const posixNonRoot = process.platform !== 'win32' && typeof process.getuid === 'function' && process.getuid() !== 0;
+  (posixNonRoot ? it : it.skip)('reports wrote:false with nothing left behind when the write itself fails', async () => {
+    const source = writeFixture();
+    const output = path.join(dir, 'out.prproj');
+    chmodSync(dir, 0o555);
+    try {
+      expect(() => writeEditedProject(output, FIXTURE_XML, true, censusOf(FIXTURE_XML))).toThrow(ProjectWriteError);
+      const result: any = await new PremiereProTools(fakeHost([]).transport).executeTool('project_file_edit', {
+        sourcePath: source, outputPath: output, replacements: [{ find: 'fixture_bin', replace: 'renamed_bin' }],
+      });
+      expect(result).toMatchObject({ success: false, code: 'WRITE_FAILED', wrote: false });
+      expect(result.outputPath).toBeUndefined();
+    } finally {
+      chmodSync(dir, 0o755);
+    }
+    expect(readdirSync(dir)).toEqual(['fixture.prproj']);
+  });
+
+  it('leaves no temp file behind on success', () => {
+    const output = path.join(dir, 'out.prproj');
+    const result = writeEditedProject(output, FIXTURE_XML, true, censusOf(FIXTURE_XML));
+    expect(result.readbackMatches).toBe(true);
+    expect(readdirSync(dir)).toEqual(['out.prproj']);
+  });
+});
+
+describe('the open-in-Premiere check ignores case where the volume does', () => {
+  const ORIGINAL_FLAG = process.env[SURGERY_ENV_FLAG];
+  const ORIGINAL_PLATFORM = Object.getOwnPropertyDescriptor(process, 'platform')!;
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', ORIGINAL_PLATFORM);
+    if (ORIGINAL_FLAG === undefined) delete process.env[SURGERY_ENV_FLAG];
+    else process.env[SURGERY_ENV_FLAG] = ORIGINAL_FLAG;
+  });
+
+  it.each(['darwin', 'win32'])('treats a differently-cased open path as the same file on %s', async (platform) => {
+    process.env[SURGERY_ENV_FLAG] = '1';
+    const source = writeFixture();
+    const reported = require('node:fs').realpathSync.native(source).toUpperCase();
+    Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+    const output = path.join(dir, 'out.prproj');
+
+    const result: any = await new PremiereProTools(fakeHost([reported]).transport).executeTool('project_file_edit', {
+      sourcePath: source, outputPath: output, replacements: [{ find: 'fixture_bin', replace: 'renamed_bin' }],
+    });
+
+    expect(result.code).toBe('PROJECT_IS_OPEN');
+    expect(existsSync(output)).toBe(false);
+  });
+
+  it('matches an output given through a symlinked directory against the resolved open path', async () => {
+    process.env[SURGERY_ENV_FLAG] = '1';
+    const source = writeFixture();
+    const output = path.join(dir, 'out.prproj');
+    const reported = path.join(require('node:fs').realpathSync.native(dir), 'out.prproj');
+
+    const result: any = await new PremiereProTools(fakeHost([reported]).transport).executeTool('project_file_edit', {
+      sourcePath: source, outputPath: output, replacements: [{ find: 'fixture_bin', replace: 'renamed_bin' }],
+    });
+
+    expect(result.code).toBe('PROJECT_IS_OPEN');
+  });
+});
+
+describe('only .prproj paths', () => {
+  it('inspect refuses a non-.prproj file and returns none of its contents', async () => {
+    const secret = path.join(dir, 'notes.txt');
+    writeFileSync(secret, 'token=abc123');
+    const result: any = await new PremiereProTools(fakeHost([]).transport).executeTool('project_file_inspect', {
+      projectPath: secret, xmlExcerptAround: 'token',
+    });
+    expect(result).toMatchObject({ success: false, code: 'NOT_PRPROJ_PATH' });
+    expect(JSON.stringify(result)).not.toContain('abc123');
+  });
+
+  it('accepts the extension in any case', () => {
+    const file = writeFixture('UPPER.PRPROJ');
+    expect(readProjectFile(file).file.formatVersion).toBe('3');
+  });
+
+  it('edit refuses a non-.prproj output path', () => {
+    try {
+      assertOutputWritable(writeFixture(), path.join(dir, 'out.xml'));
+      throw new Error('should have refused');
+    } catch (e) {
+      expect((e as SurgeryRefusal).code).toBe('NOT_PRPROJ_PATH');
+    }
+  });
+
+  it('edit refuses a non-.prproj source path', async () => {
+    const before = process.env[SURGERY_ENV_FLAG];
+    process.env[SURGERY_ENV_FLAG] = '1';
+    try {
+      const source = path.join(dir, 'project.xml');
+      writeFileSync(source, FIXTURE_XML);
+      const result: any = await new PremiereProTools(fakeHost([]).transport).executeTool('project_file_edit', {
+        sourcePath: source, outputPath: path.join(dir, 'out.prproj'), replacements: [{ find: 'fixture_bin', replace: 'x' }],
+      });
+      expect(result).toMatchObject({ success: false, code: 'NOT_PRPROJ_PATH', wrote: false });
+    } finally {
+      if (before === undefined) delete process.env[SURGERY_ENV_FLAG]; else process.env[SURGERY_ENV_FLAG] = before;
+    }
   });
 });

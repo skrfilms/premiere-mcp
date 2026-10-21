@@ -2011,7 +2011,7 @@
     {
       "name": "search_footage",
       "outcome": "fail",
-      "detail": "No footage index found at /Users/kahanben/.premiere-mcp/footage-index.json. Build one first with index_footage (pass the folder as rootPath), or point indexPath / PREMIERE_MCP_FOOTAGE_INDEX at an existing index."
+      "detail": "No footage index found at ~/.premiere-mcp/footage-index.json. Build one first with index_footage (pass the folder as rootPath), or point indexPath / PREMIERE_MCP_FOOTAGE_INDEX at an existing index."
     },
     {
       "name": "search_project_items",

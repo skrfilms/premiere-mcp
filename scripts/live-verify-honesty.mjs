@@ -34,6 +34,11 @@ import path from 'node:path';
 // The file channel is the point of this harness, not a fallback — see the header.
 process.env.PREMIERE_MCP_TRANSPORT = 'file';
 
+// Tools run in-process, and persistPrefToFile (src/tools/index.ts) reads this on every call. A
+// harness has no business making a change to the user's global Premiere prefs that survives a
+// force-quit, so it is refused here before any tool can run.
+process.env.PREMIERE_MCP_NO_PREFS_WRITE = '1';
+
 // Same derivation the setup resource documents and the panel defaults to, rather than a literal
 // '/tmp/premiere-mcp-bridge' that makes this harness unrunnable on Windows.
 const DIR = process.env.PREMIERE_TEMP_DIR || bridgeTempDirForDocs(process.platform, process.env);

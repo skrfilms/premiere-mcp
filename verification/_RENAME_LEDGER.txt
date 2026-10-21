@@ -1,5 +1,5 @@
-2026-08-31  DELETED  /Users/kahanben/Documents/Space_Heist/tools/premiere-mcp/verification/sweeps/20260831T163656Z-live-smoke-sweep.json
-2026-08-31  DELETED  /Users/kahanben/Documents/Space_Heist/tools/premiere-mcp/verification/sweeps/20260831T163802Z-live-smoke-sweep.json
+2026-08-31  DELETED  verification/sweeps/20260831T163656Z-live-smoke-sweep.json
+2026-08-31  DELETED  verification/sweeps/20260831T163802Z-live-smoke-sweep.json
    Reason: both were exploratory runs made WHILE debugging scripts/lib/synthesize-args.mjs, before
    the empty-args and snake_case-key fixes landed. They recorded get_item_info,
    get_project_item_info, has_proxy, get_bin_contents and get_value_at_time as live FAILURES for a
@@ -9,7 +9,7 @@
    ledger would have made docs/LIVE-VERIFICATION.md assert five defects that do not exist.
    Replaced by the clean full-catalogue sweeps recorded the same day.
 
-2026-08-31  DELETED  /Users/kahanben/Documents/Space_Heist/tools/premiere-mcp/verification/sweeps/20260831T164413Z-live-smoke-sweep.json
+2026-08-31  DELETED  verification/sweeps/20260831T164413Z-live-smoke-sweep.json
    Reason: same class of harness artefact as the two above. This run was clean on the five
    optional-key tools but recorded reflect_dom_object ("Path did not resolve to a value") and
    search_footage ("No footage index found") as live FAILURES, both caused by the widening step
@@ -18,8 +18,8 @@
    probed footage-index fixture now exists, so the run misattributes two harness bugs to two working
    tools. Superseded by the final sweeps of the same day.
 
-2026-08-31  DELETED  /Users/kahanben/Documents/Space_Heist/tools/premiere-mcp/verification/sweeps/20260831T164615Z-live-smoke-sweep.json
-2026-08-31  DELETED  /Users/kahanben/Documents/Space_Heist/tools/premiere-mcp/verification/sweeps/20260831T164739Z-live-smoke-sweep.json
+2026-08-31  DELETED  verification/sweeps/20260831T164615Z-live-smoke-sweep.json
+2026-08-31  DELETED  verification/sweeps/20260831T164739Z-live-smoke-sweep.json
    Reason: both measured a WEDGED PANEL rather than the catalogue. The 16:47:39Z mutate run started
    one minute after the 16:46:15Z read-only run and inherited its still-outstanding host command
    177c32de-33bc-4f4b-bf7f-4703e0a53b8f, so from its second tool onward the panel rejected every

@@ -4,7 +4,38 @@ All notable changes are documented here. Releases use semantic versioning.
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- `move_clip_to_track` no longer overwrites or loses clips. The fallback used to
+  delete the source first, then lay the full untrimmed item over the destination,
+  which could overwrite a neighbour and lost the clip on any later failure. It now
+  refuses an occupied span unless `overwrite:true`, parks a copy on empty space,
+  restores in/out and duration, clears sanctioned occupants only right before the
+  final slide, and removes the source last. A native move is read back rather than
+  trusted. The fallback re-creates the clip (effects, keyframes, speed, static
+  property values, markers and name do not carry over), so it now requires
+  `allowLossyMove:true`. Ported from upstream edc0b0f.
+- `get_encoder_presets` also scans `~/Documents/Adobe/Adobe Media Encoder/<ver>/Presets`,
+  where AME saves user presets. Ported from upstream 5528abb.
+- `project_file_edit`: replacements apply in one pass, so chained finds can no
+  longer interact; markup in `find` is gated like markup in `replace`, and any
+  change to the document's tag structure is refused without `allowMarkupEdit`;
+  the output is written without ever clobbering an existing file; `wrote` is
+  reported accurately on every failure path; the open-in-Premiere check ignores
+  case on macOS and Windows; both tools require a `.prproj` path.
+- MCP `initialize` reported version 1.2.0; it now reports the package version.
+
+### Live harnesses
+
+- Mutating sweeps skip `set_autosave_settings`, `create_project` and
+  `write_clipboard`, and never write Premiere's preferences file. A sweep used to
+  set every project's Auto Save to one version every minute.
+- Sweeps re-check the scratch project every 10 calls and after any recovery, and
+  recovery never saves or quits a project that is not the verified scratch file.
+- Recovery fails closed: it never presses Escape or quits Premiere when the panel
+  is busy on another client's command, when a peer shares the bridge directory,
+  when a response vanished, or when health is unknown. The sentinel no longer
+  counts its own parent harness as a peer, which had silently disabled recovery.
 
 ## [1.3.0] - 2026-08-27
 

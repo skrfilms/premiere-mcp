@@ -32,8 +32,12 @@ const PANEL_STUB = `
 import { readdirSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 const dir = process.argv[2];
-const mode = process.argv[3]; // 'accept' | 'reject' | 'silent' | 'busy'
+const mode = process.argv[3]; // 'accept' | 'reject' | 'hung' | 'peer-deletes' | 'busy'
 const busyId = process.argv[4] || null;
+// 'hung' models a real wedged engine: the panel takes the first command, names it in the heartbeat,
+// and never comes back. It does NOT delete the command file — the real panel only does that after
+// publishing a response, which is the premise the sentinel's verdicts now rest on.
+let hungOn = null;
 
 function acceptedTokens() {
   const tokens = [];
@@ -58,14 +62,15 @@ setInterval(() => {
   // is what tells the sentinel to say BUSY rather than accuse the panel of not polling.
   publish(join(dir, 'bridge-heartbeat.json'), {
     ts: Date.now(), connected: true,
-    isProcessing: mode === 'busy', currentCommandId: mode === 'busy' ? busyId : null,
-    currentCommandStartedAt: mode === 'busy' ? Date.now() : null, queueLength: 0,
+    isProcessing: mode === 'busy' || hungOn !== null,
+    currentCommandId: mode === 'busy' ? busyId : hungOn,
+    currentCommandStartedAt: mode === 'busy' || hungOn !== null ? Date.now() : null, queueLength: 0,
   });
 }, 100);
 
 setInterval(() => {
   // A busy panel does not scan for new command files at all — that is the behaviour being modelled.
-  if (mode === 'busy') return;
+  if (mode === 'busy' || hungOn !== null) return;
   for (const name of readdirSync(dir)) {
     if (!name.startsWith('command-') || !name.endsWith('.json')) continue;
     const cmdPath = join(dir, name);
@@ -73,7 +78,10 @@ setInterval(() => {
     try { cmd = JSON.parse(readFileSync(cmdPath, 'utf8')); } catch { continue; }
     const respPath = join(dir, name.replace('command-', 'response-'));
 
-    if (mode === 'silent') { try { unlinkSync(cmdPath); } catch {} continue; }
+    if (mode === 'hung') { hungOn = cmd.id; return; }
+    // Not something the panel ever does: this is a PEER sharing the directory removing the command
+    // (a starting server's sweep, an older client). The sentinel must not read it as a dead engine.
+    if (mode === 'peer-deletes') { try { unlinkSync(cmdPath); } catch {} continue; }
 
     const tokens = acceptedTokens();
     const supplied = typeof cmd.token === 'string' ? cmd.token : '';
@@ -95,16 +103,21 @@ setInterval(() => {
 }, 50);
 `;
 
-function startPanel(mode: 'accept' | 'reject' | 'silent' | 'busy', busyId?: string): void {
+function startPanel(mode: 'accept' | 'reject' | 'hung' | 'peer-deletes' | 'busy', busyId?: string): void {
   const stubPath = join(dir, 'panel-stub.mjs');
   writeFileSync(stubPath, PANEL_STUB);
   panel = spawn(process.execPath, [stubPath, dir, mode, busyId ?? ''], { stdio: 'ignore' });
 }
 
-function runSentinel(timeoutMs = 4000): { state: string; code: number; detail: string; status: number } {
+interface Verdict { state: string; code: number; detail: string; status: number; contendedBy?: number[]; busyWith?: string }
+
+function runSentinel(timeoutMs = 4000, extraEnv: Record<string, string> = {}): Verdict {
+  const env: Record<string, string | undefined> = { ...process.env, PREMIERE_TEMP_DIR: dir, ...extraEnv };
+  // Unset unless a test asks for it, so the process.ppid fallback is what the other tests exercise.
+  if (!('PREMIERE_MCP_SENTINEL_PARENT_PID' in extraEnv)) delete env.PREMIERE_MCP_SENTINEL_PARENT_PID;
   const out = spawnSync(process.execPath, [SENTINEL, '--json', `--timeout=${timeoutMs}`], {
     encoding: 'utf8',
-    env: { ...process.env, PREMIERE_TEMP_DIR: dir },
+    env,
     timeout: timeoutMs + 20_000,
   });
   const line = String(out.stdout).trim().split('\n').pop() ?? '';
@@ -161,13 +174,28 @@ describe('engine-sentinel authorisation', () => {
 });
 
 describe('engine-sentinel classification', () => {
-  it('reports ENGINE_DEAD when the panel consumes the command and never answers', async () => {
-    // The verdict the file exists to produce, and the one case where a restart is the right call.
+  it('reports ENGINE_DEAD when the panel picks up the probe and never comes back', async () => {
+    // The verdict the file exists to produce, and the one case where Escape/restart is the right
+    // call. Pickup is read from the heartbeat naming our command, because the real panel leaves the
+    // command file in place until it has answered.
     writeToken();
-    startPanel('silent');
+    startPanel('hung');
     const verdict = runSentinel(2500);
     expect(verdict.state).toBe('ENGINE_DEAD');
     expect(verdict.code).toBe(1);
+    // Panel-written and read by no one else, so no peer can fake it: it carries no contention caveat.
+    expect(verdict.contendedBy).toBeUndefined();
+  });
+
+  it('reports RESPONSE_LOST, not ENGINE_DEAD, when the command vanishes with no response', async () => {
+    // The panel deletes a command only after publishing its answer, so a vanished command means a
+    // peer removed it. This used to read as ENGINE_DEAD, the verdict recovery force-quits on.
+    writeToken();
+    startPanel('peer-deletes');
+    const verdict = runSentinel(2000);
+    expect(verdict.state).toBe('RESPONSE_LOST');
+    expect(verdict.code).toBe(5);
+    expect(verdict.detail).toMatch(/UNKNOWN, not dead/);
   });
 
   it('reports BUSY, not PANEL_DEAD, when another command is in flight', async () => {
@@ -186,6 +214,40 @@ describe('engine-sentinel classification', () => {
     const verdict = runSentinel(2000);
     expect(verdict.state).toBe('PANEL_DEAD');
     expect(verdict.code).toBe(2);
+  });
+});
+
+describe('engine-sentinel peer accounting', () => {
+  /**
+   * Every sweep harness holds a client slot for its own in-process bridge and then spawns the
+   * sentinel synchronously. Counting that parent as a peer made every verdict contended, so
+   * recovery refused every single time. The parent is excluded; any other live slot still counts.
+   */
+  it('does not count the process that spawned it (process.ppid fallback)', async () => {
+    writeToken();
+    startPanel('peer-deletes');
+    const otherPid = panel!.pid!;
+    writeFileSync(join(dir, `client-${process.pid}.json`), JSON.stringify({ pid: process.pid }));
+    writeFileSync(join(dir, `client-${otherPid}.json`), JSON.stringify({ pid: otherPid }));
+    const verdict = runSentinel(2000);
+    expect(verdict.state).toBe('RESPONSE_LOST');
+    expect(verdict.contendedBy).toEqual([otherPid]);
+  });
+
+  it('excludes the pid named in PREMIERE_MCP_SENTINEL_PARENT_PID instead of its ppid', async () => {
+    writeToken();
+    startPanel('peer-deletes');
+    const namedParent = panel!.pid!;
+    writeFileSync(join(dir, `client-${process.pid}.json`), JSON.stringify({ pid: process.pid }));
+    writeFileSync(join(dir, `client-${namedParent}.json`), JSON.stringify({ pid: namedParent }));
+    const verdict = runSentinel(2000, { PREMIERE_MCP_SENTINEL_PARENT_PID: String(namedParent) });
+    expect(verdict.contendedBy).toEqual([process.pid]);
+  });
+
+  it('names the in-flight command on BUSY so a caller can tell its own wedge from a peer\'s', async () => {
+    writeToken();
+    startPanel('busy', 'someone-elses-command-id');
+    expect(runSentinel(2000).busyWith).toBe('someone-elses-command-id');
   });
 });
 

@@ -2363,6 +2363,8 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           var moveItem = moveTrackClip.clip.projectItem;
           if (!moveItem) return fail("Clip has no projectItem for move fallback");
           var allowOverwrite = Boolean(args.overwrite);
+          var allowLossy = Boolean(args.allowLossyMove);
+          var moveSourceId = moveTrackClip.clip.nodeId;
           var moveStart = valueOfTime(moveTrackClip.clip.start);
           var moveEnd = valueOfTime(moveTrackClip.clip.end);
           var moveDur = moveEnd - moveStart;
@@ -2389,21 +2391,83 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
               occupantEnd: valueOfTime(occupants[0].end)
             });
           }
-          // Nothing is mutated before this point. overwrite:true is the caller's
-          // sanction to clear the span; lift every overlapping occupant without
-          // ripple so the track's timing holds.
-          if (occupants.length) {
-            for (var ori = occupants.length - 1; ori >= 0; ori--) occupants[ori].remove(false, true);
+          // What the fallback would drop: it lays down a FRESH clip from the
+          // projectItem, so user effects (same notion as remove_all_effects, plus
+          // Lumetri), keyframes on intrinsic components and speed do not carry over.
+          var moveLost = [];
+          var moveUserEffects = [];
+          var moveKeyframed = [];
+          try {
+            for (var mci = 0; mci < moveTrackClip.clip.components.numItems; mci++) {
+              var moveComp = moveTrackClip.clip.components[mci];
+              // Channel Volume / Panner are audio intrinsics reIsIntrinsic does not name.
+              var moveCompName = normalizeName(moveComp.displayName);
+              var moveIntrinsic = reIsIntrinsic(moveComp) || moveCompName === "channelvolume" || moveCompName === "panner";
+              if (!moveIntrinsic) { moveUserEffects.push(String(moveComp.displayName)); continue; }
+              for (var mpi = 0; mpi < moveComp.properties.numItems; mpi++) {
+                try { if (moveComp.properties[mpi].isTimeVarying()) moveKeyframed.push(String(moveComp.displayName) + "." + String(moveComp.properties[mpi].displayName)); } catch (eTv) {}
+              }
+            }
+          } catch (eComps) {}
+          if (moveUserEffects.length) moveLost.push("effects: " + moveUserEffects.join(", "));
+          if (moveKeyframed.length) moveLost.push("keyframes on: " + moveKeyframed.join(", "));
+          var moveSpeed = null;
+          try { moveSpeed = Number(moveTrackClip.clip.getSpeed()); } catch (eSpd) {}
+          if (moveSpeed !== null && !isNaN(moveSpeed) && Math.abs(moveSpeed - 1) > 0.0001) moveLost.push("speed " + Math.round(moveSpeed * 10000) / 100 + "%");
+          // Always lost on the fallback, and not detectable from the DOM: static (non-keyframed)
+          // Motion/Opacity/Volume/Pan values, clip markers and a renamed clip all come back at
+          // their defaults on a fresh copy. So the fallback is never lossless, and never runs
+          // without the caller's allowLossyMove.
+          moveLost.push("static Motion/Opacity/Volume/Pan values, clip markers and clip name reset to defaults");
+          // Native move only on an empty span: we cannot know a native move would
+          // not land on top of occupants, so with occupants present go straight to
+          // park/trim/slide, which clears them only right before the slide.
+          var moveNativeName = null;
+          if (!occupants.length) {
+            if (typeof moveTrackClip.clip.moveToTrack === "function") moveNativeName = "moveToTrack";
+            else if (typeof moveTrackClip.clip.setTrack === "function") moveNativeName = "setTrack";
           }
-          var nativeMove = tryCall(moveTrackClip.clip, ["moveToTrack", "setTrack"], [moveTargetIndex]);
-          if (nativeMove.called) {
-            return ok({ moved: true, trackIndex: moveTargetIndex, method: nativeMove.method, clipId: moveTrackClip.clip.nodeId, clearedOccupants: occupants.length });
+          var moveLossyRefusal = function () {
+            return fail("move_clip_to_track would have to use its fallback, which re-creates the clip from its project item and drops: " + moveLost.join("; ") + ". Nothing was changed. Pass allowLossyMove:true to move it anyway without them.", { lost: moveLost, allowLossyMove: false });
+          };
+          // Refuse BEFORE any mutation when the fallback is the only route.
+          if (!moveNativeName && moveLost.length && !allowLossy) return moveLossyRefusal();
+          if (moveNativeName) {
+            var nativeMove = tryCall(moveTrackClip.clip, [moveNativeName], [moveTargetIndex]);
+            if (nativeMove.called) {
+              // tryCall only says the method existed and did not throw. Read the
+              // clip back: by nodeId, else by projectItem + start (id may change).
+              var nativeFound = findClip(moveSourceId);
+              if (nativeFound && nativeFound.clip.nodeId !== moveSourceId) nativeFound = null;
+              if (!nativeFound) {
+                // Without the id, only a match on the requested track counts: another
+                // clip of the same item elsewhere is not proof of where ours went.
+                for (var nci = 0; nci < destTrack.clips.numItems; nci++) {
+                  var nativeCand = destTrack.clips[nci];
+                  if (nativeCand && nativeCand.projectItem && nativeCand.projectItem.nodeId === moveItem.nodeId && Math.abs(valueOfTime(nativeCand.start) - moveStart) < 0.05) {
+                    nativeFound = { clip: nativeCand, trackIndex: moveTargetIndex, trackType: moveTrackClip.trackType };
+                    break;
+                  }
+                }
+              }
+              if (!nativeFound) {
+                return ok({ moved: true, verified: false, unverifiedReason: nativeMove.method + "() did not throw, but the clip could not be found again by id or by project item at its start time, so the move cannot be confirmed.", trackIndex: moveTargetIndex, method: nativeMove.method, oldClipId: moveSourceId, clearedOccupants: 0 });
+              }
+              var nativeStart = valueOfTime(nativeFound.clip.start);
+              if (nativeFound.trackType !== moveTrackClip.trackType || nativeFound.trackIndex !== moveTargetIndex || Math.abs(nativeStart - moveStart) > 0.05) {
+                return fail(nativeMove.method + "() did not put the clip on the requested track at its original start; it was not moved back.", { requestedTrackType: moveTrackClip.trackType, requestedTrackIndex: moveTargetIndex, requestedStart: moveStart, actualTrackType: nativeFound.trackType, actualTrackIndex: nativeFound.trackIndex, actualStart: nativeStart, clipId: nativeFound.clip.nodeId });
+              }
+              return ok({ moved: true, verified: true, verifiedScope: "track, start", trackIndex: moveTargetIndex, method: nativeMove.method, start: nativeStart, clipId: nativeFound.clip.nodeId, oldClipId: moveSourceId, effectsCarriedOver: true, clearedOccupants: 0 });
+            }
+            // The native call threw: the fallback is next, so re-apply the refusal.
+            if (moveLost.length && !allowLossy) return moveLossyRefusal();
           }
           // Fallback: overwriteClip lays the projectItem down at its OWN duration,
           // not the trimmed timeline length, so writing at the destination can
           // destroy a neighbour past [start, end). Park past the last clip on the
-          // target track (guaranteed empty), restore the trim there, slide into
-          // the verified span, and only then lift the source.
+          // target track (guaranteed empty), restore the trim there, clear any
+          // sanctioned occupants, slide into the verified span, and only then
+          // lift the source. Occupants survive every failure before the slide.
           var moveParkTime = moveLastEnd + 1.0;
           var moveCleanupParked = function (parkedClip) {
             try {
@@ -2423,7 +2487,7 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           }
           if (!placed) {
             moveCleanupParked(null);
-            return fail("Move fallback did not create a clip on the target track; the source clip was left in place.", { clearedOccupants: occupants.length });
+            return fail("Move fallback did not create a clip on the target track; the source clip and any destination occupants were left in place.", { clearedOccupants: 0 });
           }
           // Order the trim so inPoint never transiently exceeds outPoint.
           try {
@@ -2444,16 +2508,23 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
             var placedOut = valueOfTime(placed.outPoint);
             var placedDur = valueOfTime(placed.end) - valueOfTime(placed.start);
             moveCleanupParked(placed);
-            return fail("Source trim could not be restored on the target track; the source clip was left in place.", { requestedIn: moveIn, requestedOut: moveOut, requestedDuration: moveDur, actualIn: placedIn, actualOut: placedOut, actualDuration: placedDur, clearedOccupants: occupants.length });
+            return fail("Source trim could not be restored on the target track; the source clip and any destination occupants were left in place.", { requestedIn: moveIn, requestedOut: moveOut, requestedDuration: moveDur, actualIn: placedIn, actualOut: placedOut, actualDuration: placedDur, clearedOccupants: 0 });
+          }
+          // The parked copy is verified; only now clear the span overwrite:true
+          // sanctioned. Lift (no ripple) so the destination track keeps its timing.
+          if (occupants.length) {
+            for (var ori = occupants.length - 1; ori >= 0; ori--) occupants[ori].remove(false, true);
           }
           placed.move(moveStart - valueOfTime(placed.start));
           if (Math.abs(valueOfTime(placed.start) - moveStart) > 0.05) {
             var placedStart = valueOfTime(placed.start);
             moveCleanupParked(placed);
-            return fail("Clip could not be slid into the destination span; the source clip was left in place.", { requestedStart: moveStart, actualStart: placedStart, clearedOccupants: occupants.length });
+            return fail("Clip could not be slid into the destination span; the source clip was left in place" + (occupants.length ? ", but " + occupants.length + " destination occupant(s) had already been cleared." : "."), { requestedStart: moveStart, actualStart: placedStart, clearedOccupants: occupants.length });
           }
           moveTrackClip.clip.remove(false, true);
-          return ok({ moved: true, verified: true, trackIndex: moveTargetIndex, method: "park+trim+slide", start: moveStart, clipId: placed.nodeId, oldClipId: args.clipId || args.node_id || args.nodeId, trimRestored: true, clearedOccupants: occupants.length });
+          var moveWarnings = [];
+          for (var mli = 0; mli < moveLost.length; mli++) moveWarnings.push("Not carried over (allowLossyMove): " + moveLost[mli]);
+          return ok({ moved: true, verified: true, verifiedScope: "track, start, in/out, duration", trackIndex: moveTargetIndex, method: "park+trim+slide", start: moveStart, clipId: placed.nodeId, oldClipId: moveSourceId, trimRestored: true, effectsCarriedOver: false, warnings: moveWarnings, clearedOccupants: occupants.length });
 
         case "remove_all_effects":
           var removeAllNodeId = args.clipId || args.node_id || args.nodeId;

@@ -32,13 +32,19 @@
 // exact failure this harness exists to prevent, so breadth is the default here and a narrower
 // profile has to be asked for out loud.
 if (!process.env.PREMIERE_MCP_PROFILE) process.env.PREMIERE_MCP_PROFILE = 'all';
+// The sweep runs tools in-process, so this is read by the very handler that would otherwise rewrite
+// Adobe's prefs file (persistPrefToFile in src/tools/index.ts checks it on every call). Those prefs
+// are the user's, global to every project on the machine, and outlive the scratch fixture; a sweep
+// has no business making a change to them that survives a force-quit. Set unconditionally, before
+// any tool can run, so no SKIP-list omission can reach that file.
+process.env.PREMIERE_MCP_NO_PREFS_WRITE = '1';
 const { PremiereProBridge } = await import('../dist/bridge/index.js');
 const { PremiereProTools } = await import('../dist/tools/index.js');
 import { writeFileSync } from 'node:fs';
-import { requireScratchProject } from './lib/require-scratch-project.mjs';
+import { requireScratchProject, checkStillScratch, needsScratchRecheck } from './lib/require-scratch-project.mjs';
 import { collectEnvironment, recordSweep } from './lib/verification-ledger.mjs';
 import { buildContext, synthesizeArgs } from './lib/synthesize-args.mjs';
-import { ensureHealthy } from './lib/host-recovery.mjs';
+import { ensureHealthy, trackOwnCommands } from './lib/host-recovery.mjs';
 
 const ALLOW_MUTATE = process.argv.includes('--mutate');
 /**
@@ -123,6 +129,11 @@ const SKIP = {
   set_active_sequence: 'moves the target out from under later probes',
   set_workspace: 'rearranges the UI',
   restore_recovery_checkpoint: 'replaces sequence state',
+  create_project: 'opens a second project and makes it active, escaping the scratch guard',
+
+  // (a) USER STATE OUTSIDE THE PROJECT — survives the scratch fixture being thrown away
+  set_autosave_settings: 'rewrites the user\'s global Auto Save preferences',
+  write_clipboard: 'overwrites the user\'s system clipboard',
 
   // (c) EXTERNAL SERVICE / CLOUD — reaches Creative Cloud or a team production
   convert_project_to_production: 'mutates Creative Cloud production state',
@@ -177,11 +188,16 @@ async function main() {
   const bridge = new PremiereProBridge();
   await bridge.initialize();
   const tools = new PremiereProTools(bridge);
+  // Installed before the first command goes out, so every id this process publishes is known. A
+  // BUSY verdict naming one of them is this sweep's own wedge, which recovery may clear; any other
+  // id is somebody else's work, which it must not touch.
+  const ownsCommand = trackOwnCommands(bridge);
 
   // Confirm we are pointed at a scratch project before anything else runs. Via the shared helper,
   // not the inline copy this used to carry: that copy was missing 'fixture', so it refused a
   // project the other three harnesses accept, and nothing would have caught the divergence.
-  await requireScratchProject(bridge, 'live-smoke-sweep');
+  // The pinned path is kept: a startup check says nothing about where mutation four hundred lands.
+  const pinned = await requireScratchProject(bridge, 'live-smoke-sweep');
   const version = await bridge.executeScript('return JSON.stringify({ version: String(app.version) });');
   line(`host: Premiere ${version.version}`);
   line(`tool profile: ${process.env.PREMIERE_MCP_PROFILE}`);
@@ -201,7 +217,7 @@ async function main() {
   line('');
 
   const catalogue = tools.getAvailableTools();
-  const results = { pass: [], fail: [], skipped: [], noArgs: [], wedged: [], mutateDeferred: [], abortedAfter: null };
+  const results = { pass: [], fail: [], skipped: [], noArgs: [], wedged: [], mutateDeferred: [], abortedAfter: null, scratchDrift: null };
   /** name -> the tool's own `verified` field, for tools that report one. Fed to the ledger. */
   const verifiedFlag = new Map();
 
@@ -223,7 +239,9 @@ async function main() {
   // coverage-sweep.mjs does, so a wedge is attributed to the tool that caused it and cleared
   // before the next one runs. This is the second time an inline copy of a shared helper in this
   // file has diverged from the real one (see requireScratchProject above); prefer ./lib.
-  const recoveryState = { recoveries: [], maxRecoveries: 6, probeTimeoutMs: 12_000 };
+  const recoveryState = { recoveries: [], maxRecoveries: 6, probeTimeoutMs: 12_000, ownsCommand, pinned };
+  /** Host calls since the scratch project was last re-pinned. */
+  let callsSinceScratchCheck = 0;
 
   // ---------------------------------------------------------------------------------------------
   // WHY THIS DOES NOT PROBE THE ENGINE BY DEFAULT.
@@ -232,8 +250,9 @@ async function main() {
   // waits for the panel to answer THAT file. It is only a valid probe when this process is the
   // panel's only client. When an MCP server is also attached to the same directory — i.e. whenever
   // an agent is driving Premiere in the same session, which is the normal case here — the two race
-  // for the response, the sentinel sees "consumed but never answered", and reports ENGINE_DEAD for
-  // a host that is perfectly healthy.
+  // for the response, the sentinel sees "consumed but never answered", and reported ENGINE_DEAD for
+  // a host that is perfectly healthy. (It now names that case RESPONSE_LOST, and recovery refuses
+  // to act on it, but the probe still cannot tell you anything useful while another client races.)
   //
   // Measured on 2026-08-31: a pre-flight probeEngine() returned ENGINE_DEAD while the live MCP
   // session was answering ping and honesty_selftest normally, and the recovery it triggered
@@ -348,45 +367,70 @@ async function main() {
     // specific command. Escalate only then, so the common case costs nothing and the sentinel is
     // never spawned into a race it cannot win (see the pre-flight note above).
     const stuck = results.wedged.length && results.wedged[results.wedged.length - 1].name === name;
-    if (!stuck) continue;
+    /** Set when the host was Escaped or relaunched, either of which can change the active project. */
+    let hostDisturbed = false;
+    if (stuck) {
+      // Give the panel a moment to drain on its own. Plenty of legitimate host calls outlive one
+      // tool's turn — the 16:46:15Z run took exactly one such rejection (diff_sequences) and
+      // recovered without help, so treating the first rejection as fatal would throw away a
+      // perfectly good run.
+      let drained = false;
+      for (let i = 0; i < 5 && !drained; i++) {
+        await sleep(2000);
+        const now = heartbeat();
+        drained = Boolean(now && now.ageMs < 10_000 && !now.isProcessing);
+      }
+      if (drained) {
+        process.stdout.write('~');
+      } else {
+        // Still stuck. Something is holding the engine, and every remaining tool would be rejected
+        // unrun — which is precisely the 347-fabricated-failures outcome this rewrite exists to
+        // prevent. Recovery can clear a modal with Escape, but it spawns the sentinel, so it stays
+        // opt-in; without it, stop and say so.
+        if (!ALLOW_RECOVER) {
+          const blocking = results.wedged[results.wedged.length - 1].blockingCommandId;
+          line('');
+          line(`!! ABORTED: the panel is wedged on command ${blocking} and is not draining.`);
+          line(`!! The last tool to actually reach the host was: ${name}`);
+          line('!! Clear the modal in Premiere and re-run, or pass --recover to let the harness');
+          line('!! Escape/relaunch it — only safe when no MCP client is attached to the bridge.');
+          results.abortedAfter = name;
+          break;
+        }
 
-    // Give the panel a moment to drain on its own. Plenty of legitimate host calls outlive one
-    // tool's turn — the 16:46:15Z run took exactly one such rejection (diff_sequences) and
-    // recovered without help, so treating the first rejection as fatal would throw away a
-    // perfectly good run.
-    let drained = false;
-    for (let i = 0; i < 5 && !drained; i++) {
-      await sleep(2000);
-      const now = heartbeat();
-      drained = Boolean(now && now.ageMs < 10_000 && !now.isProcessing);
-    }
-    if (drained) { process.stdout.write('~'); continue; }
-
-    // Still stuck. Something is holding the engine, and every remaining tool would be rejected
-    // unrun — which is precisely the 347-fabricated-failures outcome this rewrite exists to
-    // prevent. Recovery can clear a modal with Escape, but it spawns the sentinel, so it stays
-    // opt-in; without it, stop and say so.
-    if (!ALLOW_RECOVER) {
-      const blocking = results.wedged[results.wedged.length - 1].blockingCommandId;
-      line('');
-      line(`!! ABORTED: the panel is wedged on command ${blocking} and is not draining.`);
-      line(`!! The last tool to actually reach the host was: ${name}`);
-      line('!! Clear the modal in Premiere and re-run, or pass --recover to let the harness');
-      line('!! Escape/relaunch it — only safe when no MCP client is attached to the bridge.');
-      results.abortedAfter = name;
-      break;
+        const health = await ensureHealthy(name, recoveryState);
+        if (!health.ok) {
+          line('');
+          line(`!! ABORTED after ${name}: ${health.error ?? health.verdict?.state}`);
+          line('!! Stopping rather than thrashing Premiere. Remaining tools are recorded as unexercised.');
+          results.abortedAfter = name;
+          break;
+        }
+        process.stdout.write(`[WEDGED-BY:${name}]`);
+        hostDisturbed = Boolean(health.clearedModal || health.recovery);
+      }
     }
 
-    const health = await ensureHealthy(name, recoveryState);
-    if (health.ok) {
-      process.stdout.write(`[WEDGED-BY:${name}]`);
-      continue;
+    // RE-PIN THE TARGET. requireScratchProject only speaks for the moment it ran; tools that omit a
+    // target act on whichever project is ACTIVE, and a project-opening tool, an Escape that lands on
+    // the wrong dialog, or a relaunch can all change that. So the pin is re-checked every few calls,
+    // straight after anything whose name says it touches projects, and after every recovery. A
+    // failed check stops the run here — with the report and ledger still written — because every
+    // later call could land on a project nobody cleared for mutation.
+    callsSinceScratchCheck++;
+    if (hostDisturbed || needsScratchRecheck(name, callsSinceScratchCheck)) {
+      const pin = await checkStillScratch(bridge, pinned);
+      if (!pin.ok) {
+        line('');
+        line(`!! ABORTED after ${name}: the scratch project is no longer the target.`);
+        line(`!! ${pin.reason}`);
+        line('!! Nothing further was run. Check Premiere by hand before saving anything.');
+        results.abortedAfter = name;
+        results.scratchDrift = pin.reason;
+        break;
+      }
+      callsSinceScratchCheck = 0;
     }
-    line('');
-    line(`!! ABORTED after ${name}: ${health.error ?? health.verdict?.state}`);
-    line('!! Stopping rather than thrashing Premiere. Remaining tools are recorded as unexercised.');
-    results.abortedAfter = name;
-    break;
   }
 
   line('');

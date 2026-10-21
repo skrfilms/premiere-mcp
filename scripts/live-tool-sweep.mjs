@@ -8,6 +8,10 @@ import { PremiereProTools } from '../dist/tools/index.js';
 import { requireScratchProject } from './lib/require-scratch-project.mjs';
 
 process.env.PREMIERE_TEMP_DIR = process.env.PREMIERE_TEMP_DIR || '/tmp/premiere-mcp-bridge';
+// Tools run in-process, and persistPrefToFile (src/tools/index.ts) reads this on every call. A
+// harness has no business making a change to the user's global Premiere prefs that survives a
+// force-quit, so it is refused here before any tool can run.
+process.env.PREMIERE_MCP_NO_PREFS_WRITE = '1';
 
 const bridge = new PremiereProBridge();
 const tools = new PremiereProTools(bridge);
@@ -86,6 +90,16 @@ const modalDialogSkips = new Set([
 ]);
 
 /**
+ * Tools that change the user's machine rather than the project, so a disposable fixture does not
+ * make them safe. The fallback loop calls anything whose schema accepts {}, so they are listed
+ * here rather than trusted to need arguments the loop cannot supply.
+ */
+const userStateSkips = new Set([
+  'set_autosave_settings',
+  'write_clipboard',
+]);
+
+/**
  * The single gate every invocation path must consult.
  *
  * The skip sets used to be checked ONLY in the trailing fallback loop, so any tool that also had
@@ -98,6 +112,7 @@ function skipReason(name) {
   if (modalDialogSkips.has(name)) return 'opens a modal Premiere dialog that wedges the panel; needs a human at the keyboard';
   if (externalFixtureSkips.has(name)) return 'requires external project/interchange/MOGRT assets or can open modal Premiere flows';
   if (mutatingNoArgSkips.has(name)) return 'intentionally skipped because it mutates or saves the active project';
+  if (userStateSkips.has(name)) return 'changes user state outside the project (global Auto Save prefs or the system clipboard)';
   return null;
 }
 

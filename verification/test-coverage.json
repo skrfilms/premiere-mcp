@@ -2302,6 +2302,7 @@
     {
       "name": "get_encoder_presets",
       "testFiles": [
+        "src/__tests__/tools/encoder-preset-dirs.test.ts",
         "src/__tests__/tools/es3-absent-methods.test.ts",
         "src/__tests__/tools/generated-script-syntax.test.ts",
         "src/__tests__/tools/index.test.ts",
@@ -6407,7 +6408,7 @@
     }
   ],
   "catalogueSize": 647,
-  "gitSha": "bcbbcc8645d9389db774c8907c77c095355a062a",
+  "gitSha": "1198b8955b8e70f3e4ea33937bfafea2640d38b8",
   "gitDirty": true,
-  "testFileCount": 30
+  "testFileCount": 31
 }

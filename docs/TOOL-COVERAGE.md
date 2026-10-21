@@ -27,9 +27,9 @@ well work; nothing here is evidence that it does.
 
 ## The measured run
 
-- commit: `bcbbcc8645d9389db774c8907c77c095355a062a` **with uncommitted changes in the tree**
+- commit: `1198b8955b8e70f3e4ea33937bfafea2640d38b8` **with uncommitted changes in the tree**
 - catalogue at measurement: 647
-- test files that dispatched at least one tool: 30
+- test files that dispatched at least one tool: 31
 
 Measured by instrumenting the dispatcher, not by grepping test files for tool names:
 a name in a table of expected strings is not a call, and a name assembled at runtime is
@@ -284,7 +284,7 @@ that was removed after the run, and the run is stale.
 | `get_ea_user_info` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `get_edit_point_list` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `get_effect_properties` | yes (4) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
-| `get_encoder_presets` | yes (6) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/index.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
+| `get_encoder_presets` | yes (7) | yes | `src/__tests__/tools/encoder-preset-dirs.test.ts`, `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/index.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `get_encoder_state` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `get_export_file_extension` | yes (4) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `get_export_progress` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |

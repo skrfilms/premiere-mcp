@@ -20,9 +20,16 @@
  * then lift the original. Every failure after the park removes the parked
  * copy and leaves the source untouched.
  *
+ * Under overwrite:true the destination occupants are the other thing at risk:
+ * they are lifted only once the parked copy's trim is verified, right before
+ * the slide, and the native move is never tried on an occupied span. The
+ * fallback re-creates the clip, so it refuses one carrying effects/speed
+ * unless allowLossyMove:true, and a native move is read back, not trusted.
+ *
  * Each test below fails against the previous implementation.
  */
 
+import { parse } from 'acorn';
 import { executeExpandedTool } from '../../tools/expanded.js';
 
 describe('move_clip_to_track fallback safety', () => {
@@ -147,5 +154,100 @@ describe('move_clip_to_track fallback safety', () => {
     // destination track keeps its timing.
     expect(block).toContain('occupants.push(other)');
     expect(block).toContain('occupants[ori].remove(false, true)');
+  });
+
+  it('removes occupants only after the parked trim is verified, immediately before the slide', async () => {
+    const block = await caseBlock();
+
+    // Every step before the slide can fail and says the destination was left
+    // alone; the occupants must still exist on those paths.
+    const occupantRemoval = block.indexOf('occupants[ori].remove(false, true)');
+    const park = block.indexOf('destTrack.overwriteClip(moveItem, moveParkTime)');
+    const trimCheck = block.indexOf('if (!trimRestored)');
+    const slide = block.indexOf('placed.move(');
+    expect(occupantRemoval).toBeGreaterThan(park);
+    expect(occupantRemoval).toBeGreaterThan(trimCheck);
+    expect(slide).toBeGreaterThan(occupantRemoval);
+    expect(block.indexOf('tryCall(moveTrackClip.clip')).toBeLessThan(occupantRemoval);
+    expect(block.split('occupants[ori].remove(').length - 1).toBe(1);
+  });
+
+  it('skips the native move when the destination span is occupied', async () => {
+    const block = await caseBlock();
+
+    // A native move cannot be trusted not to land on top of occupants, so it
+    // is only selected when there are none.
+    const gate = block.indexOf('if (!occupants.length) {');
+    const pick = block.indexOf('moveNativeName = "moveToTrack"');
+    const call = block.indexOf('tryCall(moveTrackClip.clip, [moveNativeName]');
+    expect(gate).toBeGreaterThan(-1);
+    expect(pick).toBeGreaterThan(gate);
+    expect(call).toBeGreaterThan(pick);
+    expect(block).toContain('if (moveNativeName) {');
+    expect(block).not.toContain('["moveToTrack", "setTrack"]');
+  });
+
+  it('reads back a native move instead of trusting tryCall', async () => {
+    const block = await caseBlock();
+
+    const call = block.indexOf('tryCall(moveTrackClip.clip, [moveNativeName]');
+    const reFind = block.indexOf('findClip(moveSourceId)');
+    const byItem = block.indexOf('nativeCand.projectItem.nodeId === moveItem.nodeId');
+    expect(reFind).toBeGreaterThan(call);
+    expect(byItem).toBeGreaterThan(reFind);
+    // Track type, index and start are all checked.
+    expect(block).toContain('nativeFound.trackType !== moveTrackClip.trackType || nativeFound.trackIndex !== moveTargetIndex || Math.abs(nativeStart - moveStart) > 0.05');
+    // Not found -> ok but unverified, the same shape the rest of the file uses.
+    expect(block).toMatch(/verified: false, unverifiedReason: nativeMove\.method/);
+  });
+
+  it('refuses a lossy fallback before any mutation unless allowLossyMove:true', async () => {
+    const block = await caseBlock();
+
+    expect(block).toContain('Boolean(args.allowLossyMove)');
+    // Lossiness uses the shared intrinsic notion plus speed.
+    expect(block).toContain('reIsIntrinsic(moveComp)');
+    expect(block).toContain('moveTrackClip.clip.getSpeed()');
+    const refusal = block.indexOf('if (!moveNativeName && moveLost.length && !allowLossy) return moveLossyRefusal();');
+    expect(refusal).toBeGreaterThan(-1);
+    // The fallback is never lossless (static values, markers and name reset on a fresh copy), so
+    // moveLost is unconditionally non-empty before the refusal and every fallback needs the flag.
+    const always = block.indexOf('moveLost.push("static Motion/Opacity/Volume/Pan values');
+    expect(always).toBeGreaterThan(-1);
+    expect(always).toBeLessThan(refusal);
+    expect(block.slice(always - 200, always)).not.toMatch(/\bif \([^)]*\)\s*$/);
+    const mutations = ['.remove(false, true)', 'overwriteClip(', 'tryCall(moveTrackClip.clip', 'placed.move('];
+    for (const m of mutations) {
+      expect(block.indexOf(m)).toBeGreaterThan(refusal);
+    }
+  });
+
+  it('reports what the fallback did not carry over and scopes its verification', async () => {
+    const block = await caseBlock();
+
+    const okLine = block.slice(block.lastIndexOf('return ok('));
+    expect(okLine).toContain('effectsCarriedOver: false');
+    expect(okLine).toContain('warnings: moveWarnings');
+    expect(okLine).toContain('verifiedScope: "track, start, in/out, duration"');
+  });
+
+  it('returns early for the current track before anything mutates', async () => {
+    const block = await caseBlock();
+
+    const early = block.indexOf('method: "already on requested track"');
+    expect(early).toBeGreaterThan(-1);
+    for (const m of ['.remove(', 'overwriteClip(', 'tryCall(', '.move(']) {
+      expect(block.slice(0, early).includes(m)).toBe(false);
+    }
+  });
+
+  it('stays ES3: parses in acorn ES3 mode and uses no let/const/arrows', async () => {
+    let script = '';
+    const bridge = { executeScript: async (s: string) => { script = s; return { success: true }; } };
+    await executeExpandedTool(bridge as any, 'move_clip_to_track', { clipId: 'clip-1', trackIndex: 1, allowLossyMove: true });
+    expect(() => parse(script, { ecmaVersion: 3, allowReturnOutsideFunction: true })).not.toThrow();
+
+    const block = await caseBlock();
+    expect(block).not.toMatch(/\blet\b|\bconst\b|=>/);
   });
 });

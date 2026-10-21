@@ -24,6 +24,11 @@ import { PremiereProBridge } from '../dist/bridge/index.js';
 import { PremiereProTools } from '../dist/tools/index.js';
 import { requireScratchProject, assertStillScratch } from './lib/require-scratch-project.mjs';
 
+// Tools run in-process, and persistPrefToFile (src/tools/index.ts) reads this on every call. A
+// harness has no business making a change to the user's global Premiere prefs that survives a
+// force-quit, so it is refused here before any tool can run.
+process.env.PREMIERE_MCP_NO_PREFS_WRITE = '1';
+
 const KEEP = ['fixture_seq_a', 'fixture_seq_b'];
 const MARKER_PREFIX = 'harness-drift-probe';
 
