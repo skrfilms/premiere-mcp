@@ -4,6 +4,10 @@ All notable changes are documented here. Releases use semantic versioning.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [1.3.1] - 2026-10-21
+
 ### Fixed
 
 - `move_clip_to_track` no longer overwrites or loses clips. The fallback used to
