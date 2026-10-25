@@ -312,27 +312,18 @@ export class ColorTools extends ProjectMediaTools {
         function findById(bin,id){for(var i=0;i<bin.children.numItems;i++){var c=bin.children[i];if(c.nodeId===id)return c;if(c.type===2){var r=findById(c,id);if(r)return r;}}return null;}
         var item = findById(root, ${JSON.stringify(projectItemId)});
         if (!item) return JSON.stringify({success:false,error:'Item not found'});
-        var orig = item.getOriginalColorSpace ? String(item.getOriginalColorSpace()) : 'N/A';
-        var ovr = item.getOverrideColorSpace ? String(item.getOverrideColorSpace()) : 'N/A';
-        var list = [];
-        try { var l = item.getOverrideColorSpaceList ? item.getOverrideColorSpaceList() : null; if (l) list = String(l).split(',').map(function(s){return s.replace(/^\\s+|\\s+$/g,'');}); } catch(e){}
-        return JSON.stringify({success:true,projectItemId:${JSON.stringify(projectItemId)},originalColorSpace:orig,overrideColorSpace:ovr,availableOverrides:list.slice(0,20)});
+        var orig = null, ovr = null;
+        try { orig = __csInfo(item.getOriginalColorSpace()); } catch(eO) {}
+        try { ovr = __csInfo(item.getOverrideColorSpace()); } catch(eV) {}
+        return JSON.stringify({success:true,projectItemId:${JSON.stringify(projectItemId)},originalColorSpace:orig,overrideColorSpace:(ovr && !ovr.empty) ? ovr : null,availableOverrides:__colorSpaceNames(item)});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
 
   protected async setClipColorSpace(projectItemId: string, colorSpaceName: string): Promise<any> {
-    return await this.bridge.executeScript(`
-      try {
-        var root = app.project.rootItem;
-        function findById(bin,id){for(var i=0;i<bin.children.numItems;i++){var c=bin.children[i];if(c.nodeId===id)return c;if(c.type===2){var r=findById(c,id);if(r)return r;}}return null;}
-        var item = findById(root, ${JSON.stringify(projectItemId)});
-        if (!item) return JSON.stringify({success:false,error:'Item not found'});
-        item.setOverrideColorSpace(${JSON.stringify(colorSpaceName)});
-        var after = item.getOverrideColorSpace ? String(item.getOverrideColorSpace()) : 'N/A';
-        return JSON.stringify({success:true,verified:true,colorSpaceName:${JSON.stringify(colorSpaceName)},applied:after});
-      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
-    `);
+    // Same operation as set_color_space_override. This used to pass the name string straight to
+    // setOverrideColorSpace(), which takes a ColorSpace object and threw "Illegal Parameter type".
+    return await this.setColorSpaceOverride(projectItemId, colorSpaceName);
   }
 
   protected async applyLutToClip(trackIndex: number, clipIndex: number, lutPath: string, sequenceId?: string): Promise<any> {
@@ -685,22 +676,25 @@ export class ColorTools extends ProjectMediaTools {
       try {
         var item=${this.findItemById(projectItemId)};
         if(!item)return JSON.stringify({success:false,error:'Item not found'});
-        var valid=item.isValidOverrideColorSpace?item.isValidOverrideColorSpace(${JSON.stringify(colorSpaceName)}):true;
-        if(!valid)return JSON.stringify({success:false,error:'Invalid color space: '+${JSON.stringify(colorSpaceName)}});
-        var before=null; try{ before=String(item.getOverrideColorSpace()); }catch(eB){}
+        var cs=__findColorSpace(${JSON.stringify(colorSpaceName)}, item);
+        if(!cs)return JSON.stringify({success:false,error:'No colour space named '+${JSON.stringify(JSON.stringify(colorSpaceName))}+' is available. Pass one of availableColorSpaces.',availableColorSpaces:__colorSpaceNames(item)});
+        var valid=true; try{ valid=item.isValidOverrideColorSpace(cs); }catch(eV){}
+        if(!valid)return JSON.stringify({success:false,error:'Premiere rejects '+String(cs.name)+' as an override for this item.',availableColorSpaces:__colorSpaceNames(item)});
+        var before=null; try{ before=__csInfo(item.getOverrideColorSpace()); }catch(eB){}
         var setError=null;
-        try{ item.setOverrideColorSpace(${JSON.stringify(colorSpaceName)}); }catch(eS){ setError=eS.toString(); }
-        var back=null; try{ back=String(item.getOverrideColorSpace()); }catch(eA){}
-        if(back===null){
-          return JSON.stringify({success:true,verified:false,colorSpace:${JSON.stringify(colorSpaceName)},before:before,setError:setError,
+        try{ item.setOverrideColorSpace(cs); }catch(eS){ setError=eS.toString(); }
+        var back=null; try{ back=__csInfo(item.getOverrideColorSpace()); }catch(eA){}
+        if(!back){
+          return JSON.stringify({success:true,verified:false,colorSpace:String(cs.name),setError:setError,
             unverifiedReason:'getOverrideColorSpace() is not readable for this item, so the override cannot be confirmed.'});
         }
-        if(back.indexOf(${JSON.stringify(colorSpaceName)})<0){
-          return JSON.stringify({success:false,verified:true,verifiedBy:'getOverrideColorSpace() readback',changed:back!==before,colorSpace:${JSON.stringify(colorSpaceName)},before:before,readback:back,setError:setError,
-            error:'The item colour space reads "' + back + '", which does not contain the requested ' + ${JSON.stringify(colorSpaceName)} + '. isValidOverrideColorSpace accepted the name, so the override was refused at write time.'});
+        if(back.empty || back.name!==String(cs.name)){
+          return JSON.stringify({success:false,verified:true,verifiedBy:'getOverrideColorSpace() readback',colorSpace:String(cs.name),before:before,readback:back,setError:setError,
+            error:'The override reads "'+back.name+'" after the write, not '+String(cs.name)+'.'});
         }
-        return JSON.stringify({success:true,verified:true,verifiedBy:'getOverrideColorSpace() readback',changed:back!==before,colorSpace:${JSON.stringify(colorSpaceName)},before:before,readback:back,
-          note: back === before ? 'The item was already overridden to this colour space; nothing changed.' : undefined});
+        var unchanged = before && !before.empty && before.name===back.name;
+        return JSON.stringify({success:true,verified:true,verifiedBy:'getOverrideColorSpace() readback',changed:!unchanged,colorSpace:back,before:(before && !before.empty) ? before : null,
+          note:'An override cannot be cleared by script on this build; set it back to the original colour space instead.'});
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
     `);
   }
@@ -796,10 +790,10 @@ export class ColorTools extends ProjectMediaTools {
         if (!item) return JSON.stringify({ success: false, error: 'Project item not found: ' + ${JSON.stringify(projectItemId)} });
         var o = { success: true, name: String(item.name) };
         try { o.isColorManagedMedia = item.isColorManagedMedia(); } catch(e1) {}
-        try { o.originalColorSpace = String(item.getOriginalColorSpace()); } catch(e2) {}
-        try { o.overrideColorSpace = String(item.getOverrideColorSpace()); } catch(e3) {}
-        try { o.overrideColorSpaceList = String(item.getOverrideColorSpaceList); } catch(e4) {}
-        try { o.colorSpace = String(item.getColorSpace()); } catch(e5) {}
+        try { o.originalColorSpace = __csInfo(item.getOriginalColorSpace()); } catch(e2) {}
+        try { var ov = __csInfo(item.getOverrideColorSpace()); o.overrideColorSpace = (ov && !ov.empty) ? ov : null; } catch(e3) {}
+        try { o.overrideColorSpaceList = __colorSpaceNames(item); } catch(e4) {}
+        try { o.colorSpace = __csInfo(item.getColorSpace()); } catch(e5) {}
         try { o.embeddedLUTID = String(item.getEmbeddedLUTID()); } catch(e6) {}
         try { o.inputLUTID = String(item.getInputLUTID()); } catch(e7) {}
         try { o.isReference = item.isReference(); } catch(e8) {}

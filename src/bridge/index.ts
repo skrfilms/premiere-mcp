@@ -609,6 +609,58 @@ function __videoGaps(seq) {
   }
   return __rangesGaps(ranges);
 }
+/*
+ * Colour spaces are ColorSpace host objects, not names. Measured on 26.5.2: ColorSpace has no
+ * constructor, its fields are read-only, ProjectItem.getOverrideColorSpaceList() does not exist,
+ * String(colorSpace) is "[object Object]", and setOverrideColorSpace("Rec. 709") throws "Illegal
+ * Parameter type". The only source of ColorSpace objects a script can pass back is a sequence's
+ * settings.workingColorSpaceList (plus items' own original colour spaces), so names are resolved
+ * against those.
+ */
+function __csInfo(cs) {
+  if (!cs) return null;
+  var o = {};
+  try { o.name = String(cs.name); } catch (e1) {}
+  try { o.empty = Boolean(cs.empty); } catch (e2) {}
+  try { o.primaries = Number(cs.primaries); } catch (e3) {}
+  try { o.transferCharacteristic = Number(cs.transferCharacteristic); } catch (e4) {}
+  try { o.matrixEquation = Number(cs.matrixEquation); } catch (e5) {}
+  try { o.isSceneReferred = Boolean(cs.isSceneReferred); } catch (e6) {}
+  return o;
+}
+function __colorSpaceCatalog(item) {
+  var out = [], seen = {};
+  var add = function (cs) {
+    if (!cs) return;
+    var n = '';
+    try { if (cs.empty) return; n = String(cs.name); } catch (e) { return; }
+    if (!n || seen[n]) return;
+    seen[n] = true; out.push(cs);
+  };
+  try {
+    var seqs = app.project.sequences;
+    for (var i = 0; i < seqs.numSequences; i++) {
+      var list = null;
+      try { list = seqs[i].getSettings().workingColorSpaceList; } catch (eL) {}
+      if (list) for (var j = 0; j < list.length; j++) add(list[j]);
+    }
+  } catch (eS) {}
+  if (item) { try { add(item.getOriginalColorSpace()); } catch (eO) {} }
+  return out;
+}
+function __findColorSpace(name, item) {
+  var want = String(name).toLowerCase().replace(/[^a-z0-9]/g, '');
+  var cat = __colorSpaceCatalog(item);
+  for (var i = 0; i < cat.length; i++) {
+    if (String(cat[i].name).toLowerCase().replace(/[^a-z0-9]/g, '') === want) return cat[i];
+  }
+  return null;
+}
+function __colorSpaceNames(item) {
+  var cat = __colorSpaceCatalog(item), names = [];
+  for (var i = 0; i < cat.length; i++) names.push(String(cat[i].name));
+  return names;
+}
 function __padLeft(value, width, padChar) {
   var out = String(value);
   var ch = (padChar === undefined || padChar === null) ? '0' : String(padChar);

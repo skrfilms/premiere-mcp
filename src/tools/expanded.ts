@@ -1912,11 +1912,12 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
         case "get_color_space":
           var colorItem = findItem(args.projectItemId || args.itemId || args.item_id || args.name) || firstMediaItem();
           if (!colorItem) return fail("Project item not found");
-          var colorSpaceResult = tryCall(colorItem, ["getOverrideColorSpace", "getColorSpace"], []);
-          var colorSpaceList = null;
-          try { if (colorItem.getOverrideColorSpaceList) colorSpaceList = colorItem.getOverrideColorSpaceList(); } catch (colorListError) {}
-          if (!colorSpaceResult.called && colorSpaceList === null) return fail(colorSpaceResult.error, { item: colorItem.name });
-          return ok({ item: projectItemInfo(colorItem), colorSpace: colorSpaceResult.called ? colorSpaceResult.result : null, overrideColorSpaceList: colorSpaceList });
+          // ColorSpace objects stringify to "[object Object]"; read their fields instead.
+          var csNow = null, csOverride = null;
+          try { csNow = __csInfo(colorItem.getColorSpace()); } catch (csNowError) {}
+          try { csOverride = __csInfo(colorItem.getOverrideColorSpace()); } catch (csOvError) {}
+          if (!csNow && !csOverride) return fail("This item exposes no colour space", { item: colorItem.name });
+          return ok({ item: projectItemInfo(colorItem), colorSpace: csNow, overrideColorSpace: (csOverride && !csOverride.empty) ? csOverride : null, overrideColorSpaceList: __colorSpaceNames(colorItem) });
 
         case "get_graphics_white_luminance":
           if (!app.project || !app.project.getGraphicsWhiteLuminance) return fail("app.project.getGraphicsWhiteLuminance is unavailable");
