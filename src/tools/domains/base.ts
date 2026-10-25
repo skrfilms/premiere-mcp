@@ -425,7 +425,12 @@ export class ToolsBase {
   /** QE sequence resolver — use in executeScript template literals. Fails closed like buildSeqRes. */
   protected buildQSeqResolver(seqId?: string): string {
     if (!seqId) return 'qe.project.getActiveSequence()';
-    return `(function(){ app.enableQE(); var seqs=app.project.sequences; for(var i=0;i<seqs.numSequences;i++){ if(seqs[i].sequenceID===${JSON.stringify(seqId)}) return qe.project.getSequenceAt(i); } throw new Error("Sequence not found by id: "+${JSON.stringify(seqId)}+". Refusing to fall back to the active sequence -- nothing was read or changed."); })()`;
+    // Matched by guid through __qeSequenceFor, never by position. QE does not list sequences in
+    // the DOM's order: measured on 26.5.2, DOM index 0 was synth_seq while qe.project
+    // .getSequenceAt(0) was fixture_seq_a, so pairing the two indices sent every QE tool given a
+    // sequenceId to a different sequence than the one named — with a verified:true readback of
+    // the wrong timeline.
+    return `(function(){ var __d=__findSequence(${JSON.stringify(seqId)}); if(!__d) throw new Error("Sequence not found by id: "+${JSON.stringify(seqId)}+". Refusing to fall back to the active sequence -- nothing was read or changed."); var __q=__qeSequenceFor(__d); if(!__q) throw new Error("Sequence "+${JSON.stringify(seqId)}+" exists but QE does not expose it (QE only sees sequences that have been opened in a timeline). Open it with set_active_sequence and retry -- nothing was read or changed."); return __q; })()`;
   }
 
   /** Size and mtime of a path, or null when it is absent or unreadable. */

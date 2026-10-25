@@ -71,3 +71,15 @@ describe('copy_markers_between_sequences', () => {
     expect(s).toContain('(after-before)===snap.length');
   });
 });
+
+describe('QE sequence resolution', () => {
+  // QE lists sequences in a different order from app.project.sequences (measured on 26.5.2),
+  // so pairing the two indices addressed the wrong sequence.
+  it('resolves a named QE sequence by guid, not by DOM index', async () => {
+    let script = '';
+    const bridge = { executeScript: async (s: string) => { script = s; return { success: true }; } };
+    await new PremiereProTools(bridge as never).executeTool('get_qe_sequence_props', { sequenceId: 'SEQ-1' });
+    expect(script).toContain('__qeSequenceFor(__d)');
+    expect(script).not.toMatch(/return qe\.project\.getSequenceAt\(i\)/);
+  });
+});
