@@ -4,7 +4,20 @@ All notable changes are documented here. Releases use semantic versioning.
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- 36 tools declared `sequenceId`, forwarded it, and then ignored it, acting on the
+  active sequence instead. They now honour the id they are given.
+- The shared sequence and bin resolvers no longer fall back to the active sequence
+  or the project root when an id does not match. A stale or mistyped id is now an
+  error, not a silent retarget. `silent-retarget-audit.test.ts` pins the pattern.
+- `copy_effects_between_clips` resolves its source and target clips across every
+  sequence, so an effect stack can be lifted from one sequence onto another.
+
+### Added
+
+- `set_scale_to_frame_size_batch`: scale-to-frame-size for a track, every video
+  track, or a list of clip ids in one call, with a per-clip readback.
 
 ## [1.3.1] - 2026-10-21
 

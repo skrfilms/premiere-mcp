@@ -408,10 +408,10 @@ export class AssemblyTools extends ToolsBase {
     return await this.bridge.executeScript(script);
   }
 
-  protected async nestAllV1Clips(newSeqName: string, _seqId?: string): Promise<any> {
+  protected async nestAllV1Clips(newSeqName: string, seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(seqId)};
         var v1 = seq.videoTracks[0];
         if (!v1 || v1.clips.numItems === 0) return JSON.stringify({success:false,error:'No clips on V1'});
         var clips = [];

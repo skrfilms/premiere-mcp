@@ -12,7 +12,8 @@ export interface PremiereProTransport {
   createProject(name: string, location: string): Promise<PremiereProProject>;
   openProject(path: string): Promise<PremiereProProject>;
   saveProject(): Promise<void>;
-  importMedia(filePath: string): Promise<PremiereProProjectItem>;
+  /** binName accepts a "/"-separated bin path; binId (a bin nodeId) wins over it. */
+  importMedia(filePath: string, binName?: string, binId?: string): Promise<PremiereProProjectItem>;
   createSequence(name: string, presetPath: string): Promise<PremiereProSequence>;
   addToTimeline(sequenceId: string, projectItemId: string, trackIndex: number, time: number, linkAudio?: boolean, sourceInPoint?: number, sourceOutPoint?: number, insertMode?: string): Promise<PremiereProClip>;
   addToTimelineBatch(sequenceId: string, clips: Array<{ projectItemId: string; trackIndex: number; time?: number; linkAudio?: boolean; sourceInPoint?: number; sourceOutPoint?: number }>, mode?: 'absolute' | 'append'): Promise<any>;

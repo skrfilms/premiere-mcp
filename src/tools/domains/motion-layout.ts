@@ -40,7 +40,7 @@ export class MotionLayoutTools extends MarkerTools {
   ): string {
     return `
       try {
-        var seq = ${seqId ? `(function(){var ss=app.project.sequences;for(var i=0;i<ss.numSequences;i++){if(ss[i].sequenceID===${JSON.stringify(seqId)})return ss[i];}return app.project.activeSequence;})()` : 'app.project.activeSequence'};
+        var seq = ${this.buildSeqRes(seqId)};
         if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
         function __valuesMatch(a, b) {
           if (a === null || a === undefined) return false;
@@ -139,14 +139,14 @@ export class MotionLayoutTools extends MarkerTools {
     `;
   }
 
-  protected async flipClip(_sequenceId: string | undefined, ti: number, ci: number, direction: 'horizontal' | 'vertical'): Promise<any> {
+  protected async flipClip(sequenceId: string | undefined, ti: number, ci: number, direction: 'horizontal' | 'vertical'): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = qe.project.getActiveSequence();
+        var seq = ${this.buildQSeqResolver(sequenceId)};
         var qeClip = seq.getVideoTrackAt(${ti}).getItemAt(${ci});
         if (!qeClip) return JSON.stringify({success:false,error:'Clip not found'});
-        var domSeq = app.project.activeSequence;
+        var domSeq = ${this.buildSeqRes(sequenceId)};
         var domClip = domSeq.videoTracks[${ti}].clips[${ci}];
         var before = domClip.components.numItems;
         var effect = qe.project.getVideoEffectByName('Transform');
@@ -193,10 +193,10 @@ export class MotionLayoutTools extends MarkerTools {
     `);
   }
 
-  protected async fadeVideo(_sequenceId: string | undefined, ti: number, ci: number, durationFrames: number, direction: 'in' | 'out'): Promise<any> {
+  protected async fadeVideo(sequenceId: string | undefined, ti: number, ci: number, durationFrames: number, direction: 'in' | 'out'): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(sequenceId)};
         var clip = seq.videoTracks[${ti}].clips[${ci}];
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         ${this.keyframeVerifyFragment()}
@@ -253,10 +253,10 @@ export class MotionLayoutTools extends MarkerTools {
     ], 'reset_transform'));
   }
 
-  protected async matchTransform(_sequenceId: string | undefined, srcTi: number, srcCi: number, targets: Array<{trackIndex: number, clipIndex: number}>): Promise<any> {
+  protected async matchTransform(sequenceId: string | undefined, srcTi: number, srcCi: number, targets: Array<{trackIndex: number, clipIndex: number}>): Promise<any> {
     const readScript = `
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(sequenceId)};
         var clip = seq.videoTracks[${srcTi}].clips[${srcCi}];
         if (!clip) return JSON.stringify({success:false,error:'Source clip not found'});
         var mot = null;
@@ -270,7 +270,7 @@ export class MotionLayoutTools extends MarkerTools {
     if (!src.success) return src;
     const results: any[] = [];
     for (const t of targets) {
-      const r = await this.bridge.executeScript(this.motionParamScript(_sequenceId, t.trackIndex, t.clipIndex, [
+      const r = await this.bridge.executeScript(this.motionParamScript(sequenceId, t.trackIndex, t.clipIndex, [
         { index: 0, name: 'Position', value: src.pos },
         { index: 1, name: 'Scale', value: src.scale },
         { index: 4, name: 'Rotation', value: src.rot },
@@ -296,7 +296,7 @@ export class MotionLayoutTools extends MarkerTools {
     };
   }
 
-  protected async applyLetterbox(_sequenceId: string | undefined, ti: number, ci: number, aspect?: string, cropPercent?: number): Promise<any> {
+  protected async applyLetterbox(sequenceId: string | undefined, ti: number, ci: number, aspect?: string, cropPercent?: number): Promise<any> {
     let crop = cropPercent;
     if (!crop && aspect) {
       const parts = aspect!.split(':');
@@ -312,7 +312,7 @@ export class MotionLayoutTools extends MarkerTools {
     // through the name-guarded helper: if this build's Motion has no top/bottom crop
     // parameter, the tool now refuses and lists what Motion does expose, instead of writing
     // 11.25 into whatever parameter happens to sit at index 8.
-    const r: any = await this.bridge.executeScript(this.motionParamScript(_sequenceId, ti, ci, [
+    const r: any = await this.bridge.executeScript(this.motionParamScript(sequenceId, ti, ci, [
       { index: 8, name: 'Crop Top', aliases: ['Top', 'crop top'], value: crop },
       { index: 10, name: 'Crop Bottom', aliases: ['Bottom', 'crop bottom'], value: crop },
     ], 'letterbox'));
@@ -375,11 +375,11 @@ export class MotionLayoutTools extends MarkerTools {
     `);
   }
 
-  protected async setClipScaleToFrameSize(_sequenceId: string | undefined, ti: number, ci: number, enabled: boolean): Promise<any> {
+  protected async setClipScaleToFrameSize(sequenceId: string | undefined, ti: number, ci: number, enabled: boolean): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = qe.project.getActiveSequence();
+        var seq = ${this.buildQSeqResolver(sequenceId)};
         var clip = seq.getVideoTrackAt(${ti}).getItemAt(${ci});
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         // scaleToFrameSize is one of the QE clip properties measured SAFE to read on 26.3.2,
@@ -397,6 +397,125 @@ export class MotionLayoutTools extends MarkerTools {
         }
         return JSON.stringify({success:true,verified:true,verifiedBy:'qeClip.scaleToFrameSize readback',enabled:${enabled},before:before,after:after,changed:before!==after,
           note: before === after ? 'The clip was already set this way; nothing changed.' : undefined});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
+  /**
+   * Scale-to-frame-size across many clips in one call.
+   *
+   * The per-clip tool means one round-trip per clip, so normalising a 45-clip
+   * stringout cost 45 calls. Scope is a whole video track, every video track, or
+   * an explicit clip-id list.
+   *
+   * QE items are matched to DOM clips by start time via __findQeClipByDomClip,
+   * not by index: a QE track also contains gaps and transitions, so the DOM clip
+   * index addresses a different item as soon as anything precedes the target.
+   *
+   * setScaleToFrameSize() requires an EXPLICIT boolean -- called with no
+   * argument it throws "Error: Not Enough Parameters" rather than defaulting to
+   * true, so `enabled` is always passed through.
+   */
+  protected async setScaleToFrameSizeBatch(
+    enabled: boolean,
+    sequenceId?: string,
+    trackIndex?: number,
+    clipIds?: string[]
+  ): Promise<any> {
+    const idFilter = Array.isArray(clipIds) && clipIds.length ? JSON.stringify(clipIds) : 'null';
+    return await this.bridge.executeScript(`
+      try {
+        var seq = __findSequence(${sequenceId !== undefined ? JSON.stringify(sequenceId) : 'null'});
+        if (!seq) return JSON.stringify({success:false,error:'Sequence not found. Pass a sequenceId from list_sequences, or open a sequence.'});
+        app.enableQE();
+        var qeSeq = __qeSequenceFor(seq);
+        if (!qeSeq) return JSON.stringify({success:false,error:"Could not address sequence '" + String(seq.name) + "' through the QE API."});
+
+        var wantedIds = ${idFilter};
+        function __wanted(nodeId) {
+          if (wantedIds === null) return true;
+          for (var w = 0; w < wantedIds.length; w++) { if (String(wantedIds[w]) === String(nodeId)) return true; }
+          return false;
+        }
+
+        var firstTrack = ${trackIndex !== undefined ? trackIndex : 'null'};
+        var lastTrack = firstTrack === null ? (seq.videoTracks.numTracks - 1) : firstTrack;
+        if (firstTrack === null) firstTrack = 0;
+        if (firstTrack < 0 || lastTrack >= seq.videoTracks.numTracks) {
+          return JSON.stringify({success:false,error:'trackIndex ' + ${trackIndex !== undefined ? trackIndex : 'null'} + ' is out of range; the sequence has ' + seq.videoTracks.numTracks + ' video tracks (0-based).'});
+        }
+
+        var applied = [], failed = [], skipped = [], seenIds = [];
+        for (var t = firstTrack; t <= lastTrack; t++) {
+          var domTrack = seq.videoTracks[t];
+          var qeTrack = null;
+          try { qeTrack = qeSeq.getVideoTrackAt(t); } catch (eTrack) {}
+          if (!qeTrack) { failed.push({trackIndex:t,error:'QE could not address video track ' + t}); continue; }
+          for (var c = 0; c < domTrack.clips.numItems; c++) {
+            var domClip = domTrack.clips[c];
+            var nodeId = null; try { nodeId = String(domClip.nodeId); } catch (eNode) {}
+            if (!__wanted(nodeId)) continue;
+            seenIds.push(nodeId);
+            var qeClip = __findQeClipByDomClip(qeTrack, domClip);
+            if (!qeClip) { failed.push({trackIndex:t,clipIndex:c,nodeId:nodeId,name:String(domClip.name),error:'No QE item matches this clip start time.'}); continue; }
+            var before = null; try { before = Boolean(qeClip.scaleToFrameSize); } catch (eB) {}
+            try {
+              // Explicit boolean: called with no argument this throws
+              // "Error: Not Enough Parameters" instead of defaulting.
+              qeClip.setScaleToFrameSize(${enabled});
+            } catch (eSet) {
+              failed.push({trackIndex:t,clipIndex:c,nodeId:nodeId,name:String(domClip.name),error:eSet.toString()});
+              continue;
+            }
+            var after = null; try { after = Boolean(qeClip.scaleToFrameSize); } catch (eA) {}
+            var entry = {trackIndex:t,clipIndex:c,nodeId:nodeId,name:String(domClip.name),before:before,after:after};
+            if (after === null) {
+              // Unreadable flag is "unknown", not "done" -- reported separately
+              // so a caller is never told 45 clips were verified when none were.
+              entry.verified = false;
+              entry.unverifiedReason = 'qeClip.scaleToFrameSize is not readable on this build, so the flag cannot be confirmed.';
+              skipped.push(entry);
+            } else if (after !== ${enabled}) {
+              entry.error = 'Scale to frame size still reads ' + String(after) + ' after being set to ${enabled}.';
+              failed.push(entry);
+            } else {
+              entry.verified = true;
+              entry.changed = before !== after;
+              applied.push(entry);
+            }
+          }
+        }
+
+        var missingIds = [];
+        if (wantedIds !== null) {
+          for (var mi = 0; mi < wantedIds.length; mi++) {
+            var seen = false;
+            for (var si = 0; si < seenIds.length; si++) { if (String(seenIds[si]) === String(wantedIds[mi])) { seen = true; break; } }
+            if (!seen) missingIds.push(String(wantedIds[mi]));
+          }
+        }
+
+        var total = applied.length + failed.length + skipped.length;
+        return JSON.stringify({
+          success: failed.length === 0 && missingIds.length === 0 && total > 0,
+          verified: failed.length === 0 && skipped.length === 0 && missingIds.length === 0 && total > 0,
+          verifiedBy: 'qeClip.scaleToFrameSize readback per clip',
+          enabled: ${enabled},
+          sequenceId: seq.sequenceID,
+          sequenceName: String(seq.name),
+          trackScope: ${trackIndex !== undefined ? `'video track ' + ${trackIndex}` : "'all video tracks'"},
+          clipsMatched: total,
+          appliedCount: applied.length,
+          applied: applied,
+          failed: failed.length ? failed : undefined,
+          unverified: skipped.length ? skipped : undefined,
+          notFoundClipIds: missingIds.length ? missingIds : undefined,
+          error: total === 0
+            ? 'No clips matched the requested scope, so nothing was changed.'
+            : (failed.length || missingIds.length
+                ? ('PARTIALLY APPLIED: ' + applied.length + ' of ' + total + ' clips confirmed. See failed[] and notFoundClipIds[].')
+                : null)
+        });
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }

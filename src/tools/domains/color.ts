@@ -54,7 +54,7 @@ export class ColorTools extends ProjectMediaTools {
   ): string {
     return `
       try {
-        var seq = ${seqId ? `(function(){var ss=app.project.sequences;for(var i=0;i<ss.numSequences;i++){if(ss[i].sequenceID===${JSON.stringify(seqId)})return ss[i];}return app.project.activeSequence;})()` : 'app.project.activeSequence'};
+        var seq = ${this.buildSeqRes(seqId)};
         if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
         var track = seq.videoTracks[${ti}];
         if (!track) return JSON.stringify({success:false,error:'Video track ${ti} not found'});
@@ -155,7 +155,7 @@ export class ColorTools extends ProjectMediaTools {
   protected async lumetriReport(sequenceId: string | undefined, ti: number, ci: number): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = ${sequenceId ? `(function(){var ss=app.project.sequences;for(var i=0;i<ss.numSequences;i++){if(ss[i].sequenceID===${JSON.stringify(sequenceId)})return ss[i];}return app.project.activeSequence;})()` : 'app.project.activeSequence'};
+        var seq = ${this.buildSeqRes(sequenceId)};
         var clip = seq.videoTracks[${ti}].clips[${ci}];
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         var lumetri = null;
@@ -222,7 +222,7 @@ export class ColorTools extends ProjectMediaTools {
     // successful write is not proof Premiere has finished analysing.
     return await this.bridge.executeScript(`
       try {
-        var seq = ${sequenceId ? `(function(){var ss=app.project.sequences;for(var i=0;i<ss.numSequences;i++){if(ss[i].sequenceID===${JSON.stringify(sequenceId)})return ss[i];}return app.project.activeSequence;})()` : 'app.project.activeSequence'};
+        var seq = ${this.buildSeqRes(sequenceId)};
         if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
         var track = seq.videoTracks[${ti}];
         var clip = track && track.clips[${ci}];
@@ -338,7 +338,7 @@ export class ColorTools extends ProjectMediaTools {
   protected async applyLutToClip(trackIndex: number, clipIndex: number, lutPath: string, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = ${this.buildSeqScript(sequenceId)};
+        var seq = ${this.buildSeqRes(sequenceId)};
         var clip = seq.videoTracks[${trackIndex}].clips[${clipIndex}];
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         var comps = clip.components;
@@ -932,10 +932,10 @@ export class ColorTools extends ProjectMediaTools {
     }
   }
 
-  protected async setMogrtColor(_seqId: string|undefined, trackIndex: number, clipIndex: number, paramName: string, r: number, g: number, b: number): Promise<any> {
+  protected async setMogrtColor(seqId: string|undefined, trackIndex: number, clipIndex: number, paramName: string, r: number, g: number, b: number): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var clip = app.project.activeSequence.videoTracks[${trackIndex}].clips[${clipIndex}];
+        var clip = ${this.buildSeqRes(seqId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
         if (!clip || !clip.isMGT()) return JSON.stringify({success:false,error:'Clip is not a MOGRT'});
         var comp = clip.getMGTComponent();
         if (!comp) return JSON.stringify({success:false,error:'Could not get MGT component'});

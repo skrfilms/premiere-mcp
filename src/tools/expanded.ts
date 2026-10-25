@@ -874,6 +874,59 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
       }
       return scan(seq.videoTracks, "video") || scan(seq.audioTracks, "audio");
     }
+    // Scan ONE sequence for a clip id (or name). Shared by findClip's
+    // single-sequence path and the cross-sequence resolver below.
+    function scanSequenceForClip(seq, nodeId) {
+      if (!seq) return null;
+      function scan(collection, type) {
+        if (!collection) return null;
+        for (var t = 0; t < collection.numTracks; t++) {
+          var track = collection[t];
+          for (var c = 0; c < track.clips.numItems; c++) {
+            var clip = track.clips[c];
+            if (!nodeId || clip.nodeId === nodeId || clip.name === nodeId) {
+              return { clip: clip, track: track, trackIndex: t, clipIndex: c, trackType: type, sequence: seq, sequenceId: seq.sequenceID, sequenceName: String(seq.name) };
+            }
+          }
+        }
+        return null;
+      }
+      return scan(seq.videoTracks, "video") || scan(seq.audioTracks, "audio");
+    }
+    /*
+     * Resolve a clip id that may live in ANY sequence.
+     *
+     * findClip() only ever looks in one sequence -- args.sequenceId or the
+     * active one -- which made every two-clip tool implicitly same-sequence.
+     * copy_effects_between_clips reported "Source or target clip not found" for
+     * two perfectly valid ids whenever they sat in different sequences, which is
+     * the main reason to reach for it: lifting an effect stack off a reference
+     * sequence onto a new one.
+     *
+     * An explicit sequenceId is honoured exactly (and an unresolvable one is an
+     * error, never a fall back to the active sequence). With none given, the
+     * active sequence is tried first and then every other sequence. Returns
+     * { error: "..." } rather than null so the caller can say which side failed.
+     */
+    function findClipAnySequence(nodeId, explicitSequenceId, label) {
+      if (!nodeId) return { error: label + " clip id is required." };
+      if (explicitSequenceId !== undefined && explicitSequenceId !== null && String(explicitSequenceId) !== "") {
+        var named = findSequence(String(explicitSequenceId));
+        if (!named) return { error: "Sequence not found by id: " + explicitSequenceId + " (given for the " + label + " clip). Use list_sequences to obtain a valid sequence ID." };
+        var inNamed = scanSequenceForClip(named, nodeId);
+        if (!inNamed) return { error: label + " clip " + nodeId + " is not in sequence '" + String(named.name) + "'." };
+        return { found: inNamed };
+      }
+      var inActive = scanSequenceForClip(activeSequence(), nodeId);
+      if (inActive) return { found: inActive };
+      if (app.project && app.project.sequences) {
+        for (var si = 0; si < app.project.sequences.numSequences; si++) {
+          var hit = scanSequenceForClip(app.project.sequences[si], nodeId);
+          if (hit) return { found: hit };
+        }
+      }
+      return { error: label + " clip not found in any sequence: " + nodeId + "." };
+    }
     function clipInfo(clip, trackType, trackIndex, clipIndex) {
       var item = {
         nodeId: clip.nodeId,
@@ -1103,6 +1156,17 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
         if (normalizeName(component.displayName) === wanted || normalizeName(component.matchName) === wanted) return { component: component, index: i };
       }
       return null;
+    }
+    // The effect-component names present on a clip. Returned alongside a
+    // "nothing matched" failure so the caller can see WHY the match missed
+    // instead of guessing at spelling.
+    function componentNames(clip) {
+      var names = [];
+      if (!clip || !clip.components) return names;
+      for (var i = 0; i < clip.components.numItems; i++) {
+        try { names.push(String(clip.components[i].displayName)); } catch (e) {}
+      }
+      return names;
     }
     function componentProperties(component) {
       var props = [];
@@ -2805,9 +2869,25 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
 
         case "copy_effects_between_clips":
         case "copy_effect_values":
-          var copySource = findClip(args.sourceClipId || args.source_clip_id || args.clipId);
-          var copyTarget = findClip(args.targetClipId || args.target_clip_id || args.destinationClipId);
-          if (!copySource || !copyTarget) return fail("Source or target clip not found");
+          // Resolved across sequences: the source and target legitimately live in
+          // different sequences when an effect stack is being lifted off a
+          // reference cut. Each side reports its own failure -- "Source or target
+          // clip not found" for two valid ids was a dead end.
+          var copySourceLookup = findClipAnySequence(
+            args.sourceClipId || args.source_clip_id || args.clipId,
+            args.sourceSequenceId || args.source_sequence_id || args.sequenceId || args.sequence_id,
+            "Source");
+          if (copySourceLookup.error) return fail(copySourceLookup.error);
+          var copyTargetLookup = findClipAnySequence(
+            args.targetClipId || args.target_clip_id || args.destinationClipId,
+            args.targetSequenceId || args.target_sequence_id || args.sequenceId || args.sequence_id,
+            "Target");
+          if (copyTargetLookup.error) return fail(copyTargetLookup.error);
+          var copySource = copySourceLookup.found;
+          var copyTarget = copyTargetLookup.found;
+          if (copySource.clip.nodeId === copyTarget.clip.nodeId && String(copySource.sequenceId) === String(copyTarget.sequenceId)) {
+            return fail("Source and target are the same clip in the same sequence; nothing to copy.");
+          }
           var copied = [];
           var copyComponentName = args.componentName || args.effectName || null;
           for (var cci = 0; cci < copySource.clip.components.numItems; cci++) {
@@ -2826,8 +2906,21 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
               } catch (copyError) {}
             }
           }
-          if (!copied.length) return fail("No matching effect properties could be copied");
-          return ok({ copied: copied.length, properties: copied });
+          if (!copied.length) return fail("No matching effect properties could be copied", {
+            sourceSequence: copySource.sequenceName,
+            targetSequence: copyTarget.sequenceName,
+            sourceComponents: componentNames(copySource.clip),
+            targetComponents: componentNames(copyTarget.clip)
+          });
+          return ok({
+            copied: copied.length,
+            properties: copied,
+            sourceSequence: copySource.sequenceName,
+            sourceSequenceId: copySource.sequenceId,
+            targetSequence: copyTarget.sequenceName,
+            targetSequenceId: copyTarget.sequenceId,
+            crossSequence: String(copySource.sequenceId) !== String(copyTarget.sequenceId)
+          });
 
         case "replace_clip_media":
           if (!args.projectItemId && !args.itemId && !args.item_id) return fail("replace_clip_media requires projectItemId or itemId.");

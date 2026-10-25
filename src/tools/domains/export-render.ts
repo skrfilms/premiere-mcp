@@ -290,7 +290,7 @@ export class ExportRenderTools extends PlaybackTools {
     const script = `
       try {
         app.enableQE();
-        var seq = ${sequenceId ? `(function(){ var seqs=app.project.sequences; for(var i=0;i<seqs.numSequences;i++){ if(seqs[i].sequenceID===${JSON.stringify(sequenceId)}) return qe.project.getSequenceAt(i); } return qe.project.getActiveSequence(); })()` : 'qe.project.getActiveSequence()'};
+        var seq = ${this.buildQSeqResolver(sequenceId)};
         if (!seq) return JSON.stringify({ success: false, error: 'Sequence not found' });
         function timesToArr(arr) { var out=[]; for(var i=0;i<arr.length;i++) out.push({ticks:String(arr[i].ticks),secs:arr[i].secs,frames:arr[i].frames}); return out; }
         var green = timesToArr(seq.getGreenBarTimes());
@@ -315,7 +315,7 @@ export class ExportRenderTools extends PlaybackTools {
     const script = `
       try {
         app.enableQE();
-        var seq = ${sequenceId ? `(function(){ var seqs=app.project.sequences; for(var i=0;i<seqs.numSequences;i++){ if(seqs[i].sequenceID===${JSON.stringify(sequenceId)}) return qe.project.getSequenceAt(i); } return qe.project.getActiveSequence(); })()` : 'qe.project.getActiveSequence()'};
+        var seq = ${this.buildQSeqResolver(sequenceId)};
         if (!seq) return JSON.stringify({ success: false, error: 'Sequence not found' });
         var redBefore = seq.getRedBarTimes().length;
         var yellowBefore = seq.getYellowBarTimes().length;
@@ -326,10 +326,10 @@ export class ExportRenderTools extends PlaybackTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async exportInOutRange(outputPath: string, presetPath: string, _sequenceId?: string): Promise<any> {
+  protected async exportInOutRange(outputPath: string, presetPath: string, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(sequenceId)};
         if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
         // workAreaType 1 = work area / in-out range
         var result = seq.exportAsMediaDirect(${JSON.stringify(outputPath)}, ${JSON.stringify(presetPath)}, 1);
@@ -375,7 +375,7 @@ export class ExportRenderTools extends PlaybackTools {
     return { success: false, error: 'create_custom_export_preset requires the AME bridge (app.encoder). Use execute_extendscript with: var exp = app.encoder.getExporters(); then find your format, call getPresets(), setExportParamValue(k,v) for each param, writeToFile(path).' };
   }
 
-  protected async exportSocialPreset(outputPath: string, preset: string, _sequenceId?: string): Promise<any> {
+  protected async exportSocialPreset(outputPath: string, preset: string, sequenceId?: string): Promise<any> {
     const presetSettings: Record<string, Record<string, string>> = {
       youtube_1080p: { Width: '1920', Height: '1080', TargetBitrate: '8', MaxBitrate: '10', FrameRate: '29.97' },
       youtube_4k: { Width: '3840', Height: '2160', TargetBitrate: '40', MaxBitrate: '50', FrameRate: '29.97' },
@@ -398,14 +398,14 @@ export class ExportRenderTools extends PlaybackTools {
         ${paramStr}
         var tmpPath = '/tmp/premiere-mcp-bridge/generated-assets/social_preset.epr';
         preset.writeToFile(tmpPath);
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(sequenceId)};
         var r = app.encoder.exportWithPresetObject(${JSON.stringify(outputPath)}, preset, seq, false);
         return JSON.stringify({success:true,preset:${JSON.stringify(preset)},settings:${JSON.stringify(settings)},outputPath:${JSON.stringify(outputPath)},exportResult:String(r)});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
 
-  protected async exportAudioOnly(outputPath: string, format: string, _sequenceId?: string): Promise<any> {
+  protected async exportAudioOnly(outputPath: string, format: string, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var exporters = app.encoder.getExporters();
@@ -414,7 +414,7 @@ export class ExportRenderTools extends PlaybackTools {
         for (var i=0;i<exporters.length;i++) { if (String(exporters[i].name)===targetName){target=exporters[i];break;} }
         if (!target) return JSON.stringify({success:false,error:'Exporter not found: '+targetName});
         var preset = target.getPresets()[0];
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(sequenceId)};
         var r = app.encoder.exportWithPresetObject(${JSON.stringify(outputPath)}, preset, seq, false);
         return JSON.stringify({success:true,outputPath:${JSON.stringify(outputPath)},format:${JSON.stringify(format)},exportResult:String(r)});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
@@ -455,7 +455,7 @@ export class ExportRenderTools extends PlaybackTools {
   protected async exportSequenceAsProject(outputPath: string, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = ${sequenceId ? `(function(){var ss=app.project.sequences;for(var i=0;i<ss.numSequences;i++){if(ss[i].sequenceID===${JSON.stringify(sequenceId)})return ss[i];}return app.project.activeSequence;})()` : 'app.project.activeSequence'};
+        var seq = ${this.buildSeqRes(sequenceId)};
         if (!seq) return JSON.stringify({success:false,error:'No sequence'});
         var result = seq.exportAsProject(${JSON.stringify(outputPath)});
         var exists = (new File(${JSON.stringify(outputPath)})).exists;
@@ -486,11 +486,11 @@ export class ExportRenderTools extends PlaybackTools {
     `);
   }
 
-  protected async setRenderPreviewQuality(useMaxQuality?: boolean, presetPath?: string, width?: number, height?: number, _sequenceId?: string): Promise<any> {
+  protected async setRenderPreviewQuality(useMaxQuality?: boolean, presetPath?: string, width?: number, height?: number, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var qseq = qe.project.getActiveSequence();
+        var qseq = ${this.buildQSeqResolver(sequenceId)};
         ${useMaxQuality !== undefined ? `qseq.setUseMaxRenderQuality(${useMaxQuality}); qseq.setUseMaxBitDepth(${useMaxQuality});` : ''}
         ${presetPath ? `qseq.setPreviewPresetPath(${JSON.stringify(presetPath)});` : ''}
         ${width && height ? `qseq.setPreviewFrameSize(${width}, ${height});` : ''}
@@ -1301,11 +1301,11 @@ export class ExportRenderTools extends PlaybackTools {
    * frame, without effects, transitions, or anything from tracks above. For a composited frame
    * use capture_program_output, which is verified working.
    */
-  protected async exportThumbnail(outputPath: string, _seqId?: string): Promise<any> {
+  protected async exportThumbnail(outputPath: string, seqId?: string): Promise<any> {
     const qe: any = await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var qseq=qe.project.getActiveSequence();
+        var qseq=${this.buildQSeqResolver(seqId)};
         var tc='00:00:00:00';
         var playheadSecs=0;
         try{
@@ -1318,7 +1318,7 @@ export class ExportRenderTools extends PlaybackTools {
         // Source media under the playhead, so the Node side can fall back without a second call.
         var mediaPath=null, sourceSecs=null;
         try{
-          var dom=app.project.activeSequence;
+          var dom=${this.buildSeqRes(seqId)};
           var vt=dom.videoTracks[0];
           for(var i=0;i<vt.clips.numItems;i++){
             var c=vt.clips[i];
@@ -1400,11 +1400,11 @@ export class ExportRenderTools extends PlaybackTools {
     return { success: true, count: results.length, presets: results };
   }
 
-  protected async getExportProgress(_seqId?: string): Promise<any> {
+  protected async getExportProgress(seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq=qe.project.getActiveSequence();
+        var seq=${this.buildQSeqResolver(seqId)};
         var complete=seq.getExportComplete();
         return JSON.stringify({success:true,exportComplete:String(complete),isComplete:complete===true});
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
@@ -1486,11 +1486,11 @@ export class ExportRenderTools extends PlaybackTools {
     `);
   }
 
-  protected async setPreviewQuality(maxRenderQuality?: boolean, maxBitDepth?: boolean, previewWidth?: number, previewHeight?: number, _seqId?: string): Promise<any> {
+  protected async setPreviewQuality(maxRenderQuality?: boolean, maxBitDepth?: boolean, previewWidth?: number, previewHeight?: number, seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq=qe.project.getActiveSequence();
+        var seq=${this.buildQSeqResolver(seqId)};
         if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
         // Three fire-and-forget QE calls with no readback and no verified field at all. QE
         // exposes no getters for these three, so the honest report is "dispatched, and here is

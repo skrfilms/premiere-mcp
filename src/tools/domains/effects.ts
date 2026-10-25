@@ -16,7 +16,7 @@ export class EffectsTools extends AssemblyTools {
     return await this.bridge.executeScript(`
       app.enableQE(); ${this.qeClipScript(trackIndex, clipIndex, sequenceId)}
       if (!__clip) return JSON.stringify({success:false,error:'Clip not found'});
-      var domSeq = app.project.activeSequence;
+      var domSeq = ${this.buildSeqRes(sequenceId)};
       var domClip = domSeq.videoTracks[${trackIndex}].clips[${clipIndex}];
       var before = domClip.components.numItems;
       var comp = __clip.getComponentAt(${componentIndex});
@@ -36,14 +36,14 @@ export class EffectsTools extends AssemblyTools {
     `);
   }
 
-  protected async reorderEffects(trackIndex: number, clipIndex: number, newOrder: string[], _sequenceId?: string): Promise<any> {
+  protected async reorderEffects(trackIndex: number, clipIndex: number, newOrder: string[], sequenceId?: string): Promise<any> {
     const orderJson = JSON.stringify(newOrder);
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = qe.project.getActiveSequence();
+        var seq = ${this.buildQSeqResolver(sequenceId)};
         var qeClip = seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
-        var domSeq = app.project.activeSequence;
+        var domSeq = ${this.buildSeqRes(sequenceId)};
         var domClip = domSeq.videoTracks[${trackIndex}].clips[${clipIndex}];
         var newOrder = ${orderJson};
         // Serialize all component params
@@ -91,7 +91,7 @@ export class EffectsTools extends AssemblyTools {
   protected async effectStackReport(trackIndex: number, clipIndex: number, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = ${this.buildSeqScript(sequenceId)};
+        var seq = ${this.buildSeqRes(sequenceId)};
         var clip = seq.videoTracks[${trackIndex}].clips[${clipIndex}];
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         var effects = [];
@@ -114,7 +114,7 @@ export class EffectsTools extends AssemblyTools {
   protected async enableDisableEffect(trackIndex: number, clipIndex: number, effectName: string, enabled: boolean, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = ${this.buildSeqScript(sequenceId)};
+        var seq = ${this.buildSeqRes(sequenceId)};
         var clip = seq.videoTracks[${trackIndex}].clips[${clipIndex}];
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         var pat = ${JSON.stringify(effectName.toLowerCase())};
@@ -165,14 +165,14 @@ export class EffectsTools extends AssemblyTools {
   }
 
   // Batch H: Effects shortcuts
-  protected async blurClip(trackIndex: number, clipIndex: number, amount: number, _sequenceId?: string): Promise<any> {
+  protected async blurClip(trackIndex: number, clipIndex: number, amount: number, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = qe.project.getActiveSequence();
+        var seq = ${this.buildQSeqResolver(sequenceId)};
         var clip = seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
-        var domClip = app.project.activeSequence.videoTracks[${trackIndex}].clips[${clipIndex}];
+        var domClip = ${this.buildSeqRes(sequenceId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
         var before = domClip.components.numItems;
         var eff = qe.project.getVideoEffectByName('Gaussian Blur');
         if (!eff) return JSON.stringify({success:false,error:'Gaussian Blur not found'});
@@ -206,14 +206,14 @@ export class EffectsTools extends AssemblyTools {
     `);
   }
 
-  protected async sharpenClip(trackIndex: number, clipIndex: number, amount: number, _sequenceId?: string): Promise<any> {
+  protected async sharpenClip(trackIndex: number, clipIndex: number, amount: number, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = qe.project.getActiveSequence();
+        var seq = ${this.buildQSeqResolver(sequenceId)};
         var clip = seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
-        var domClip = app.project.activeSequence.videoTracks[${trackIndex}].clips[${clipIndex}];
+        var domClip = ${this.buildSeqRes(sequenceId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
         var before = domClip.components.numItems;
         var eff = qe.project.getVideoEffectByName('Unsharp Mask');
         if (!eff) return JSON.stringify({success:false,error:'Unsharp Mask not found'});
@@ -234,7 +234,7 @@ export class EffectsTools extends AssemblyTools {
   protected async enableDisableAllEffects(trackIndex: number, clipIndex: number, enabled: boolean, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = ${this.buildSeqScript(sequenceId)};
+        var seq = ${this.buildSeqRes(sequenceId)};
         var clip = seq.videoTracks[${trackIndex}].clips[${clipIndex}];
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         var skip = ['Motion','Opacity','Time Remapping'];
@@ -279,14 +279,14 @@ export class EffectsTools extends AssemblyTools {
     `);
   }
 
-  protected async removeAllEffectsQe(trackIndex: number, clipIndex: number, _sequenceId?: string): Promise<any> {
+  protected async removeAllEffectsQe(trackIndex: number, clipIndex: number, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = qe.project.getActiveSequence();
+        var seq = ${this.buildQSeqResolver(sequenceId)};
         var clip = seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
-        var domClip = app.project.activeSequence.videoTracks[${trackIndex}].clips[${clipIndex}];
+        var domClip = ${this.buildSeqRes(sequenceId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
         var before = domClip.components.numItems;
         var names = [];
         for (var ni=0; ni<domClip.components.numItems; ni++) names.push(String(domClip.components[ni].displayName));
@@ -304,13 +304,13 @@ export class EffectsTools extends AssemblyTools {
     `);
   }
 
-  protected async listEffectsOnClipQe(trackIndex: number, clipIndex: number, _sequenceId?: string): Promise<any> {
+  protected async listEffectsOnClipQe(trackIndex: number, clipIndex: number, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = qe.project.getActiveSequence();
+        var seq = ${this.buildQSeqResolver(sequenceId)};
         var clip = seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
-        var domClip = app.project.activeSequence.videoTracks[${trackIndex}].clips[${clipIndex}];
+        var domClip = ${this.buildSeqRes(sequenceId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
         if (!clip || !domClip) return JSON.stringify({success:false,error:'Clip not found'});
         var effects = [];
         for (var i=0; i<domClip.components.numItems; i++) {
@@ -956,7 +956,7 @@ export class EffectsTools extends AssemblyTools {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var domSeq=${this.buildSeqScript(seqId)};
+        var domSeq=${this.buildSeqRes(seqId)};
         if(!domSeq)return JSON.stringify({success:false,error:'No active sequence'});
         var qeSeq=__qeSequenceFor(domSeq);
         if(!qeSeq)return JSON.stringify({success:false,error:"Could not address sequence '" + String(domSeq.name) + "' through the QE API."});
@@ -1204,10 +1204,10 @@ export class EffectsTools extends AssemblyTools {
     }
   }
 
-  protected async getAllClipEffects(_seqId?: string): Promise<any> {
+  protected async getAllClipEffects(seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(seqId)};
         var report = [];
         for (var t=0;t<seq.videoTracks.numTracks;t++) {
           var track = seq.videoTracks[t];

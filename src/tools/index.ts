@@ -693,6 +693,7 @@ export class PremiereProTools extends TrimmingTools {
         case 'letterbox': return await this.applyLetterbox(args.sequenceId, args.trackIndex ?? 0, args.clipIndex ?? 0, args.aspect, args.cropPercent);
         case 'ken_burns': return await this.kenBurns(args);
         case 'set_clip_scale_to_frame_size': return await this.setClipScaleToFrameSize(args.sequenceId, args.trackIndex ?? 0, args.clipIndex ?? 0, args.enabled ?? true);
+        case 'set_scale_to_frame_size_batch': return await this.setScaleToFrameSizeBatch(args.enabled ?? true, args.sequenceId, args.trackIndex, args.clipIds);
 
         // Batch 3: Audio
         case 'fade_in_audio': return await this.fadeAudio(args.sequenceId, args.audioTrackIndex ?? 0, args.clipIndex ?? 0, args.durationFrames, 'in');
@@ -825,13 +826,13 @@ export class PremiereProTools extends TrimmingTools {
 
         // Media Management
         case 'import_media':
-          return await this.importMedia(args.filePath, args.binName);
+          return await this.importMedia(args.filePath, args.binName, args.binId);
         case 'import_fcp_xml':
           return await this.importFcpXml(args.filePath);
         case 'import_edl':
           return await this.importEdl(args.filePath);
         case 'import_folder':
-          return await this.importFolder(args.folderPath, args.binName, args.recursive);
+          return await this.importFolder(args.folderPath, args.binName, args.recursive, args.binId);
         case 'create_bin':
           return await this.createBin(args.name, args.parentBinName, args.parentBinId);
 
@@ -1103,7 +1104,7 @@ export class PremiereProTools extends TrimmingTools {
         case 'compare_takes': return this.compareTakes(args.projectItemId1, args.projectItemId2, args.outputDir);
         case 'get_source_clip_info': return await this.getSourceClipInfo();
         case 'batch_log_from_csv': return await this.batchLogFromCsv(args.csvPath);
-        case 'storyboard_bin_to_sequence': return await this.storyboardBinToSequence(args.binName, args.sequenceId, args.startAtSecs);
+        case 'storyboard_bin_to_sequence': return await this.storyboardBinToSequence(args.binName, args.sequenceId, args.startAtSecs, args.binId);
         case 'snap_clips_to_grid': return await this.snapClipsToGrid(args.sequenceId);
         case 'conform_sequence_settings': return await this.conformSequenceSettings(args.sourceSequenceId, args.targetSequenceId);
         case 'get_sequence_info_extended': return await this.getSequenceInfoExtended(args.sequenceId);
@@ -1116,7 +1117,7 @@ export class PremiereProTools extends TrimmingTools {
         case 'sequence_from_markers': return await this.sequenceFromMarkers(args.sequenceId, args.markerType);
         case 'get_project_item_info_extended': return await this.getProjectItemInfoExtended(args.projectItemId);
         case 'verify_media_online': return await this.verifyMediaOnline(args.projectItemId);
-        case 'get_bin_contents_recursive': return await this.getBinContentsRecursive(args.binName);
+        case 'get_bin_contents_recursive': return await this.getBinContentsRecursive(args.binName, args.binId);
         case 'find_clips_by_source': return await this.findClipsBySource(args.projectItemId);
         case 'batch_relink_by_prefix': return await this.batchRelinkByPrefix(args.oldPrefix, args.newPrefix);
         case 'set_interpretation_frame_rate': return await this.setInterpretationFrameRate(args.projectItemId, args.frameRate);
@@ -1298,7 +1299,7 @@ export class PremiereProTools extends TrimmingTools {
         case 'flatten_multicam': return await this.flattenMulticam(args.sequenceId, args.trackIndex, args.clipIndex);
         case 'multicam_info': return await this.multicamInfo(args.sequenceId, args.trackIndex, args.clipIndex);
         case 'set_multicam_angle': return await this.setMulticamAngle(args.sequenceId, args.trackIndex, args.clipIndex, args.angleIndex);
-        case 'create_multicam_source_sequence': return await this.createMulticamSourceSequence(args.binName, args.newSequenceName, args.presetPath);
+        case 'create_multicam_source_sequence': return await this.createMulticamSourceSequence(args.binName, args.newSequenceName, args.presetPath, args.binId);
         case 'create_multicam_from_clips': return await this.createMulticamFromClips(args.projectItemIds, args.sequenceName, args.presetPath);
         case 'frame_diff': return await this.frameDiff(args.time1Secs, args.time2Secs, args.outputDir ?? '/tmp', args.sequenceId);
         case 'verify_effect_rendered': return await this.verifyEffectRendered(args.sequenceId, args.trackIndex, args.clipIndex, args.effectName, args.effectParam, args.effectParamValue, args.outputDir ?? '/tmp/premiere-mcp-bridge/generated-assets');
@@ -1329,7 +1330,7 @@ export class PremiereProTools extends TrimmingTools {
         case 'export_with_burn_ins': return await this.exportWithBurnIns(args.outputPath, args.presetPath);
         case 'archive_master': return await this.archiveMaster(args.outputDir, args.includeProxy ?? false);
         case 'start_encode_and_monitor': return await this.startEncodeAndMonitor(args.outputPath, args.presetPath, args.workAreaType ?? 0);
-        case 'export_per_marker_range': return await this.exportPerMarkerRange(args.outputDir, args.presetPath, args.markerNamePattern);
+        case 'export_per_marker_range': return await this.exportPerMarkerRange(args.outputDir, args.presetPath, args.markerNamePattern, args.sequenceId);
         case 'batch_export_sequences': return await this.batchExportSequences(args.sequenceIds, args.outputDir, args.presetPath);
         case 'export_omf_with_settings': return await this.exportOmfWithSettings(args.outputPath);
         case 'export_aaf_with_settings': return await this.exportAafWithSettings(args.outputPath);
@@ -1344,7 +1345,7 @@ export class PremiereProTools extends TrimmingTools {
         case 'countdown_leader': return await this.countdownLeader(args.startTimeSecs, args.count ?? 5, args.trackIndex ?? 1, args.sequenceId);
         case 'create_adjustment_layer_at': return await this.createAdjustmentLayerAt(args.startTimeSecs, args.durationSecs, args.trackIndex, args.sequenceId);
         case 'nest_all_v1_clips': return await this.nestAllV1Clips(args.newSequenceName, args.sequenceId);
-        case 'create_sequence_from_bin': return await this.createSequenceFromBin(args.binName, args.sequenceName, args.presetPath);
+        case 'create_sequence_from_bin': return await this.createSequenceFromBin(args.binName, args.sequenceName, args.presetPath, args.binId);
         case 'get_all_clip_effects': return await this.getAllClipEffects(args.sequenceId);
         case 'batch_replace_clips': return await this.batchReplaceClips(args.oldProjectItemId, args.newProjectItemId, args.sequenceId);
         case 'clear_sequence_in_out': return await this.clearSequenceInOut(args.sequenceId);

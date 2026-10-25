@@ -32,7 +32,7 @@ export class AudioTools extends ExportRenderTools {
 
   protected async jCut(sequenceId: string | undefined, videoTrackIndex: number, clipIndex: number, frames: number): Promise<any> {
     return await this.bridge.executeScript(`
-      var seq = ${this.buildSequenceResolver2(sequenceId)};
+      var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
       var vTrack = seq.videoTracks[${videoTrackIndex}];
       var vClip = vTrack && vTrack.clips[${clipIndex}];
@@ -68,7 +68,7 @@ export class AudioTools extends ExportRenderTools {
 
   protected async lCut(sequenceId: string | undefined, videoTrackIndex: number, clipIndex: number, frames: number): Promise<any> {
     return await this.bridge.executeScript(`
-      var seq = ${this.buildSequenceResolver2(sequenceId)};
+      var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
       var vTrack = seq.videoTracks[${videoTrackIndex}];
       var vClip = vTrack && vTrack.clips[${clipIndex}];
@@ -100,10 +100,10 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected async fadeAudio(_sequenceId: string | undefined, ati: number, ci: number, durationFrames: number, direction: 'in' | 'out'): Promise<any> {
+  protected async fadeAudio(sequenceId: string | undefined, ati: number, ci: number, durationFrames: number, direction: 'in' | 'out'): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(sequenceId)};
         var clip = seq.audioTracks[${ati}].clips[${ci}];
         if (!clip) return JSON.stringify({success:false,error:'Audio clip not found'});
         // Find volume/level param
@@ -138,10 +138,10 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected async setClipGain(_sequenceId: string | undefined, ati: number, ci: number, gainDb: number): Promise<any> {
+  protected async setClipGain(sequenceId: string | undefined, ati: number, ci: number, gainDb: number): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(sequenceId)};
         var clip = seq.audioTracks[${ati}].clips[${ci}];
         if (!clip) return JSON.stringify({success:false,error:'Audio clip not found'});
         var gainProp = null;
@@ -191,7 +191,7 @@ export class AudioTools extends ExportRenderTools {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var domSeq = ${this.buildSeqScript(sequenceId)};
+        var domSeq = ${this.buildSeqRes(sequenceId)};
         if (!domSeq) return JSON.stringify({success:false,error:'No active sequence'});
         var qeSeq = __qeSequenceFor(domSeq);
         if (!qeSeq) return JSON.stringify({success:false,error:"Could not address sequence '" + String(domSeq.name) + "' through the QE API."});
@@ -233,10 +233,10 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected async muteClipAudio(_sequenceId: string | undefined, ti: number, ci: number, mute: boolean): Promise<any> {
+  protected async muteClipAudio(sequenceId: string | undefined, ti: number, ci: number, mute: boolean): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(sequenceId)};
         var vClip = seq.videoTracks[${ti}].clips[${ci}];
         if (!vClip) return JSON.stringify({success:false,error:'Video clip not found'});
         var linked = vClip.getLinkedItems();
@@ -296,7 +296,7 @@ export class AudioTools extends ExportRenderTools {
     // Get the source media path first
     const pathResult = await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(sequenceId)};
         var clip = seq.audioTracks[${ati}].clips[${ci}];
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         return JSON.stringify({success:true,path:clip.projectItem ? String(clip.projectItem.getMediaPath()) : null,name:String(clip.name)});
@@ -324,18 +324,18 @@ export class AudioTools extends ExportRenderTools {
     }
   }
 
-  protected async renderAudio(_sequenceId?: string): Promise<any> {
+  protected async renderAudio(sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = qe.project.getActiveSequence();
+        var seq = ${this.buildQSeqResolver(sequenceId)};
         seq.renderAudio();
         return JSON.stringify({success:true,verified:false,note:'renderAudio() dispatched. Audio rendering is async.',sequenceName:String(seq.name)});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
 
-  protected async applyAudioEffectQe(trackIndex: number, clipIndex: number, effectName: string, audioTrack: boolean, _sequenceId?: string): Promise<any> {
+  protected async applyAudioEffectQe(trackIndex: number, clipIndex: number, effectName: string, audioTrack: boolean, sequenceId?: string): Promise<any> {
     const remapped = AudioTools.OBSOLETE_AUDIO_EFFECTS[effectName];
     const requested = effectName;
     const target = remapped ?? effectName;
@@ -343,7 +343,7 @@ export class AudioTools extends ExportRenderTools {
     const result: any = await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = qe.project.getActiveSequence();
+        var seq = ${this.buildQSeqResolver(sequenceId)};
         var track = ${audioTrack} ? seq.getAudioTrackAt(${trackIndex}) : seq.getVideoTrackAt(${trackIndex});
         if (!track) return JSON.stringify({success:false,error:'Track not found at index ${trackIndex}'});
         var clip = track.getItemAt(${clipIndex});
@@ -367,7 +367,7 @@ export class AudioTools extends ExportRenderTools {
 
         var eff = qe.project.getAudioEffectByName(exact);
         if (!eff) return JSON.stringify({success:false,error:'getAudioEffectByName returned nothing for: '+exact});
-        var domSeq = app.project.activeSequence;
+        var domSeq = ${this.buildSeqRes(sequenceId)};
         var domTrack = ${audioTrack} ? domSeq.audioTracks[${trackIndex}] : domSeq.videoTracks[${trackIndex}];
         var domClip = domTrack.clips[${clipIndex}];
         var before = domClip.components.numItems;
@@ -393,14 +393,14 @@ export class AudioTools extends ExportRenderTools {
     return await this.applyAudioEffectQe(trackIndex, clipIndex, 'DeNoise', true, sequenceId);
   }
 
-  protected async listAudioEffectsOnClip(trackIndex: number, clipIndex: number, _sequenceId?: string): Promise<any> {
+  protected async listAudioEffectsOnClip(trackIndex: number, clipIndex: number, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = qe.project.getActiveSequence();
+        var seq = ${this.buildQSeqResolver(sequenceId)};
         var clip = seq.getAudioTrackAt(${trackIndex}).getItemAt(${clipIndex});
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
-        var domClip = app.project.activeSequence.audioTracks[${trackIndex}].clips[${clipIndex}];
+        var domClip = ${this.buildSeqRes(sequenceId)}.audioTracks[${trackIndex}].clips[${clipIndex}];
         var comps = [];
         for (var i = 0; i < domClip.components.numItems; i++) {
           var dc = domClip.components[i];
@@ -428,7 +428,7 @@ export class AudioTools extends ExportRenderTools {
     const kfJson = JSON.stringify(keyframes);
     return await this.bridge.executeScript(`
       try {
-        var seq = ${this.buildSeqScript(sequenceId)};
+        var seq = ${this.buildSeqRes(sequenceId)};
         if (!seq) return JSON.stringify({success:false,error:'No sequence'});
         var track = seq.audioTracks[${trackIndex}];
         if (!track || track.clips.numItems === 0) return JSON.stringify({success:false,error:'Audio track not found or empty'});
@@ -453,8 +453,8 @@ export class AudioTools extends ExportRenderTools {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var qseq = qe.project.getActiveSequence();
-        var seq = ${this.buildSeqScript(sequenceId)};
+        var qseq = ${this.buildQSeqResolver(sequenceId)};
+        var seq = ${this.buildSeqRes(sequenceId)};
         if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
         var transition = qe.project.getAudioTransitionByName('Constant Power');
         if (!transition) return JSON.stringify({success:false,error:'The Constant Power audio transition is not present on this build. Use list_available_audio_transitions to see what is.'});
@@ -1211,11 +1211,11 @@ export class AudioTools extends ExportRenderTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async setParametricEq(_seqId: string|undefined, trackIndex: number, clipIndex: number, band: number, frequency?: number, gain?: number, q?: number): Promise<any> {
+  protected async setParametricEq(seqId: string|undefined, trackIndex: number, clipIndex: number, band: number, frequency?: number, gain?: number, q?: number): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = qe.project.getActiveSequence();
+        var seq = ${this.buildQSeqResolver(seqId)};
         var atrack = seq.getAudioTrackAt(${trackIndex});
         if (!atrack) return JSON.stringify({success:false,error:'Audio track not found'});
         var clip = atrack.getItemAt(${clipIndex});
@@ -1239,11 +1239,11 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected async setCompressor(_seqId: string|undefined, trackIndex: number, clipIndex: number, threshold?: number, ratio?: number, attack?: number, release?: number): Promise<any> {
+  protected async setCompressor(seqId: string|undefined, trackIndex: number, clipIndex: number, threshold?: number, ratio?: number, attack?: number, release?: number): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = qe.project.getActiveSequence();
+        var seq = ${this.buildQSeqResolver(seqId)};
         var clip = seq.getAudioTrackAt(${trackIndex}).getItemAt(${clipIndex});
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         var set = 0;
@@ -1264,11 +1264,11 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected async setLimiter(_seqId: string|undefined, trackIndex: number, clipIndex: number, ceiling: number): Promise<any> {
+  protected async setLimiter(seqId: string|undefined, trackIndex: number, clipIndex: number, ceiling: number): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = qe.project.getActiveSequence();
+        var seq = ${this.buildQSeqResolver(seqId)};
         var clip = seq.getAudioTrackAt(${trackIndex}).getItemAt(${clipIndex});
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         for (var ci = 0; ci < 20; ci++) {
@@ -1285,17 +1285,17 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected async dereverbClip(_seqId: string|undefined, trackIndex: number, clipIndex: number, amount: number): Promise<any> {
+  protected async dereverbClip(seqId: string|undefined, trackIndex: number, clipIndex: number, amount: number): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = qe.project.getActiveSequence();
+        var seq = ${this.buildQSeqResolver(seqId)};
         var atrack = seq.getAudioTrackAt(${trackIndex});
         var clip = atrack && atrack.getItemAt(${clipIndex});
         if (!clip) return JSON.stringify({success:false,error:'Audio clip not found'});
         var eff = qe.project.getAudioEffectByName('DeReverb');
         if (!eff) return JSON.stringify({success:false,error:'DeReverb effect not found in effect list'});
-        var domClip = app.project.activeSequence.audioTracks[${trackIndex}].clips[${clipIndex}];
+        var domClip = ${this.buildSeqRes(seqId)}.audioTracks[${trackIndex}].clips[${clipIndex}];
         var before = domClip.components.numItems;
         clip.addAudioEffect(eff);
         var after = domClip.components.numItems;
@@ -1309,11 +1309,11 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected async normalizeTrackPeaks(_seqId: string|undefined, trackIndex: number, targetDbfs: number): Promise<any> {
+  protected async normalizeTrackPeaks(seqId: string|undefined, trackIndex: number, targetDbfs: number): Promise<any> {
     // Node.js side: get clips, probe each, set gain
     return await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(seqId)};
         var track = seq.audioTracks[${trackIndex}];
         if (!track) return JSON.stringify({success:false,error:'Audio track not found'});
         var results = [];
@@ -1328,10 +1328,10 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected async fillRoomTone(_seqId: string|undefined, trackIndex: number, gapStart: number, gapDuration: number, roomToneItemId: string): Promise<any> {
+  protected async fillRoomTone(seqId: string|undefined, trackIndex: number, gapStart: number, gapDuration: number, roomToneItemId: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(seqId)};
         var item = __findProjectItem(${JSON.stringify(roomToneItemId)});
         if (!item) return JSON.stringify({success:false,error:'Room tone item not found'});
         var track = seq.audioTracks[${trackIndex}];
@@ -1343,11 +1343,11 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected async stemExport(_seqId: string|undefined, trackIndices: number[], outputDir: string, format: string): Promise<any> {
+  protected async stemExport(seqId: string|undefined, trackIndices: number[], outputDir: string, format: string): Promise<any> {
     // Mute all except target, export audio only, repeat
     return await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(seqId)};
         var results = [];
         var allTracks = seq.audioTracks;
         for (var ti = 0; ti < ${JSON.stringify(trackIndices)}.length; ti++) {
@@ -1367,10 +1367,10 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected async channelRemapReport(_seqId?: string): Promise<any> {
+  protected async channelRemapReport(seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(seqId)};
         var report = {audioTracks:[]};
         for (var t = 0; t < seq.audioTracks.numTracks; t++) {
           var track = seq.audioTracks[t];

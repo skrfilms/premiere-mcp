@@ -17,25 +17,25 @@ wrote a file. Tools nobody has executed live are counted and named, not omitted.
 
 ## Coverage
 
-Catalogue: **647** tools. Sweeps on record: **2**.
+Catalogue: **648** tools. Sweeps on record: **2**.
 
 | standing | tools | share of catalogue |
 | --- | --- | --- |
 | **executed live** | **226** | **34.9%** |
-| **never executed live** | **421** | **65.1%** |
+| **never executed live** | **422** | **65.1%** |
 
 Broken down. Only the first two rows are evidence about a tool; the rest record that we
 looked and did not run it, and why.
 
 | standing | tools | share of catalogue |
 | --- | --- | --- |
-| executed live, reported success | 207 | 32.0% |
+| executed live, reported success | 207 | 31.9% |
 | executed live, FAILED | 19 | 2.9% |
 | not executed — harness could not build arguments | 93 | 14.4% |
 | not executed — unsafe for an unattended sweep | 81 | 12.5% |
 | not executed — panel was wedged by an earlier tool | 0 | 0.0% |
-| not executed — mutating, sweep was read-only | 247 | 38.2% |
-| absent from every sweep | 0 | 0.0% |
+| not executed — mutating, sweep was read-only | 247 | 38.1% |
+| absent from every sweep | 1 | 0.2% |
 
 ## Failures on record
 
@@ -972,6 +972,7 @@ looked and did not run it, and why.
     "path": [
     |
 | `set_scale_to_frame_size` | not executed — mutating, sweep was read-only | 2026-08-27T18:02:09Z | `live-smoke-sweep` |  |
+| `set_scale_to_frame_size_batch` | absent from every sweep | — | — | |
 | `set_scale_width_height` | not executed — mutating, sweep was read-only | 2026-08-27T18:02:09Z | `live-smoke-sweep` |  |
 | `set_scratch_disk_path` | not executed — mutating, sweep was read-only | 2026-08-27T18:02:09Z | `live-smoke-sweep` |  |
 | `set_sequence_audio_settings` | not executed — mutating, sweep was read-only | 2026-08-27T18:02:09Z | `live-smoke-sweep` |  |

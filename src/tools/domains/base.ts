@@ -238,19 +238,14 @@ export class ToolsBase {
   // ─────────────────────────────────────────────────────────────────────────
 
 
-  // Batch A helpers
-  protected buildSeqScript(id?: string): string {
-    return id
-      ? `(function(){var seqs=app.project.sequences;for(var i=0;i<seqs.numSequences;i++){if(seqs[i].sequenceID===${JSON.stringify(id)})return seqs[i];}return app.project.activeSequence;})()`
-      : 'app.project.activeSequence';
-  }
-
-  // Batch B: QE clip ops
+  /**
+   * Batch B: QE clip ops. Delegates to buildQSeqResolver rather than inlining its own lookup —
+   * it used to carry a private copy that ended in `return qe.project.getActiveSequence()`, so a
+   * stale id here reached into the open timeline and pulled the clip at the same track/index.
+   * That is the worst version of the bug: the wrong clip, on the wrong sequence, verified.
+   */
   protected qeClipScript(trackIndex: number, clipIndex: number, sequenceId?: string): string {
-    const seqScript = sequenceId
-      ? `(function(){app.enableQE();var qseqs=app.project.sequences;for(var i=0;i<qseqs.numSequences;i++){if(qseqs[i].sequenceID===${JSON.stringify(sequenceId)}){return qe.project.getSequenceAt(i);}}return qe.project.getActiveSequence();})()`
-      : '(function(){app.enableQE();return qe.project.getActiveSequence();})()';
-    return `var __seq=${seqScript};var __clip=__seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});`;
+    return `app.enableQE();var __seq=${this.buildQSeqResolver(sequenceId)};var __clip=__seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});`;
   }
 
   // Audio Analysis Implementation
@@ -408,15 +403,29 @@ export class ToolsBase {
       .trim();
   }
 
+  /**
+   * DOM sequence resolver — use in executeScript template literals.
+   *
+   * An id that does not resolve THROWS. It used to `return app.project.activeSequence`,
+   * which meant a stale or mistyped sequenceId silently retargeted whatever timeline the
+   * editor happened to have open — and every mutating tool then verified its readback
+   * against that wrong sequence and reported verified:true. Per-tool verification cannot
+   * catch a wrong target, so the refusal has to happen here, at resolution time.
+   *
+   * Throwing rather than returning null is deliberate: every generated script wraps its
+   * body in try/catch and returns {success:false,error:e.toString()}, so this fails closed
+   * with a legible message at ~100 call sites without touching any of them. Omitting the
+   * id still means the active sequence, which is documented and intended.
+   */
   protected buildSeqRes(sid?: string): string {
     if (!sid) return 'app.project.activeSequence';
-    return `(function(){var ss=app.project.sequences;for(var i=0;i<ss.numSequences;i++){if(ss[i].sequenceID===${JSON.stringify(sid)})return ss[i];}return app.project.activeSequence;})()`;
+    return `(function(){var ss=app.project.sequences;for(var i=0;i<ss.numSequences;i++){if(ss[i].sequenceID===${JSON.stringify(sid)})return ss[i];}throw new Error("Sequence not found by id: "+${JSON.stringify(sid)}+". Refusing to fall back to the active sequence -- nothing was read or changed.");})()`;
   }
 
-  /** QE sequence resolver — use in executeScript template literals. */
+  /** QE sequence resolver — use in executeScript template literals. Fails closed like buildSeqRes. */
   protected buildQSeqResolver(seqId?: string): string {
     if (!seqId) return 'qe.project.getActiveSequence()';
-    return `(function(){ app.enableQE(); var seqs=app.project.sequences; for(var i=0;i<seqs.numSequences;i++){ if(seqs[i].sequenceID===${JSON.stringify(seqId)}) return qe.project.getSequenceAt(i); } return qe.project.getActiveSequence(); })()`;
+    return `(function(){ app.enableQE(); var seqs=app.project.sequences; for(var i=0;i<seqs.numSequences;i++){ if(seqs[i].sequenceID===${JSON.stringify(seqId)}) return qe.project.getSequenceAt(i); } throw new Error("Sequence not found by id: "+${JSON.stringify(seqId)}+". Refusing to fall back to the active sequence -- nothing was read or changed."); })()`;
   }
 
   /** Size and mtime of a path, or null when it is absent or unreadable. */

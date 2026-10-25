@@ -13,7 +13,7 @@ import { MARKER_COLOR_NAMES } from '../catalogue-schemas.js';
 export class MarkerTools extends KeyframeTools {
   protected async createMarker(timeSecs: number, name?: string, comment?: string, type?: string, colorIndex?: number, durationSecs?: number, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
-      var seq = ${this.buildSequenceResolver2(sequenceId)};
+      var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No sequence'});
       var markers = seq.markers;
       var m = markers.createMarker(${timeSecs});
@@ -29,7 +29,7 @@ export class MarkerTools extends KeyframeTools {
   protected async markersToCsv(outputPath: string, sequenceId?: string): Promise<any> {
     const result = await this.bridge.executeScript(`
       try {
-        var seq = ${sequenceId ? `(function(){var ss=app.project.sequences;for(var i=0;i<ss.numSequences;i++){if(ss[i].sequenceID===${JSON.stringify(sequenceId)})return ss[i];}return app.project.activeSequence;})()` : 'app.project.activeSequence'};
+        var seq = ${this.buildSeqRes(sequenceId)};
         if (!seq) return JSON.stringify({success:false,error:'No sequence'});
         var markers = seq.markers;
         var rows = [];
@@ -399,7 +399,7 @@ ${this.buildSequenceResolver(sequenceId)}
 
       const markerScript = `
         try {
-          var seq = ${sequenceId ? `(function(){ var seqs=app.project.sequences; for(var i=0;i<seqs.numSequences;i++){ if(seqs[i].sequenceID===${JSON.stringify(sequenceId)}) return seqs[i]; } return app.project.activeSequence; })()` : 'app.project.activeSequence'};
+          var seq = ${this.buildSeqRes(sequenceId)};
           if (!seq) return JSON.stringify({success:false,error:'No sequence'});
           var comments = ${JSON.stringify(comments)};
           var created = 0;
@@ -420,10 +420,29 @@ ${this.buildSequenceResolver(sequenceId)}
     }
   }
 
-  protected async exportPerMarkerRange(outputDir: string, presetPath?: string, markerPattern?: string): Promise<any> {
+  /**
+   * Three defects, all in the same call:
+   *
+   * 1. It finished with `seq.clearInPoint(0); seq.clearOutPoint(0)`. Those are ProjectItem
+   *    methods and are UNDEFINED on Sequence (measured on 26.3.2 — the same fact is written
+   *    down in clearSequenceInOut one domain over), so the line threw AFTER every export had
+   *    already run. The tool therefore reported success:false on a run that fully succeeded,
+   *    and left the caller's in/out points sitting on the last exported range.
+   * 2. exportAsMediaDirect's result was discarded and no file was ever stat'ed, so the
+   *    response listed output paths that need not exist and called itself success:true.
+   * 3. It hardcoded the active sequence with no way to name another one.
+   *
+   * The in/out points are now captured up front and restored with setInPoint/setOutPoint,
+   * and every output is stat'ed so `verified` reflects files that are actually on disk.
+   */
+  protected async exportPerMarkerRange(outputDir: string, presetPath?: string, markerPattern?: string, seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(seqId)};
+        if (!seq) return JSON.stringify({success:false,error:'No sequence to export from.'});
+        // Captured BEFORE any range is set, so the caller's range can be put back.
+        var priorIn = null, priorOut = null;
+        try { priorIn = seq.getInPointAsTime().seconds; priorOut = seq.getOutPointAsTime().seconds; } catch(ePrior) {}
         var markers = seq.markers;
         var m = markers.getFirstMarker();
         var ranges = [];
@@ -440,19 +459,40 @@ ${this.buildSequenceResolver(sequenceId)}
           }
           m = markers.getNextMarker(m);
         }
-        // Export each range
-        var exported = [];
+        // Export each range, then stat the file. A queued-but-absent output is a failure.
+        var exported = [], missing = [];
         for (var i = 0; i < ranges.length; i++) {
           var r = ranges[i];
+          // The extension is assumed to be .mp4. A preset that writes something else lands at a
+          // different path, which shows up below as a missing file rather than a false success.
           var outPath = ${JSON.stringify(outputDir)} + '/' + r.name.replace(/[^a-zA-Z0-9_-]/g,'_') + '_' + i + '.mp4';
           var inT = new Time(); inT.seconds = r.inSecs;
           var outT = new Time(); outT.seconds = r.outSecs;
           seq.setInPoint(inT); seq.setOutPoint(outT);
-          seq.exportAsMediaDirect(outPath, ${JSON.stringify(presetPath ?? '')}, 1);
-          exported.push({range:r, outputPath:outPath});
+          var callResult = null;
+          try { callResult = seq.exportAsMediaDirect(outPath, ${JSON.stringify(presetPath ?? '')}, 1); } catch(eExp) { callResult = 'threw: ' + eExp.toString(); }
+          var f = new File(outPath);
+          if (f.exists) exported.push({range:r, outputPath:outPath, fileSize:f.length});
+          else missing.push({range:r, outputPath:outPath, exportAsMediaDirectReturned:String(callResult)});
         }
-        seq.clearInPoint(0); seq.clearOutPoint(0);
-        return JSON.stringify({success:true,rangeCount:ranges.length,exported:exported});
+        // clearInPoint/clearOutPoint do NOT exist on Sequence (26.3.2); restore by setting.
+        var restored = false;
+        if (priorIn !== null && priorOut !== null) {
+          try { seq.setInPoint(priorIn); seq.setOutPoint(priorOut); restored = true; } catch(eRestore) {}
+        }
+        return JSON.stringify({
+          success: ranges.length > 0 && missing.length === 0,
+          verified: true,
+          rangeCount: ranges.length,
+          exportedCount: exported.length,
+          exported: exported,
+          missing: missing,
+          inOutPointsRestored: restored,
+          error: ranges.length === 0
+            ? 'No marker pairs matched, so nothing was exported.'
+            : (missing.length ? missing.length + ' of ' + ranges.length + ' ranges produced no file on disk.' : undefined),
+          note: restored ? undefined : 'The sequence in/out points were changed for export and could not be restored; they now sit on the last range.'
+        });
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }

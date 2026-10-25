@@ -213,7 +213,7 @@ export class SpeedTimeTools extends SourceMonitorTools {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq=qe.project.getActiveSequence();
+        var seq=${this.buildQSeqResolver(seqId)};
         var domSeq=${this.buildSeqRes(seqId)};
         var clip=domSeq.videoTracks[${trackIndex}].clips[${clipIndex}];
         if(!clip)return JSON.stringify({success:false,error:'Clip not found'});
@@ -282,7 +282,7 @@ export class SpeedTimeTools extends SourceMonitorTools {
       try {
         app.enableQE();
         var clip=${this.buildSeqRes(seqId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
-        var qeClip=qe.project.getActiveSequence().getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        var qeClip=${this.buildQSeqResolver(seqId)}.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
         return JSON.stringify({success:true,speed:clip.getSpeed?clip.getSpeed():1,durationSecs:clip.duration.seconds,isReversed:qeClip?qeClip.reversed:false,frameBlend:qeClip?qeClip.frameBlend:false,timeInterpolation:qeClip?qeClip.timeInterpolationType:0});
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
     `);
@@ -292,7 +292,7 @@ export class SpeedTimeTools extends SourceMonitorTools {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var qeClip=qe.project.getActiveSequence().getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        var qeClip=${this.buildQSeqResolver(seqId)}.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
         if(!qeClip)return JSON.stringify({success:false,error:'Clip not found'});
         var clip=${this.buildSeqRes(seqId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
         if(!clip)return JSON.stringify({success:false,error:'Clip not found on the DOM sequence at video track ${trackIndex} index ${clipIndex}'});

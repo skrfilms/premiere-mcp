@@ -130,13 +130,19 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
     } catch (e: any) { return { success: false, error: e.message }; }
   }
 
-  protected async storyboardBinToSequence(binName: string, seqId?: string, startAtSecs = 0): Promise<any> {
+  /**
+   * The local findBin deep-walked but returned the FIRST name match, so with two bins of the
+   * same name (one per scene, which is the normal shape of a show project) this assembled the
+   * wrong bin onto the timeline and reported success. The shared __resolveBin prelude helper
+   * refuses an ambiguous bare name instead of guessing, and also accepts a path or an id.
+   */
+  protected async storyboardBinToSequence(binName: string, seqId?: string, startAtSecs = 0, binId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq=${this.buildSeqRes(seqId)};
-        function findBin(bin,name){for(var i=0;i<bin.children.numItems;i++){var c=bin.children[i];if(c.type===2&&String(c.name)===name)return c;if(c.type===2){var r=findBin(c,name);if(r)return r;}}return null;}
-        var bin=findBin(app.project.rootItem,${JSON.stringify(binName)});
-        if(!bin)return JSON.stringify({success:false,error:'Bin not found: '+${JSON.stringify(binName)}});
+        var req=__resolveBin(${JSON.stringify(binId??null)},${JSON.stringify(binName)});
+        if(req.error)return JSON.stringify({success:false,error:req.error+' Nothing was placed on the timeline.',binName:${JSON.stringify(binName)},binId:${JSON.stringify(binId??null)},matchCount:req.matchCount});
+        var bin=req.bin;
         var pos=new Time();pos.seconds=${startAtSecs};
         var placed=0;
         for(var i=0;i<bin.children.numItems;i++){
@@ -146,7 +152,9 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
           var dur=item.getOutPoint().seconds-item.getInPoint().seconds;
           pos.seconds+=dur;placed++;
         }
-        return JSON.stringify({success:true,placed:placed,finalPositionSecs:pos.seconds});
+        return JSON.stringify({success:placed>0,placed:placed,finalPositionSecs:pos.seconds,
+          binId:String(bin.nodeId),binName:String(bin.name),binResolvedBy:req.resolvedBy,
+          error:placed===0?'Bin "'+String(bin.name)+'" ('+String(bin.treePath)+') holds no footage items, so nothing was placed.':undefined});
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
     `);
   }

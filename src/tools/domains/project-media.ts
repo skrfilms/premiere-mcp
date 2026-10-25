@@ -452,21 +452,22 @@ export class ProjectMediaTools extends CaptionTools {
   }
 
   // Media Management Implementation
-  protected async importMedia(filePath: string, binName?: string): Promise<any> {
+  protected async importMedia(filePath: string, binName?: string, binId?: string): Promise<any> {
     try {
-      const result: any = await this.bridge.importMedia(filePath);
+      const result: any = await this.bridge.importMedia(filePath, binName, binId);
       if (!result.success) {
         return {
           ...result,
-          filePath: filePath,
-          binName: binName || 'Root'
+          filePath: filePath
         };
       }
+      // binName/binId/treePath come from the bridge readback and are spread LAST
+      // on purpose: the request's binName used to be written over the response,
+      // so a file imported to the root reported the bin that was asked for.
       return {
         success: true,
         message: `Media imported successfully`,
         filePath: filePath,
-        binName: binName || 'Root',
         ...result
       };
     } catch (error) {
@@ -483,7 +484,7 @@ export class ProjectMediaTools extends CaptionTools {
     }
   }
 
-  protected async importFolder(folderPath: string, binName?: string, recursive = false): Promise<any> {
+  protected async importFolder(folderPath: string, binName?: string, recursive = false, binId?: string): Promise<any> {
     const script = `
       try {
         var folder = new Folder(${JSON.stringify(folderPath)});
@@ -516,38 +517,35 @@ export class ProjectMediaTools extends CaptionTools {
           }
         }
         
-        var targetBin = app.project.rootItem;
-        ${binName ? `
-        // Same silent reparent as create_bin: an unresolved destination bin sent the
-        // whole import to the project root instead of failing.
-        function __binByName(parent, wanted) {
-          // children[name] does not resolve: Premiere's ProjectItemCollection is
-          // index-only, so a string key returns undefined even when a child of that
-          // name exists. Verified against 26.0.2. Walk and compare instead.
-          if (!parent || !parent.children) return null;
-          for (var i = 0; i < parent.children.numItems; i++) {
-            var child = parent.children[i];
-            if (child && String(child.name) === String(wanted)) return child;
-          }
-          return null;
-        }
-        targetBin = __binByName(app.project.rootItem, ${JSON.stringify(binName)});
-        if (!targetBin) {
+        // Destination resolution is delegated to the shared __resolveBin prelude
+        // helper (id > "/"-separated path > deep single name, ambiguity refused).
+        // The old local __binByName scanned rootItem.children ONE level deep and
+        // matched any child by name, so a bin nested under another bin -- which
+        // is what create_bin usually hands back -- was unreachable, and a clip
+        // sharing the bin's name could be selected as the destination.
+        var __binRequest = __resolveBin(${binId !== undefined ? JSON.stringify(binId) : 'null'}, ${binName !== undefined ? JSON.stringify(binName) : 'null'});
+        if (__binRequest.error) {
           return JSON.stringify({
             success: false,
-            error: "Destination bin not found: " + ${JSON.stringify(binName)} + ". Nothing was imported. Omit binName to import to the project root.",
-            binName: ${JSON.stringify(binName)}
+            error: __binRequest.error + " Nothing was imported. Omit binName/binId to import to the project root.",
+            binName: ${binName !== undefined ? JSON.stringify(binName) : 'null'},
+            binId: ${binId !== undefined ? JSON.stringify(binId) : 'null'},
+            matchCount: __binRequest.matchCount
           });
-        }` : ''}
-        
+        }
+        var targetBin = __binRequest.bin;
+
         importFiles(folder, targetBin);
-        
+
         return JSON.stringify({
           success: true,
           importedItems: importedItems,
           errors: errors,
           totalImported: importedItems.length,
-          totalErrors: errors.length
+          totalErrors: errors.length,
+          binId: targetBin.nodeId,
+          binName: String(targetBin.name),
+          binResolvedBy: __binRequest.resolvedBy
         });
       } catch (e) {
         return JSON.stringify({
@@ -568,40 +566,10 @@ export class ProjectMediaTools extends CaptionTools {
         var parentBin = app.project.rootItem;
         var resolvedBy = "root";
 
-        // A bin has a createBin() method; clips do not. type===2 is Premiere's BIN
-        // constant, but the duck-type is the reliable fallback across builds.
-        function __isBin(it) {
-          if (!it) return false;
-          if (it.type === 2) return true;
-          return (typeof it.createBin === "function");
-        }
-        // Walk a "/"-separated path from a starting node, matching bins by name.
-        function __binByPath(root, segments) {
-          var node = root;
-          for (var s = 0; s < segments.length; s++) {
-            if (!node || !node.children) return null;
-            var next = null;
-            for (var i = 0; i < node.children.numItems; i++) {
-              var ch = node.children[i];
-              if (ch && __isBin(ch) && String(ch.name) === String(segments[s])) { next = ch; break; }
-            }
-            if (!next) return null;
-            node = next;
-          }
-          return node;
-        }
-        // Depth-first collect every bin anywhere in the tree matching a single name.
-        function __binsByNameDeep(root, wanted, acc) {
-          if (!root || !root.children) return acc;
-          for (var i = 0; i < root.children.numItems; i++) {
-            var ch = root.children[i];
-            if (ch && __isBin(ch)) {
-              if (String(ch.name) === String(wanted)) acc.push(ch);
-              __binsByNameDeep(ch, wanted, acc);
-            }
-          }
-          return acc;
-        }
+        // __isBin / __binByPath / __binsByNameDeep now live in the ExtendScript
+        // prelude (bridge/index.ts) so the import tools resolve destination bins
+        // the same way this does. The branching below stays local because the
+        // error wording is create_bin's own ("Nothing was created").
 
         if (parentBinId !== null) {
           // Unambiguous: resolve the parent bin by nodeId.
@@ -1213,18 +1181,25 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async getBinContentsRecursive(binName?: string): Promise<any> {
+  /**
+   * The bin lookup used to end in `findBin(...) || app.project.rootItem`, so a name that did
+   * not resolve walked the WHOLE PROJECT and returned success:true with a count. There is no
+   * way for a caller to tell 40 items in one shot bin from 4,000 items in the project, which
+   * makes it worse than an error. Routed through the shared __resolveBin prelude helper, which
+   * accepts an id, a "/"-separated path or a deep-searched name and refuses rather than guessing.
+   */
+  protected async getBinContentsRecursive(binName?: string, binId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var startBin=app.project.rootItem;
-        if(${JSON.stringify(binName??'')}){
-          function findBin(b,n){for(var i=0;i<b.children.numItems;i++){var c=b.children[i];if(c.type===2&&String(c.name)===n)return c;if(c.type===2){var r=findBin(c,n);if(r)return r;}}return null;}
-          startBin=findBin(app.project.rootItem,${JSON.stringify(binName??'')})||app.project.rootItem;
-        }
+        var req=__resolveBin(${JSON.stringify(binId??null)},${JSON.stringify(binName??null)});
+        if(req.error)return JSON.stringify({success:false,error:req.error+' Nothing was read. Omit binName/binId to list the whole project.',binName:${JSON.stringify(binName??null)},binId:${JSON.stringify(binId??null)},matchCount:req.matchCount});
+        var startBin=req.bin;
         var items=[];
-        function walk(bin){for(var i=0;i<bin.children.numItems;i++){var c=bin.children[i];if(c.type===2)walk(c);else items.push({name:String(c.name),nodeId:String(c.nodeId),treePath:String(c.treePath),type:c.type});}}
+        function walk(bin){for(var i=0;i<bin.children.numItems;i++){var c=bin.children[i];if(__isBin(c))walk(c);else items.push({name:String(c.name),nodeId:String(c.nodeId),treePath:String(c.treePath),type:c.type});}}
         walk(startBin);
-        return JSON.stringify({success:true,count:items.length,items:items});
+        var scope=null;try{scope=String(startBin.treePath);}catch(eScope){}
+        return JSON.stringify({success:true,count:items.length,items:items,
+          binId:String(startBin.nodeId),binName:String(startBin.name),binResolvedBy:req.resolvedBy,scope:scope});
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
     `);
   }

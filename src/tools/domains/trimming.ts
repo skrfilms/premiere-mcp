@@ -9,7 +9,7 @@ import { GraphicsTools } from './graphics.js';
 export class TrimmingTools extends GraphicsTools {
   protected async rippleTrimIn(sequenceId: string | undefined, trackIndex: number, clipIndex: number): Promise<any> {
     return await this.bridge.executeScript(`
-      var seq = ${this.buildSequenceResolver2(sequenceId)};
+      var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
       var track = seq.videoTracks[${trackIndex}];
       if (!track) return JSON.stringify({success:false,error:'Track not found'});
@@ -44,7 +44,7 @@ export class TrimmingTools extends GraphicsTools {
 
   protected async rippleTrimOut(sequenceId: string | undefined, trackIndex: number, clipIndex: number): Promise<any> {
     return await this.bridge.executeScript(`
-      var seq = ${this.buildSequenceResolver2(sequenceId)};
+      var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
       var track = seq.videoTracks[${trackIndex}];
       if (!track) return JSON.stringify({success:false,error:'Track not found'});
@@ -67,7 +67,7 @@ export class TrimmingTools extends GraphicsTools {
 
   protected async extendEdit(sequenceId: string | undefined, trackIndex: number, clipIndex: number): Promise<any> {
     return await this.bridge.executeScript(`
-      var seq = ${this.buildSequenceResolver2(sequenceId)};
+      var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
       var track = seq.videoTracks[${trackIndex}];
       var clip = track && track.clips[${clipIndex}];
@@ -88,7 +88,7 @@ export class TrimmingTools extends GraphicsTools {
 
   protected async nudgeClip(sequenceId: string | undefined, trackIndex: number, clipIndex: number, frames: number): Promise<any> {
     return await this.bridge.executeScript(`
-      var seq = ${this.buildSequenceResolver2(sequenceId)};
+      var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
       var track = seq.videoTracks[${trackIndex}];
       var clip = track && track.clips[${clipIndex}];
@@ -113,9 +113,9 @@ export class TrimmingTools extends GraphicsTools {
     `);
   }
 
-  protected async closeGapAt(timecode: string, _sequenceId?: string): Promise<any> {
+  protected async closeGapAt(timecode: string, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
-      var seq = app.project.activeSequence;
+      var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No sequence'});
       var gaps = seq.getTimelineGaps();
       if (!gaps || !gaps.length) return JSON.stringify({success:true,message:'No gaps found',gapsClosed:0});
@@ -134,7 +134,7 @@ export class TrimmingTools extends GraphicsTools {
 
   protected async closeAllGaps(sequenceId?: string, _trackIndex?: number): Promise<any> {
     return await this.bridge.executeScript(`
-      var seq = ${this.buildSequenceResolver2(sequenceId)};
+      var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No sequence'});
       var gaps = seq.getTimelineGaps ? seq.getTimelineGaps() : [];
       return JSON.stringify({success:true,gapCount:gaps ? gaps.length : 0,note:'Use get_timeline_gaps to enumerate, then ripple_delete each gap range.'});
@@ -340,10 +340,10 @@ export class TrimmingTools extends GraphicsTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async getSequenceGaps(_seqId?: string, _trackIndex?: number): Promise<any> {
+  protected async getSequenceGaps(seqId?: string, _trackIndex?: number): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(seqId)};
         var gaps = seq.getTimelineGaps ? seq.getTimelineGaps() : [];
         if (!gaps) return JSON.stringify({success:true,gapCount:0,gaps:[]});
         var result = [];

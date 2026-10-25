@@ -13,13 +13,13 @@ Two independent axes, kept apart on purpose:
 
 ## Headline
 
-Catalogue: **647** tools.
+Catalogue: **648** tools.
 
 | standing | tools | share of catalogue |
 | --- | --- | --- |
-| **nothing has ever run it** | **0** | **0.0%** |
+| **nothing has ever run it** | **1** | **0.2%** |
 | run by the suite and live | 226 | 34.9% |
-| run by the suite only (mock host) | 421 | 65.1% |
+| run by the suite only (mock host) | 421 | 65.0% |
 | run live only | 0 | 0.0% |
 
 A tool in the first row is shipped on the strength of a code review and a schema. It may
@@ -35,9 +35,12 @@ Measured by instrumenting the dispatcher, not by grepping test files for tool na
 a name in a table of expected strings is not a call, and a name assembled at runtime is
 not a literal. Both errors are silent.
 
+The catalogue was **647** tools when this was measured and is
+**648** now, so the suite axis is stale. Re-run `npm run coverage:tools`.
+
 ## Tools nothing has ever run
 
-None. Every tool in the catalogue has been dispatched by the suite, by a live sweep, or both.
+- `set_scale_to_frame_size_batch`
 
 ## Recorded names that are not tools in this catalogue
 
@@ -613,6 +616,7 @@ that was removed after the run, and the run is stale.
 | `set_render_preview_quality` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `set_renderer` | yes (5) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `set_scale_to_frame_size` | yes (4) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
+| `set_scale_to_frame_size_batch` | no | no |  |
 | `set_scale_width_height` | yes (4) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `set_scratch_disk_path` | yes (4) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `set_sequence_audio_settings` | yes (4) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |

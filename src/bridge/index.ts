@@ -458,6 +458,83 @@ function __findProjectItem(nodeId) {
   return walk(app.project.rootItem);
 }
 /*
+ * Bin addressing, shared by every tool that takes a destination bin.
+ *
+ * These lived only inside create_bin's generated script, so import_folder and
+ * import_media each carried a weaker copy that scanned rootItem.children one
+ * level deep. A bin created inside another bin -- which is what create_bin
+ * returns most of the time -- was therefore unreachable as an import
+ * destination, and the only diagnosis on offer was "Destination bin not found"
+ * for a bin that plainly existed. One resolver, three callers.
+ */
+function __isBin(it) {
+  // A bin has createBin(); clips do not. type===2 is Premiere's BIN constant,
+  // but the duck-type is what survives across builds.
+  if (!it) return false;
+  if (it.type === 2) return true;
+  return (typeof it.createBin === 'function');
+}
+function __binByPath(root, segments) {
+  var node = root;
+  for (var s = 0; s < segments.length; s++) {
+    if (!node || !node.children) return null;
+    var next = null;
+    for (var i = 0; i < node.children.numItems; i++) {
+      var ch = node.children[i];
+      if (ch && __isBin(ch) && String(ch.name) === String(segments[s])) { next = ch; break; }
+    }
+    if (!next) return null;
+    node = next;
+  }
+  return node;
+}
+function __binsByNameDeep(root, wanted, acc) {
+  if (!root || !root.children) return acc;
+  for (var i = 0; i < root.children.numItems; i++) {
+    var ch = root.children[i];
+    if (ch && __isBin(ch)) {
+      if (String(ch.name) === String(wanted)) acc.push(ch);
+      __binsByNameDeep(ch, wanted, acc);
+    }
+  }
+  return acc;
+}
+/*
+ * Resolve a destination bin from an id, a "/"-separated path, or a single name.
+ * Returns { bin: <ProjectItem> } on success or { error: "..." } on failure --
+ * never a silent fall back to the project root, because an import that lands
+ * somewhere other than where it was asked to land is the failure this replaces.
+ * A bare name is deep-searched and REFUSED when two bins share it: guessing
+ * between them is how media ends up in the wrong scene.
+ */
+function __resolveBin(binId, binName) {
+  var root = (app.project && app.project.rootItem) ? app.project.rootItem : null;
+  if (!root) return { error: 'No project is open.' };
+  if (binId !== undefined && binId !== null && String(binId) !== '') {
+    var byId = __findProjectItem(String(binId));
+    if (!byId) return { error: 'Bin not found by id: ' + binId + '.' };
+    if (!__isBin(byId)) return { error: 'binId ' + binId + ' refers to "' + String(byId.name) + '", which is not a bin.' };
+    return { bin: byId, resolvedBy: 'id' };
+  }
+  if (binName === undefined || binName === null || String(binName) === '') {
+    return { bin: root, resolvedBy: 'root' };
+  }
+  if (String(binName).indexOf('/') !== -1) {
+    var segs = String(binName).split('/');
+    var trimmed = [];
+    for (var si = 0; si < segs.length; si++) { if (segs[si] !== '') trimmed.push(segs[si]); }
+    var byPath = __binByPath(root, trimmed);
+    if (!byPath) return { error: 'Bin path not found: ' + binName + '.' };
+    return { bin: byPath, resolvedBy: 'path' };
+  }
+  var matches = __binsByNameDeep(root, binName, []);
+  if (matches.length === 0) return { error: 'Bin not found: ' + binName + '.' };
+  if (matches.length > 1) {
+    return { error: 'Bin name "' + binName + '" is ambiguous (' + matches.length + ' bins share it). Pass binId, or a "/"-separated path, to disambiguate.', matchCount: matches.length };
+  }
+  return { bin: matches[0], resolvedBy: 'name' };
+}
+/*
  * String.prototype.padStart does not exist in this engine (measured on 26.3.2: typeof is
  * undefined), so frames_to_timecode threw "String().padStart is not a function" on every call.
  * Neither do padEnd, repeat, find, findIndex, some, every, reduce, lastIndexOf, bind, or
@@ -1718,7 +1795,17 @@ export class PremiereProBridge implements PremiereProTransport {
     await this.executeScript(script);
   }
 
-  async importMedia(filePath: string): Promise<PremiereProProjectItem> {
+  /**
+   * Import one media file, optionally INTO a named bin.
+   *
+   * The destination used to be hardcoded to app.project.rootItem while the
+   * caller's binName was echoed back in the response, so every bin-targeted
+   * import reported a bin it had not used. The bin is now resolved (by id, path
+   * or deep name) via the __resolveBin prelude helper, an unresolvable bin
+   * fails before anything is imported, and the parent bin is read back off the
+   * imported item rather than restated from the request.
+   */
+  async importMedia(filePath: string, binName?: string, binId?: string): Promise<PremiereProProjectItem> {
     // Validate file path for security
     const pathValidation = validateFilePath(filePath);
     if (!pathValidation.valid) {
@@ -1757,29 +1844,48 @@ export class PremiereProBridge implements PremiereProTransport {
           });
         }
 
+        var __binRequest = __resolveBin(${binId !== undefined ? JSON.stringify(binId) : 'null'}, ${binName !== undefined ? JSON.stringify(binName) : 'null'});
+        if (__binRequest.error) {
+          return JSON.stringify({
+            success: false,
+            error: __binRequest.error + " Nothing was imported. Omit binName/binId to import to the project root.",
+            binName: ${binName !== undefined ? JSON.stringify(binName) : 'null'},
+            binId: ${binId !== undefined ? JSON.stringify(binId) : 'null'},
+            matchCount: __binRequest.matchCount
+          });
+        }
+        var __destBin = __binRequest.bin;
+
         var existingItems = [];
         __walkItems(app.project.rootItem, existingItems);
 
         // Premiere returns true when asked to import media already in the
         // project, but it does not add another project item. Reuse that item
-        // instead of reporting a fabricated import failure.
+        // instead of reporting a fabricated import failure. It is reported at
+        // whatever bin it actually sits in -- a re-import does not move it, so
+        // claiming the requested bin here would be the same lie the hardcoded
+        // root destination used to tell.
         for (var existingIndex = 0; existingIndex < existingItems.length; existingIndex++) {
           var existingItem = existingItems[existingIndex];
           try {
             if (existingItem.getMediaPath && existingItem.getMediaPath() === file.fsName) {
+              var __existingPath = null;
+              try { __existingPath = String(existingItem.treePath); } catch (eTp) {}
               return JSON.stringify({
                 success: true,
                 id: existingItem.nodeId,
                 name: existingItem.name,
                 type: existingItem.type.toString(),
                 mediaPath: file.fsName,
-                alreadyImported: true
+                alreadyImported: true,
+                treePath: __existingPath,
+                movedToRequestedBin: false
               });
             }
           } catch (e) {}
         }
 
-        var importResult = app.project.importFiles([file.fsName], true, app.project.rootItem, false);
+        var importResult = app.project.importFiles([file.fsName], true, __destBin, false);
         if (!importResult) {
           return JSON.stringify({
             success: false,
@@ -1821,13 +1927,34 @@ export class PremiereProBridge implements PremiereProTransport {
           });
         }
 
-        return JSON.stringify({
+        // The destination is read back off the imported item, not restated from
+        // the request: treePath is what Premiere actually did with it.
+        var __landedPath = null;
+        try { __landedPath = String(importedItem.treePath); } catch (eLanded) {}
+        var __landedInRequestedBin = null;
+        try {
+          var __found = false;
+          for (var di = 0; di < __destBin.children.numItems; di++) {
+            if (__destBin.children[di] && __destBin.children[di].nodeId === importedItem.nodeId) { __found = true; break; }
+          }
+          __landedInRequestedBin = __found;
+        } catch (eCheck) {}
+
+        var __payload = {
           success: true,
           id: importedItem.nodeId,
           name: importedItem.name,
           type: importedItem.type.toString(),
-          mediaPath: importedItem.getMediaPath ? importedItem.getMediaPath() : file.fsName
-        });
+          mediaPath: importedItem.getMediaPath ? importedItem.getMediaPath() : file.fsName,
+          binId: __destBin.nodeId,
+          binName: String(__destBin.name),
+          binResolvedBy: __binRequest.resolvedBy,
+          treePath: __landedPath
+        };
+        // Only claim verified when the readback actually answered. An
+        // unreadable children collection is "unknown", not "confirmed".
+        if (__landedInRequestedBin !== null) __payload.verified = __landedInRequestedBin;
+        return JSON.stringify(__payload);
       } catch (e) {
         return JSON.stringify({
           success: false,

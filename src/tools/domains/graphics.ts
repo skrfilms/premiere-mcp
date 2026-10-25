@@ -100,10 +100,10 @@ export class GraphicsTools extends SpeedTimeTools {
     };
   }
 
-  protected async setMogrtText(_sequenceId: string | undefined, ti: number, ci: number, paramName: string, text: string): Promise<any> {
+  protected async setMogrtText(sequenceId: string | undefined, ti: number, ci: number, paramName: string, text: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(sequenceId)};
         var clip = seq.videoTracks[${ti}].clips[${ci}];
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         if (!clip.isMGT()) return JSON.stringify({success:false,error:'Clip is not a Motion Graphics Template (MOGRT)'});
@@ -124,10 +124,10 @@ export class GraphicsTools extends SpeedTimeTools {
     `);
   }
 
-  protected async setMogrtParam(_sequenceId: string | undefined, ti: number, ci: number, paramName: string, value: any): Promise<any> {
+  protected async setMogrtParam(sequenceId: string | undefined, ti: number, ci: number, paramName: string, value: any): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(sequenceId)};
         var clip = seq.videoTracks[${ti}].clips[${ci}];
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         if (!clip.isMGT()) return JSON.stringify({success:false,error:'Clip is not a MOGRT'});
@@ -146,10 +146,10 @@ export class GraphicsTools extends SpeedTimeTools {
     `);
   }
 
-  protected async mogrtParamsReport(_sequenceId: string | undefined, ti: number, ci: number): Promise<any> {
+  protected async mogrtParamsReport(sequenceId: string | undefined, ti: number, ci: number): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(sequenceId)};
         var clip = seq.videoTracks[${ti}].clips[${ci}];
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         if (!clip.isMGT()) return JSON.stringify({success:false,error:'Clip is not a MOGRT — check isMGT()'});
@@ -166,14 +166,14 @@ export class GraphicsTools extends SpeedTimeTools {
     `);
   }
 
-  protected async timecodeBurnIn(_sequenceId: string | undefined, ti: number, ci: number): Promise<any> {
+  protected async timecodeBurnIn(sequenceId: string | undefined, ti: number, ci: number): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = qe.project.getActiveSequence();
+        var seq = ${this.buildQSeqResolver(sequenceId)};
         var qeClip = seq.getVideoTrackAt(${ti}).getItemAt(${ci});
         if (!qeClip) return JSON.stringify({success:false,error:'Clip not found'});
-        var domClip = app.project.activeSequence.videoTracks[${ti}].clips[${ci}];
+        var domClip = ${this.buildSeqRes(sequenceId)}.videoTracks[${ti}].clips[${ci}];
         var before = domClip.components.numItems;
         // Try both common names
         var eff = qe.project.getVideoEffectByName('Timecode') || qe.project.getVideoEffectByName('Metadata & Timecode Burn-in');
@@ -633,10 +633,10 @@ export class GraphicsTools extends SpeedTimeTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async watermarkApply(logoPath: string, opacity: number, corner: string, _seqId?: string): Promise<any> {
+  protected async watermarkApply(logoPath: string, opacity: number, corner: string, seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(seqId)};
         var logoFile = new File(${JSON.stringify(logoPath)});
         if (!logoFile.exists) return JSON.stringify({success:false,error:'Logo file not found: ' + ${JSON.stringify(logoPath)}});
         // Import the logo
@@ -658,10 +658,10 @@ export class GraphicsTools extends SpeedTimeTools {
     `);
   }
 
-  protected async getMogrtTextAll(_seqId?: string): Promise<any> {
+  protected async getMogrtTextAll(seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(seqId)};
         var mogrts = [];
         for (var t=0;t<seq.videoTracks.numTracks;t++) {
           var track = seq.videoTracks[t];
@@ -686,10 +686,10 @@ export class GraphicsTools extends SpeedTimeTools {
     `);
   }
 
-  protected async removeMogrtClip(_seqId: string|undefined, trackIndex: number, clipIndex: number): Promise<any> {
+  protected async removeMogrtClip(seqId: string|undefined, trackIndex: number, clipIndex: number): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(seqId)};
         var track = seq.videoTracks[${trackIndex}];
         var clip = track && track.clips[${clipIndex}];
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
@@ -717,10 +717,10 @@ export class GraphicsTools extends SpeedTimeTools {
     `);
   }
 
-  protected async createAdjustmentLayerAt(startTimeSecs: number, durationSecs: number, trackIndex?: number, _seqId?: string): Promise<any> {
+  protected async createAdjustmentLayerAt(startTimeSecs: number, durationSecs: number, trackIndex?: number, seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(seqId)};
         var tIdx = ${trackIndex ?? 'seq.videoTracks.numTracks - 1'};
         var track = seq.videoTracks[tIdx];
         if (!track) return JSON.stringify({success:false,error:'Track not found'});
