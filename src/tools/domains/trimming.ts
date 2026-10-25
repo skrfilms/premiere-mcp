@@ -113,32 +113,105 @@ export class TrimmingTools extends GraphicsTools {
     `);
   }
 
-  protected async closeGapAt(timecode: string, sequenceId?: string): Promise<any> {
-    return await this.bridge.executeScript(`
-      var seq = ${this.buildSeqRes(sequenceId)};
-      if (!seq) return JSON.stringify({success:false,error:'No sequence'});
-      var gaps = seq.getTimelineGaps();
-      if (!gaps || !gaps.length) return JSON.stringify({success:true,message:'No gaps found',gapsClosed:0});
-      // Find gap containing our timecode (as seconds for comparison)
-      var targetSecs = ${JSON.stringify(timecode)}.indexOf(':') >= 0 ? 0 : Number(${JSON.stringify(timecode)});
-      var closed = 0;
-      for (var i = 0; i < gaps.length; i++) {
-        var g = gaps[i];
-        if (g && g.start !== undefined) {
-          seq.videoTracks[0].clips[i] && seq.rippleDelete ? null : null; // placeholder
-        }
-      }
-      return JSON.stringify({success:true,note:'Gap closing requires ripple-delete on the gap range. Use ripple_delete tool with the gap timecodes from get_timeline_gaps.',gapCount:gaps.length});
-    `);
+  /**
+   * Shared ExtendScript for the gap tools. A gap here is a range where NO track, video or audio,
+   * has material: closing anything narrower would pull one track against another and break sync.
+   * TrackItem.move() takes a relative offset and moves only the item it is called on (measured on
+   * 26.5.2: moving V1 left its linked A1 where it was), so every clip after the gap is moved
+   * individually, earliest first so nothing is moved onto a neighbour, and every start is read
+   * back. This replaces two stubs: close_gap_at was a syntax error, and close_all_gaps reported
+   * success without moving anything.
+   */
+  private gapCloserScript(sequenceId: string | undefined, body: string): string {
+    return `
+      try {
+        var seq = ${this.buildSeqRes(sequenceId)};
+        if (!seq) return JSON.stringify({success:false,error:'No sequence'});
+        var TPS = 254016000000;
+        var __items = function(){
+          var out = [];
+          var groups = [seq.videoTracks, seq.audioTracks];
+          for (var g=0; g<2; g++) {
+            for (var ti=0; ti<groups[g].numTracks; ti++) {
+              var tr = groups[g][ti];
+              for (var ci=0; ci<tr.clips.numItems; ci++) {
+                var c = tr.clips[ci];
+                out.push({clip:c, kind:g===0?'V':'A', track:ti, start:Number(c.start.ticks), end:Number(c.end.ticks)});
+              }
+            }
+          }
+          return out;
+        };
+        // Empty ranges across ALL tracks, from 0 up to the last edit.
+        var __gaps = function(){
+          var items = __items();
+          items.sort(function(x,y){ return x.start - y.start; });
+          var gaps = [], cursor = 0;
+          for (var i=0; i<items.length; i++) {
+            if (items[i].start > cursor) gaps.push({start:cursor, end:items[i].start});
+            if (items[i].end > cursor) cursor = items[i].end;
+          }
+          return gaps;
+        };
+        var __close = function(gap){
+          var len = gap.end - gap.start;
+          var items = __items();
+          var movers = [];
+          for (var i=0; i<items.length; i++) { if (items[i].start >= gap.end) movers.push(items[i]); }
+          movers.sort(function(x,y){ return x.start - y.start; });
+          var off = new Time(); off.ticks = String(-len);
+          var bad = [];
+          for (var m=0; m<movers.length; m++) {
+            movers[m].clip.move(off);
+            var now = Number(movers[m].clip.start.ticks);
+            if (now !== movers[m].start - len) bad.push(movers[m].kind + (movers[m].track+1) + ' clip at ' + (movers[m].start/TPS) + 's is now at ' + (now/TPS) + 's');
+          }
+          return {startSecs:gap.start/TPS, endSecs:gap.end/TPS, durationSecs:len/TPS, clipsMoved:movers.length, misplaced:bad};
+        };
+        ${body}
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `;
   }
 
-  protected async closeAllGaps(sequenceId?: string, _trackIndex?: number): Promise<any> {
-    return await this.bridge.executeScript(`
-      var seq = ${this.buildSeqRes(sequenceId)};
-      if (!seq) return JSON.stringify({success:false,error:'No sequence'});
-      var gaps = seq.getTimelineGaps ? seq.getTimelineGaps() : [];
-      return JSON.stringify({success:true,gapCount:gaps ? gaps.length : 0,note:'Use get_timeline_gaps to enumerate, then ripple_delete each gap range.'});
-    `);
+  protected async closeGapAt(timecode: string, sequenceId?: string): Promise<any> {
+    return await this.bridge.executeScript(this.gapCloserScript(sequenceId, `
+        var tc = ${JSON.stringify(String(timecode))};
+        var target = null;
+        var parts = tc.split(/[:;]/);
+        if (parts.length === 4) {
+          var fps = TPS / Number(seq.timebase);
+          target = Math.round(((Number(parts[0])*3600 + Number(parts[1])*60 + Number(parts[2])) + Number(parts[3])/fps) * TPS);
+        } else if (parts.length === 1 && !isNaN(Number(tc))) {
+          target = Math.round(Number(tc) * TPS);
+        }
+        if (target === null || isNaN(target)) return JSON.stringify({success:false,error:'Could not read timecode "' + tc + '". Pass HH:MM:SS:FF or a number of seconds.'});
+        var gaps = __gaps(), hit = null;
+        for (var i=0; i<gaps.length; i++) { if (target >= gaps[i].start && target < gaps[i].end) { hit = gaps[i]; break; } }
+        if (!hit) return JSON.stringify({success:false,error:'There is no gap across all tracks at ' + (target/TPS) + 's. Something occupies that time on at least one video or audio track, and closing a gap on one track alone would break sync. Nothing was changed.',gapsInSequence:gaps.length});
+        var r = __close(hit);
+        var ok = r.misplaced.length === 0;
+        return JSON.stringify({success:ok,verified:ok,verifiedBy:'clip start readback',gap:r,
+          error: ok ? undefined : 'PARTIALLY APPLIED: some clips did not land where expected. See gap.misplaced. Undo to restore.'});
+    `));
+  }
+
+  protected async closeAllGaps(sequenceId?: string, trackIndex?: number): Promise<any> {
+    return await this.bridge.executeScript(this.gapCloserScript(sequenceId, `
+        var limit = ${trackIndex === undefined ? 'null' : Number(trackIndex)};
+        var before = __gaps();
+        if (!before.length) return JSON.stringify({success:true,verified:true,verifiedBy:'gap scan',gapsClosed:0,message:'No gaps across all tracks.'});
+        var closed = [];
+        // Latest first: closing a gap moves everything after it, so working backwards keeps every
+        // earlier gap where the scan found it.
+        for (var i=before.length-1; i>=0; i--) closed.push(__close(before[i]));
+        var after = __gaps();
+        var misplaced = 0;
+        for (var k=0; k<closed.length; k++) misplaced += closed[k].misplaced.length;
+        var ok = after.length === 0 && misplaced === 0;
+        return JSON.stringify({success:ok,verified:ok,verifiedBy:'gap rescan + clip start readback',gapsFound:before.length,gapsClosed:closed.length,gapsRemaining:after.length,closed:closed,
+          trackIndexNote: limit === null ? undefined : 'trackIndex is ignored: only gaps empty on every track are closed, because closing one track alone breaks sync.',
+          error: ok ? undefined : 'PARTIALLY APPLIED: ' + after.length + ' gap(s) remain and ' + misplaced + ' clip(s) are misplaced. Undo to restore.'});
+    `));
   }
 
   protected async trimClip(clipId: string, inPoint?: number, outPoint?: number, duration?: number): Promise<any> {

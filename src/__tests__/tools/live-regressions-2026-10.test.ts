@@ -83,3 +83,21 @@ describe('QE sequence resolution', () => {
     expect(script).not.toMatch(/return qe\.project\.getSequenceAt\(i\)/);
   });
 });
+
+describe('gap closing', () => {
+  const scriptFor = async (name: string, args: Record<string, unknown>): Promise<string> => {
+    let script = '';
+    const bridge = { executeScript: async (s: string) => { script = s; return { success: true }; } };
+    await new PremiereProTools(bridge as never).executeTool(name, args);
+    return script;
+  };
+
+  // close_gap_at used to call a getTimelineGaps() this host lacks and then report a note;
+  // close_all_gaps returned success:true having moved nothing.
+  it.each(['close_gap_at', 'close_all_gaps'])('%s moves clips and reads them back', async (name) => {
+    const s = await scriptFor(name, { timecode: '1' });
+    expect(s).not.toContain('getTimelineGaps');
+    expect(s).toContain('.move(off)');
+    expect(s).toContain('misplaced');
+  });
+});

@@ -334,18 +334,18 @@ export function buildToolCatalogue(): MCPTool[] {
       // Gap operations
       {
         name: 'close_gap_at',
-        description: 'Closes a gap at a specific timecode by ripple-deleting it. Verified via getTimelineGaps + ripple delete.',
+        description: 'Closes the gap containing a time by moving every later clip on every track left by the gap length. Only gaps empty on ALL video and audio tracks are closed, so sync holds; anything narrower is refused. Verified by reading back every moved clip start.',
         inputSchema: z.object({
-          timecode: z.string().describe('Timecode within the gap to close'),
+          timecode: z.string().describe('A time inside the gap: HH:MM:SS:FF, or a number of seconds'),
           sequenceId: z.string().optional()
         })
       },
       {
         name: 'close_all_gaps',
-        description: 'Closes all gaps in the active sequence by ripple-deleting each one. Reports count of gaps closed. Verified via getTimelineGaps.',
+        description: 'Closes every gap that is empty on all tracks (including one at the start), latest first, by moving later clips left. Verified by rescanning for gaps and reading back every moved clip start.',
         inputSchema: z.object({
           sequenceId: z.string().optional(),
-          trackIndex: z.number().optional().describe('Limit to one track. Default: closes gaps on all tracks.')
+          trackIndex: z.number().optional().describe('Ignored: only gaps empty on every track are closed, because closing one track alone breaks sync. Kept for compatibility.')
         })
       },
       {
