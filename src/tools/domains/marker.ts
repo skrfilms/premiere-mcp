@@ -17,12 +17,22 @@ export class MarkerTools extends KeyframeTools {
       if (!seq) return JSON.stringify({success:false,error:'No sequence'});
       var markers = seq.markers;
       var m = markers.createMarker(${timeSecs});
-      ${name ? `try { m.name = ${JSON.stringify(name)}; } catch(e) {}` : ''}
-      ${comment ? `try { m.comments = ${JSON.stringify(comment)}; } catch(e) {}` : ''}
-      ${type ? `try { m.type = ${JSON.stringify(type)}; } catch(e) {}` : ''}
-      ${colorIndex !== undefined ? `try { m.colorByIndex = ${colorIndex}; } catch(e) {}` : ''}
-      ${durationSecs ? `try { var endT = new Time(); endT.seconds = ${timeSecs} + ${durationSecs}; m.end = endT; } catch(e) {}` : ''}
-      return JSON.stringify({success:true,verified:true,timeSecs:${timeSecs},name:String(m.name),type:String(m.type),ticks:String(m.start.ticks)});
+      if (!m) return JSON.stringify({success:false,error:'createMarker() returned nothing, so no marker was added.'});
+      // Every write used to be swallowed by an empty catch and the call still claimed
+      // verified:true. Measured on 26.5.2: Marker.end takes a NUMBER of seconds and rejects a Time
+      // ("Illegal Parameter type"); colour is set by setColorByIndex(), and assigning the
+      // colorByIndex property does nothing. Each requested field is now read back.
+      var mismatches = [];
+      ${name ? `try { m.name = ${JSON.stringify(name)}; } catch(e) {} if (String(m.name) !== ${JSON.stringify(name)}) mismatches.push('name');` : ''}
+      ${comment ? `try { m.comments = ${JSON.stringify(comment)}; } catch(e) {} if (String(m.comments) !== ${JSON.stringify(comment)}) mismatches.push('comment');` : ''}
+      ${type ? `try { m.type = ${JSON.stringify(type)}; } catch(e) {} if (String(m.type) !== ${JSON.stringify(type)}) mismatches.push('type');` : ''}
+      ${colorIndex !== undefined ? `try { m.setColorByIndex(${Number(colorIndex)}); } catch(e) {} var cb = null; try { cb = m.getColorByIndex(); } catch(e) {} if (cb !== ${Number(colorIndex)}) mismatches.push('colour');` : ''}
+      ${durationSecs ? `try { m.end = ${Number(timeSecs) + Number(durationSecs)}; } catch(e) {} if (Math.abs(Number(m.end.seconds) - ${Number(timeSecs) + Number(durationSecs)}) > 0.001) mismatches.push('duration');` : ''}
+      var colorNow = null; try { colorNow = m.getColorByIndex(); } catch(e) {}
+      var info = {timeSecs:Number(m.start.seconds),endSecs:Number(m.end.seconds),name:String(m.name),comment:String(m.comments),type:String(m.type),colorIndex:colorNow,ticks:String(m.start.ticks)};
+      if (mismatches.length) return JSON.stringify({success:false,verified:true,verifiedBy:'marker field readback',markerCreated:true,marker:info,
+        error:'HALF APPLIED: the marker was created but these fields did not take: ' + mismatches.join(', ') + '. Fix it with update_marker or delete it.'});
+      return JSON.stringify({success:true,verified:true,verifiedBy:'marker field readback',timeSecs:info.timeSecs,endSecs:info.endSecs,name:info.name,type:info.type,colorIndex:info.colorIndex,ticks:info.ticks});
     `);
   }
 
@@ -35,7 +45,7 @@ export class MarkerTools extends KeyframeTools {
         var rows = [];
         var m = markers.numMarkers > 0 ? markers.getFirstMarker() : null;
         while (m) {
-          rows.push({ time: m.start ? m.start.seconds : 0, name: String(m.name||''), comment: String(m.comments||''), type: String(m.type||'Comment'), color: m.colorByIndex||0 });
+          rows.push({ time: m.start ? m.start.seconds : 0, name: String(m.name||''), comment: String(m.comments||''), type: String(m.type||'Comment'), color: (function(){ try { return m.getColorByIndex(); } catch(eC) { return 0; } })() });
           try { m = markers.getNextMarker(m); } catch(e) { break; }
         }
         return JSON.stringify({success:true,rows:rows,count:rows.length});
@@ -247,7 +257,8 @@ ${this.buildSequenceResolver(sequenceId)}
         // try{}catch(ee){} while the response claimed verified:true — so a zero-length marker
         // was indistinguishable from a duration marker. Read the end back and compare.
         var endError=null;
-        try{var et=new Time();et.seconds=${startSecs+durationSecs};m.end=et;}catch(ee){endError=ee.toString();}
+        // Marker.end takes a number of seconds; a Time object is rejected on 26.5.2.
+        try{m.end=${Number(startSecs)+Number(durationSecs)};}catch(ee){endError=ee.toString();}
         var endBack=null; try{ endBack=Number(m.end.seconds); }catch(eE){}
         var startBack=null; try{ startBack=Number(m.start.seconds); }catch(eS){}
         var wantEnd=${startSecs+durationSecs};
@@ -395,7 +406,7 @@ ${this.buildSequenceResolver(sequenceId)}
         for(var i=0;i<seqs.numSequences;i++){
           var seq=seqs[i];var seqName=String(seq.name);
           var m=seq.markers.getFirstMarker();
-          while(m){all.push({sequenceName:seqName,name:String(m.name),comment:String(m.comments),type:String(m.type),secs:m.start.seconds,color:m.colorByIndex});m=seq.markers.getNextMarker(m);}
+          while(m){all.push({sequenceName:seqName,name:String(m.name),comment:String(m.comments),type:String(m.type),secs:m.start.seconds,color:(function(){try{return m.getColorByIndex();}catch(eC){return null;}})()});m=seq.markers.getNextMarker(m);}
         }
         return JSON.stringify({success:true,count:all.length,markers:all});
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
@@ -429,7 +440,7 @@ ${this.buildSequenceResolver(sequenceId)}
             var m = seq.markers.createMarker(c.time);
             m.name = c.author ? '[' + c.author + ']' : 'Frame.io';
             m.comments = c.text;
-            m.colorByIndex = ${markerColor};
+            try { m.setColorByIndex(${markerColor}); } catch(eC) {}
             created++;
           }
           return JSON.stringify({success:true,verified:true,markersCreated:created,sequenceName:String(seq.name)});
