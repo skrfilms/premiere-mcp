@@ -541,6 +541,42 @@ function __resolveBin(binId, binName) {
  * Object.assign — while map, filter, indexOf and Array.isArray DO exist. No single rule predicts
  * that set, so it is probed rather than assumed; see es3-absent-methods.test.ts.
  */
+/*
+ * map, filter, indexOf and Array.isArray are NOT reliably present. Premiere 26.5.2 (ExtendScript
+ * 4.5.6), probed with typeof on a freshly launched host on 2026-10-25, has none of them, and
+ * ~20 tools threw "x.indexOf is not a function" / "x.map is not a function" on every call. The
+ * 26.3.2 probe that recorded them as present was most likely reading a shared engine another
+ * extension had already polyfilled, so a measurement on a warm host says nothing about a cold one.
+ * Installed only where missing, so a host that has its own keeps it. The serialiser walks arrays
+ * by index and every for-in over an object here is own-property guarded, so these enumerable
+ * prototype members cannot leak into a response.
+ */
+if (typeof Array.isArray !== 'function') {
+  Array.isArray = function (value) { return Object.prototype.toString.call(value) === '[object Array]'; };
+}
+if (typeof Array.prototype.indexOf !== 'function') {
+  Array.prototype.indexOf = function (needle, fromIndex) {
+    var len = this.length >>> 0;
+    var i = fromIndex ? Number(fromIndex) : 0;
+    if (i < 0) i = Math.max(0, len + i);
+    for (; i < len; i++) { if (i in this && this[i] === needle) return i; }
+    return -1;
+  };
+}
+if (typeof Array.prototype.map !== 'function') {
+  Array.prototype.map = function (fn, thisArg) {
+    var len = this.length >>> 0, out = new Array(len);
+    for (var i = 0; i < len; i++) { if (i in this) out[i] = fn.call(thisArg, this[i], i, this); }
+    return out;
+  };
+}
+if (typeof Array.prototype.filter !== 'function') {
+  Array.prototype.filter = function (fn, thisArg) {
+    var len = this.length >>> 0, out = [];
+    for (var i = 0; i < len; i++) { if (i in this && fn.call(thisArg, this[i], i, this)) out.push(this[i]); }
+    return out;
+  };
+}
 function __padLeft(value, width, padChar) {
   var out = String(value);
   var ch = (padChar === undefined || padChar === null) ? '0' : String(padChar);

@@ -337,14 +337,35 @@ ${this.buildSequenceResolver(sequenceId)}
           if(seqs[i].sequenceID===${JSON.stringify(tgtSeqId)})tgt=seqs[i];
         }
         if(!src||!tgt)return JSON.stringify({success:false,error:'Source or target sequence not found'});
-        var count=0;
+        // Copying a sequence onto itself used to hang the host: the loop walked the same
+        // marker list it was appending to, so it never reached the end and the panel could
+        // not cancel it. Refuse it, and snapshot the source before writing anything so the
+        // walk can never see a marker this call created.
+        if(src===tgt||src.sequenceID===tgt.sequenceID)return JSON.stringify({success:false,error:'Source and target are the same sequence. Copying the markers of a sequence onto itself would only duplicate every marker, so nothing was done.'});
+        var snap=[];
         var m=src.markers.getFirstMarker();
         while(m){
-          var nm=tgt.markers.createMarker(m.start.seconds);
-          nm.name=m.name;nm.comments=m.comments;nm.type=m.type;nm.colorByIndex=m.colorByIndex;
-          count++;m=src.markers.getNextMarker(m);
+          var endT=null;try{endT=m.end?m.end.seconds:null;}catch(eE){}
+          var cbi=null;try{cbi=m.getColorByIndex?m.getColorByIndex():null;}catch(eC){}
+          snap.push({start:m.start.seconds,end:endT,name:String(m.name),comments:String(m.comments),type:String(m.type),color:cbi});
+          m=src.markers.getNextMarker(m);
         }
-        return JSON.stringify({success:true,markersCopied:count});
+        var before=tgt.markers.numMarkers;
+        var count=0,warnings=[];
+        for(var k=0;k<snap.length;k++){
+          var s=snap[k];
+          var nm=tgt.markers.createMarker(s.start);
+          if(!nm){warnings.push('createMarker returned nothing at '+s.start+'s');continue;}
+          nm.name=s.name;nm.comments=s.comments;
+          try{if(s.type&&s.type!=='Comment'){nm.type=s.type;}}catch(eT){warnings.push('type not set at '+s.start+'s');}
+          try{if(s.end!==null&&s.end>s.start){nm.end=s.end;}}catch(eD){warnings.push('duration not set at '+s.start+'s');}
+          try{if(s.color!==null&&nm.setColorByIndex){nm.setColorByIndex(s.color);}}catch(eS){warnings.push('colour not set at '+s.start+'s');}
+          count++;
+        }
+        var after=tgt.markers.numMarkers;
+        var verified=(after-before)===snap.length;
+        return JSON.stringify({success:verified,verified:verified,verifiedBy:'target markers.numMarkers before/after',sourceMarkers:snap.length,markersCopied:count,targetBefore:before,targetAfter:after,warnings:warnings,
+          error:verified?undefined:'Expected the target to gain '+snap.length+' markers but it gained '+(after-before)+'.'});
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
     `);
   }

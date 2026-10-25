@@ -6,7 +6,10 @@
  * Premiere Pro 26.3.2 on 2026-08-24:
  *
  *   PRESENT:  Array.prototype.map, Array.prototype.filter, Array.prototype.indexOf,
- *             Array.isArray, JSON.stringify (the latter installed by the bridge prelude)
+ *             Array.isArray, JSON.stringify — ALL FIVE installed by the bridge prelude.
+ *             Re-probed 2026-10-25 on a cold Premiere 26.5.2 (ExtendScript 4.5.6): the engine
+ *             itself has none of the first four, so they are present only because the prelude
+ *             polyfills them. The 26.3.2 "present" reading was taken on a warm engine.
  *   ABSENT:   Array.prototype.forEach, find, findIndex, some, every, reduce, lastIndexOf,
  *             String.prototype.trim, startsWith, endsWith, includes, padStart, padEnd, repeat,
  *             Function.prototype.bind, Object.keys, Object.assign, Set, Map
