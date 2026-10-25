@@ -700,23 +700,40 @@ export class ColorTools extends ProjectMediaTools {
   }
 
   protected async matchShotColor(srcTrack: number, srcClip: number, tgtTrack: number, tgtClip: number, seqId?: string): Promise<any> {
+    // Copies every Lumetri Color value the host will read and write, matched by position AND
+    // display name (both clips carry the same Lumetri layout), and reads each one back. The old
+    // version copied nine Basic parameters, swallowed every write error, reported a count with no
+    // verification, and threw "null is not an object" when a clip index did not exist.
     return await this.bridge.executeScript(`
       try {
         var seq=${this.buildSeqRes(seqId)};
-        var src=seq.videoTracks[${srcTrack}].clips[${srcClip}];
-        var tgt=seq.videoTracks[${tgtTrack}].clips[${tgtClip}];
-        var srcL=null,tgtL=null;
-        for(var i=0;i<src.components.numItems;i++)if(src.components[i].displayName==='Lumetri Color'){srcL=src.components[i];break;}
-        for(var j=0;j<tgt.components.numItems;j++)if(tgt.components[j].displayName==='Lumetri Color'){tgtL=tgt.components[j];break;}
-        if(!srcL||!tgtL)return JSON.stringify({success:false,error:'Lumetri Color not found on both clips'});
-        var namedParams=['Exposure','Contrast','Highlights','Shadows','Whites','Blacks','Temperature','Tint','Saturation'];
-        var srcProps=srcL.properties,tgtProps=tgtL.properties;
-        var applied=0;
-        for(var k=0;k<srcProps.numItems;k++){
-          var pname=String(srcProps[k].displayName);
-          if(namedParams.indexOf(pname)>=0){try{tgtProps[k].setValue(srcProps[k].getValue(),true);applied++;}catch(ev){}}
+        var st=seq.videoTracks[${srcTrack}], tt=seq.videoTracks[${tgtTrack}];
+        if(!st||!tt)return JSON.stringify({success:false,error:'Video track not found (source ${srcTrack}, target ${tgtTrack})'});
+        var src=st.clips[${srcClip}], tgt=tt.clips[${tgtClip}];
+        if(!src)return JSON.stringify({success:false,error:'Source clip ${srcClip} not found on video track ${srcTrack}'});
+        if(!tgt)return JSON.stringify({success:false,error:'Target clip ${tgtClip} not found on video track ${tgtTrack}'});
+        var findL=function(c){for(var i=0;i<c.components.numItems;i++)if(String(c.components[i].displayName)==='Lumetri Color')return c.components[i];return null;};
+        var srcL=findL(src),tgtL=findL(tgt);
+        if(!srcL)return JSON.stringify({success:false,error:'The source clip has no Lumetri Color, so there is no grade to copy.'});
+        if(!tgtL)return JSON.stringify({success:false,error:'The target clip has no Lumetri Color. Apply one first (apply_effect with Lumetri Color), then retry.'});
+        var sp=srcL.properties,tp=tgtL.properties;
+        if(sp.numItems!==tp.numItems)return JSON.stringify({success:false,error:'The two Lumetri Color instances expose different parameter counts ('+sp.numItems+' vs '+tp.numItems+'), so they cannot be matched by position.'});
+        var same=function(a,b){if(a===b)return true;try{return a.toSource()===b.toSource();}catch(e){return false;}};
+        var copied=0,unchanged=0,mismatched=[],unreadable=0;
+        for(var k=0;k<sp.numItems;k++){
+          var n=String(sp[k].displayName);
+          if(String(tp[k].displayName)!==n){mismatched.push(k+':'+n+' (layout differs)');continue;}
+          var v;try{v=sp[k].getValue();}catch(eR){unreadable++;continue;}
+          if(v===undefined||v===null){unreadable++;continue;}
+          var cur;try{cur=tp[k].getValue();}catch(eC){}
+          if(same(cur,v)){unchanged++;continue;}
+          try{tp[k].setValue(v,true);}catch(eW){}
+          var back;try{back=tp[k].getValue();}catch(eB){}
+          if(same(back,v))copied++;else mismatched.push(k+':'+n);
         }
-        return JSON.stringify({success:true,paramsApplied:applied});
+        var ok=mismatched.length===0;
+        return JSON.stringify({success:ok,verified:true,verifiedBy:'per-parameter getValue() readback',paramsCopied:copied,paramsAlreadyMatching:unchanged,paramsUnreadable:unreadable,paramsNotMatched:mismatched.slice(0,40),
+          error:ok?undefined:'PARTIALLY APPLIED: '+mismatched.length+' Lumetri parameter(s) did not take the source value. See paramsNotMatched.'});
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
     `);
   }
