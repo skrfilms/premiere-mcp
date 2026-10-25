@@ -140,55 +140,37 @@ export class MotionLayoutTools extends MarkerTools {
   }
 
   protected async flipClip(sequenceId: string | undefined, ti: number, ci: number, direction: 'horizontal' | 'vertical'): Promise<any> {
+    // Premiere's Transform effect has no flip parameter (measured on 26.5.2: Anchor Point,
+    // Position, Uniform Scale, Scale Height, Scale Width, Skew, Skew Axis, Rotation, Opacity,
+    // shutter and sampling only), so the old path always left an inert Transform on the clip.
+    // Flipping is its own pair of parameterless effects, so success is proven by the clip
+    // gaining a component of that exact name. qe.project.getVideoEffectByName() returns an
+    // object even for a name that does not exist, so its return value proves nothing.
+    const effectName = direction === 'horizontal' ? 'Horizontal Flip' : 'Vertical Flip';
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = ${this.buildQSeqResolver(sequenceId)};
-        var qeClip = seq.getVideoTrackAt(${ti}).getItemAt(${ci});
-        if (!qeClip) return JSON.stringify({success:false,error:'Clip not found'});
         var domSeq = ${this.buildSeqRes(sequenceId)};
-        var domClip = domSeq.videoTracks[${ti}].clips[${ci}];
-        var before = domClip.components.numItems;
-        var effect = qe.project.getVideoEffectByName('Transform');
-        if (!effect) return JSON.stringify({success:false,error:'Transform effect not found'});
+        var domTrack = domSeq.videoTracks[${ti}];
+        if (!domTrack) return JSON.stringify({success:false,error:'Video track ${ti} not found'});
+        var domClip = domTrack.clips[${ci}];
+        if (!domClip) return JSON.stringify({success:false,error:'Clip not found'});
+        var qeSeq = __qeSequenceFor(domSeq);
+        if (!qeSeq) return JSON.stringify({success:false,error:'QE does not expose this sequence. Open it with set_active_sequence and retry.'});
+        var qeClip = __findQeClipByDomClip(qeSeq.getVideoTrackAt(${ti}), domClip);
+        if (!qeClip) return JSON.stringify({success:false,error:'Could not match the clip in QE'});
+        var countNamed = function(){ var n=0; for (var i=0;i<domClip.components.numItems;i++){ if (String(domClip.components[i].displayName)===${JSON.stringify(effectName)}) n++; } return n; };
+        var before = domClip.components.numItems, namedBefore = countNamed();
+        if (namedBefore > 0) return JSON.stringify({success:true,verified:true,verifiedBy:'component already present',direction:${JSON.stringify(direction)},effect:${JSON.stringify(effectName)},alreadyFlipped:true,changed:false});
+        var effect = qe.project.getVideoEffectByName(${JSON.stringify(effectName)});
+        if (!effect) return JSON.stringify({success:false,error:${JSON.stringify(effectName + ' effect not found on this build')}});
         qeClip.addVideoEffect(effect);
-        var after = domClip.components.numItems;
-        if (after <= before) return JSON.stringify({success:false,verified:true,error:'The Transform effect was not added (component count did not rise), so no flip was applied.'});
-        // The flip parameter write used to sit inside try{}catch(e){} with no readback, so a
-        // clip that gained a Transform effect and no flip reported verified: true. That is a
-        // half-applied edit: the caller is left with an inert effect on the clip.
-        var flipComp = null;
-        for (var i=0;i<domClip.components.numItems;i++) {
-          if (String(domClip.components[i].displayName) === 'Transform') { flipComp = domClip.components[i]; break; }
+        var after = domClip.components.numItems, namedAfter = countNamed();
+        if (namedAfter !== namedBefore + 1) {
+          return JSON.stringify({success:false,verified:true,verifiedBy:'component readback',direction:${JSON.stringify(direction)},componentsBefore:before,componentsAfter:after,
+            error:${JSON.stringify('The ' + effectName + ' effect did not appear on the clip, so it is not flipped.')} + (after > before ? ' A different component was added instead; check list_effects_on_clip_qe.' : '')});
         }
-        if (!flipComp) return JSON.stringify({success:false,verified:true,error:'The Transform effect was added but cannot be found on the clip by name, so its flip parameter could not be set. Remove it with remove_effect_by_name before retrying.'});
-        var flipParam = null, flipParamName = null, propsSeen = [];
-        for (var pi=0;pi<flipComp.properties.numItems;pi++) {
-          var rawName = String(flipComp.properties[pi].displayName);
-          propsSeen.push(rawName);
-          var pname = rawName.toLowerCase();
-          if ((${JSON.stringify(direction)} === 'horizontal' && (pname.indexOf('horizontal') >= 0 || pname.indexOf('horiz') >= 0)) ||
-              (${JSON.stringify(direction)} === 'vertical' && pname.indexOf('vertical') >= 0)) {
-            flipParam = flipComp.properties[pi]; flipParamName = rawName; break;
-          }
-        }
-        if (!flipParam) {
-          return JSON.stringify({success:false,verified:true,direction:${JSON.stringify(direction)},transformParameters:propsSeen,
-            error:'The Transform effect was ADDED to this clip but exposes no ${direction} flip parameter, so the clip now carries an inert effect and is not flipped. Parameters present are listed in transformParameters. Remove it with remove_effect_by_name.'});
-        }
-        var flipBefore = null; try { flipBefore = flipParam.getValue(); } catch(eFB) {}
-        var flipSetError = null;
-        try { flipParam.setValue(true, true); } catch(eFS) { flipSetError = eFS.toString(); }
-        var flipAfter = null; try { flipAfter = flipParam.getValue(); } catch(eFA) {}
-        if (flipAfter === null) {
-          return JSON.stringify({success:true,verified:false,direction:${JSON.stringify(direction)},effectAdded:true,parameter:flipParamName,
-            unverifiedReason:'The Transform effect was added and the ${direction} flip was written, but the parameter is not readable on this build, so the flip cannot be confirmed.',setError:flipSetError});
-        }
-        if (!Boolean(flipAfter)) {
-          return JSON.stringify({success:false,verified:true,verifiedBy:'Transform flip parameter getValue() readback',direction:${JSON.stringify(direction)},effectAdded:true,parameter:flipParamName,before:flipBefore,after:flipAfter,
-            error:'HALF APPLIED: the Transform effect was added to this clip but its ' + flipParamName + ' parameter still reads ' + String(flipAfter) + ', so the clip is not flipped.' + (flipSetError ? ' setValue threw: ' + flipSetError : '')});
-        }
-        return JSON.stringify({success:true,verified:true,verifiedBy:'Transform flip parameter getValue() readback',direction:${JSON.stringify(direction)},effectAdded:true,parameter:flipParamName,before:flipBefore,after:flipAfter,changed:Boolean(flipBefore)!==Boolean(flipAfter)});
+        return JSON.stringify({success:true,verified:true,verifiedBy:'component readback',direction:${JSON.stringify(direction)},effect:${JSON.stringify(effectName)},componentsBefore:before,componentsAfter:after,changed:true});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }

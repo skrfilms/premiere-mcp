@@ -153,7 +153,7 @@ export class AudioTools extends ExportRenderTools {
           }
           if (gainProp) break;
         }
-        if (!gainProp) return JSON.stringify({success:false,error:'Gain param not found',note:'Try set_clip_volume for rubber-band volume'});
+        if (!gainProp) return JSON.stringify({success:false,error:'This clip exposes no gain parameter to scripting. On 26.5.2 an audio clip carries only Volume (Bypass, Level); clip gain lives in the Audio Gain dialog, which no script can reach. Nothing was changed.',note:'set_clip_volume sets Volume > Level, which changes loudness the same way for a static offset.'});
         var before = null; try { before = gainProp.getValue(); } catch(eB) {}
         var setError = null;
         try { gainProp.setValue(${gainDb}, true); } catch(eS) { setError = eS.toString(); }
