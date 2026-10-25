@@ -483,7 +483,7 @@ export function buildToolCatalogue(): MCPTool[] {
       // ── Batch 2: Motion, Transform, Layout ────────────────────────────────
       {
         name: 'flip_horizontal',
-        description: 'Flips a clip horizontally by applying the Transform effect and setting its horizontal flip param. Verified via component fingerprint.',
+        description: 'Flips a clip horizontally by applying the Horizontal Flip effect. Verified by component readback; a clip already carrying the effect is reported as already flipped.',
         inputSchema: z.object({
           sequenceId: z.string().optional(),
           trackIndex: z.number().optional(),
@@ -492,7 +492,7 @@ export function buildToolCatalogue(): MCPTool[] {
       },
       {
         name: 'flip_vertical',
-        description: 'Flips a clip vertically by applying the Transform effect. Verified via component fingerprint.',
+        description: 'Flips a clip vertically by applying the Vertical Flip effect. Verified by component readback; a clip already carrying the effect is reported as already flipped.',
         inputSchema: z.object({
           sequenceId: z.string().optional(),
           trackIndex: z.number().optional(),
