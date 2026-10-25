@@ -113,3 +113,28 @@ describe('gap readers', () => {
     expect(script).toMatch(/__(track|video)Gaps\(/);
   });
 });
+
+describe('QE frame export time', () => {
+  // QE exportFrame* exports frame 0 for a seconds or ticks string; only a timecode lands on the
+  // requested frame (measured against a binary frame-counter clip on 26.5.2).
+  const tc = (timebase: string, secs: number): string => {
+    const ctx = vm.createContext({});
+    vm.runInContext(EXTENDSCRIPT_HELPERS, ctx);
+    return vm.runInContext(`__qeTimecode({timebase:${JSON.stringify(timebase)}}, ${secs})`, ctx);
+  };
+
+  it('builds a timecode from the sequence frame rate', () => {
+    expect(tc('10584000000', 2)).toBe('00;00;02;00'); // 24 fps
+    expect(tc('10584000000', 5.5)).toBe('00;00;05;12');
+    expect(tc('8475667200', 1)).toBe('00;00;01;00'); // 29.97 -> nominal 30
+    expect(tc('10584000000', 3725 + 1 / 24)).toBe('01;02;05;01');
+  });
+
+  it.each(['capture_program_output', 'export_frame', 'capture_frame', 'export_thumbnail'])('%s exports by timecode only', async (name) => {
+    let script = '';
+    const bridge = { executeScript: async (s: string) => { script = s; return { success: false }; } };
+    await new PremiereProTools(bridge as never).executeTool(name, { sequenceId: 'S', time: 2, outputPath: '/tmp/x.png' });
+    expect(script).toContain('__qeTimecode(');
+    expect(script).not.toMatch(/tryExport\(timeNumber|tryFrameExport\(frameTicks|tryFrameExport\(frameSeconds/);
+  });
+});

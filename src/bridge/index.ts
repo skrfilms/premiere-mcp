@@ -661,6 +661,25 @@ function __colorSpaceNames(item) {
   for (var i = 0; i < cat.length; i++) names.push(String(cat[i].name));
   return names;
 }
+/*
+ * The QE exportFrame* methods take the time as a TIMECODE STRING. Measured on 26.5.2 against a
+ * frame-counter clip: "00;00;02;00" and "00:00:02:00" export frame 48 at 24 fps, while "2" and a
+ * ticks string are accepted without error and export frame 0, and a bare number throws. The old
+ * callers tried seconds and ticks first and took the first call that wrote a file, so every
+ * captured frame was frame 0 regardless of the time asked for. Built from the sequence's own
+ * frame rate, as whole frames at the nominal rate (non-drop).
+ */
+function __qeTimecode(seq, seconds) {
+  var fps = 24;
+  try { fps = 254016000000 / Number(seq.timebase); } catch (eFps) {}
+  if (!(fps > 0)) fps = 24;
+  var nominal = Math.round(fps);
+  var frames = Math.round(Number(seconds) * fps);
+  if (frames < 0) frames = 0;
+  var ff = frames % nominal, totalSecs = Math.floor(frames / nominal);
+  var ss = totalSecs % 60, mm = Math.floor(totalSecs / 60) % 60, hh = Math.floor(totalSecs / 3600);
+  return __padLeft(hh, 2) + ';' + __padLeft(mm, 2) + ';' + __padLeft(ss, 2) + ';' + __padLeft(ff, 2);
+}
 function __padLeft(value, width, padChar) {
   var out = String(value);
   var ch = (padChar === undefined || padChar === null) ? '0' : String(padChar);

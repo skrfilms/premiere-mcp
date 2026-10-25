@@ -3501,13 +3501,8 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
             try { qeFrameSeq[frameMethod](arg1, arg2); } catch (frameError) { frameExportError = frameError.toString(); return false; }
             return frameWritten(false) !== null;
           }
-          var frameExported =
-            tryFrameExport(frameTicks, frameStem) ||
-            tryFrameExport(frameStem, frameTicks) ||
-            tryFrameExport(frameTimeString, frameStem) ||
-            tryFrameExport(frameStem, frameTimeString) ||
-            tryFrameExport(frameSeconds, frameStem) ||
-            tryFrameExport(frameStem, frameSeconds);
+          // Timecode only: seconds/ticks strings are accepted and silently export frame 0.
+          var frameExported = tryFrameExport(__qeTimecode(frameSeq, frameSeconds), frameStem);
           var frameFinal = frameWritten(true);
           if (!frameExported && !frameFinal) return fail(frameExportError || "Frame export produced no file on disk", { verified: false });
           return ok({ exported: true, outputPath: frameFinal || (frameStem + frameExt), method: frameMethod, format: frameFormat, seconds: frameSeconds, verified: true });

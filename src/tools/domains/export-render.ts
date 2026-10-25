@@ -1230,13 +1230,10 @@ export class ExportRenderTools extends PlaybackTools {
           return writtenPath(false) !== null;
         }
 
-        var exported =
-          tryExport(timeNumber, exportStem) ||
-          tryExport(exportStem, timeNumber) ||
-          tryExport(timeString, exportStem) ||
-          tryExport(exportStem, timeString) ||
-          tryExport(timeTicks, exportStem) ||
-          tryExport(exportStem, timeTicks);
+        // Timecode first and only: seconds and ticks strings are accepted and silently export
+        // frame 0 (see __qeTimecode), so they must never be tried as fallbacks.
+        var exportTimecode = __qeTimecode(sequence, timeNumber);
+        var exported = tryExport(exportTimecode, exportStem);
 
         var actualPath = writtenPath(true);
         if (!exported || !actualPath) {
@@ -1249,6 +1246,7 @@ export class ExportRenderTools extends PlaybackTools {
         return JSON.stringify({
           success: true,
           message: "Frame exported successfully",
+          timecode: exportTimecode,
           sequenceId: ${JSON.stringify(sequenceId)},
           sequenceName: sequence.name,
           time: ${time},
@@ -1304,15 +1302,21 @@ export class ExportRenderTools extends PlaybackTools {
       try {
         app.enableQE();
         var qseq=${this.buildQSeqResolver(seqId)};
-        var tc='00:00:00:00';
         var playheadSecs=0;
-        try{
-          var s=qseq.CTI.secs; playheadSecs=s;
-          var h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=Math.floor(s%60),fr=Math.round((s%1)*24);
-          tc=(h<10?'0':'')+h+':'+(m<10?'0':'')+m+':'+(sec<10?'0':'')+sec+':'+(fr<10?'0':'')+fr;
-        }catch(etc){}
-        var result=qseq.exportFrameJPEG(${JSON.stringify(outputPath)},tc);
-        var exists=(new File(${JSON.stringify(outputPath)})).exists;
+        var domSeq=${this.buildSeqRes(seqId)};
+        try{ playheadSecs=Number(domSeq.getPlayerPosition().seconds); }catch(etc){ try{ playheadSecs=Number(qseq.CTI.secs); }catch(etc2){} }
+        // QE takes (timecode, path-without-extension) and appends ".jpg" itself. This used to
+        // pass (path, timecode) with a timecode built at a hardcoded 24 fps, which wrote nothing.
+        var tc=__qeTimecode(domSeq, playheadSecs);
+        var outPath=${JSON.stringify(outputPath)};
+        var stem=outPath.replace(/\.(jpe?g)$/i,'');
+        var target=new File(stem+'.jpg');
+        var stampBefore=target.exists&&target.modified?target.modified.getTime():null;
+        var result=null;
+        try{ result=qseq.exportFrameJPEG(tc,stem); }catch(eq){ result='ERR '+eq; }
+        target=new File(stem+'.jpg');
+        var exists=target.exists&&(stampBefore===null||(target.modified&&target.modified.getTime()!==stampBefore));
+        if(exists&&stem+'.jpg'!==outPath){ try{ target.copy(outPath); }catch(ecp){} }
         // Source media under the playhead, so the Node side can fall back without a second call.
         var mediaPath=null, sourceSecs=null;
         try{

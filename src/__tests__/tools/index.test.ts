@@ -474,8 +474,9 @@ describe('PremiereProTools', () => {
         });
 
         expect(script).toContain('var exportStem = requestedPath;');
-        expect(script).toContain('tryExport(timeNumber, exportStem)');
-        expect(script).not.toContain('tryExport(timeNumber, "/tmp/shot.png")');
+        // By timecode: QE exports frame 0 for a seconds or ticks value.
+        expect(script).toContain('tryExport(exportTimecode, exportStem)');
+        expect(script).not.toContain('tryExport(timeNumber');
       });
 
       it('reports the path it actually wrote rather than the one requested', async () => {
