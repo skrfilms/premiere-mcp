@@ -5,7 +5,7 @@
  * had grown to 19k lines; the method bodies are unchanged.
  */
 import { ProjectMediaTools } from './project-media.js';
-import { spawn, execSync } from 'child_process';
+import { spawn } from 'child_process';
 // Synchronous fs/path/os bindings for the Node-side (non-ExtendScript) tools.
 // Kept separate from the `promises as fs` import above, which is the async API.
 import * as fsSync from 'node:fs';
@@ -14,6 +14,7 @@ import * as osSync from 'node:os';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import { basename, dirname, extname, join } from 'node:path';
 import type { ClipPlanColor } from './shared.js';
+import { runFf } from '../ff-exec.js';
 
 export class ColorTools extends ProjectMediaTools {
   protected hasColorAdjustments(color?: ClipPlanColor): boolean {
@@ -646,15 +647,17 @@ export class ColorTools extends ProjectMediaTools {
 
   protected broadcastSafeCheck(mediaPath: string): any {
     try {
-      const out = execSync(`ffprobe -v error -f lavfi -i "movie=${mediaPath},signalstats" -show_entries frame_tags=lavfi.signalstats.YMAX,lavfi.signalstats.YMIN -of csv 2>/dev/null`, { encoding: 'utf8', timeout: 30000 });
-      const lines = out.trim().split('\n').filter((l: string) => l);
-      let illegalHigh = 0, illegalLow = 0;
-      lines.forEach((l: string) => {
-        const parts = l.split(',');
-        if (parts[1] && Number(parts[1]) > 235) illegalHigh++;
-        if (parts[2] && Number(parts[2]) < 16) illegalLow++;
-      });
-      return { success: true, totalFrames: lines.length, illegalHighFrames: illegalHigh, illegalLowFrames: illegalLow, broadcastSafe: illegalHigh === 0 && illegalLow === 0 };
+      // signalstats per frame, printed by the metadata filter to stdout. The old movie= source put
+      // the path inside a filtergraph unescaped and through a shell.
+      const out = runFf('ffmpeg', ['-hide_banner', '-nostats', '-loglevel', 'error', '-i', mediaPath, '-an', '-vf', 'signalstats,metadata=print:file=-', '-f', 'null', '-'], { timeoutMs: 180000 });
+      let frames = 0, illegalHigh = 0, illegalLow = 0;
+      for (const l of out.split('\n')) {
+        if (l.startsWith('frame:')) frames++;
+        const hi = l.match(/^lavfi\.signalstats\.YMAX=(\d+)/); if (hi && Number(hi[1]) > 235) illegalHigh++;
+        const lo = l.match(/^lavfi\.signalstats\.YMIN=(\d+)/); if (lo && Number(lo[1]) < 16) illegalLow++;
+      }
+      if (frames === 0) return { success: false, error: 'ffmpeg decoded no video frames from this file, so nothing was measured.' };
+      return { success: true, totalFrames: frames, illegalHighFrames: illegalHigh, illegalLowFrames: illegalLow, broadcastSafe: illegalHigh === 0 && illegalLow === 0, note: 'Limits are 8-bit studio range: luma above 235 or below 16.' };
     } catch (e: any) { return { success: false, error: e.message }; }
   }
 
@@ -666,7 +669,7 @@ export class ColorTools extends ProjectMediaTools {
       // to a single output path ("Conversion failed!"). The default (stats_mode=full)
       // computes one palette across the whole range, and -frames:v 1 pins the output to
       // exactly one image.
-      execSync(`ffmpeg -y -ss ${startSecs} -t ${durationSecs} -i "${mediaPath}" -vf "palettegen=max_colors=${colorCount}" -frames:v 1 "${palettePath}"`, { timeout: 30000 });
+      runFf('ffmpeg', ['-y', '-ss', String(startSecs), '-t', String(durationSecs), '-i', mediaPath, '-vf', `palettegen=max_colors=${Number(colorCount)}`, '-frames:v', '1', '-update', '1', palettePath], { timeoutMs: 30000 });
       return { success: true, palettePath, note: 'Palette PNG written. Use image tools to extract hex values from the palette image.' };
     } catch (e: any) { return { success: false, error: e.message }; }
   }
@@ -770,9 +773,18 @@ export class ColorTools extends ProjectMediaTools {
 
   protected falseColorFrame(mediaPath: string, timeSecs: number, outputPath: string): any {
     try {
-      execSync(`ffmpeg -y -ss ${timeSecs} -i "${mediaPath}" -frames:v 1 -vf "scale=1280:-1,lutrgb=r=if(gt(r\\,200)\\,r\\,0):g=if(between(r\\,100\\,200)\\,255\\,0):b=if(lt(r\\,100)\\,255\\,0)" "${outputPath}"`, { timeout: 20000 });
+      // Exposure false colour on luma. lutrgb names the pixel value `val`; the old expression used
+      // `r`, which lutrgb does not define, so ffmpeg rejected it on every call. After format=gray the
+      // three channels all carry luma, so each band can be painted from it: clipped highlights
+      // (>235) red, crushed blacks (<16) blue, the 18%-grey/skin band (110-140) green, the rest grey.
+      const band = (hi: number, lo: number, mid: number) => `'if(gt(val,235),${hi},if(lt(val,16),${lo},if(between(val,110,140),${mid},val)))'`;
+      const vf = `scale=1280:-2,format=gray,format=rgb24,lutrgb=r=${band(255, 0, 0)}:g=${band(0, 0, 255)}:b=${band(0, 255, 0)}`;
       const fs = fsSync;
-      return { success: fs.existsSync(outputPath), outputPath };
+      const before = fs.existsSync(outputPath) ? fs.statSync(outputPath).mtimeMs : null;
+      runFf('ffmpeg', ['-y', '-loglevel', 'error', '-ss', String(timeSecs), '-i', mediaPath, '-frames:v', '1', '-update', '1', '-vf', vf, outputPath], { timeoutMs: 20000 });
+      const st = fs.existsSync(outputPath) ? fs.statSync(outputPath) : null;
+      if (!st || st.size === 0 || (before !== null && st.mtimeMs === before)) return { success: false, error: 'ffmpeg ran but no new image was written to outputPath.' };
+      return { success: true, verified: true, verifiedBy: 'output file written', outputPath, bytes: st.size, legend: { red: 'luma > 235 (clipped)', blue: 'luma < 16 (crushed)', green: 'luma 110-140 (mid grey / skin)', grey: 'everything else' } };
     } catch (e: any) { return { success: false, error: e.message }; }
   }
 
@@ -897,7 +909,7 @@ export class ColorTools extends ProjectMediaTools {
     if (!mediaInfo?.success) return { success: false, error: mediaInfo?.error, verified: false };
 
     try {
-      execSync(`ffmpeg -y -ss ${mediaInfo.sourceTimeSecs} -i "${mediaInfo.mediaPath}" -vframes 1 "${frameBefore}"`, { timeout: 15000 });
+      runFf('ffmpeg', ['-y', '-ss', String(mediaInfo.sourceTimeSecs), '-i', String(mediaInfo.mediaPath), '-frames:v', '1', '-update', '1', frameBefore], { timeoutMs: 15000 });
     } catch (e: any) { return { success: false, error: 'Pre-grade capture failed', verified: false }; }
 
     // Apply grade params
@@ -922,8 +934,8 @@ export class ColorTools extends ProjectMediaTools {
     if (!gradeResult?.success) return { success: false, error: 'Grade apply failed: ' + gradeResult?.error, verified: false };
 
     try {
-      execSync(`ffmpeg -y -ss ${mediaInfo.sourceTimeSecs} -i "${mediaInfo.mediaPath}" -vframes 1 "${frameAfter}"`, { timeout: 15000 });
-      const psnrOut = execSync(`ffmpeg -i "${frameBefore}" -i "${frameAfter}" -lavfi psnr -f null - 2>&1`, { timeout: 10000 }).toString();
+      runFf('ffmpeg', ['-y', '-ss', String(mediaInfo.sourceTimeSecs), '-i', String(mediaInfo.mediaPath), '-frames:v', '1', '-update', '1', frameAfter], { timeoutMs: 15000 });
+      const psnrOut = runFf('ffmpeg', ['-hide_banner', '-i', frameBefore, '-i', frameAfter, '-lavfi', 'psnr', '-f', 'null', '-'], { timeoutMs: 10000, mergeStderr: true });
       const match = psnrOut.match(/psnr_avg:(\S+)/);
       const psnr = match?.[1] ? parseFloat(match[1]) : null;
       const gradeLanded = psnr !== null && psnr < 45;

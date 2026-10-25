@@ -6,7 +6,6 @@
  */
 
 import { z } from 'zod';
-import { execSync } from 'child_process';
 // Synchronous fs/path/os bindings for the Node-side (non-ExtendScript) tools.
 // Kept separate from the `promises as fs` import above, which is the async API.
 import * as fsSync from 'node:fs';
@@ -52,6 +51,7 @@ import { TrimmingTools } from './domains/trimming.js';
 // importing this class. Re-exported because expanded.ts and the tests import it from here.
 export type { MCPTool } from './tool-types.js';
 import type { MCPTool } from './tool-types.js';
+import { runFf } from './ff-exec.js';
 
 // The header declarations and pure helpers moved to ./domains/shared.ts when this file was
 // split into one class per tool domain. Re-exported here: they were part of this module's
@@ -3024,9 +3024,9 @@ export class PremiereProTools extends TrimmingTools {
     `);
     if (!seqInfo?.success || !seqInfo?.mediaPath) return { success: false, error: 'Could not get media path', note: 'frame_diff works on the source media of the first V1 clip' };
     try {
-      execSync(`ffmpeg -y -ss ${time1} -i "${seqInfo.mediaPath}" -vframes 1 "${frame1}"`, { timeout: 15000 });
-      execSync(`ffmpeg -y -ss ${time2} -i "${seqInfo.mediaPath}" -vframes 1 "${frame2}"`, { timeout: 15000 });
-      const psnrOut = execSync(`ffmpeg -i "${frame1}" -i "${frame2}" -lavfi psnr -f null - 2>&1`, { timeout: 10000 }).toString();
+      runFf('ffmpeg', ['-y', '-ss', String(time1), '-i', String(seqInfo.mediaPath), '-frames:v', '1', '-update', '1', frame1], { timeoutMs: 15000 });
+      runFf('ffmpeg', ['-y', '-ss', String(time2), '-i', String(seqInfo.mediaPath), '-frames:v', '1', '-update', '1', frame2], { timeoutMs: 15000 });
+      const psnrOut = runFf('ffmpeg', ['-hide_banner', '-i', frame1, '-i', frame2, '-lavfi', 'psnr', '-f', 'null', '-'], { timeoutMs: 10000, mergeStderr: true });
       const match = psnrOut.match(/psnr_avg:(\S+)/);
       const psnr = match?.[1] ? parseFloat(match[1]) : null;
       return { success: true, frame1, frame2, psnr, identical: psnr !== null && psnr > 50, note: 'Higher PSNR = more similar. >40dB = nearly identical. Infinity = identical.' };
@@ -3111,7 +3111,8 @@ export class PremiereProTools extends TrimmingTools {
 
   private blackFrameScan(filePath: string, threshold: number, minDuration: number): any {
     try {
-      const out = execSync(`ffprobe -v error -f lavfi -i "movie=${filePath.replace(/'/g, "'\\''")}[out+adiff],blackdetect=d=${minDuration}:pix_th=${threshold}" -show_entries tags=lavfi.black_start,lavfi.black_end -of csv 2>&1`, { timeout: 30000 }).toString();
+      // blackdetect reports on stderr as "black_start:X black_end:Y", which the parser below reads.
+      const out = runFf('ffmpeg', ['-hide_banner', '-nostats', '-i', filePath, '-an', '-vf', `blackdetect=d=${Number(minDuration)}:pix_th=${Number(threshold)}`, '-f', 'null', '-'], { timeoutMs: 120000, mergeStderr: true });
       const lines = out.split('\n').filter((l: string) => l.trim());
       const ranges: any[] = [];
       let current: any = null;
@@ -3125,23 +3126,53 @@ export class PremiereProTools extends TrimmingTools {
     }
   }
 
-  private flashFrameScan(_filePath: string, threshold: number): any {
+  private flashFrameScan(filePath: string, threshold: number): any {
+    // This used to return success:true with a note and analyse nothing. A flash is a run of at
+    // most two frames whose mean luma reaches `threshold` (0-1) and sits clearly above the frames
+    // on both sides of it, so a hard cut to a bright shot is not reported as a flash.
     try {
-      return { success: true, note: 'Flash frame detection requires analyzing frame brightness differences. Use ffmpeg with signalstats filter for accurate results.', threshold };
+      const out = runFf('ffmpeg', ['-hide_banner', '-nostats', '-loglevel', 'error', '-i', filePath, '-an', '-vf', 'signalstats,metadata=print:key=lavfi.signalstats.YAVG:file=-', '-f', 'null', '-'], { timeoutMs: 180000 });
+      const frames: Array<{ t: number; y: number }> = [];
+      let t: number | null = null;
+      for (const line of out.split('\n')) {
+        const tm = line.match(/pts_time:([\d.]+)/);
+        if (tm?.[1]) { t = parseFloat(tm[1]); continue; }
+        const ym = line.match(/^lavfi\.signalstats\.YAVG=([\d.]+)/);
+        if (ym?.[1] && t !== null) { frames.push({ t, y: parseFloat(ym[1]) / 255 }); t = null; }
+      }
+      if (!frames.length) return { success: false, error: 'ffmpeg decoded no video frames from this file, so nothing was measured.' };
+      const MAX_RUN = 2, MARGIN = 0.25;
+      const flashes: Array<{ startSecs: number; frames: number; peakLuma: number; neighbourLuma: number }> = [];
+      for (let i = 0; i < frames.length; i++) {
+        if (frames[i]!.y < threshold) continue;
+        let j = i;
+        while (j + 1 < frames.length && frames[j + 1]!.y >= threshold) j++;
+        const run = j - i + 1;
+        const before = i > 0 ? frames[i - 1]!.y : null;
+        const after = j + 1 < frames.length ? frames[j + 1]!.y : null;
+        let peak = 0;
+        for (let k = i; k <= j; k++) peak = Math.max(peak, frames[k]!.y);
+        if (run <= MAX_RUN && before !== null && after !== null && peak - before >= MARGIN && peak - after >= MARGIN) {
+          flashes.push({ startSecs: frames[i]!.t, frames: run, peakLuma: Math.round(peak * 1000) / 1000, neighbourLuma: Math.round(Math.max(before, after) * 1000) / 1000 });
+        }
+        i = j;
+      }
+      return { success: true, framesAnalysed: frames.length, flashCount: flashes.length, flashes: flashes.slice(0, 100), criteria: `mean luma >= ${threshold}, at most ${MAX_RUN} frames long, at least ${MARGIN} brighter than the frames on both sides` };
     } catch (e: any) {
-      return { success: false, error: e.message?.slice(0, 200) };
+      return { success: false, error: e.message?.slice(0, 300) };
     }
   }
 
   private freezeFrameScan(filePath: string, minDuration: number): any {
     try {
-      const out = execSync(`ffprobe -v error -f lavfi -i "movie=${filePath.replace(/'/g, "'\\''")},freezedetect=n=-60dB:d=${minDuration}" -show_entries tags=lavfi.freezedetect.freeze_start,lavfi.freezedetect.freeze_end -of csv 2>&1`, { timeout: 30000 }).toString();
+      // freezedetect reports on stderr as "lavfi.freezedetect.freeze_start: X".
+      const out = runFf('ffmpeg', ['-hide_banner', '-nostats', '-i', filePath, '-an', '-vf', `freezedetect=n=-60dB:d=${Number(minDuration)}`, '-f', 'null', '-'], { timeoutMs: 120000, mergeStderr: true });
       const ranges: any[] = [];
       const lines = out.split('\n');
       let current: any = null;
       for (const line of lines) {
-        if (line.includes('freeze_start')) { const m = line.match(/freeze_start:([\d.]+)/); if (m?.[1]) current = { start: parseFloat(m[1]) }; }
-        if (line.includes('freeze_end') && current) { const m = line.match(/freeze_end:([\d.]+)/); if (m?.[1]) { current.end = parseFloat(m[1]); current.duration = current.end - current.start; ranges.push(current); current = null; } }
+        if (line.includes('freeze_start')) { const m = line.match(/freeze_start:\s*([\d.]+)/); if (m?.[1]) current = { start: parseFloat(m[1]) }; }
+        if (line.includes('freeze_end') && current) { const m = line.match(/freeze_end:\s*([\d.]+)/); if (m?.[1]) { current.end = parseFloat(m[1]); current.duration = current.end - current.start; ranges.push(current); current = null; } }
       }
       return { success: true, freezeRangeCount: ranges.length, ranges: ranges.slice(0, 50) };
     } catch (e: any) {

@@ -5,7 +5,7 @@
  * had grown to 19k lines; the method bodies are unchanged.
  */
 import { PlaybackTools } from './playback.js';
-import { spawn, execSync } from 'child_process';
+import { spawn } from 'child_process';
 // Synchronous fs/path/os bindings for the Node-side (non-ExtendScript) tools.
 // Kept separate from the `promises as fs` import above, which is the async API.
 import * as fsSync from 'node:fs';
@@ -16,6 +16,7 @@ import { homedir, platform, tmpdir } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, parse } from 'node:path';
 import { summarizeBatch } from './shared.js';
 import type { AddToRenderQueueArgs, CaptureTapReport, EncoderPresetDiscovery, EncoderPresetEntry, ExportSequenceArgs } from './shared.js';
+import { runFf } from '../ff-exec.js';
 
 export class ExportRenderTools extends PlaybackTools {
   protected async validateProjectForExport(sequenceId?: string, outputPath?: string, presetPath?: string, requireNonEmptyTimeline = true, checkGaps = true): Promise<any> {
@@ -425,10 +426,7 @@ export class ExportRenderTools extends PlaybackTools {
     const fs = fsSync;
     try {
       if (!fs.existsSync(filePath)) return { success: false, error: 'File not found: ' + filePath };
-      const probe = execSync(
-        `ffprobe -v error -select_streams v:0 -of json -show_streams ${JSON.stringify(filePath)} 2>&1`,
-        { encoding: 'utf8', timeout: 10000 }
-      );
+      const probe = runFf('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-of', 'json', '-show_streams', filePath], { timeoutMs: 10000 });
       const data = JSON.parse(probe);
       const stream = data.streams?.[0] ?? {};
       const durationSecs = parseFloat(stream.duration ?? '0');
@@ -1269,8 +1267,8 @@ export class ExportRenderTools extends PlaybackTools {
   protected exportGif(mediaPath: string, startSecs: number, durationSecs: number, fps: number, width: number, outputPath: string): any {
     const palette = outputPath.replace(/\.gif$/i, '_palette.png');
     try {
-      execSync(`ffmpeg -y -ss ${startSecs} -t ${durationSecs} -i "${mediaPath}" -vf "fps=${fps},scale=${width}:-1:flags=lanczos,palettegen" "${palette}"`, { timeout: 30000 });
-      execSync(`ffmpeg -y -ss ${startSecs} -t ${durationSecs} -i "${mediaPath}" -i "${palette}" -filter_complex "fps=${fps},scale=${width}:-1:flags=lanczos[x];[x][1:v]paletteuse" "${outputPath}"`, { timeout: 30000 });
+      runFf('ffmpeg', ['-y', '-ss', String(startSecs), '-t', String(durationSecs), '-i', mediaPath, '-vf', `fps=${Number(fps)},scale=${Number(width)}:-1:flags=lanczos,palettegen`, '-update', '1', palette], { timeoutMs: 30000 });
+      runFf('ffmpeg', ['-y', '-ss', String(startSecs), '-t', String(durationSecs), '-i', mediaPath, '-i', palette, '-filter_complex', `fps=${Number(fps)},scale=${Number(width)}:-1:flags=lanczos[x];[x][1:v]paletteuse`, outputPath], { timeoutMs: 30000 });
       const fs = fsSync;
       try { fs.unlinkSync(palette); } catch {}
       return { success: fs.existsSync(outputPath), outputPath, fps, width };
@@ -1282,7 +1280,7 @@ export class ExportRenderTools extends PlaybackTools {
     try {
       if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
       const prefix = path.join(outputDir, 'still_%04d.jpg');
-      execSync(`ffmpeg -y -i "${mediaPath}" -vf "fps=1/10" "${prefix}"`, { timeout: 60000 });
+      runFf('ffmpeg', ['-y', '-i', mediaPath, '-vf', 'fps=1/10', prefix], { timeoutMs: 60000 });
       const files = fs.readdirSync(outputDir).filter((f: string) => f.match(/still_\d+\.jpg/)).map((f: string) => path.join(outputDir, f));
       return { success: true, count: files.length, paths: files };
     } catch (e: any) { return { success: false, error: e.message }; }
@@ -1365,12 +1363,9 @@ export class ExportRenderTools extends PlaybackTools {
   /** Single-frame still via ffmpeg. Returns a result object rather than throwing. */
   private async runFfmpegStill(mediaPath: string, atSeconds: number, outputPath: string): Promise<{ ok: boolean; error?: string }> {
     try {
-      execSync(
-        `ffmpeg -y -v error -ss ${Math.max(0, atSeconds).toFixed(3)} -i ${JSON.stringify(mediaPath)} -frames:v 1 ${JSON.stringify(outputPath)}`,
-        { stdio: 'pipe', timeout: 60_000 },
-      );
+      runFf('ffmpeg', ['-y', '-v', 'error', '-ss', Math.max(0, atSeconds).toFixed(3), '-i', mediaPath, '-frames:v', '1', '-update', '1', outputPath], { timeoutMs: 60_000 });
     } catch (e: any) {
-      return { ok: false, error: String(e?.stderr?.toString?.() || e?.message || e).slice(0, 300) };
+      return { ok: false, error: String(e?.message || e).slice(0, 300) };
     }
     if (!fsSync.existsSync(outputPath) || fsSync.statSync(outputPath).size === 0) {
       return { ok: false, error: 'ffmpeg reported success but wrote no usable file.' };
@@ -1627,7 +1622,7 @@ export class ExportRenderTools extends PlaybackTools {
       for (const f of (mediaInfo.files || [])) {
         if (!fs.existsSync(f.path)) { manifest.push({ ...f, status: 'missing' }); continue; }
         const dest = path.join(outputDir, path.basename(f.path));
-        if (!fs.existsSync(dest)) execSync(`cp "${f.path}" "${dest}"`, { timeout: 30000 });
+        if (!fs.existsSync(dest)) fs.copyFileSync(f.path, dest, fs.constants.COPYFILE_EXCL);
         const stat = fs.statSync(dest);
         manifest.push({ ...f, dest, size: stat.size, status: 'copied' });
       }
@@ -1752,7 +1747,7 @@ export class ExportRenderTools extends PlaybackTools {
     const fs = fsSync;
     if (!fs.existsSync(filePath)) return { success: false, error: 'File does not exist: ' + filePath };
     try {
-      const out = execSync(`ffprobe -v quiet -print_format json -show_streams -show_format "${filePath}"`, { timeout: 15000 }).toString();
+      const out = runFf('ffprobe', ['-v', 'quiet', '-print_format', 'json', '-show_streams', '-show_format', filePath], { timeoutMs: 15000 });
       const info = JSON.parse(out);
       const video = (info.streams || []).find((s: any) => s.codec_type === 'video');
       const dur = parseFloat(info.format?.duration ?? '0');

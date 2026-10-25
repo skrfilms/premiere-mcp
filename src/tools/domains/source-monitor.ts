@@ -5,11 +5,11 @@
  * had grown to 19k lines; the method bodies are unchanged.
  */
 import { ReviewDeliveryTools } from './review-delivery.js';
-import { execSync } from 'child_process';
 // Synchronous fs/path/os bindings for the Node-side (non-ExtendScript) tools.
 // Kept separate from the `promises as fs` import above, which is the async API.
 import * as fsSync from 'node:fs';
 import * as pathSync from 'node:path';
+import { runFf } from '../ff-exec.js';
 
 export class SourceMonitorTools extends ReviewDeliveryTools {
   protected async openProjectItemInSource(projectItemId: string, timecode?: string): Promise<any> {
@@ -78,12 +78,12 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
     try {
       if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
       // Get duration first
-      const dur = parseFloat(execSync(`ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "${mediaPath}"`, { encoding: 'utf8', timeout: 10000 }).trim());
+      const dur = parseFloat(runFf('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=nw=1:nk=1', mediaPath], { timeoutMs: 10000 }).trim());
       const paths: string[] = [];
       for (let i = 0; i < count; i++) {
         const t = (dur / (count + 1)) * (i + 1);
         const outPath = path.join(outputDir, `scrub_${i.toString().padStart(3,'0')}.jpg`);
-        execSync(`ffmpeg -y -ss ${t.toFixed(3)} -i "${mediaPath}" -frames:v 1 -q:v 3 "${outPath}"`, { timeout: 10000 });
+        runFf('ffmpeg', ['-y', '-ss', t.toFixed(3), '-i', mediaPath, '-frames:v', '1', '-update', '1', '-q:v', '3', outPath], { timeoutMs: 10000 });
         if (fs.existsSync(outPath)) paths.push(outPath);
       }
       return { success: true, count: paths.length, paths };

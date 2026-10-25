@@ -5,9 +5,10 @@
  * had grown to 19k lines; the method bodies are unchanged.
  */
 import { ExportRenderTools } from './export-render.js';
-import { spawn, execSync } from 'child_process';
+import { spawn } from 'child_process';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import { basename, dirname, extname, join } from 'node:path';
+import { runFf } from '../ff-exec.js';
 
 export class AudioTools extends ExportRenderTools {
   protected async setEssentialSoundCategory(projectItemId: string, category: string): Promise<any> {
@@ -272,10 +273,8 @@ export class AudioTools extends ExportRenderTools {
 
   protected loudnessReport(filePath: string): any {
     try {
-      const result = execSync(
-        `ffmpeg -i ${JSON.stringify(filePath)} -filter_complex ebur128=peak=true -f null /dev/null 2>&1 | tail -20`,
-        { encoding: 'utf8', timeout: 30000 }
-      );
+      // ebur128 prints its summary at the end of stderr.
+      const result = runFf('ffmpeg', ['-hide_banner', '-nostats', '-i', filePath, '-vn', '-filter_complex', 'ebur128=peak=true', '-f', 'null', '-'], { timeoutMs: 180000, mergeStderr: true }).split('\n').slice(-20).join('\n');
       const lufsMatch = result.match(/I:\s*([-\d.]+)\s*LUFS/);
       const peakMatch = result.match(/Peak:\s*([-\d.]+)/);
       const lraMatch = result.match(/LRA:\s*([-\d.]+)\s*LU/);
@@ -305,15 +304,7 @@ export class AudioTools extends ExportRenderTools {
     if (!pathResult.success || !pathResult.path) return { success: false, error: 'Could not get media path' };
     // Analyze peak
     try {
-      execSync(
-        `ffprobe -v error -of json -show_streams ${JSON.stringify(pathResult.path)} 2>&1`,
-        { encoding: 'utf8', timeout: 10000 }
-      );
-      // Use ffmpeg volumedetect
-      const vol = execSync(
-        `ffmpeg -i ${JSON.stringify(pathResult.path)} -filter:a volumedetect -f null /dev/null 2>&1 | grep max_volume`,
-        { encoding: 'utf8', timeout: 15000 }
-      );
+      const vol = runFf('ffmpeg', ['-hide_banner', '-nostats', '-i', String(pathResult.path), '-vn', '-filter:a', 'volumedetect', '-f', 'null', '-'], { timeoutMs: 60000, mergeStderr: true });
       const maxVol = vol.match(/max_volume:\s*([-\d.]+)/);
       if (!maxVol) return { success: false, error: 'Could not detect peak volume' };
       const currentPeakDb = parseFloat(maxVol[1] ?? 'NaN');
@@ -416,11 +407,18 @@ export class AudioTools extends ExportRenderTools {
 
   protected audioPeaksReport(filePath: string): any {
     try {
-      const out = execSync(
-        `ffprobe -v error -f lavfi -i amovie=${JSON.stringify(filePath)},astats=metadata=1:reset=1 -show_entries frame_tags=lavfi.astats.Overall.RMS_level,lavfi.astats.Overall.Peak_level -of default=noprint_wrappers=1 2>/dev/null | head -20`,
-        { encoding: 'utf8', timeout: 30000 }
-      );
-      return { success: true, filePath, analysis: out.trim().split('\n').slice(0, 20) };
+      // Whole-file astats summary from stderr. The old amovie= source put the path inside a
+      // filtergraph through a shell, and reset=1 reported only the first 20 audio frames.
+      const out = runFf('ffmpeg', ['-hide_banner', '-nostats', '-i', filePath, '-vn', '-af', 'astats=measure_perchannel=none', '-f', 'null', '-'], { timeoutMs: 180000, mergeStderr: true });
+      // The Overall block follows the per-channel ones; read its fields only.
+      const overall = out.slice(out.lastIndexOf('Overall'));
+      const field = (label: string): number | null => {
+        const m = overall.match(new RegExp(label + ':\\s*(-?[\\d.]+)'));
+        return m?.[1] !== undefined ? parseFloat(m[1]) : null;
+      };
+      const res = { peakDb: field('Peak level dB'), rmsDb: field('RMS level dB'), crestFactor: field('Crest factor'), dcOffset: field('DC offset') };
+      if (res.peakDb === null && res.rmsDb === null) return { success: false, error: 'ffmpeg reported no audio statistics; the file may have no audio stream.' };
+      return { success: true, filePath, ...res };
     } catch (e: any) { return { success: false, error: e.message }; }
   }
 
@@ -1389,7 +1387,7 @@ export class AudioTools extends ExportRenderTools {
 
   protected audioSilenceScan(filePath: string, noiseDb: number, minDuration: number): any {
     try {
-      const out = execSync(`ffmpeg -i "${filePath}" -af "silencedetect=noise=${noiseDb}dB:d=${minDuration}" -f null - 2>&1`, { timeout: 30000 }).toString();
+      const out = runFf('ffmpeg', ['-hide_banner', '-nostats', '-i', filePath, '-vn', '-af', `silencedetect=noise=${Number(noiseDb)}dB:d=${Number(minDuration)}`, '-f', 'null', '-'], { timeoutMs: 120000, mergeStderr: true });
       const ranges: any[] = [];
       let current: any = null;
       for (const line of out.split('\n')) {

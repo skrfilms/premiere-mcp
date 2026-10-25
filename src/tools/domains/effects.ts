@@ -5,11 +5,11 @@
  * had grown to 19k lines; the method bodies are unchanged.
  */
 import { AssemblyTools } from './assembly.js';
-import { execSync } from 'child_process';
 // Synchronous fs/path/os bindings for the Node-side (non-ExtendScript) tools.
 // Kept separate from the `promises as fs` import above, which is the async API.
 import * as fsSync from 'node:fs';
 import * as pathSync from 'node:path';
+import { runFf } from '../ff-exec.js';
 
 export class EffectsTools extends AssemblyTools {
   protected async removeEffectAtIndex(trackIndex: number, clipIndex: number, componentIndex: number, sequenceId?: string): Promise<any> {
@@ -1144,7 +1144,7 @@ export class EffectsTools extends AssemblyTools {
     if (!mediaInfo?.success) return { success: false, error: 'Could not locate clip media: ' + mediaInfo?.error };
 
     try {
-      execSync(`ffmpeg -y -ss ${mediaInfo.sourceTimeSecs} -i "${mediaInfo.mediaPath}" -vframes 1 "${frameBefore}"`, { timeout: 15000 });
+      runFf('ffmpeg', ['-y', '-ss', String(mediaInfo.sourceTimeSecs), '-i', String(mediaInfo.mediaPath), '-frames:v', '1', '-update', '1', frameBefore], { timeoutMs: 15000 });
     } catch (e: any) { return { success: false, error: 'ffmpeg frame capture failed: ' + e.message?.slice(0,100) }; }
 
     // Step 2: apply the effect via QE
@@ -1174,12 +1174,12 @@ export class EffectsTools extends AssemblyTools {
 
     // Step 3: capture frame AFTER applying
     try {
-      execSync(`ffmpeg -y -ss ${mediaInfo.sourceTimeSecs} -i "${mediaInfo.mediaPath}" -vframes 1 "${frameAfter}"`, { timeout: 15000 });
+      runFf('ffmpeg', ['-y', '-ss', String(mediaInfo.sourceTimeSecs), '-i', String(mediaInfo.mediaPath), '-frames:v', '1', '-update', '1', frameAfter], { timeoutMs: 15000 });
     } catch (e: any) { return { success: false, error: 'Post-effect frame capture failed', verified: false }; }
 
     // Step 4: pixel diff
     try {
-      const psnrOut = execSync(`ffmpeg -i "${frameBefore}" -i "${frameAfter}" -lavfi psnr -f null - 2>&1`, { timeout: 10000 }).toString();
+      const psnrOut = runFf('ffmpeg', ['-hide_banner', '-i', frameBefore, '-i', frameAfter, '-lavfi', 'psnr', '-f', 'null', '-'], { timeoutMs: 10000, mergeStderr: true });
       const match = psnrOut.match(/psnr_avg:(\S+)/);
       const psnr = match?.[1] ? parseFloat(match[1]) : null;
       const identical = psnr !== null && psnr > 45;

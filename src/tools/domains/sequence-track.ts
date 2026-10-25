@@ -5,11 +5,11 @@
  * had grown to 19k lines; the method bodies are unchanged.
  */
 import { EffectsTools } from './effects.js';
-import { execSync } from 'child_process';
 // Synchronous fs/path/os bindings for the Node-side (non-ExtendScript) tools.
 // Kept separate from the `promises as fs` import above, which is the async API.
 import * as fsSync from 'node:fs';
 import * as pathSync from 'node:path';
+import { runFf } from '../ff-exec.js';
 
 export class SequenceTrackTools extends EffectsTools {
   protected async listSequences(): Promise<any> {
@@ -243,9 +243,9 @@ ${this.buildSequenceResolver(sequenceId)}
     try {
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       const base = path.join(dir, 'thumb_%04d.jpg');
-      const dur = parseFloat(execSync(`ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${filePath}"`, { encoding: 'utf8' }).trim());
+      const dur = parseFloat(runFf('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', filePath], { timeoutMs: 15000 }).trim());
       const fps = count / dur;
-      execSync(`ffmpeg -y -i "${filePath}" -vf "fps=${fps}" -vframes ${count} "${base}" 2>/dev/null`, { encoding: 'utf8' });
+      runFf('ffmpeg', ['-y', '-loglevel', 'error', '-i', filePath, '-vf', `fps=${fps}`, '-frames:v', String(count), base], { timeoutMs: 120000 });
       const files: string[] = [];
       for (let i = 1; i <= count; i++) {
         const p = path.join(dir, `thumb_${String(i).padStart(4,'0')}.jpg`);
