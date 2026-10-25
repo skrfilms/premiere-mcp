@@ -413,21 +413,26 @@ export class TrimmingTools extends GraphicsTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async getSequenceGaps(seqId?: string, _trackIndex?: number): Promise<any> {
+  protected async getSequenceGaps(seqId?: string, trackIndex?: number): Promise<any> {
+    // Computed from clip ranges: getTimelineGaps() does not exist on this host, and the old
+    // typeof-guarded call reported gapCount:0 on every sequence, gaps or not.
     return await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(seqId)};
-        var gaps = seq.getTimelineGaps ? seq.getTimelineGaps() : [];
-        if (!gaps) return JSON.stringify({success:true,gapCount:0,gaps:[]});
-        var result = [];
-        if (typeof gaps.length === 'number') {
-          for (var i=0;i<gaps.length;i++) {
-            var g = gaps[i];
-            result.push({startTicks:g.start?String(g.start.ticks):'0',endTicks:g.end?String(g.end.ticks):'0',startSecs:g.start?g.start.seconds:0,durationSecs:g.duration?g.duration.seconds:0});
-          }
+        var only = ${trackIndex === undefined ? 'null' : Number(trackIndex)};
+        if (only !== null && !seq.videoTracks[only]) return JSON.stringify({success:false,error:'Video track ' + only + ' not found'});
+        var TPS = 254016000000, result = [];
+        for (var t=0; t<seq.videoTracks.numTracks; t++) {
+          if (only !== null && t !== only) continue;
+          var g = __trackGaps(seq.videoTracks[t]);
+          for (var i=0; i<g.length; i++) result.push({trackIndex:t,startTicks:String(g[i].start),endTicks:String(g[i].end),startSecs:g[i].start/TPS,endSecs:g[i].end/TPS,durationSecs:(g[i].end-g[i].start)/TPS});
         }
-        return JSON.stringify({success:true,gapCount:result.length,gaps:result.slice(0,50)});
+        var black = __videoGaps(seq), blackOut = [];
+        for (var b=0; b<black.length; b++) blackOut.push({startSecs:black[b].start/TPS,endSecs:black[b].end/TPS,durationSecs:(black[b].end-black[b].start)/TPS});
+        return JSON.stringify({success:true,gapCount:result.length,gaps:result.slice(0,200),truncated:result.length>200,
+          programGaps:blackOut,programGapsNote:'Ranges where no video track has a clip, so the program shows black.'});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
+
 }

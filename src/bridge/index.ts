@@ -577,6 +577,38 @@ if (typeof Array.prototype.filter !== 'function') {
     return out;
   };
 }
+/*
+ * Sequence.getTimelineGaps() does not exist (typeof undefined on 26.5.2), and every caller that
+ * reached for it behind a typeof guard silently reported zero gaps. Gaps are computed from clip
+ * ranges instead. __trackGaps returns the empty ranges on one track, from 0 to its last clip, in
+ * ticks. __videoGaps returns ranges where NO video track has a clip, i.e. black in the program.
+ */
+function __rangesGaps(ranges) {
+  ranges.sort(function (a, b) { return a.start - b.start; });
+  var gaps = [], cursor = 0;
+  for (var i = 0; i < ranges.length; i++) {
+    if (ranges[i].start > cursor) gaps.push({ start: cursor, end: ranges[i].start });
+    if (ranges[i].end > cursor) cursor = ranges[i].end;
+  }
+  return gaps;
+}
+function __trackGaps(track) {
+  var ranges = [];
+  for (var i = 0; i < track.clips.numItems; i++) {
+    ranges.push({ start: Number(track.clips[i].start.ticks), end: Number(track.clips[i].end.ticks) });
+  }
+  return __rangesGaps(ranges);
+}
+function __videoGaps(seq) {
+  var ranges = [];
+  for (var t = 0; t < seq.videoTracks.numTracks; t++) {
+    var tr = seq.videoTracks[t];
+    for (var i = 0; i < tr.clips.numItems; i++) {
+      ranges.push({ start: Number(tr.clips[i].start.ticks), end: Number(tr.clips[i].end.ticks) });
+    }
+  }
+  return __rangesGaps(ranges);
+}
 function __padLeft(value, width, padChar) {
   var out = String(value);
   var ch = (padChar === undefined || padChar === null) ? '0' : String(padChar);

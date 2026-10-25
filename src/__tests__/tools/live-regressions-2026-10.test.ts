@@ -101,3 +101,15 @@ describe('gap closing', () => {
     expect(s).toContain('misplaced');
   });
 });
+
+describe('gap readers', () => {
+  // Sequence.getTimelineGaps() does not exist on 26.5.2; a typeof-guarded call to it made
+  // get_sequence_gaps report zero gaps and delivery_qc never flag one.
+  it.each(['get_sequence_gaps', 'delivery_qc'])('%s computes gaps from clip ranges', async (name) => {
+    let script = '';
+    const bridge = { executeScript: async (s: string) => { script = s; return { success: true }; } };
+    await new PremiereProTools(bridge as never).executeTool(name, { sequenceId: 'S' });
+    expect(script).not.toContain('seq.getTimelineGaps');
+    expect(script).toMatch(/__(track|video)Gaps\(/);
+  });
+});
