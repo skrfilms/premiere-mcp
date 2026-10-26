@@ -4,6 +4,12 @@ All notable changes are documented here. Releases use semantic versioning.
 
 ## [Unreleased]
 
+### Added (post-merge)
+
+- `npm run canary` (`scripts/api-canary.mjs`, `docs/API-CANARY.md`): re-measures the 17
+  Premiere scripting behaviours the tools depend on, mostly from rendered frames, and diffs each
+  run against the last. Run it after every Premiere update.
+
 ### Fixed
 
 - 36 tools declared `sequenceId`, forwarded it, and then ignored it, acting on the

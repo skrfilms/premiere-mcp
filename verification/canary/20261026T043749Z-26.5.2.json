@@ -1,0 +1,186 @@
+{
+  "ranAt": "2026-10-26T04:37:49.752Z",
+  "environment": {
+    "premiere": "26.5.2",
+    "extendscript": "4.5.6",
+    "build": "5"
+  },
+  "probes": [
+    {
+      "id": "prelude.array-methods",
+      "kind": "relied",
+      "expect": "Array map/filter/indexOf/isArray usable (polyfilled by the prelude if absent)",
+      "ok": true,
+      "observed": {
+        "map": "2,4",
+        "filter": 2,
+        "indexOf": 1,
+        "isArray": true
+      }
+    },
+    {
+      "id": "qe.sequence-by-guid",
+      "kind": "relied",
+      "expect": "every QE-visible sequence is found by guid (QE order may differ from the DOM)",
+      "ok": true,
+      "observed": {
+        "seen": 5,
+        "mismatched": 0,
+        "qeOrderMatchesDom": false
+      }
+    },
+    {
+      "id": "qe.gap-items",
+      "kind": "relied",
+      "expect": "QE track items include gaps, so DOM clip index != QE item index",
+      "ok": true,
+      "observed": {
+        "items": "Clip,Empty,Clip,Empty",
+        "qeClipByIndexHitsClip": true
+      }
+    },
+    {
+      "id": "qe.export-frame-timecode",
+      "kind": "relied",
+      "expect": "capture at t=2s / t=5.5s shows source frames 48 / 132",
+      "ok": true,
+      "observed": {
+        "at2s": 48,
+        "at5_5s": 132
+      }
+    },
+    {
+      "id": "qe.export-frame-bare-number",
+      "kind": "relied",
+      "expect": "a bare number string (\"2\") is read as a FRAME count, not seconds (why exports pass a timecode)",
+      "ok": true,
+      "observed": {
+        "frame": 2
+      }
+    },
+    {
+      "id": "dom.inPoint-write-slips",
+      "kind": "relied",
+      "expect": "inPoint=1s on clip A shows source 1s at t=0, timeline range unchanged",
+      "ok": true,
+      "observed": {
+        "frameAt0": 24,
+        "start": 0,
+        "end": 5
+      }
+    },
+    {
+      "id": "dom.start-write-moves-content",
+      "kind": "relied",
+      "expect": "start=1s on clip A shows source 1s at t=2 (content moves with the head)",
+      "ok": true,
+      "observed": {
+        "frameAt2": 24
+      }
+    },
+    {
+      "id": "dom.end-write-trims-tail",
+      "kind": "relied",
+      "expect": "end=4s on clip A leaves source 3.958s as its last frame",
+      "ok": true,
+      "observed": {
+        "frameAt3_958": 95
+      }
+    },
+    {
+      "id": "dom.outPoint-write-inert",
+      "kind": "watch",
+      "expect": "outPoint writes have no visible effect",
+      "ok": true,
+      "observed": {
+        "frameAt9_5": 228
+      }
+    },
+    {
+      "id": "dom.move-relative-single-item",
+      "kind": "relied",
+      "expect": "move(+1s) on V1 clip B shifts it 1s and leaves its linked audio",
+      "ok": true,
+      "observed": {
+        "video": 6,
+        "audio": 5
+      }
+    },
+    {
+      "id": "dom.remove-no-ripple",
+      "kind": "relied",
+      "expect": "TrackItem.remove(true,true) removes only that item and does not ripple",
+      "ok": true,
+      "observed": {
+        "v1": 1,
+        "v1Start": 5,
+        "a1": 2
+      }
+    },
+    {
+      "id": "dom.nodeId-identity",
+      "kind": "relied",
+      "expect": "dual-mono A1/A2 items have distinct nodeIds that survive edits",
+      "ok": true,
+      "observed": {
+        "distinct": true,
+        "stable": true
+      }
+    },
+    {
+      "id": "item.media-duration-metadata",
+      "kind": "relied",
+      "expect": "Column.Intrinsic.MediaDuration reports the full 10s with an out mark at 4s",
+      "ok": true,
+      "observed": {
+        "mediaDuration": "00:00:10:00",
+        "mark": 4
+      }
+    },
+    {
+      "id": "qe.addTransition-atStart-flag",
+      "kind": "relied",
+      "expect": "addTransition(t, false, ...) on clip A lands at its end (the 5s cut)",
+      "ok": true,
+      "observed": {
+        "atCut": 1,
+        "span": [
+          4.5,
+          5
+        ]
+      }
+    },
+    {
+      "id": "dom.marker-end-and-colour",
+      "kind": "relied",
+      "expect": "Marker.end takes seconds; setColorByIndex sticks",
+      "ok": true,
+      "observed": {
+        "end": 2.5,
+        "colour": 3
+      }
+    },
+    {
+      "id": "qe.setSpeed-miscalibrated",
+      "kind": "watch",
+      "expect": "QE setSpeed(2) yields 1.333x (speed tools undo and point to bake_speed_change)",
+      "ok": true,
+      "observed": {
+        "speed": 1.33333333333333,
+        "duration": 2.5
+      }
+    },
+    {
+      "id": "dom.missing-apis",
+      "kind": "watch",
+      "expect": "getTimelineGaps, openInTimeline, a clip-gain parameter and a work-area setter are absent",
+      "ok": true,
+      "observed": {
+        "getTimelineGaps": "undefined",
+        "openInTimeline": "undefined",
+        "clipGainParam": false,
+        "workAreaSettable": false
+      }
+    }
+  ]
+}
