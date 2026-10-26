@@ -12,7 +12,7 @@ export class MulticamTools extends MotionLayoutTools {
       try {
         app.enableQE();
         var seq = ${this.buildQSeqResolver(seqId)};
-        var clip = seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        var clip = __qeClipByIndex(seq, 'video', ${trackIndex}, ${clipIndex});
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         var canDo = clip.canDoMulticam();
         if (!canDo && ${enabled}) return JSON.stringify({success:false,verified:true,error:'canDoMulticam() returned false for this clip, so multicam cannot be enabled on it. Only a clip whose source is a multicam source sequence can be switched to multicam.'});
@@ -50,7 +50,7 @@ export class MulticamTools extends MotionLayoutTools {
       try {
         app.enableQE();
         var seq = ${this.buildQSeqResolver(seqId)};
-        var clip = seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        var clip = __qeClipByIndex(seq, 'video', ${trackIndex}, ${clipIndex});
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         clip.setMulticam(false);
         return JSON.stringify({success:true,message:'Multicam disabled on clip. Clip now plays as single-stream at the active angle.'});
@@ -63,7 +63,7 @@ export class MulticamTools extends MotionLayoutTools {
       try {
         app.enableQE();
         var seq = ${this.buildQSeqResolver(seqId)};
-        var qeClip = seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        var qeClip = __qeClipByIndex(seq, 'video', ${trackIndex}, ${clipIndex});
         if (!qeClip) return JSON.stringify({success:false,error:'Clip not found'});
         var domClip = ${this.buildSeqRes(seqId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
         return JSON.stringify({success:true,multicamEnabled:qeClip.multicamEnabled,canDoMulticam:qeClip.canDoMulticam(),isMulticamClip:domClip.projectItem.isMulticamClip(),name:String(domClip.name)});
@@ -76,7 +76,7 @@ export class MulticamTools extends MotionLayoutTools {
       try {
         app.enableQE();
         var seq = ${this.buildQSeqResolver(seqId)};
-        var clip = seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        var clip = __qeClipByIndex(seq, 'video', ${trackIndex}, ${clipIndex});
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         clip.setSwitchSources(${angleIndex});
         return JSON.stringify({success:true,angleIndex:${angleIndex}});

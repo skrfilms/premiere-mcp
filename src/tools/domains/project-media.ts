@@ -1523,7 +1523,7 @@ export class ProjectMediaTools extends CaptionTools {
         var seq = qe.project.getActiveSequence();
         if (!seq) return JSON.stringify({ success: false, error: 'No active sequence' });
         var track = seq.getVideoTrackAt(${trackIndex});
-        var clip = track && track.getItemAt(${clipIndex});
+        var clip = track && __qeClipByIndex(seq, 'video', ${trackIndex}, ${clipIndex});
         if (!clip) return JSON.stringify({ success: false, error: 'QE clip not found at track ${trackIndex} clip ${clipIndex}' });
         var pi = clip.getProjectItem();
         if (!pi) return JSON.stringify({ success: false, error: 'getProjectItem() returned nothing' });
@@ -1554,7 +1554,7 @@ export class ProjectMediaTools extends CaptionTools {
         if (!f.exists) return JSON.stringify({ success: false, error: 'Media file does not exist: ' + ${JSON.stringify(mediaPath)} });
         var seq = qe.project.getActiveSequence();
         var track = seq && seq.getVideoTrackAt(${trackIndex});
-        var clip = track && track.getItemAt(${clipIndex});
+        var clip = track && __qeClipByIndex(seq, 'video', ${trackIndex}, ${clipIndex});
         if (!clip) return JSON.stringify({ success: false, error: 'QE clip not found' });
         var pi = clip.getProjectItem();
         if (!pi) return JSON.stringify({ success: false, error: 'getProjectItem() returned nothing' });
@@ -1578,7 +1578,7 @@ export class ProjectMediaTools extends CaptionTools {
         if (!f.exists) return JSON.stringify({ success: false, error: 'Preset file does not exist: ' + ${JSON.stringify(presetPath)} });
         var seq = qe.project.getActiveSequence();
         var track = seq && seq.getVideoTrackAt(${trackIndex});
-        var clip = track && track.getItemAt(${clipIndex});
+        var clip = track && __qeClipByIndex(seq, 'video', ${trackIndex}, ${clipIndex});
         if (!clip) return JSON.stringify({ success: false, error: 'QE clip not found' });
         var pi = clip.getProjectItem();
         if (!pi) return JSON.stringify({ success: false, error: 'getProjectItem() returned nothing' });

@@ -186,7 +186,7 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
         app.enableQE();
         var seq = qe.project.getActiveSequence();
         var track = seq && seq.getVideoTrackAt(${trackIndex});
-        var clip = track && track.getItemAt(${clipIndex});
+        var clip = track && __qeClipByIndex(seq, 'video', ${trackIndex}, ${clipIndex});
         if (!clip) return JSON.stringify({ success: false, error: 'QE clip not found' });
         var pi = clip.getProjectItem();
         if (!pi) return JSON.stringify({ success: false, error: 'getProjectItem() returned nothing' });

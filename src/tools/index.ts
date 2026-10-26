@@ -2493,7 +2493,7 @@ export class PremiereProTools extends TrimmingTools {
         if (!seq) return JSON.stringify({ success: false, error: 'No active sequence' });
         var track = seq.getVideoTrackAt(${trackIndex});
         if (!track) return JSON.stringify({ success: false, error: 'QE video track ${trackIndex} not found' });
-        var clip = track.getItemAt(${clipIndex});
+        var clip = __qeClipByIndex(seq, 'video', ${trackIndex}, ${clipIndex});
         if (!clip) return JSON.stringify({ success: false, error: 'QE clip ${clipIndex} not found' });
         var o = { success: true };
         // EIGHT QE CLIP PROPERTIES CANNOT BE READ ON 26.3.2, and reading one does not throw a

@@ -171,7 +171,7 @@ export class GraphicsTools extends SpeedTimeTools {
       try {
         app.enableQE();
         var seq = ${this.buildQSeqResolver(sequenceId)};
-        var qeClip = seq.getVideoTrackAt(${ti}).getItemAt(${ci});
+        var qeClip = __qeClipByIndex(seq, 'video', ${ti}, ${ci});
         if (!qeClip) return JSON.stringify({success:false,error:'Clip not found'});
         var domClip = ${this.buildSeqRes(sequenceId)}.videoTracks[${ti}].clips[${ci}];
         var before = domClip.components.numItems;

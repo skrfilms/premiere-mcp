@@ -138,3 +138,31 @@ describe('QE frame export time', () => {
     expect(script).not.toMatch(/tryExport\(timeNumber|tryFrameExport\(frameTicks|tryFrameExport\(frameSeconds/);
   });
 });
+
+describe('QE clip addressing by DOM index', () => {
+  // QE track items include gaps ("Empty") and transitions: measured on 26.5.2, a track with a gap
+  // before clip 1 listed [Clip, Empty, Clip, Empty], so getItemAt(1) was the gap.
+  it('no tool script addresses a QE track item by the DOM clip index', () => {
+    const { readFileSync, readdirSync } = require('node:fs');
+    const { join } = require('node:path');
+    const dir = join(__dirname, '..', '..', 'tools');
+    const files: string[] = [];
+    const walk = (d: string) => { for (const n of readdirSync(d, { withFileTypes: true })) { const p = join(d, n.name); if (n.isDirectory()) walk(p); else if (p.endsWith('.ts')) files.push(p); } };
+    walk(dir);
+    const offenders: string[] = [];
+    for (const f of files) {
+      readFileSync(f, 'utf8').split('\n').forEach((line: string, i: number) => {
+        if (/\.getItemAt\(\$\{(clipIndex|ci|Number\(clipIndex\))\}\)/.test(line)) offenders.push(`${f}:${i + 1}`);
+      });
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('speed_change undoes a speed Premiere applied incorrectly', async () => {
+    let script = '';
+    const bridge = { executeScript: async (s: string) => { script = s; return { success: true }; } };
+    await new PremiereProTools(bridge as never).executeTool('speed_change', { clipId: 'C', speed: 2 });
+    expect(script).toContain('qe.project.undo()');
+    expect(script).toContain('wantDur');
+  });
+});

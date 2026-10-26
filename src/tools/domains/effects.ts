@@ -42,7 +42,7 @@ export class EffectsTools extends AssemblyTools {
       try {
         app.enableQE();
         var seq = ${this.buildQSeqResolver(sequenceId)};
-        var qeClip = seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        var qeClip = __qeClipByIndex(seq, 'video', ${trackIndex}, ${clipIndex});
         var domSeq = ${this.buildSeqRes(sequenceId)};
         var domClip = domSeq.videoTracks[${trackIndex}].clips[${clipIndex}];
         var newOrder = ${orderJson};
@@ -170,7 +170,7 @@ export class EffectsTools extends AssemblyTools {
       try {
         app.enableQE();
         var seq = ${this.buildQSeqResolver(sequenceId)};
-        var clip = seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        var clip = __qeClipByIndex(seq, 'video', ${trackIndex}, ${clipIndex});
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         var domClip = ${this.buildSeqRes(sequenceId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
         var before = domClip.components.numItems;
@@ -211,7 +211,7 @@ export class EffectsTools extends AssemblyTools {
       try {
         app.enableQE();
         var seq = ${this.buildQSeqResolver(sequenceId)};
-        var clip = seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        var clip = __qeClipByIndex(seq, 'video', ${trackIndex}, ${clipIndex});
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         var domClip = ${this.buildSeqRes(sequenceId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
         var before = domClip.components.numItems;
@@ -284,7 +284,7 @@ export class EffectsTools extends AssemblyTools {
       try {
         app.enableQE();
         var seq = ${this.buildQSeqResolver(sequenceId)};
-        var clip = seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        var clip = __qeClipByIndex(seq, 'video', ${trackIndex}, ${clipIndex});
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         var domClip = ${this.buildSeqRes(sequenceId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
         var before = domClip.components.numItems;
@@ -309,7 +309,7 @@ export class EffectsTools extends AssemblyTools {
       try {
         app.enableQE();
         var seq = ${this.buildQSeqResolver(sequenceId)};
-        var clip = seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        var clip = __qeClipByIndex(seq, 'video', ${trackIndex}, ${clipIndex});
         var domClip = ${this.buildSeqRes(sequenceId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
         if (!clip || !domClip) return JSON.stringify({success:false,error:'Clip not found'});
         var effects = [];
@@ -961,7 +961,7 @@ export class EffectsTools extends AssemblyTools {
         var qeSeq=__qeSequenceOpening(domSeq);
         if(!qeSeq)return JSON.stringify({success:false,error:"Could not address sequence '" + String(domSeq.name) + "' through the QE API."});
         var qeTrack=qeSeq.getVideoTrackAt(${trackIndex});
-        var clip=qeTrack?qeTrack.getItemAt(${clipIndex}):null;
+        var clip=qeTrack?__qeClipByIndex(qeSeq, 'video', ${trackIndex}, ${clipIndex}):null;
         if(!clip)return JSON.stringify({success:false,error:'No clip at video track ${trackIndex} index ${clipIndex}'});
         var domTrack=domSeq.videoTracks[${trackIndex}];
         var domClip=domTrack?domTrack.clips[${clipIndex}]:null;
@@ -1152,7 +1152,7 @@ export class EffectsTools extends AssemblyTools {
       try {
         app.enableQE();
         var seq = qe.project.getActiveSequence();
-        var clip = seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        var clip = __qeClipByIndex(seq, 'video', ${trackIndex}, ${clipIndex});
         if (!clip) return JSON.stringify({success:false,error:'QE clip not found'});
         var domClip = app.project.activeSequence.videoTracks[${trackIndex}].clips[${clipIndex}];
         var before = domClip.components.numItems;

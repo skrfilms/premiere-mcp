@@ -245,7 +245,7 @@ export class ToolsBase {
    * That is the worst version of the bug: the wrong clip, on the wrong sequence, verified.
    */
   protected qeClipScript(trackIndex: number, clipIndex: number, sequenceId?: string): string {
-    return `app.enableQE();var __seq=${this.buildQSeqResolver(sequenceId)};var __clip=__seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});`;
+    return `app.enableQE();var __seq=${this.buildQSeqResolver(sequenceId)};var __clip=__qeClipByIndex(__seq, 'video', ${trackIndex}, ${clipIndex});`;
   }
 
   // Audio Analysis Implementation

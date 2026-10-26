@@ -164,7 +164,7 @@ export class AudioTools extends ExportRenderTools {
         var qeSeq = __qeSequenceOpening(domSeq);
         if (!qeSeq) return JSON.stringify({success:false,error:"Could not address sequence '" + String(domSeq.name) + "' through the QE API."});
         var track = qeSeq.getAudioTrackAt(${ati});
-        var clip = track ? track.getItemAt(${clipIndex}) : null;
+        var clip = track ? __qeClipByIndex(qeSeq, 'audio', ${ati}, ${clipIndex}) : null;
         if (!clip) return JSON.stringify({success:false,error:'No audio clip at audio track ${ati} index ${clipIndex}'});
         var domTrack = domSeq.audioTracks[${ati}];
         var domClip = domTrack ? domTrack.clips[${clipIndex}] : null;
@@ -304,7 +304,7 @@ export class AudioTools extends ExportRenderTools {
         var seq = ${this.buildQSeqResolver(sequenceId)};
         var track = ${audioTrack} ? seq.getAudioTrackAt(${trackIndex}) : seq.getVideoTrackAt(${trackIndex});
         if (!track) return JSON.stringify({success:false,error:'Track not found at index ${trackIndex}'});
-        var clip = track.getItemAt(${clipIndex});
+        var clip = __qeClipByIndex(seq, ${audioTrack} ? 'audio' : 'video', ${trackIndex}, ${clipIndex});
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
 
         // Resolve against the live catalogue first. Asking for a name this build does not
@@ -356,7 +356,7 @@ export class AudioTools extends ExportRenderTools {
       try {
         app.enableQE();
         var seq = ${this.buildQSeqResolver(sequenceId)};
-        var clip = seq.getAudioTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        var clip = __qeClipByIndex(seq, 'audio', ${trackIndex}, ${clipIndex});
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         var domClip = ${this.buildSeqRes(sequenceId)}.audioTracks[${trackIndex}].clips[${clipIndex}];
         var comps = [];
@@ -1183,7 +1183,7 @@ export class AudioTools extends ExportRenderTools {
         var seq = ${this.buildQSeqResolver(seqId)};
         var atrack = seq.getAudioTrackAt(${trackIndex});
         if (!atrack) return JSON.stringify({success:false,error:'Audio track not found'});
-        var clip = atrack.getItemAt(${clipIndex});
+        var clip = __qeClipByIndex(seq, 'audio', ${trackIndex}, ${clipIndex});
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         var set = 0;
         for (var ci = 0; ci < (clip.numComponents||10); ci++) {
@@ -1209,7 +1209,7 @@ export class AudioTools extends ExportRenderTools {
       try {
         app.enableQE();
         var seq = ${this.buildQSeqResolver(seqId)};
-        var clip = seq.getAudioTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        var clip = __qeClipByIndex(seq, 'audio', ${trackIndex}, ${clipIndex});
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         var set = 0;
         for (var ci = 0; ci < 20; ci++) {
@@ -1234,7 +1234,7 @@ export class AudioTools extends ExportRenderTools {
       try {
         app.enableQE();
         var seq = ${this.buildQSeqResolver(seqId)};
-        var clip = seq.getAudioTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        var clip = __qeClipByIndex(seq, 'audio', ${trackIndex}, ${clipIndex});
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         for (var ci = 0; ci < 20; ci++) {
           try { var comp = clip.getComponentAt(ci); if (!comp) break;
@@ -1256,7 +1256,7 @@ export class AudioTools extends ExportRenderTools {
         app.enableQE();
         var seq = ${this.buildQSeqResolver(seqId)};
         var atrack = seq.getAudioTrackAt(${trackIndex});
-        var clip = atrack && atrack.getItemAt(${clipIndex});
+        var clip = atrack && __qeClipByIndex(seq, 'audio', ${trackIndex}, ${clipIndex});
         if (!clip) return JSON.stringify({success:false,error:'Audio clip not found'});
         var eff = qe.project.getAudioEffectByName('DeReverb');
         if (!eff) return JSON.stringify({success:false,error:'DeReverb effect not found in effect list'});

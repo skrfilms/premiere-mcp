@@ -362,7 +362,7 @@ export class MotionLayoutTools extends MarkerTools {
       try {
         app.enableQE();
         var seq = ${this.buildQSeqResolver(sequenceId)};
-        var clip = seq.getVideoTrackAt(${ti}).getItemAt(${ci});
+        var clip = __qeClipByIndex(seq, 'video', ${ti}, ${ci});
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         // scaleToFrameSize is one of the QE clip properties measured SAFE to read on 26.3.2,
         // so there is no excuse for the unconditional verified: true this used to return.

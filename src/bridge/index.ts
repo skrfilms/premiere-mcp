@@ -419,6 +419,28 @@ function __findQeClipByDomClip(qeTrack, domClip) {
   }
   return best;
 }
+/*
+ * The QE item for DOM clip index ci on track ti. qeTrack.getItemAt(ci) is NOT that clip: QE track
+ * items include gaps and transitions, so the DOM index lands on a different item as soon as
+ * anything precedes the clip (see __findQeClipByDomClip). Resolves the DOM clip through the
+ * sequence whose id is the QE sequence's guid, then matches by start time. Null when either side
+ * cannot be resolved -- never a guess.
+ */
+function __qeClipByIndex(qeSeq, kind, ti, ci) {
+  if (!qeSeq) return null;
+  var dom = null;
+  try {
+    var g = String(qeSeq.guid);
+    for (var i = 0; i < app.project.sequences.numSequences; i++) { if (String(app.project.sequences[i].sequenceID) === g) { dom = app.project.sequences[i]; break; } }
+  } catch (eG) {}
+  var qt = null;
+  try { qt = kind === 'audio' ? qeSeq.getAudioTrackAt(ti) : qeSeq.getVideoTrackAt(ti); } catch (eT) {}
+  if (!qt || !dom) return null;
+  var tracks = kind === 'audio' ? dom.audioTracks : dom.videoTracks;
+  var dc = tracks[ti] ? tracks[ti].clips[ci] : null;
+  if (!dc) return null;
+  return __findQeClipByDomClip(qt, dc);
+}
 function __findClipInSequence(seq, nodeId) {
   if (!seq) return null;
   for (var t = 0; t < seq.videoTracks.numTracks; t++) {
