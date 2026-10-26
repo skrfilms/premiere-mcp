@@ -4,6 +4,14 @@ All notable changes are documented here. Releases use semantic versioning.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [1.4.0] - 2026-10-25
+
+Fixes from running the catalogue live against Premiere Pro 26.5.2, which changed scripting
+behaviour under the server, each verified frame by frame against a frame-counter clip. Live
+coverage went from 34.9% to 86.4% of tools executed against a real host.
+
 ### Fixed
 
 - 36 tools declared `sequenceId`, forwarded it, and then ignored it, acting on the

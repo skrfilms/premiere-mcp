@@ -1,6 +1,6 @@
 {
   "name": "premiere-mcp",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "description": "Premiere MCP — an MCP bridge for Adobe Premiere Pro with 648 tools for AI-driven video editing. By Skry. Based on Adobe_Premiere_Pro_MCP (MIT).",
   "main": "dist/index.js",
   "bin": {
