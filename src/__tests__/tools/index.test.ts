@@ -460,7 +460,7 @@ describe('PremiereProTools', () => {
           sequenceId: 'seq-guid', time: 15, outputPath: '/tmp/f.png',
         });
 
-        expect(script).toContain('var qeSequence = __qeSequenceFor(sequence);');
+        expect(script).toContain('var qeSequence = __qeSequenceOpening(sequence);');
         // Match the assignment, not the bare call: the surrounding comment
         // names getActiveSequence() to explain what it replaced.
         expect(script).not.toContain('var qeSequence = qe.project.getActiveSequence()');
@@ -1985,7 +1985,7 @@ describe('PremiereProTools', () => {
       await tools.executeTool('delete_track', { sequenceId: 'seq-target', trackType: 'video', trackIndex: 1 });
 
       const script = mockBridge.executeScript.mock.calls[0][0] as string;
-      expect(script).toContain('var qeSeq = __qeSequenceFor(sequence);');
+      expect(script).toContain('var qeSeq = __qeSequenceOpening(sequence);');
       expect(script).not.toContain('activeSeq.sequenceID !== sequence.sequenceID');
       expect(script).not.toContain('var qeSeq = qe.project.getActiveSequence()');
     });

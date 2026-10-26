@@ -79,7 +79,7 @@ describe('QE sequence resolution', () => {
     let script = '';
     const bridge = { executeScript: async (s: string) => { script = s; return { success: true }; } };
     await new PremiereProTools(bridge as never).executeTool('get_qe_sequence_props', { sequenceId: 'SEQ-1' });
-    expect(script).toContain('__qeSequenceFor(__d)');
+    expect(script).toContain('__qeSequenceOpening(__d)');
     expect(script).not.toMatch(/return qe\.project\.getSequenceAt\(i\)/);
   });
 });

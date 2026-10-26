@@ -161,7 +161,7 @@ export class AudioTools extends ExportRenderTools {
         app.enableQE();
         var domSeq = ${this.buildSeqRes(sequenceId)};
         if (!domSeq) return JSON.stringify({success:false,error:'No active sequence'});
-        var qeSeq = __qeSequenceFor(domSeq);
+        var qeSeq = __qeSequenceOpening(domSeq);
         if (!qeSeq) return JSON.stringify({success:false,error:"Could not address sequence '" + String(domSeq.name) + "' through the QE API."});
         var track = qeSeq.getAudioTrackAt(${ati});
         var clip = track ? track.getItemAt(${clipIndex}) : null;
@@ -1058,7 +1058,7 @@ export class AudioTools extends ExportRenderTools {
         // Make target active so QE DOM can address it
         var __priorActive = app.project.activeSequence;
         app.project.activeSequence = seq;
-        var qeSeq = __qeSequenceFor(seq);
+        var qeSeq = __qeSequenceOpening(seq);
         if (!qeSeq) return JSON.stringify({ success: false, error: "Could not address sequence '" + seq.name + "' through the QE API." });
         var effect = qe.project.getAudioEffectByName(${JSON.stringify(effectName)});
         if (!effect) return JSON.stringify({ success: false, error: "Audio effect not found: " + ${JSON.stringify(effectName)} });

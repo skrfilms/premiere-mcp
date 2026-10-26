@@ -430,7 +430,7 @@ export class ToolsBase {
     // .getSequenceAt(0) was fixture_seq_a, so pairing the two indices sent every QE tool given a
     // sequenceId to a different sequence than the one named — with a verified:true readback of
     // the wrong timeline.
-    return `(function(){ var __d=__findSequence(${JSON.stringify(seqId)}); if(!__d) throw new Error("Sequence not found by id: "+${JSON.stringify(seqId)}+". Refusing to fall back to the active sequence -- nothing was read or changed."); var __q=__qeSequenceFor(__d); if(!__q) throw new Error("Sequence "+${JSON.stringify(seqId)}+" exists but QE does not expose it (QE only sees sequences that have been opened in a timeline). Open it with set_active_sequence and retry -- nothing was read or changed."); return __q; })()`;
+    return `(function(){ var __d=__findSequence(${JSON.stringify(seqId)}); if(!__d) throw new Error("Sequence not found by id: "+${JSON.stringify(seqId)}+". Refusing to fall back to the active sequence -- nothing was read or changed."); var __q=__qeSequenceOpening(__d); if(!__q) throw new Error("Sequence "+${JSON.stringify(seqId)}+" exists but QE could not address it even after opening it -- nothing was read or changed."); return __q; })()`;
   }
 
   /** Size and mtime of a path, or null when it is absent or unreadable. */

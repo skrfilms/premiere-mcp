@@ -178,7 +178,7 @@ export class AssemblyTools extends ToolsBase {
         // sequence in the project, so a clip can be resolved out of one sequence and
         // then, through getActiveSequence(), have the effect applied to whichever
         // clip sits at the same track and index in a different one.
-        var qeSeq = __qeSequenceFor(info.sequence);
+        var qeSeq = __qeSequenceOpening(info.sequence);
         if (!qeSeq) return JSON.stringify({ success: false, error: "Could not address sequence '" + info.sequenceName + "' through the QE API." });
         var qeTrack = info.trackType === 'video' ? qeSeq.getVideoTrackAt(info.trackIndex) : qeSeq.getAudioTrackAt(info.trackIndex);
         var beforeCount = info.track.clips.numItems;
@@ -227,7 +227,7 @@ export class AssemblyTools extends ToolsBase {
         function pad(n) { return n < 10 ? "0" + n : "" + n; }
         var tc = pad(hours) + ":" + pad(mins) + ":" + pad(secs) + ":" + pad(frames);
 
-        var qeSeq = __qeSequenceFor(sequence);
+        var qeSeq = __qeSequenceOpening(sequence);
         if (!qeSeq) return JSON.stringify({ success: false, error: "QE active sequence unavailable" });
 
         function buildIndices(count, requested) {

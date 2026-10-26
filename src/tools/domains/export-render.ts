@@ -1104,16 +1104,13 @@ export class ExportRenderTools extends PlaybackTools {
         var sequence = __findSequence(${JSON.stringify(sequenceId)});
         if (!sequence) return JSON.stringify({ success: false, error: "Sequence not found by id: " + ${JSON.stringify(sequenceId)} });
 
-        if (sequence.openInTimeline) {
-          try { sequence.openInTimeline(); } catch (e0) {}
-        }
 
         // Resolve the QE handle for the sequence the caller named. Reaching for
         // qe.project.getActiveSequence() here exported whatever happened to be
         // open in the timeline instead: asking for a non-active sequence
         // returned success, echoed back the requested sequenceId, and wrote a
         // frame of the active sequence's content.
-        var qeSequence = __qeSequenceFor(sequence);
+        var qeSequence = __qeSequenceOpening(sequence);
         if (!qeSequence) {
           return JSON.stringify({
             success: false,

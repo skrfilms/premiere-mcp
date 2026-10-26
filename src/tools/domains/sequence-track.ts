@@ -700,7 +700,7 @@ ${this.buildSequenceResolver(sequenceId)}
         if (!seq) return JSON.stringify({ success: false, error: "Sequence not found" });
         var __priorActive = app.project.activeSequence;
         app.project.activeSequence = seq;
-        var qeSeq = __qeSequenceFor(seq);
+        var qeSeq = __qeSequenceOpening(seq);
         if (!qeSeq) return JSON.stringify({ success: false, error: "Could not address sequence '" + seq.name + "' through the QE API." });
 
         // Calculate insertion index based on position
@@ -795,7 +795,7 @@ ${this.buildSequenceResolver(sequenceId)}
             // reported as such, naming it, rather than deleting a track from
             // the timeline that happens to be on screen.
             var activeSeq = app.project.activeSequence;
-            var qeSeq = __qeSequenceFor(sequence);
+            var qeSeq = __qeSequenceOpening(sequence);
             if (!qeSeq) {
               return JSON.stringify({
                 success: false,

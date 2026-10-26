@@ -727,6 +727,12 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
         var activeCandidate = qe.project.getActiveSequence();
         if (activeCandidate && String(activeCandidate.guid) === String(seq.sequenceID)) return activeCandidate;
       } catch (eActive) {}
+      // Still unseen: QE reaches any sequence that is ACTIVE, so open it (see __qeSequenceOpening).
+      try {
+        app.project.openSequence(seq.sequenceID);
+        var openedCandidate = qe.project.getActiveSequence();
+        if (openedCandidate && String(openedCandidate.guid) === String(seq.sequenceID)) return openedCandidate;
+      } catch (eOpened) {}
       return null;
     }
     function sequenceRequestError() {
@@ -3432,11 +3438,9 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           if (!frameSeq) return fail("No active sequence");
           var framePath = String(args.outputPath || args.path || "");
           if (!framePath) return fail("capture_frame requires outputPath");
-          if (frameSeq.openInTimeline) {
-            try { frameSeq.openInTimeline(); } catch (frameOpenError) {}
-          }
           app.enableQE();
           var qeFrameSeq = qeSequenceFor(frameSeq);
+          if (!qeFrameSeq) { try { app.project.openSequence(frameSeq.sequenceID); } catch (frameOpenError) {} qeFrameSeq = qeSequenceFor(frameSeq); }
           if (!qeFrameSeq) return fail("Could not address sequence '" + frameSeq.name + "' through the QE API.");
           // Format -> QE method + extension, confirmed live. The method name is
           // case-sensitive, so the old "exportFrameTiff" silently failed every TIFF

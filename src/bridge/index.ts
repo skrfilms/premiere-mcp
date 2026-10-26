@@ -377,6 +377,20 @@ function __qeSequenceFor(seq) {
   } catch (eActive) {}
   return null;
 }
+/*
+ * QE addresses only the sequences in its own list plus whichever sequence is ACTIVE (measured on
+ * 26.5.2: a sequence never opened in a timeline is absent from qe.project.getSequenceAt(), and
+ * becomes reachable the moment app.project.openSequence(id) makes it active). Sequence
+ * .openInTimeline() does not exist on this build, so callers that guarded on it silently did
+ * nothing. This opens the named sequence when QE cannot see it. Side effect, by design: the named
+ * sequence is left active, the same contract the transactions module declares.
+ */
+function __qeSequenceOpening(seq) {
+  var q = __qeSequenceFor(seq);
+  if (q || !seq) return q;
+  try { app.project.openSequence(seq.sequenceID); } catch (eOpen) {}
+  return __qeSequenceFor(seq);
+}
 function __findQeClipByDomClip(qeTrack, domClip) {
   // QE track items are not the DOM clip list: they include gaps and
   // transitions, so the DOM clip index addresses a different item as soon as

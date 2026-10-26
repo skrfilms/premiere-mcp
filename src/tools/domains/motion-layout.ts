@@ -155,8 +155,8 @@ export class MotionLayoutTools extends MarkerTools {
         if (!domTrack) return JSON.stringify({success:false,error:'Video track ${ti} not found'});
         var domClip = domTrack.clips[${ci}];
         if (!domClip) return JSON.stringify({success:false,error:'Clip not found'});
-        var qeSeq = __qeSequenceFor(domSeq);
-        if (!qeSeq) return JSON.stringify({success:false,error:'QE does not expose this sequence. Open it with set_active_sequence and retry.'});
+        var qeSeq = __qeSequenceOpening(domSeq);
+        if (!qeSeq) return JSON.stringify({success:false,error:'QE could not address this sequence even after opening it.'});
         var qeClip = __findQeClipByDomClip(qeSeq.getVideoTrackAt(${ti}), domClip);
         if (!qeClip) return JSON.stringify({success:false,error:'Could not match the clip in QE'});
         var countNamed = function(){ var n=0; for (var i=0;i<domClip.components.numItems;i++){ if (String(domClip.components[i].displayName)===${JSON.stringify(effectName)}) n++; } return n; };
@@ -410,7 +410,7 @@ export class MotionLayoutTools extends MarkerTools {
         var seq = __findSequence(${sequenceId !== undefined ? JSON.stringify(sequenceId) : 'null'});
         if (!seq) return JSON.stringify({success:false,error:'Sequence not found. Pass a sequenceId from list_sequences, or open a sequence.'});
         app.enableQE();
-        var qeSeq = __qeSequenceFor(seq);
+        var qeSeq = __qeSequenceOpening(seq);
         if (!qeSeq) return JSON.stringify({success:false,error:"Could not address sequence '" + String(seq.name) + "' through the QE API."});
 
         var wantedIds = ${idFilter};
@@ -567,7 +567,7 @@ export class MotionLayoutTools extends MarkerTools {
           // sequence in the project, so a clip can be resolved out of one sequence and
           // then, through getActiveSequence(), have the effect applied to whichever
           // clip sits at the same track and index in a different one.
-          var qeSeq = __qeSequenceFor(info.sequence);
+          var qeSeq = __qeSequenceOpening(info.sequence);
           if (!qeSeq) return JSON.stringify({ success: false, error: "QE active sequence not available" });
           var qeTrack = qeSeq.getVideoTrackAt(info.trackIndex);
           if (!qeTrack) return JSON.stringify({ success: false, error: "QE video track not found for clip" });
