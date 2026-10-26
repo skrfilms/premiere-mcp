@@ -257,7 +257,8 @@ describe("generated ExtendScript is syntactically valid", () => {
 
     it("set_clip_speed_qe / set_clip_start_time / set_zero_point verify the value", async () => {
       const speed = await capture("set_clip_speed_qe");
-      expect(speed).toContain("did not apply the requested speed");
+      expect(speed).toContain("applied the speed incorrectly");
+      expect(speed).toContain("qe.project.undo()");
       const startTime = await capture("set_clip_start_time");
       expect(startTime).toContain("did not move the clip start");
       const zero = await capture("set_zero_point");

@@ -2656,6 +2656,8 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           var speedRatio = speedInput <= 10 ? speedInput : (speedInput / 100);
           var requestedPercent = speedRatio * 100;
           var speedOldRatio = null; try { speedOldRatio = Number(speedClip.clip.getSpeed()); } catch (eGsOld) {}
+          var speedOldDur = Number(speedClip.clip.end.ticks) - Number(speedClip.clip.start.ticks);
+          var speedTpf = Number(speedClip.sequence.timebase) || 10584000000;
           try {
             speedQeClip.setSpeed(speedRatio, "00:00:00:00", Boolean(args.reverse), Boolean(args.maintainAudio !== false), false);
           } catch (speedSetError) {
@@ -2666,8 +2668,14 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           if (speedNewRatio === null || isNaN(speedNewRatio)) {
             return ok({ speed: requestedPercent, requestedRatio: speedRatio, maintainAudio: Boolean(args.maintainAudio !== false), changed: true, verified: false, note: "setSpeed did not throw but DOM getSpeed() was not readable to confirm." });
           }
-          if (Math.abs(speedNewRatio - speedRatio) > 0.02) {
-            return fail("Premiere did not apply the requested speed (clip is at " + (speedNewRatio * 100) + "%, requested " + requestedPercent + "%).", { actualPercent: speedNewRatio * 100, requestedPercent: requestedPercent, oldSpeed: speedOldRatio });
+          // QE setSpeed is miscalibrated on 26.5.2 (rate r plays at 2r/(r+1) while the duration is cut
+          // to 1/r), so check the duration that rate implies as well, and undo a wrong result.
+          var speedNewDur = Number(speedClip.clip.end.ticks) - Number(speedClip.clip.start.ticks);
+          var speedWantDur = speedOldRatio ? speedOldDur * speedOldRatio / speedRatio : speedNewDur;
+          if (Math.abs(speedNewRatio - speedRatio) > 0.02 || Math.abs(speedNewDur - speedWantDur) > speedTpf / 2) {
+            var speedUndone = false;
+            try { qe.project.undo(); speedUndone = Math.abs(Number(speedClip.clip.getSpeed()) - speedOldRatio) < 0.0001; } catch (eSpeedUndo) {}
+            return fail("Premiere applied the speed incorrectly (" + (speedNewRatio * 100) + "% over " + (speedNewDur / 254016000000) + "s, requested " + requestedPercent + "% over " + (speedWantDur / 254016000000) + "s)" + (speedUndone ? "; it was undone and the clip is unchanged." : "; it could NOT be undone, check the clip.") + " QE speed changes are unreliable on this build; bake_speed_change renders a retimed file instead.", { actualPercent: speedNewRatio * 100, requestedPercent: requestedPercent, oldSpeed: speedOldRatio, rolledBack: speedUndone });
           }
           return ok({ speed: requestedPercent, actualPercent: speedNewRatio * 100, requestedRatio: speedRatio, oldSpeed: speedOldRatio, maintainAudio: Boolean(args.maintainAudio !== false), reverse: Boolean(args.reverse), changed: true, verified: true });
 
