@@ -171,12 +171,21 @@ export class AudioTools extends ExportRenderTools {
         var transition = qe.project.getAudioTransitionByName('Constant Power');
         if (!transition) return JSON.stringify({success:false,error:'The Constant Power audio transition is not present on this build. Use list_available_audio_transitions to see what is.'});
         ${this.transitionVerificationScript()}
+        // The second argument puts the transition at the clip's START when true (measured on
+        // 26.5.2), so this used to crossfade the head of the clip -- usually not a cut at all --
+        // and the XML count never noticed. false = the clip's end = the cut with the next clip.
+        var cutSecs = domClip ? Number(domClip.end.seconds) : null;
+        var atCutBefore = cutSecs === null ? [] : __qeTransitionsAt(track, cutSecs);
         var before = __readQeTransitionState(clip);
         var beforeXml = __transitionXmlCount(domSeq);
         var addError = null;
         try {
-          clip.addTransition(transition, true, String(${durationFrames}), "0", 0.5, true, true);
+          clip.addTransition(transition, false, String(${durationFrames}), "0", 0.5, true, true);
         } catch (eAdd) { addError = eAdd.toString(); }
+        var atCutAfter = cutSecs === null ? [] : __qeTransitionsAt(track, cutSecs);
+        if (atCutAfter.length > atCutBefore.length) {
+          return JSON.stringify({success:true,verified:true,verifiedBy:'QE track transition list at the cut',durationFrames:${durationFrames},edge:'end',cutSecs:cutSecs,transitions:atCutAfter});
+        }
         var afterClip = domClip ? __findQeClipByDomClip(track, domClip) : clip;
         var after = __readQeTransitionState(afterClip || clip);
         var afterXml = __transitionXmlCount(domSeq);
@@ -433,19 +442,25 @@ export class AudioTools extends ExportRenderTools {
         var added = 0, attempted = 0;
         var failures = [];
         var beforeXml = __transitionXmlCount(seq);
+        // Walk DOM clips, not QE items: QE lists gaps ("Empty") as items, so "item c and item c+1"
+        // is not a cut. A cut is where one clip ends exactly where the next begins. The crossfade
+        // goes on the outgoing clip's END (second argument false; true means its START).
+        var cutsDone = [];
         for (var t=0; t<seq.audioTracks.numTracks; t++) {
           var qatrack = qseq.getAudioTrackAt(t);
-          var numItems = qatrack ? qatrack.numItems : 0;
-          for (var c=0; c<numItems-1; c++) {
+          var dclips = seq.audioTracks[t].clips;
+          for (var c=0; c<dclips.numItems-1; c++) {
+            var outgoing = dclips[c], incoming = dclips[c+1];
+            var cut = Number(outgoing.end.seconds);
+            if (Math.abs(Number(incoming.start.seconds) - cut) > 0.5 / fps) continue;
             attempted++;
-            var clip = qatrack.getItemAt(c);
-            if (!clip) { failures.push('track ' + t + ' clip ' + c + ': QE clip not found'); continue; }
-            var cBefore = __readQeTransitionState(clip);
+            var clip = __findQeClipByDomClip(qatrack, outgoing);
+            if (!clip) { failures.push('A' + (t+1) + ' cut at ' + cut + 's: QE clip not found'); continue; }
+            var nBefore = __qeTransitionsAt(qatrack, cut).length;
             var addErr = null;
-            try { clip.addTransition(transition, true, String(frames), "0", 0.5, true, true); } catch(e2) { addErr = e2.toString(); }
-            var cAfter = __readQeTransitionState(qatrack.getItemAt(c) || clip);
-            if (__transitionWasVerified(cBefore, cAfter)) added++;
-            else failures.push('track ' + t + ' clip ' + c + ': ' + (addErr ? addErr : 'no transition appeared (the cut may have no source handles)'));
+            try { clip.addTransition(transition, false, String(frames), "0", 0.5, true, true); } catch(e2) { addErr = e2.toString(); }
+            if (__qeTransitionsAt(qatrack, cut).length > nBefore) { added++; cutsDone.push('A' + (t+1) + '@' + cut + 's'); }
+            else failures.push('A' + (t+1) + ' cut at ' + cut + 's: ' + (addErr ? addErr : 'no transition appeared (the clips may have no source handles at the cut)'));
           }
         }
         var afterXml = __transitionXmlCount(seq);
@@ -455,7 +470,7 @@ export class AudioTools extends ExportRenderTools {
             note:'This sequence has no audio cut with a clip on both sides, so there was nothing to crossfade.'});
         }
         if (added === attempted) {
-          return JSON.stringify({success:true,verified:true,verifiedBy:'QE clip transition enumeration per cut',crossfadesAdded:added,cutsAttempted:attempted,durationSeconds:${durationSeconds},durationFrames:frames,xmlTransitionDelta:xmlDelta});
+          return JSON.stringify({success:true,verified:true,verifiedBy:'QE track transition list at each cut',crossfadesAdded:added,cutsAttempted:attempted,cuts:cutsDone,durationSeconds:${durationSeconds},durationFrames:frames,xmlTransitionDelta:xmlDelta});
         }
         return JSON.stringify({success:false,verified:true,verifiedBy:'QE clip transition enumeration per cut',crossfadesAdded:added,cutsAttempted:attempted,durationSeconds:${durationSeconds},durationFrames:frames,xmlTransitionDelta:xmlDelta,failures:failures,
           error: added === 0

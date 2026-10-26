@@ -766,7 +766,25 @@ export class EffectsTools extends AssemblyTools {
         var info1 = __findClip(${JSON.stringify(clipId1)});
         if (!info1) return JSON.stringify({ success: false, error: "First clip not found" });
         var info2 = __findClip(${JSON.stringify(clipId2)});
-        var targetInfo = info2 || info1;
+        // QE addTransition(..., atStart, ...) attaches to ONE clip: true = its start, false = its end
+        // (measured on 26.5.2). This used to put the transition on the END of clip 2, so a dissolve
+        // "between A and B" landed at B's far end. Between two clips it now goes on the end of
+        // whichever clip is outgoing at their shared cut; clips that do not abut are refused.
+        var targetInfo = info1, atStart = true, cutSecs = null;
+        if (info2) {
+          var e1 = Number(info1.clip.end.seconds), s1 = Number(info1.clip.start.seconds);
+          var e2 = Number(info2.clip.end.seconds), s2 = Number(info2.clip.start.seconds);
+          var halfFrame = 0.5 * Number(info1.sequence.timebase || 10584000000) / 254016000000;
+          if (info1.sequence.sequenceID !== info2.sequence.sequenceID || info1.trackType !== info2.trackType || info1.trackIndex !== info2.trackIndex) {
+            return JSON.stringify({ success: false, error: "The two clips are not on the same track of the same sequence, so there is no cut between them." });
+          }
+          if (Math.abs(s2 - e1) <= halfFrame) { targetInfo = info1; cutSecs = e1; }
+          else if (Math.abs(s1 - e2) <= halfFrame) { targetInfo = info2; cutSecs = e2; }
+          else return JSON.stringify({ success: false, error: "The clips do not touch (" + s1 + "-" + e1 + "s and " + s2 + "-" + e2 + "s), so there is no cut to put a transition on. Close the gap first." });
+          atStart = false;
+        } else {
+          cutSecs = Number(info1.clip.start.seconds);
+        }
         // Addressed by id, not by whatever is on screen. __findClip() searches every
         // sequence in the project, so a clip can be resolved out of one sequence and
         // then, through getActiveSequence(), have the effect applied to whichever
@@ -786,11 +804,13 @@ export class EffectsTools extends AssemblyTools {
         ${this.transitionVerificationScript()}
         var before = __readQeTransitionState(qeClip);
         var beforeXml = __transitionXmlCount(seq);
-        qeClip.addTransition(transition, info2 ? false : true, String(frames), "0", 0.5, false, true);
+        var atCutBefore = __qeTransitionsAt(qeTrack, cutSecs).length;
+        qeClip.addTransition(transition, atStart, String(frames), "0", 0.5, true, true);
         var afterClip = __findQeClipByDomClip(qeTrack, targetInfo.clip);
         var after = __readQeTransitionState(afterClip);
         var afterXml = __transitionXmlCount(seq);
-        if (!__transitionWasVerified(before, after) && !__transitionWasVerifiedByXml(beforeXml, afterXml)) {
+        var atCut = __qeTransitionsAt(qeTrack, cutSecs);
+        if (atCut.length <= atCutBefore) {
           return JSON.stringify({
             success: false,
             error: "Transition call completed but Premiere Pro did not expose a verified transition change",
@@ -803,7 +823,7 @@ export class EffectsTools extends AssemblyTools {
             afterXml: afterXml
           });
         }
-        return JSON.stringify({ success: true, message: "Transition added and verified", transitionName: ${JSON.stringify(transitionName)}, duration: ${duration}, frames: frames, before: before, after: after, beforeXml: beforeXml, afterXml: afterXml });
+        return JSON.stringify({ success: true, verified: true, verifiedBy: "QE track transition list at the cut", message: "Transition added and verified", transitionName: ${JSON.stringify(transitionName)}, duration: ${duration}, frames: frames, cutSecs: cutSecs, transitions: atCut });
       } catch (e) {
         return JSON.stringify({ success: false, error: "QE DOM error: " + e.toString() });
       }
@@ -840,7 +860,9 @@ export class EffectsTools extends AssemblyTools {
         ${this.transitionVerificationScript()}
         var before = __readQeTransitionState(qeClip);
         var beforeXml = __transitionXmlCount(seq);
-        qeClip.addTransition(transition, ${atEnd}, String(frames), "0", 0.5, true, true);
+        // The second argument means AT START when true (measured on 26.5.2); passing atEnd put an
+        // 'end' transition on the clip's start and vice versa.
+        qeClip.addTransition(transition, ${!atEnd}, String(frames), "0", 0.5, true, true);
         var afterClip = __findQeClipByDomClip(qeTrack, info.clip);
         var after = __readQeTransitionState(afterClip);
         var afterXml = __transitionXmlCount(seq);
@@ -1063,31 +1085,30 @@ export class EffectsTools extends AssemblyTools {
         var frames = Math.round(${duration} * fps);
         ${this.transitionVerificationScript()}
         var beforeXml = __transitionXmlCount(sequence);
-        for (var i = 0; i < clipCount; i++) {
+        // One transition per CUT (a clip ending exactly where the next begins), on the outgoing
+        // clip's end. This used to add one at the START of every clip, so the first clip got a
+        // dissolve from nothing at its head and gaps were treated like cuts.
+        var cutsDone = [];
+        var halfFrame = 0.5 / fps;
+        for (var i = 0; i < clipCount - 1; i++) {
           try {
-            var domClip = track.clips[i];
+            var domClip = track.clips[i], nextClip = track.clips[i + 1];
+            var cut = Number(domClip.end.seconds);
+            if (Math.abs(Number(nextClip.start.seconds) - cut) > halfFrame) continue;
             var qeClip = __findQeClipByDomClip(qeTrack, domClip);
             if (!qeClip) {
-              errors.push("Clip " + i + ": Could not locate matching QE clip");
+              errors.push("Cut at " + cut + "s: Could not locate matching QE clip");
               continue;
             }
-            var before = __readQeTransitionState(qeClip);
-            qeClip.addTransition(transition, true, String(frames), "0", 0.5, false, true);
-            var afterClip = __findQeClipByDomClip(qeTrack, domClip);
-            var after = __readQeTransitionState(afterClip);
-            if (__transitionWasVerified(before, after)) {
-              added++;
-            } else {
-              errors.push("Clip " + i + ": transition call completed but no verified transition change was exposed");
-            }
+            var nBefore = __qeTransitionsAt(qeTrack, cut).length;
+            qeClip.addTransition(transition, false, String(frames), "0", 0.5, true, true);
+            if (__qeTransitionsAt(qeTrack, cut).length > nBefore) { added++; cutsDone.push(cut); }
+            else errors.push("Cut at " + cut + "s: transition call completed but none appeared at the cut (the clips may have no handles there)");
           } catch (e) {
-            errors.push("Clip " + i + ": " + e.toString());
+            errors.push("Cut after clip " + i + ": " + e.toString());
           }
         }
         var afterXml = __transitionXmlCount(sequence);
-        if (added === 0 && __transitionWasVerifiedByXml(beforeXml, afterXml)) {
-          added = afterXml.count - beforeXml.count;
-        }
         if (added === 0) {
           return JSON.stringify({
             success: false,
@@ -1101,13 +1122,15 @@ export class EffectsTools extends AssemblyTools {
           });
         }
         return JSON.stringify({
-          success: true,
+          success: errors.length === 0,
+          verified: true,
+          verifiedBy: "QE track transition list at each cut",
           transitionsAdded: added,
+          cuts: cutsDone,
           totalClips: clipCount,
           frames: frames,
           errors: errors,
-          beforeXml: beforeXml,
-          afterXml: afterXml
+          error: errors.length ? "PARTIALLY APPLIED: " + added + " cut(s) got a transition; see errors[]." : undefined
         });
       } catch (e) {
         return JSON.stringify({ success: false, error: e.toString() });

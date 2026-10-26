@@ -1756,10 +1756,11 @@ describe('PremiereProTools', () => {
       expect(result.success).toBe(true);
       const script = mockBridge.executeScript.mock.calls[0][0];
       expect(script).toContain('var info2 = __findClip("clip-2")');
-      expect(script).toContain('qeClip.addTransition(transition, info2 ? false : true, String(frames), "0"');
+      // true means the clip START on 26.5.2; between two clips the transition goes on the
+      // outgoing clip's end and is verified at the cut itself.
+      expect(script).toContain('qeClip.addTransition(transition, atStart, String(frames), "0"');
       expect(script).not.toContain('frames + ":00"');
-      expect(script).toContain('__transitionWasVerified(before, after)');
-      expect(script).toContain('__transitionWasVerifiedByXml(beforeXml, afterXml)');
+      expect(script).toContain('__qeTransitionsAt(qeTrack, cutSecs)');
       expect(script).toContain('Transition call completed but Premiere Pro did not expose a verified transition change');
     });
 
@@ -1819,7 +1820,7 @@ describe('PremiereProTools', () => {
 
       expect(result.success).toBe(false);
       const script = mockBridge.executeScript.mock.calls[0][0];
-      expect(script).toContain('qeClip.addTransition(transition, true, String(frames), "0"');
+      expect(script).toContain('qeClip.addTransition(transition, false, String(frames), "0"');
       expect(script).not.toContain('frames + ":00"');
       expect(script).toContain('No transitions were verifiably added');
     });

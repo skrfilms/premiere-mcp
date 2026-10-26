@@ -441,6 +441,30 @@ function __qeClipByIndex(qeSeq, kind, ti, ci) {
   if (!dc) return null;
   return __findQeClipByDomClip(qt, dc);
 }
+/*
+ * Named transitions on a QE track that touch time t (seconds). QE track transition lists also
+ * carry unnamed placeholder spans, which are skipped. Used to prove a transition landed AT A CUT:
+ * QE addTransition's second argument means "at the clip's START" (true) or its end (false) --
+ * measured on 26.5.2 -- so a call can succeed while putting the transition somewhere else.
+ */
+function __qeTransitionsAt(qeTrack, t, tol) {
+  var out = [];
+  if (!qeTrack) return out;
+  if (tol === undefined) tol = 0.05;
+  var n = 0;
+  try { n = qeTrack.numTransitions; } catch (eN) { return out; }
+  for (var i = 0; i < n; i++) {
+    var tr = null;
+    try { tr = qeTrack.getTransitionAt(i); } catch (eT) {}
+    if (!tr) continue;
+    var name = '';
+    try { name = String(tr.name); } catch (eName) {}
+    if (!name) continue;
+    var a = Number(tr.start.secs), b = Number(tr.end.secs);
+    if (a <= t + tol && b >= t - tol) out.push({ name: name, startSecs: a, endSecs: b });
+  }
+  return out;
+}
 function __findClipInSequence(seq, nodeId) {
   if (!seq) return null;
   for (var t = 0; t < seq.videoTracks.numTracks; t++) {
