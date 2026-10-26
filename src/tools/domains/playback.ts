@@ -368,7 +368,7 @@ export class PlaybackTools extends SequenceTrackTools {
           // so the caller knows to stop retrying and what to use instead.
           return JSON.stringify({
             success: false, verified: false,
-            error: "The work area did not move (reads back in " + inNow + "s / out " + outNow + "s). setWorkAreaInPoint/setWorkAreaOutPoint are accepted but inert on this build (26.3.2), as is QE setWorkInOutPoints, so the work area cannot be set by script here. Retrying will not help. Use set_sequence_in_out_points instead — it is verified working — and export with workAreaType set to the in/out range.",
+            error: "The work area did not move (reads back in " + inNow + "s / out " + outNow + "s). setWorkAreaInPoint/setWorkAreaOutPoint are accepted but inert (measured on 26.3.2 and again on 26.5.2, with the work area enabled and every argument form: seconds, ticks, Time, and QE setWorkInOutPoints with a timecode), so the work area cannot be set by script here. Retrying will not help. Use set_sequence_in_out_points instead — it is verified working — and export with workAreaType set to the in/out range.",
             workAreaEnabled: __workAreaEnabled(sequence),
             requested: { inPoint: ${inPoint}, outPoint: ${outPoint} }, actual: { inPoint: inNow, outPoint: outNow }
           });
