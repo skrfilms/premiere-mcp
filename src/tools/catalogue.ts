@@ -258,7 +258,7 @@ export function buildToolCatalogue(): MCPTool[] {
       // Trimming & Edit Point Operations
       {
         name: 'ripple_trim_in',
-        description: 'Ripple-trims the in-point of a clip to the current playhead (Q-key equivalent). Removes the head of the clip and ripples everything earlier. Verified via clip start + move.',
+        description: 'Ripple-trims the head of a clip to the current playhead (Q-key equivalent): removes the material before the playhead, keeps the clip where it starts, and moves everything after it left on every track so sync holds. Linked audio is trimmed with it. Refuses if the playhead is outside the clip or a clip on another track spans the edit. Verified by start/end/in readback.',
         inputSchema: z.object({
           sequenceId: z.string().optional(),
           trackIndex: z.number().describe('0-based video track index'),
@@ -267,7 +267,7 @@ export function buildToolCatalogue(): MCPTool[] {
       },
       {
         name: 'ripple_trim_out',
-        description: 'Ripple-trims the out-point of a clip to the current playhead (W-key equivalent). Removes the tail and ripples everything later. Verified via clip end + move.',
+        description: 'Ripple-trims the tail of a clip to the current playhead (W-key equivalent): removes the material after the playhead and moves everything later left on every track so sync holds. Linked audio is trimmed with it. Verified by start/end/in readback.',
         inputSchema: z.object({
           sequenceId: z.string().optional(),
           trackIndex: z.number().describe('0-based video track index'),
@@ -276,7 +276,7 @@ export function buildToolCatalogue(): MCPTool[] {
       },
       {
         name: 'extend_edit',
-        description: 'Extends the nearest edit point to the current playhead (E-key equivalent) — rolling trim. Verified via clip in/out readback.',
+        description: 'Moves the nearest edit point of the clip to the current playhead (E-key equivalent). An abutting neighbour is rolled so no gap or overlap opens; linked audio/video moves with it. Refuses when the media has no handle left (extending past the media would play black). Verified by start/end/in readback.',
         inputSchema: z.object({
           sequenceId: z.string().optional(),
           trackIndex: z.number().describe('0-based video track index'),
@@ -285,7 +285,7 @@ export function buildToolCatalogue(): MCPTool[] {
       },
       {
         name: 'nudge_clip',
-        description: 'Nudges a clip ±N frames on the timeline (Alt+Left/Right equivalent). Verified via clip start time readback.',
+        description: 'Nudges a clip and its linked audio/video ±N frames on the timeline (Alt+Left/Right equivalent). Refuses when the destination is occupied. Verified by start readback of every linked item.',
         inputSchema: z.object({
           sequenceId: z.string().optional(),
           trackIndex: z.number().describe('0-based video track index'),
@@ -297,7 +297,7 @@ export function buildToolCatalogue(): MCPTool[] {
       // J-Cut and L-Cut
       {
         name: 'j_cut',
-        description: 'Creates a J-cut: extends the audio of clip N under clip N-1 (audio leads video). Sets the audio in-point earlier than the video cut. Verified via clip in/out readback.',
+        description: 'Creates a J-cut: the linked audio of clip N starts the given number of frames before its picture (audio leads video), rolling the audio edit so the previous audio clip gives up the same span. Refuses when the audio has no head handle. Verified by start/end/in readback.',
         inputSchema: z.object({
           sequenceId: z.string().optional(),
           videoTrackIndex: z.number().describe('0-based video track index'),
@@ -307,7 +307,7 @@ export function buildToolCatalogue(): MCPTool[] {
       },
       {
         name: 'l_cut',
-        description: 'Creates an L-cut: extends the audio of clip N under clip N+1 (audio trails video). Sets the audio out-point later than the video cut. Verified via clip in/out readback.',
+        description: 'Creates an L-cut: the linked audio of clip N runs the given number of frames past its picture (audio trails video), rolling the audio edit so the next audio clip gives up the same span. Refuses when the audio has no tail handle. Verified by start/end/in readback.',
         inputSchema: z.object({
           sequenceId: z.string().optional(),
           videoTrackIndex: z.number().describe('0-based video track index'),
@@ -1536,7 +1536,7 @@ export function buildToolCatalogue(): MCPTool[] {
       },
       {
         name: 'trim_clip',
-        description: 'Adjusts the in and out points of a clip on the timeline, effectively shortening it.',
+        description: 'Trims a clip (and its linked audio/video) to new SOURCE in/out points, or to a timeline duration, keeping every remaining frame where it was on the timeline. Snaps to the frame grid, refuses trims past the media or into a neighbour, and restores the clip if Premiere does not apply the edit.',
         inputSchema: z.object({
           clipId: z.string().describe('The ID of the clip on the timeline to trim'),
           inPoint: z.number().optional().describe('The new in point in seconds from the start of the clip'),

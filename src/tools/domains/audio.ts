@@ -9,6 +9,7 @@ import { spawn } from 'child_process';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import { basename, dirname, extname, join } from 'node:path';
 import { runFf } from '../ff-exec.js';
+import { TRIM_LIB } from '../trim-lib.js';
 
 export class AudioTools extends ExportRenderTools {
   protected async setEssentialSoundCategory(projectItemId: string, category: string): Promise<any> {
@@ -32,72 +33,38 @@ export class AudioTools extends ExportRenderTools {
   }
 
   protected async jCut(sequenceId: string | undefined, videoTrackIndex: number, clipIndex: number, frames: number): Promise<any> {
-    return await this.bridge.executeScript(`
-      var seq = ${this.buildSeqRes(sequenceId)};
-      if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
-      var vTrack = seq.videoTracks[${videoTrackIndex}];
-      var vClip = vTrack && vTrack.clips[${clipIndex}];
-      if (!vClip) return JSON.stringify({success:false,error:'Video clip not found'});
-      var linked = vClip.getLinkedItems();
-      var aClip = null;
-      for (var i = 0; i < linked.numItems; i++) { if (linked[i].mediaType === 'Audio') { aClip = linked[i]; break; } }
-      if (!aClip) return JSON.stringify({success:false,error:'No linked audio clip found'});
-      var ticksPerFrame = Number(seq.timebase) || 10584000000;
-      var before = String(aClip.start.ticks);
-      var inBefore = String(aClip.inPoint.ticks);
-      var newAIn = new Time(); newAIn.ticks = String(Math.max(0, Math.round(Number(inBefore) - ${frames} * ticksPerFrame)));
-      aClip.inPoint = newAIn;
-      var after = String(aClip.start.ticks);
-      var inAfter = String(aClip.inPoint.ticks);
-      // A J-cut is two effects of one write: the source in-point moves AND the clip's
-      // timeline start pulls earlier. Reporting only "start changed" hid the half-applied
-      // case where the in-point moved and the clip did not, which is a silently trimmed
-      // clip rather than a J-cut.
-      var sourceMoved = inAfter !== inBefore;
-      var timelineMoved = after !== before;
-      if (sourceMoved && timelineMoved) {
-        return JSON.stringify({success:true,verified:true,verifiedBy:'TrackItem.inPoint and TrackItem.start readback',changed:true,frames:${frames},audioStartBefore:before,audioStartAfter:after,sourceInBefore:inBefore,sourceInAfter:inAfter,type:'j_cut'});
-      }
-      if (sourceMoved && !timelineMoved) {
-        return JSON.stringify({success:false,verified:true,verifiedBy:'TrackItem.inPoint and TrackItem.start readback',changed:true,partial:true,frames:${frames},audioStartBefore:before,audioStartAfter:after,sourceInBefore:inBefore,sourceInAfter:inAfter,type:'j_cut',
-          error:'HALF APPLIED: the audio source in-point moved but the clip did not extend earlier on the timeline, so the audio was trimmed instead of J-cut. The clip to its left is probably in the way. Undo, clear the space, and retry.'});
-      }
-      return JSON.stringify({success:false,verified:true,verifiedBy:'TrackItem.inPoint and TrackItem.start readback',changed:false,frames:${frames},audioStartBefore:before,audioStartAfter:after,sourceInBefore:inBefore,sourceInAfter:inAfter,type:'j_cut',
-        error:'Nothing moved. The linked audio has no source handle left before its in-point, so it cannot start earlier.'});
-    `);
+    // J-cut: the clip's linked audio starts \`frames\` earlier than its picture. The audio edit
+    // point rolls, so the previous audio clip on that track (if it abuts) gives up the same span.
+    return await this.audioRoll(sequenceId, videoTrackIndex, clipIndex, frames, 'head', 'j_cut');
   }
 
   protected async lCut(sequenceId: string | undefined, videoTrackIndex: number, clipIndex: number, frames: number): Promise<any> {
+    // L-cut: the clip's linked audio runs \`frames\` past the end of its picture, rolling the next
+    // audio clip's head if it abuts.
+    return await this.audioRoll(sequenceId, videoTrackIndex, clipIndex, frames, 'tail', 'l_cut');
+  }
+
+  private async audioRoll(sequenceId: string | undefined, videoTrackIndex: number, clipIndex: number, frames: number, edge: 'head' | 'tail', type: string): Promise<any> {
+    // The old versions wrote the audio inPoint/outPoint and waited for the timeline to follow.
+    // inPoint only slips and outPoint does nothing visible (see trim-lib.ts), so they could only
+    // ever report a half-applied edit or nothing at all.
     return await this.bridge.executeScript(`
+      ${TRIM_LIB}
       var seq = ${this.buildSeqRes(sequenceId)};
-      if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
-      var vTrack = seq.videoTracks[${videoTrackIndex}];
-      var vClip = vTrack && vTrack.clips[${clipIndex}];
+      var vTrack = seq.videoTracks[${Number(videoTrackIndex)}];
+      var vClip = vTrack && vTrack.clips[${Number(clipIndex)}];
       if (!vClip) return JSON.stringify({success:false,error:'Video clip not found'});
-      var linked = vClip.getLinkedItems();
-      var aClip = null;
-      for (var i = 0; i < linked.numItems; i++) { if (linked[i].mediaType === 'Audio') { aClip = linked[i]; break; } }
-      if (!aClip) return JSON.stringify({success:false,error:'No linked audio clip found'});
-      var ticksPerFrame = Number(seq.timebase) || 10584000000;
-      var before = String(aClip.end.ticks);
-      var outBefore = String(aClip.outPoint.ticks);
-      var newAOut = new Time(); newAOut.ticks = String(Math.round(Number(outBefore) + ${frames} * ticksPerFrame));
-      aClip.outPoint = newAOut;
-      var after = String(aClip.end.ticks);
-      var outAfter = String(aClip.outPoint.ticks);
-      // Same half-applied hazard as j_cut: the source out-point can move while the clip
-      // refuses to extend later on the timeline, which trims rather than L-cuts.
-      var sourceMoved = outAfter !== outBefore;
-      var timelineMoved = after !== before;
-      if (sourceMoved && timelineMoved) {
-        return JSON.stringify({success:true,verified:true,verifiedBy:'TrackItem.outPoint and TrackItem.end readback',changed:true,frames:${frames},audioEndBefore:before,audioEndAfter:after,sourceOutBefore:outBefore,sourceOutAfter:outAfter,type:'l_cut'});
-      }
-      if (sourceMoved && !timelineMoved) {
-        return JSON.stringify({success:false,verified:true,verifiedBy:'TrackItem.outPoint and TrackItem.end readback',changed:true,partial:true,frames:${frames},audioEndBefore:before,audioEndAfter:after,sourceOutBefore:outBefore,sourceOutAfter:outAfter,type:'l_cut',
-          error:'HALF APPLIED: the audio source out-point moved but the clip did not extend later on the timeline, so the audio was trimmed instead of L-cut. The clip to its right is probably in the way. Undo, clear the space, and retry.'});
-      }
-      return JSON.stringify({success:false,verified:true,verifiedBy:'TrackItem.outPoint and TrackItem.end readback',changed:false,frames:${frames},audioEndBefore:before,audioEndAfter:after,sourceOutBefore:outBefore,sourceOutAfter:outAfter,type:'l_cut',
-        error:'Nothing moved. The linked audio has no source handle left after its out-point, so it cannot run later.'});
+      var group = __withLinked(vClip), aClips = [];
+      for (var i = 0; i < group.length; i++) if (String(group[i].mediaType) === 'Audio') aClips.push(group[i]);
+      if (!aClips.length) return JSON.stringify({success:false,error:'No linked audio clip found'});
+      var tpf = Number(seq.timebase) || 10584000000;
+      var d = ${edge === 'head' ? '-' : ''}${Number(frames)} * tpf;
+      var ops = [], errors = [];
+      for (var k = 0; k < aClips.length; k++) { var plan = __planRoll(seq, aClips[k], ${JSON.stringify(edge)}, d); if (plan.error) errors.push(plan.error); else ops = ops.concat(plan.ops); }
+      if (errors.length) return JSON.stringify({success:false,type:${JSON.stringify(type)},frames:${Number(frames)},error:errors.join(' ') + ' Nothing was changed.'});
+      var bad = __applyOps(ops, (Number(seq.timebase) || 10584000000) / 2);
+      return JSON.stringify({success:bad.length===0,verified:true,verifiedBy:'start/end/in readback of every edited clip',type:${JSON.stringify(type)},frames:${Number(frames)},edits:__opsReport(ops),
+        error: bad.length ? 'PARTIALLY APPLIED: ' + bad.join('; ') + '. Undo to restore.' : undefined});
     `);
   }
 

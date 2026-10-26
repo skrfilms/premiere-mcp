@@ -1521,12 +1521,13 @@ describe('PremiereProTools', () => {
 
       expect(result.success).toBe(true);
       const script = mockBridge.executeScript.mock.calls[0][0];
-      expect(script).not.toContain('clip.outPoint = timeFromSeconds(targetOutPoint)');
-      expect(script).toContain('clip.end = timeFromSeconds(secondsOf(clip.start) + targetDuration)');
-      expect(script).not.toContain('new Time(clip.inPoint.seconds + 2.5)');
-      expect(script).toContain('timeline duration did not change to requested value');
+      // outPoint writes have no visible effect on 26.5.2, so a duration is applied through end
+      // and verified by reading start/end back, with a rollback when it does not take.
+      expect(script).not.toMatch(/\bclip\.outPoint\s*=/);
+      expect(script).toContain("kind:'set'");
+      expect(script).toContain('__applyOps(ops, half)');
       expect(script).toContain('TRIM_UNSUPPORTED_FOR_CLIP');
-      expect(script).toContain('rollback("outPoint", original.outPoint)');
+      expect(script).toContain('__rollbackOps(ops, half)');
     });
 
     it('rejects conflicting trim_clip duration and outPoint arguments before calling Premiere', async () => {
@@ -1582,8 +1583,8 @@ describe('PremiereProTools', () => {
 
       expect(parsed.success).toBe(false);
       expect(parsed.errorCode).toBe('TRIM_UNSUPPORTED_FOR_CLIP');
-      expect(parsed.attempted.outPoint).toBeCloseTo(3604.96803333333);
-      expect(parsed.restored.outPoint).toBeCloseTo(3604.96803333333);
+      expect(parsed.attempted.durationSecs).toBeCloseTo(4.97163333333333);
+      expect(parsed.after.durationSecs).toBeCloseTo(4.97163333333333);
       expect(parsed.rolledBack).toBe(true);
       expect(outPointWrites).toBe(0);
     });
@@ -1632,9 +1633,29 @@ describe('PremiereProTools', () => {
       await tools.executeTool('trim_clip', { clipId: 'clip-123', duration: 5.0333666667 });
       const script = mockBridge.executeScript.mock.calls[0][0];
 
-      expect(script).toContain('if (!exactEnough(before.duration, targetDuration))');
-      expect(script).not.toContain('if (!closeEnough(before.duration, targetDuration))');
-      expect(script).toContain('frameDurationSeconds / 2');
+      const ticksPerSecond = 254016000000;
+      class FakeTime {
+        private value = 0;
+        get seconds() { return this.value; }
+        set seconds(value: number) { this.value = value; }
+        get ticks() { return String(Math.round(this.value * ticksPerSecond)); }
+        set ticks(value: string) { this.value = Number(value) / ticksPerSecond; }
+      }
+      const at = (seconds: number) => { const t = new FakeTime(); t.seconds = seconds; return t; };
+      let endWrites = 0;
+      let timelineEnd = at(5);
+      const clip: any = { inPoint: at(0), start: at(0) };
+      Object.defineProperty(clip, 'end', { get: () => timelineEnd, set: (v) => { endWrites++; timelineEnd = v; } });
+      const parsed = JSON.parse(new Function('__findClip', 'Time', script)(
+        () => ({ clip, sequence: { timebase: String(Math.round(ticksPerSecond * 1001 / 30000)) } }),
+        FakeTime
+      ));
+      // One frame at 29.97 is within any "close enough" window, so a fuzzy no-op test would skip
+      // this write. It must be written.
+      expect(endWrites).toBe(1);
+      expect(parsed.success).toBe(true);
+      // Snapped to the 29.97 frame grid, so within half a frame of the request.
+      expect(Math.abs(parsed.newDuration - 5.0333666667)).toBeLessThanOrEqual(1001 / 30000 / 2);
     });
 
     it('generates a non-destructive export readiness validation script', async () => {
