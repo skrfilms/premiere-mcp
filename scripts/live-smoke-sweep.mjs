@@ -57,6 +57,12 @@ const ALLOW_RECOVER = process.argv.includes('--recover');
 
 /** How long one tool gets before the harness gives up on it and records a failure. */
 const TOOL_TIMEOUT_MS = 25_000;
+/**
+ * Tools that do real work for longer than TOOL_TIMEOUT_MS on a healthy host. export_aaf wrote a
+ * correct 356 KB AAF on 2026-10-25 but took ~30s, so the default budget recorded it as a failure
+ * and the panel looked wedged while it finished.
+ */
+const SLOW_TOOL_TIMEOUT_MS = { export_aaf: 180_000, export_omf: 180_000 };
 
 /**
  * The panel's own words when it rejects a call because a PREVIOUS script is still outstanding.
@@ -350,7 +356,7 @@ async function main() {
     try {
       const r = await Promise.race([
         tools.executeTool(name, args),
-        new Promise((_, rej) => setTimeout(() => rej(new Error(`harness timeout ${TOOL_TIMEOUT_MS / 1000}s`)), TOOL_TIMEOUT_MS)),
+        new Promise((_, rej) => { const ms = SLOW_TOOL_TIMEOUT_MS[name] ?? TOOL_TIMEOUT_MS; setTimeout(() => rej(new Error(`harness timeout ${ms / 1000}s`)), ms); }),
       ]);
       if (r && r.success === false) {
         record(String(r.error ?? 'unknown'));
