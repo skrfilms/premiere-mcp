@@ -615,7 +615,7 @@ async function deletePreviewFilesOnDisk(bridge: PremiereProTransport, args: Reco
 }
 
 /** Expanded tools whose scripts need the measured trim primitives. */
-const TRIM_LIB_TOOLS = new Set(['ripple_delete', 'roll_edit', 'slide_edit', 'slip_edit']);
+const TRIM_LIB_TOOLS = new Set(['ripple_delete', 'roll_edit', 'slide_edit', 'slip_edit', 'remove_selected_clips', 'lift_selection', 'extract_selection']);
 
 function buildExpandedToolScript(name: string, args: Record<string, any>): string {
   return `
@@ -3749,28 +3749,32 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
             return n;
           }
           var selBeforeTotal = selectionTotalClips();
-          var removedSelected = 0;
-          var selectedErrors = [];
-          for (var si = selectedCount - 1; si >= 0; si--) {
-            try {
-              var selectedClip = selectedItems[si];
-              if (!selectedClip && selectedItems.getItemAt) selectedClip = selectedItems.getItemAt(si);
-              if (!selectedClip || typeof selectedClip.remove !== "function") {
-                selectedErrors.push({ index: si, error: "Selected item is not a removable clip" });
-                continue;
-              }
-              selectedClip.remove(rippleSelected, true);
-              removedSelected++;
-            } catch (selectedError) {
-              selectedErrors.push({ index: si, error: selectedError.toString() });
-            }
+          // TrackItem.remove() never ripples and never takes linked items on 26.5.2, so extract left
+          // gaps. Each selected clip goes through __removeGroup (linked items, sync-locked ripple),
+          // latest first so the positions of earlier selections are not moved under us.
+          var selected = [];
+          for (var si = 0; si < selectedCount; si++) {
+            var selectedClip = selectedItems[si];
+            if (!selectedClip && selectedItems.getItemAt) selectedClip = selectedItems.getItemAt(si);
+            if (selectedClip && selectedClip.start !== undefined) selected.push(selectedClip);
+          }
+          selected.sort(function (x, y) { return Number(y.start.ticks) - Number(x.start.ticks); });
+          var doneKeys = {}, removedSelected = 0, selectedErrors = [], selRemoved = [];
+          for (var sk = 0; sk < selected.length; sk++) {
+            var sc = selected[sk];
+            if (doneKeys[__key(sc)]) continue;
+            var scGroup = __withLinked(sc);
+            for (var sg = 0; sg < scGroup.length; sg++) doneKeys[__key(scGroup[sg])] = true;
+            var scResult = __removeGroup(selectionSeq, sc, rippleSelected);
+            if (scResult.error) { selectedErrors.push({ clip: String(sc.name), error: scResult.error }); continue; }
+            if (scResult.problems.length) selectedErrors.push({ clip: String(sc.name), error: scResult.problems.join("; ") });
+            removedSelected += scResult.removed.length;
+            selRemoved = selRemoved.concat(scResult.removed);
           }
           if (!removedSelected) return fail("No selected clips were removed", { selectedCount: selectedCount, errors: selectedErrors });
           var selAfterTotal = selectionTotalClips();
-          // .remove() returns void and can no-op silently, so gate on the timeline
-          // actually losing clips rather than on the loop counter alone.
-          if (selAfterTotal >= selBeforeTotal) return fail("remove() ran but the timeline clip count did not drop.", { selectedCount: selectedCount, beforeCount: selBeforeTotal, afterCount: selAfterTotal, errors: selectedErrors });
-          return ok({ removed: removedSelected, selectedCount: selectedCount, ripple: rippleSelected, beforeCount: selBeforeTotal, afterCount: selAfterTotal, verified: true, errors: selectedErrors });
+          if (selectedErrors.length) return fail("PARTIALLY APPLIED: " + removedSelected + " item(s) removed; see details.errors. Undo to restore.", { removed: selRemoved, errors: selectedErrors });
+          return ok({ removed: removedSelected, items: selRemoved, selectedCount: selectedCount, ripple: rippleSelected, beforeCount: selBeforeTotal, afterCount: selAfterTotal, verified: true });
 
         case "link_selection":
         case "unlink_selection":

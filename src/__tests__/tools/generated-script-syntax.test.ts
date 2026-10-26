@@ -248,14 +248,15 @@ describe("generated ExtendScript is syntactically valid", () => {
       expect(detach).toContain("did not detach the proxy");
     });
 
-    it("ripple_delete verifies each removed item; remove_selected_clips gates on a dropped clip count", async () => {
+    it("ripple_delete and the selection removers go through __removeGroup", async () => {
       // TrackItem.remove() never ripples and never takes linked items on 26.5.2, so ripple_delete
       // goes through __removeGroup, which looks every linked item up again after removing it.
       const ripple = await capture("ripple_delete");
       expect(ripple).toContain("__removeGroup(rippleClip.sequence, rippleClip.clip, true)");
       expect(ripple).toContain("is still on the timeline");
       const removeSel = await capture("remove_selected_clips");
-      expect(removeSel).toContain("timeline clip count did not drop");
+      expect(removeSel).toContain("__removeGroup(selectionSeq, sc, rippleSelected)");
+      expect(removeSel).toContain("No selected clips were removed");
     });
 
     it("set_clip_speed_qe / set_clip_start_time / set_zero_point verify the value", async () => {
