@@ -113,8 +113,13 @@ describe('QE targeting, second pass', () => {
       // name to explain what replaced it, and a naive count picks those up.
       const code = script.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
       const total = (code.match(/qe\.project\.getActiveSequence\(\)/g) || []).length;
-      expect(total).toBe(1);
+      const inHelper = (inFallback.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n').match(/qe\.project\.getActiveSequence\(\)/g) || []).length;
+      // Both reads live in the helper and both are guid-checked: the plain fallback, and the one
+      // after openSequence() makes a hidden sequence active.
+      expect(total).toBe(2);
+      expect(inHelper).toBe(2);
       expect(inFallback).toContain('String(activeCandidate.guid) === String(seq.sequenceID)');
+      expect(inFallback).toContain('String(openedCandidate.guid) === String(seq.sequenceID)');
     });
   });
 

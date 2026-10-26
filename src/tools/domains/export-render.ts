@@ -5,7 +5,7 @@
  * had grown to 19k lines; the method bodies are unchanged.
  */
 import { PlaybackTools } from './playback.js';
-import { spawn, execSync } from 'child_process';
+import { spawn } from 'child_process';
 // Synchronous fs/path/os bindings for the Node-side (non-ExtendScript) tools.
 // Kept separate from the `promises as fs` import above, which is the async API.
 import * as fsSync from 'node:fs';
@@ -16,6 +16,7 @@ import { homedir, platform, tmpdir } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, parse } from 'node:path';
 import { summarizeBatch } from './shared.js';
 import type { AddToRenderQueueArgs, CaptureTapReport, EncoderPresetDiscovery, EncoderPresetEntry, ExportSequenceArgs } from './shared.js';
+import { runFf } from '../ff-exec.js';
 
 export class ExportRenderTools extends PlaybackTools {
   protected async validateProjectForExport(sequenceId?: string, outputPath?: string, presetPath?: string, requireNonEmptyTimeline = true, checkGaps = true): Promise<any> {
@@ -290,7 +291,7 @@ export class ExportRenderTools extends PlaybackTools {
     const script = `
       try {
         app.enableQE();
-        var seq = ${sequenceId ? `(function(){ var seqs=app.project.sequences; for(var i=0;i<seqs.numSequences;i++){ if(seqs[i].sequenceID===${JSON.stringify(sequenceId)}) return qe.project.getSequenceAt(i); } return qe.project.getActiveSequence(); })()` : 'qe.project.getActiveSequence()'};
+        var seq = ${this.buildQSeqResolver(sequenceId)};
         if (!seq) return JSON.stringify({ success: false, error: 'Sequence not found' });
         function timesToArr(arr) { var out=[]; for(var i=0;i<arr.length;i++) out.push({ticks:String(arr[i].ticks),secs:arr[i].secs,frames:arr[i].frames}); return out; }
         var green = timesToArr(seq.getGreenBarTimes());
@@ -315,7 +316,7 @@ export class ExportRenderTools extends PlaybackTools {
     const script = `
       try {
         app.enableQE();
-        var seq = ${sequenceId ? `(function(){ var seqs=app.project.sequences; for(var i=0;i<seqs.numSequences;i++){ if(seqs[i].sequenceID===${JSON.stringify(sequenceId)}) return qe.project.getSequenceAt(i); } return qe.project.getActiveSequence(); })()` : 'qe.project.getActiveSequence()'};
+        var seq = ${this.buildQSeqResolver(sequenceId)};
         if (!seq) return JSON.stringify({ success: false, error: 'Sequence not found' });
         var redBefore = seq.getRedBarTimes().length;
         var yellowBefore = seq.getYellowBarTimes().length;
@@ -326,10 +327,10 @@ export class ExportRenderTools extends PlaybackTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async exportInOutRange(outputPath: string, presetPath: string, _sequenceId?: string): Promise<any> {
+  protected async exportInOutRange(outputPath: string, presetPath: string, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(sequenceId)};
         if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
         // workAreaType 1 = work area / in-out range
         var result = seq.exportAsMediaDirect(${JSON.stringify(outputPath)}, ${JSON.stringify(presetPath)}, 1);
@@ -375,7 +376,7 @@ export class ExportRenderTools extends PlaybackTools {
     return { success: false, error: 'create_custom_export_preset requires the AME bridge (app.encoder). Use execute_extendscript with: var exp = app.encoder.getExporters(); then find your format, call getPresets(), setExportParamValue(k,v) for each param, writeToFile(path).' };
   }
 
-  protected async exportSocialPreset(outputPath: string, preset: string, _sequenceId?: string): Promise<any> {
+  protected async exportSocialPreset(outputPath: string, preset: string, sequenceId?: string): Promise<any> {
     const presetSettings: Record<string, Record<string, string>> = {
       youtube_1080p: { Width: '1920', Height: '1080', TargetBitrate: '8', MaxBitrate: '10', FrameRate: '29.97' },
       youtube_4k: { Width: '3840', Height: '2160', TargetBitrate: '40', MaxBitrate: '50', FrameRate: '29.97' },
@@ -398,14 +399,14 @@ export class ExportRenderTools extends PlaybackTools {
         ${paramStr}
         var tmpPath = '/tmp/premiere-mcp-bridge/generated-assets/social_preset.epr';
         preset.writeToFile(tmpPath);
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(sequenceId)};
         var r = app.encoder.exportWithPresetObject(${JSON.stringify(outputPath)}, preset, seq, false);
         return JSON.stringify({success:true,preset:${JSON.stringify(preset)},settings:${JSON.stringify(settings)},outputPath:${JSON.stringify(outputPath)},exportResult:String(r)});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
 
-  protected async exportAudioOnly(outputPath: string, format: string, _sequenceId?: string): Promise<any> {
+  protected async exportAudioOnly(outputPath: string, format: string, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var exporters = app.encoder.getExporters();
@@ -414,7 +415,7 @@ export class ExportRenderTools extends PlaybackTools {
         for (var i=0;i<exporters.length;i++) { if (String(exporters[i].name)===targetName){target=exporters[i];break;} }
         if (!target) return JSON.stringify({success:false,error:'Exporter not found: '+targetName});
         var preset = target.getPresets()[0];
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(sequenceId)};
         var r = app.encoder.exportWithPresetObject(${JSON.stringify(outputPath)}, preset, seq, false);
         return JSON.stringify({success:true,outputPath:${JSON.stringify(outputPath)},format:${JSON.stringify(format)},exportResult:String(r)});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
@@ -425,10 +426,7 @@ export class ExportRenderTools extends PlaybackTools {
     const fs = fsSync;
     try {
       if (!fs.existsSync(filePath)) return { success: false, error: 'File not found: ' + filePath };
-      const probe = execSync(
-        `ffprobe -v error -select_streams v:0 -of json -show_streams ${JSON.stringify(filePath)} 2>&1`,
-        { encoding: 'utf8', timeout: 10000 }
-      );
+      const probe = runFf('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-of', 'json', '-show_streams', filePath], { timeoutMs: 10000 });
       const data = JSON.parse(probe);
       const stream = data.streams?.[0] ?? {};
       const durationSecs = parseFloat(stream.duration ?? '0');
@@ -455,7 +453,7 @@ export class ExportRenderTools extends PlaybackTools {
   protected async exportSequenceAsProject(outputPath: string, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = ${sequenceId ? `(function(){var ss=app.project.sequences;for(var i=0;i<ss.numSequences;i++){if(ss[i].sequenceID===${JSON.stringify(sequenceId)})return ss[i];}return app.project.activeSequence;})()` : 'app.project.activeSequence'};
+        var seq = ${this.buildSeqRes(sequenceId)};
         if (!seq) return JSON.stringify({success:false,error:'No sequence'});
         var result = seq.exportAsProject(${JSON.stringify(outputPath)});
         var exists = (new File(${JSON.stringify(outputPath)})).exists;
@@ -486,11 +484,11 @@ export class ExportRenderTools extends PlaybackTools {
     `);
   }
 
-  protected async setRenderPreviewQuality(useMaxQuality?: boolean, presetPath?: string, width?: number, height?: number, _sequenceId?: string): Promise<any> {
+  protected async setRenderPreviewQuality(useMaxQuality?: boolean, presetPath?: string, width?: number, height?: number, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var qseq = qe.project.getActiveSequence();
+        var qseq = ${this.buildQSeqResolver(sequenceId)};
         ${useMaxQuality !== undefined ? `qseq.setUseMaxRenderQuality(${useMaxQuality}); qseq.setUseMaxBitDepth(${useMaxQuality});` : ''}
         ${presetPath ? `qseq.setPreviewPresetPath(${JSON.stringify(presetPath)});` : ''}
         ${width && height ? `qseq.setPreviewFrameSize(${width}, ${height});` : ''}
@@ -1106,16 +1104,13 @@ export class ExportRenderTools extends PlaybackTools {
         var sequence = __findSequence(${JSON.stringify(sequenceId)});
         if (!sequence) return JSON.stringify({ success: false, error: "Sequence not found by id: " + ${JSON.stringify(sequenceId)} });
 
-        if (sequence.openInTimeline) {
-          try { sequence.openInTimeline(); } catch (e0) {}
-        }
 
         // Resolve the QE handle for the sequence the caller named. Reaching for
         // qe.project.getActiveSequence() here exported whatever happened to be
         // open in the timeline instead: asking for a non-active sequence
         // returned success, echoed back the requested sequenceId, and wrote a
         // frame of the active sequence's content.
-        var qeSequence = __qeSequenceFor(sequence);
+        var qeSequence = __qeSequenceOpening(sequence);
         if (!qeSequence) {
           return JSON.stringify({
             success: false,
@@ -1232,13 +1227,10 @@ export class ExportRenderTools extends PlaybackTools {
           return writtenPath(false) !== null;
         }
 
-        var exported =
-          tryExport(timeNumber, exportStem) ||
-          tryExport(exportStem, timeNumber) ||
-          tryExport(timeString, exportStem) ||
-          tryExport(exportStem, timeString) ||
-          tryExport(timeTicks, exportStem) ||
-          tryExport(exportStem, timeTicks);
+        // Timecode first and only: seconds and ticks strings are accepted and silently export
+        // frame 0 (see __qeTimecode), so they must never be tried as fallbacks.
+        var exportTimecode = __qeTimecode(sequence, timeNumber);
+        var exported = tryExport(exportTimecode, exportStem);
 
         var actualPath = writtenPath(true);
         if (!exported || !actualPath) {
@@ -1251,6 +1243,7 @@ export class ExportRenderTools extends PlaybackTools {
         return JSON.stringify({
           success: true,
           message: "Frame exported successfully",
+          timecode: exportTimecode,
           sequenceId: ${JSON.stringify(sequenceId)},
           sequenceName: sequence.name,
           time: ${time},
@@ -1269,8 +1262,8 @@ export class ExportRenderTools extends PlaybackTools {
   protected exportGif(mediaPath: string, startSecs: number, durationSecs: number, fps: number, width: number, outputPath: string): any {
     const palette = outputPath.replace(/\.gif$/i, '_palette.png');
     try {
-      execSync(`ffmpeg -y -ss ${startSecs} -t ${durationSecs} -i "${mediaPath}" -vf "fps=${fps},scale=${width}:-1:flags=lanczos,palettegen" "${palette}"`, { timeout: 30000 });
-      execSync(`ffmpeg -y -ss ${startSecs} -t ${durationSecs} -i "${mediaPath}" -i "${palette}" -filter_complex "fps=${fps},scale=${width}:-1:flags=lanczos[x];[x][1:v]paletteuse" "${outputPath}"`, { timeout: 30000 });
+      runFf('ffmpeg', ['-y', '-ss', String(startSecs), '-t', String(durationSecs), '-i', mediaPath, '-vf', `fps=${Number(fps)},scale=${Number(width)}:-1:flags=lanczos,palettegen`, '-update', '1', palette], { timeoutMs: 30000 });
+      runFf('ffmpeg', ['-y', '-ss', String(startSecs), '-t', String(durationSecs), '-i', mediaPath, '-i', palette, '-filter_complex', `fps=${Number(fps)},scale=${Number(width)}:-1:flags=lanczos[x];[x][1:v]paletteuse`, outputPath], { timeoutMs: 30000 });
       const fs = fsSync;
       try { fs.unlinkSync(palette); } catch {}
       return { success: fs.existsSync(outputPath), outputPath, fps, width };
@@ -1282,7 +1275,7 @@ export class ExportRenderTools extends PlaybackTools {
     try {
       if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
       const prefix = path.join(outputDir, 'still_%04d.jpg');
-      execSync(`ffmpeg -y -i "${mediaPath}" -vf "fps=1/10" "${prefix}"`, { timeout: 60000 });
+      runFf('ffmpeg', ['-y', '-i', mediaPath, '-vf', 'fps=1/10', prefix], { timeoutMs: 60000 });
       const files = fs.readdirSync(outputDir).filter((f: string) => f.match(/still_\d+\.jpg/)).map((f: string) => path.join(outputDir, f));
       return { success: true, count: files.length, paths: files };
     } catch (e: any) { return { success: false, error: e.message }; }
@@ -1301,24 +1294,30 @@ export class ExportRenderTools extends PlaybackTools {
    * frame, without effects, transitions, or anything from tracks above. For a composited frame
    * use capture_program_output, which is verified working.
    */
-  protected async exportThumbnail(outputPath: string, _seqId?: string): Promise<any> {
+  protected async exportThumbnail(outputPath: string, seqId?: string): Promise<any> {
     const qe: any = await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var qseq=qe.project.getActiveSequence();
-        var tc='00:00:00:00';
+        var qseq=${this.buildQSeqResolver(seqId)};
         var playheadSecs=0;
-        try{
-          var s=qseq.CTI.secs; playheadSecs=s;
-          var h=Math.floor(s/3600),m=Math.floor((s%3600)/60),sec=Math.floor(s%60),fr=Math.round((s%1)*24);
-          tc=(h<10?'0':'')+h+':'+(m<10?'0':'')+m+':'+(sec<10?'0':'')+sec+':'+(fr<10?'0':'')+fr;
-        }catch(etc){}
-        var result=qseq.exportFrameJPEG(${JSON.stringify(outputPath)},tc);
-        var exists=(new File(${JSON.stringify(outputPath)})).exists;
+        var domSeq=${this.buildSeqRes(seqId)};
+        try{ playheadSecs=Number(domSeq.getPlayerPosition().seconds); }catch(etc){ try{ playheadSecs=Number(qseq.CTI.secs); }catch(etc2){} }
+        // QE takes (timecode, path-without-extension) and appends ".jpg" itself. This used to
+        // pass (path, timecode) with a timecode built at a hardcoded 24 fps, which wrote nothing.
+        var tc=__qeTimecode(domSeq, playheadSecs);
+        var outPath=${JSON.stringify(outputPath)};
+        var stem=outPath.replace(/\\.(jpe?g)$/i,'');
+        var target=new File(stem+'.jpg');
+        var stampBefore=target.exists&&target.modified?target.modified.getTime():null;
+        var result=null;
+        try{ result=qseq.exportFrameJPEG(tc,stem); }catch(eq){ result='ERR '+eq; }
+        target=new File(stem+'.jpg');
+        var exists=target.exists&&(stampBefore===null||(target.modified&&target.modified.getTime()!==stampBefore));
+        if(exists&&stem+'.jpg'!==outPath){ try{ target.copy(outPath); }catch(ecp){} }
         // Source media under the playhead, so the Node side can fall back without a second call.
         var mediaPath=null, sourceSecs=null;
         try{
-          var dom=app.project.activeSequence;
+          var dom=${this.buildSeqRes(seqId)};
           var vt=dom.videoTracks[0];
           for(var i=0;i<vt.clips.numItems;i++){
             var c=vt.clips[i];
@@ -1365,12 +1364,9 @@ export class ExportRenderTools extends PlaybackTools {
   /** Single-frame still via ffmpeg. Returns a result object rather than throwing. */
   private async runFfmpegStill(mediaPath: string, atSeconds: number, outputPath: string): Promise<{ ok: boolean; error?: string }> {
     try {
-      execSync(
-        `ffmpeg -y -v error -ss ${Math.max(0, atSeconds).toFixed(3)} -i ${JSON.stringify(mediaPath)} -frames:v 1 ${JSON.stringify(outputPath)}`,
-        { stdio: 'pipe', timeout: 60_000 },
-      );
+      runFf('ffmpeg', ['-y', '-v', 'error', '-ss', Math.max(0, atSeconds).toFixed(3), '-i', mediaPath, '-frames:v', '1', '-update', '1', outputPath], { timeoutMs: 60_000 });
     } catch (e: any) {
-      return { ok: false, error: String(e?.stderr?.toString?.() || e?.message || e).slice(0, 300) };
+      return { ok: false, error: String(e?.message || e).slice(0, 300) };
     }
     if (!fsSync.existsSync(outputPath) || fsSync.statSync(outputPath).size === 0) {
       return { ok: false, error: 'ffmpeg reported success but wrote no usable file.' };
@@ -1400,11 +1396,11 @@ export class ExportRenderTools extends PlaybackTools {
     return { success: true, count: results.length, presets: results };
   }
 
-  protected async getExportProgress(_seqId?: string): Promise<any> {
+  protected async getExportProgress(seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq=qe.project.getActiveSequence();
+        var seq=${this.buildQSeqResolver(seqId)};
         var complete=seq.getExportComplete();
         return JSON.stringify({success:true,exportComplete:String(complete),isComplete:complete===true});
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
@@ -1486,11 +1482,11 @@ export class ExportRenderTools extends PlaybackTools {
     `);
   }
 
-  protected async setPreviewQuality(maxRenderQuality?: boolean, maxBitDepth?: boolean, previewWidth?: number, previewHeight?: number, _seqId?: string): Promise<any> {
+  protected async setPreviewQuality(maxRenderQuality?: boolean, maxBitDepth?: boolean, previewWidth?: number, previewHeight?: number, seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq=qe.project.getActiveSequence();
+        var seq=${this.buildQSeqResolver(seqId)};
         if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
         // Three fire-and-forget QE calls with no readback and no verified field at all. QE
         // exposes no getters for these three, so the honest report is "dispatched, and here is
@@ -1627,7 +1623,7 @@ export class ExportRenderTools extends PlaybackTools {
       for (const f of (mediaInfo.files || [])) {
         if (!fs.existsSync(f.path)) { manifest.push({ ...f, status: 'missing' }); continue; }
         const dest = path.join(outputDir, path.basename(f.path));
-        if (!fs.existsSync(dest)) execSync(`cp "${f.path}" "${dest}"`, { timeout: 30000 });
+        if (!fs.existsSync(dest)) fs.copyFileSync(f.path, dest, fs.constants.COPYFILE_EXCL);
         const stat = fs.statSync(dest);
         manifest.push({ ...f, dest, size: stat.size, status: 'copied' });
       }
@@ -1673,26 +1669,31 @@ export class ExportRenderTools extends PlaybackTools {
   }
 
   protected async exportOmfWithSettings(outputPath: string): Promise<any> {
+    // exportOMF(sequence, path, title, sampleRate, bitsPerSample, encapsulated, audioFileFormat,
+    // trimAudioFiles, handleFrames, includePan). The old call passed strings and booleans where
+    // numbers belong, Premiere rejected it, and a zero-argument fallback ran that cannot take a
+    // path. Measured on 26.5.2: this typed form writes the file (returns 1). No fallback.
     return await this.exportInterchange('OMF', outputPath, `
       try {
-        app.project.exportOMF(app.project.activeSequence, ${JSON.stringify(outputPath)}, '', '', '', '', false, false, 0, false);
+        var seq = app.project.activeSequence;
+        if (!seq) return JSON.stringify({called:false,error:'No active sequence'});
+        app.project.exportOMF(seq, ${JSON.stringify(outputPath)}, String(seq.name), 48000, 16, 1, 0, 0, 0, 0);
         return JSON.stringify({called:true,fallbackUsed:false});
-      } catch(e) {
-        try { app.project.exportOMF(); return JSON.stringify({called:true,fallbackUsed:true,firstError:e.toString()}); }
-        catch(e2) { return JSON.stringify({called:false,error:e2.toString(),firstError:e.toString()}); }
-      }
+      } catch(e) { return JSON.stringify({called:false,error:e.toString()}); }
     `);
   }
 
   protected async exportAafWithSettings(outputPath: string): Promise<any> {
+    // Same typed argument list export_aaf uses (seq, path, mixDownVideo, explodeToMono, sampleRate,
+    // bitsPerSample, embedAudio, audioFileFormat, trimSources, handleFrames). The old string/boolean
+    // list was rejected and fell back to a zero-argument call that cannot take a path.
     return await this.exportInterchange('AAF', outputPath, `
       try {
-        app.project.exportAAF(app.project.activeSequence, ${JSON.stringify(outputPath)}, '', '', false, false, 0, false, false, false);
+        var seq = app.project.activeSequence;
+        if (!seq) return JSON.stringify({called:false,error:'No active sequence'});
+        app.project.exportAAF(seq, ${JSON.stringify(outputPath)}, 1, 0, 48000, 16, 0, 0, 1, 0);
         return JSON.stringify({called:true,fallbackUsed:false});
-      } catch(e) {
-        try { app.project.exportAAF(); return JSON.stringify({called:true,fallbackUsed:true,firstError:e.toString()}); }
-        catch(e2) { return JSON.stringify({called:false,error:e2.toString(),firstError:e.toString()}); }
-      }
+      } catch(e) { return JSON.stringify({called:false,error:e.toString()}); }
     `);
   }
 
@@ -1752,7 +1753,7 @@ export class ExportRenderTools extends PlaybackTools {
     const fs = fsSync;
     if (!fs.existsSync(filePath)) return { success: false, error: 'File does not exist: ' + filePath };
     try {
-      const out = execSync(`ffprobe -v quiet -print_format json -show_streams -show_format "${filePath}"`, { timeout: 15000 }).toString();
+      const out = runFf('ffprobe', ['-v', 'quiet', '-print_format', 'json', '-show_streams', '-show_format', filePath], { timeoutMs: 15000 });
       const info = JSON.parse(out);
       const video = (info.streams || []).find((s: any) => s.codec_type === 'video');
       const dur = parseFloat(info.format?.duration ?? '0');

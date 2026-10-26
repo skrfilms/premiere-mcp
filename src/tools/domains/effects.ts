@@ -5,18 +5,18 @@
  * had grown to 19k lines; the method bodies are unchanged.
  */
 import { AssemblyTools } from './assembly.js';
-import { execSync } from 'child_process';
 // Synchronous fs/path/os bindings for the Node-side (non-ExtendScript) tools.
 // Kept separate from the `promises as fs` import above, which is the async API.
 import * as fsSync from 'node:fs';
 import * as pathSync from 'node:path';
+import { runFf } from '../ff-exec.js';
 
 export class EffectsTools extends AssemblyTools {
   protected async removeEffectAtIndex(trackIndex: number, clipIndex: number, componentIndex: number, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       app.enableQE(); ${this.qeClipScript(trackIndex, clipIndex, sequenceId)}
       if (!__clip) return JSON.stringify({success:false,error:'Clip not found'});
-      var domSeq = app.project.activeSequence;
+      var domSeq = ${this.buildSeqRes(sequenceId)};
       var domClip = domSeq.videoTracks[${trackIndex}].clips[${clipIndex}];
       var before = domClip.components.numItems;
       var comp = __clip.getComponentAt(${componentIndex});
@@ -36,14 +36,14 @@ export class EffectsTools extends AssemblyTools {
     `);
   }
 
-  protected async reorderEffects(trackIndex: number, clipIndex: number, newOrder: string[], _sequenceId?: string): Promise<any> {
+  protected async reorderEffects(trackIndex: number, clipIndex: number, newOrder: string[], sequenceId?: string): Promise<any> {
     const orderJson = JSON.stringify(newOrder);
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = qe.project.getActiveSequence();
-        var qeClip = seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
-        var domSeq = app.project.activeSequence;
+        var seq = ${this.buildQSeqResolver(sequenceId)};
+        var qeClip = __qeClipByIndex(seq, 'video', ${trackIndex}, ${clipIndex});
+        var domSeq = ${this.buildSeqRes(sequenceId)};
         var domClip = domSeq.videoTracks[${trackIndex}].clips[${clipIndex}];
         var newOrder = ${orderJson};
         // Serialize all component params
@@ -91,7 +91,7 @@ export class EffectsTools extends AssemblyTools {
   protected async effectStackReport(trackIndex: number, clipIndex: number, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = ${this.buildSeqScript(sequenceId)};
+        var seq = ${this.buildSeqRes(sequenceId)};
         var clip = seq.videoTracks[${trackIndex}].clips[${clipIndex}];
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         var effects = [];
@@ -114,7 +114,7 @@ export class EffectsTools extends AssemblyTools {
   protected async enableDisableEffect(trackIndex: number, clipIndex: number, effectName: string, enabled: boolean, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = ${this.buildSeqScript(sequenceId)};
+        var seq = ${this.buildSeqRes(sequenceId)};
         var clip = seq.videoTracks[${trackIndex}].clips[${clipIndex}];
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         var pat = ${JSON.stringify(effectName.toLowerCase())};
@@ -165,14 +165,14 @@ export class EffectsTools extends AssemblyTools {
   }
 
   // Batch H: Effects shortcuts
-  protected async blurClip(trackIndex: number, clipIndex: number, amount: number, _sequenceId?: string): Promise<any> {
+  protected async blurClip(trackIndex: number, clipIndex: number, amount: number, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = qe.project.getActiveSequence();
-        var clip = seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        var seq = ${this.buildQSeqResolver(sequenceId)};
+        var clip = __qeClipByIndex(seq, 'video', ${trackIndex}, ${clipIndex});
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
-        var domClip = app.project.activeSequence.videoTracks[${trackIndex}].clips[${clipIndex}];
+        var domClip = ${this.buildSeqRes(sequenceId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
         var before = domClip.components.numItems;
         var eff = qe.project.getVideoEffectByName('Gaussian Blur');
         if (!eff) return JSON.stringify({success:false,error:'Gaussian Blur not found'});
@@ -206,14 +206,14 @@ export class EffectsTools extends AssemblyTools {
     `);
   }
 
-  protected async sharpenClip(trackIndex: number, clipIndex: number, amount: number, _sequenceId?: string): Promise<any> {
+  protected async sharpenClip(trackIndex: number, clipIndex: number, amount: number, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = qe.project.getActiveSequence();
-        var clip = seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        var seq = ${this.buildQSeqResolver(sequenceId)};
+        var clip = __qeClipByIndex(seq, 'video', ${trackIndex}, ${clipIndex});
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
-        var domClip = app.project.activeSequence.videoTracks[${trackIndex}].clips[${clipIndex}];
+        var domClip = ${this.buildSeqRes(sequenceId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
         var before = domClip.components.numItems;
         var eff = qe.project.getVideoEffectByName('Unsharp Mask');
         if (!eff) return JSON.stringify({success:false,error:'Unsharp Mask not found'});
@@ -234,7 +234,7 @@ export class EffectsTools extends AssemblyTools {
   protected async enableDisableAllEffects(trackIndex: number, clipIndex: number, enabled: boolean, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = ${this.buildSeqScript(sequenceId)};
+        var seq = ${this.buildSeqRes(sequenceId)};
         var clip = seq.videoTracks[${trackIndex}].clips[${clipIndex}];
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         var skip = ['Motion','Opacity','Time Remapping'];
@@ -279,14 +279,14 @@ export class EffectsTools extends AssemblyTools {
     `);
   }
 
-  protected async removeAllEffectsQe(trackIndex: number, clipIndex: number, _sequenceId?: string): Promise<any> {
+  protected async removeAllEffectsQe(trackIndex: number, clipIndex: number, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = qe.project.getActiveSequence();
-        var clip = seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        var seq = ${this.buildQSeqResolver(sequenceId)};
+        var clip = __qeClipByIndex(seq, 'video', ${trackIndex}, ${clipIndex});
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
-        var domClip = app.project.activeSequence.videoTracks[${trackIndex}].clips[${clipIndex}];
+        var domClip = ${this.buildSeqRes(sequenceId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
         var before = domClip.components.numItems;
         var names = [];
         for (var ni=0; ni<domClip.components.numItems; ni++) names.push(String(domClip.components[ni].displayName));
@@ -304,13 +304,13 @@ export class EffectsTools extends AssemblyTools {
     `);
   }
 
-  protected async listEffectsOnClipQe(trackIndex: number, clipIndex: number, _sequenceId?: string): Promise<any> {
+  protected async listEffectsOnClipQe(trackIndex: number, clipIndex: number, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = qe.project.getActiveSequence();
-        var clip = seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
-        var domClip = app.project.activeSequence.videoTracks[${trackIndex}].clips[${clipIndex}];
+        var seq = ${this.buildQSeqResolver(sequenceId)};
+        var clip = __qeClipByIndex(seq, 'video', ${trackIndex}, ${clipIndex});
+        var domClip = ${this.buildSeqRes(sequenceId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
         if (!clip || !domClip) return JSON.stringify({success:false,error:'Clip not found'});
         var effects = [];
         for (var i=0; i<domClip.components.numItems; i++) {
@@ -508,7 +508,7 @@ export class EffectsTools extends AssemblyTools {
         // sequence in the project, so a clip can be resolved out of one sequence and
         // then, through getActiveSequence(), have the effect applied to whichever
         // clip sits at the same track and index in a different one.
-        var qeSeq = __qeSequenceFor(info.sequence);
+        var qeSeq = __qeSequenceOpening(info.sequence);
         if (!qeSeq) return JSON.stringify({ success: false, error: "Could not address sequence '" + info.sequenceName + "' through the QE API." });
         var qeTrack, effect;
         if (info.trackType === 'video') {
@@ -766,12 +766,30 @@ export class EffectsTools extends AssemblyTools {
         var info1 = __findClip(${JSON.stringify(clipId1)});
         if (!info1) return JSON.stringify({ success: false, error: "First clip not found" });
         var info2 = __findClip(${JSON.stringify(clipId2)});
-        var targetInfo = info2 || info1;
+        // QE addTransition(..., atStart, ...) attaches to ONE clip: true = its start, false = its end
+        // (measured on 26.5.2). This used to put the transition on the END of clip 2, so a dissolve
+        // "between A and B" landed at B's far end. Between two clips it now goes on the end of
+        // whichever clip is outgoing at their shared cut; clips that do not abut are refused.
+        var targetInfo = info1, atStart = true, cutSecs = null;
+        if (info2) {
+          var e1 = Number(info1.clip.end.seconds), s1 = Number(info1.clip.start.seconds);
+          var e2 = Number(info2.clip.end.seconds), s2 = Number(info2.clip.start.seconds);
+          var halfFrame = 0.5 * Number(info1.sequence.timebase || 10584000000) / 254016000000;
+          if (info1.sequence.sequenceID !== info2.sequence.sequenceID || info1.trackType !== info2.trackType || info1.trackIndex !== info2.trackIndex) {
+            return JSON.stringify({ success: false, error: "The two clips are not on the same track of the same sequence, so there is no cut between them." });
+          }
+          if (Math.abs(s2 - e1) <= halfFrame) { targetInfo = info1; cutSecs = e1; }
+          else if (Math.abs(s1 - e2) <= halfFrame) { targetInfo = info2; cutSecs = e2; }
+          else return JSON.stringify({ success: false, error: "The clips do not touch (" + s1 + "-" + e1 + "s and " + s2 + "-" + e2 + "s), so there is no cut to put a transition on. Close the gap first." });
+          atStart = false;
+        } else {
+          cutSecs = Number(info1.clip.start.seconds);
+        }
         // Addressed by id, not by whatever is on screen. __findClip() searches every
         // sequence in the project, so a clip can be resolved out of one sequence and
         // then, through getActiveSequence(), have the effect applied to whichever
         // clip sits at the same track and index in a different one.
-        var qeSeq = __qeSequenceFor(targetInfo.sequence);
+        var qeSeq = __qeSequenceOpening(targetInfo.sequence);
         if (!qeSeq) return JSON.stringify({ success: false, error: "Could not address sequence '" + targetInfo.sequenceName + "' through the QE API." });
         var qeTrack = qeSeq.getVideoTrackAt(targetInfo.trackIndex);
         var qeClip = __findQeClipByDomClip(qeTrack, targetInfo.clip);
@@ -786,11 +804,13 @@ export class EffectsTools extends AssemblyTools {
         ${this.transitionVerificationScript()}
         var before = __readQeTransitionState(qeClip);
         var beforeXml = __transitionXmlCount(seq);
-        qeClip.addTransition(transition, info2 ? false : true, String(frames), "0", 0.5, false, true);
+        var atCutBefore = __qeTransitionsAt(qeTrack, cutSecs).length;
+        qeClip.addTransition(transition, atStart, String(frames), "0", 0.5, true, true);
         var afterClip = __findQeClipByDomClip(qeTrack, targetInfo.clip);
         var after = __readQeTransitionState(afterClip);
         var afterXml = __transitionXmlCount(seq);
-        if (!__transitionWasVerified(before, after) && !__transitionWasVerifiedByXml(beforeXml, afterXml)) {
+        var atCut = __qeTransitionsAt(qeTrack, cutSecs);
+        if (atCut.length <= atCutBefore) {
           return JSON.stringify({
             success: false,
             error: "Transition call completed but Premiere Pro did not expose a verified transition change",
@@ -803,7 +823,7 @@ export class EffectsTools extends AssemblyTools {
             afterXml: afterXml
           });
         }
-        return JSON.stringify({ success: true, message: "Transition added and verified", transitionName: ${JSON.stringify(transitionName)}, duration: ${duration}, frames: frames, before: before, after: after, beforeXml: beforeXml, afterXml: afterXml });
+        return JSON.stringify({ success: true, verified: true, verifiedBy: "QE track transition list at the cut", message: "Transition added and verified", transitionName: ${JSON.stringify(transitionName)}, duration: ${duration}, frames: frames, cutSecs: cutSecs, transitions: atCut });
       } catch (e) {
         return JSON.stringify({ success: false, error: "QE DOM error: " + e.toString() });
       }
@@ -823,7 +843,7 @@ export class EffectsTools extends AssemblyTools {
         // sequence in the project, so a clip can be resolved out of one sequence and
         // then, through getActiveSequence(), have the effect applied to whichever
         // clip sits at the same track and index in a different one.
-        var qeSeq = __qeSequenceFor(info.sequence);
+        var qeSeq = __qeSequenceOpening(info.sequence);
         if (!qeSeq) return JSON.stringify({ success: false, error: "Could not address sequence '" + info.sequenceName + "' through the QE API." });
         var qeTrack = info.trackType === 'video' ? qeSeq.getVideoTrackAt(info.trackIndex) : qeSeq.getAudioTrackAt(info.trackIndex);
         var qeClip = __findQeClipByDomClip(qeTrack, info.clip);
@@ -840,7 +860,15 @@ export class EffectsTools extends AssemblyTools {
         ${this.transitionVerificationScript()}
         var before = __readQeTransitionState(qeClip);
         var beforeXml = __transitionXmlCount(seq);
-        qeClip.addTransition(transition, ${atEnd}, String(frames), "0", 0.5, true, true);
+        var edgeSecs = ${atEnd ? 'Number(info.clip.end.seconds)' : 'Number(info.clip.start.seconds)'};
+        var atEdgeBefore = __qeTransitionsAt(qeTrack, edgeSecs).length;
+        // The second argument means AT START when true (measured on 26.5.2); passing atEnd put an
+        // 'end' transition on the clip's start and vice versa.
+        qeClip.addTransition(transition, ${!atEnd}, String(frames), "0", 0.5, true, true);
+        var atEdge = __qeTransitionsAt(qeTrack, edgeSecs);
+        if (atEdge.length > atEdgeBefore) {
+          return JSON.stringify({ success: true, status: "verified", verified: true, verifiedBy: "QE track transition list at the clip " + ${JSON.stringify(position)}, transitionName: ${JSON.stringify(transitionName)}, position: ${JSON.stringify(position)}, edgeSecs: edgeSecs, frames: frames, transitions: atEdge });
+        }
         var afterClip = __findQeClipByDomClip(qeTrack, info.clip);
         var after = __readQeTransitionState(afterClip);
         var afterXml = __transitionXmlCount(seq);
@@ -920,7 +948,7 @@ export class EffectsTools extends AssemblyTools {
         // sequence in the project, so a clip can be resolved out of one sequence and
         // then, through getActiveSequence(), have the effect applied to whichever
         // clip sits at the same track and index in a different one.
-        var qeSeq = __qeSequenceFor(info.sequence);
+        var qeSeq = __qeSequenceOpening(info.sequence);
         if (!qeSeq) return JSON.stringify({ success: false, error: "Could not address sequence '" + info.sequenceName + "' through the QE API." });
         var qeTrack = qeSeq.getVideoTrackAt(info.trackIndex);
         var qeClip = __findQeClipByDomClip(qeTrack, info.clip);
@@ -956,12 +984,12 @@ export class EffectsTools extends AssemblyTools {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var domSeq=${this.buildSeqScript(seqId)};
+        var domSeq=${this.buildSeqRes(seqId)};
         if(!domSeq)return JSON.stringify({success:false,error:'No active sequence'});
-        var qeSeq=__qeSequenceFor(domSeq);
+        var qeSeq=__qeSequenceOpening(domSeq);
         if(!qeSeq)return JSON.stringify({success:false,error:"Could not address sequence '" + String(domSeq.name) + "' through the QE API."});
         var qeTrack=qeSeq.getVideoTrackAt(${trackIndex});
-        var clip=qeTrack?qeTrack.getItemAt(${clipIndex}):null;
+        var clip=qeTrack?__qeClipByIndex(qeSeq, 'video', ${trackIndex}, ${clipIndex}):null;
         if(!clip)return JSON.stringify({success:false,error:'No clip at video track ${trackIndex} index ${clipIndex}'});
         var domTrack=domSeq.videoTracks[${trackIndex}];
         var domClip=domTrack?domTrack.clips[${clipIndex}]:null;
@@ -972,8 +1000,17 @@ export class EffectsTools extends AssemblyTools {
         ${this.transitionVerificationScript()}
         var before=__readQeTransitionState(clip);
         var beforeXml=__transitionXmlCount(domSeq);
+        var outSecs=domClip?Number(domClip.end.seconds):null;
+        var atOutBefore=outSecs===null?0:__qeTransitionsAt(qeTrack, outSecs).length;
         var addError=null;
-        try { clip.addTransition(mc, true, String(frames), "0", 0.5, true, true); } catch(eAdd) { addError=eAdd.toString(); }
+        // At the clip's OUT-point: the second argument false = the clip's end (true = its start,
+        // measured on 26.5.2), which is where this tool always said it applied the Morph Cut.
+        try { clip.addTransition(mc, false, String(frames), "0", 0.5, true, true); } catch(eAdd) { addError=eAdd.toString(); }
+        var atOut=outSecs===null?[]:__qeTransitionsAt(qeTrack, outSecs);
+        if(atOut.length>atOutBefore){
+          return JSON.stringify({success:true,verified:true,verifiedBy:'QE track transition list at the out-point',durationFrames:frames,outPointSecs:outSecs,transitions:atOut,
+            note:'Morph Cut analysis runs in the background; the transition is in place but may show Analyzing in Background until it finishes.'});
+        }
         var afterClip=domClip?__findQeClipByDomClip(qeTrack, domClip):clip;
         var after=__readQeTransitionState(afterClip||clip);
         var afterXml=__transitionXmlCount(domSeq);
@@ -1052,7 +1089,7 @@ export class EffectsTools extends AssemblyTools {
         if (!track) return JSON.stringify({ success: false, error: "Track not found at index ${trackIndex}" });
         var clipCount = track.clips.numItems;
         if (clipCount < 2) return JSON.stringify({ success: false, error: "Need at least 2 clips to add transitions, found " + clipCount });
-        var qeSeq = __qeSequenceFor(sequence);
+        var qeSeq = __qeSequenceOpening(sequence);
         if (!qeSeq) return JSON.stringify({ success: false, error: "Could not address sequence '" + sequence.name + "' through the QE API." });
         var qeTrack = qeSeq.getVideoTrackAt(${trackIndex});
         var transition = qe.project.getVideoTransitionByName(${JSON.stringify(transitionName)});
@@ -1063,31 +1100,30 @@ export class EffectsTools extends AssemblyTools {
         var frames = Math.round(${duration} * fps);
         ${this.transitionVerificationScript()}
         var beforeXml = __transitionXmlCount(sequence);
-        for (var i = 0; i < clipCount; i++) {
+        // One transition per CUT (a clip ending exactly where the next begins), on the outgoing
+        // clip's end. This used to add one at the START of every clip, so the first clip got a
+        // dissolve from nothing at its head and gaps were treated like cuts.
+        var cutsDone = [];
+        var halfFrame = 0.5 / fps;
+        for (var i = 0; i < clipCount - 1; i++) {
           try {
-            var domClip = track.clips[i];
+            var domClip = track.clips[i], nextClip = track.clips[i + 1];
+            var cut = Number(domClip.end.seconds);
+            if (Math.abs(Number(nextClip.start.seconds) - cut) > halfFrame) continue;
             var qeClip = __findQeClipByDomClip(qeTrack, domClip);
             if (!qeClip) {
-              errors.push("Clip " + i + ": Could not locate matching QE clip");
+              errors.push("Cut at " + cut + "s: Could not locate matching QE clip");
               continue;
             }
-            var before = __readQeTransitionState(qeClip);
-            qeClip.addTransition(transition, true, String(frames), "0", 0.5, false, true);
-            var afterClip = __findQeClipByDomClip(qeTrack, domClip);
-            var after = __readQeTransitionState(afterClip);
-            if (__transitionWasVerified(before, after)) {
-              added++;
-            } else {
-              errors.push("Clip " + i + ": transition call completed but no verified transition change was exposed");
-            }
+            var nBefore = __qeTransitionsAt(qeTrack, cut).length;
+            qeClip.addTransition(transition, false, String(frames), "0", 0.5, true, true);
+            if (__qeTransitionsAt(qeTrack, cut).length > nBefore) { added++; cutsDone.push(cut); }
+            else errors.push("Cut at " + cut + "s: transition call completed but none appeared at the cut (the clips may have no handles there)");
           } catch (e) {
-            errors.push("Clip " + i + ": " + e.toString());
+            errors.push("Cut after clip " + i + ": " + e.toString());
           }
         }
         var afterXml = __transitionXmlCount(sequence);
-        if (added === 0 && __transitionWasVerifiedByXml(beforeXml, afterXml)) {
-          added = afterXml.count - beforeXml.count;
-        }
         if (added === 0) {
           return JSON.stringify({
             success: false,
@@ -1101,13 +1137,15 @@ export class EffectsTools extends AssemblyTools {
           });
         }
         return JSON.stringify({
-          success: true,
+          success: errors.length === 0,
+          verified: true,
+          verifiedBy: "QE track transition list at each cut",
           transitionsAdded: added,
+          cuts: cutsDone,
           totalClips: clipCount,
           frames: frames,
           errors: errors,
-          beforeXml: beforeXml,
-          afterXml: afterXml
+          error: errors.length ? "PARTIALLY APPLIED: " + added + " cut(s) got a transition; see errors[]." : undefined
         });
       } catch (e) {
         return JSON.stringify({ success: false, error: e.toString() });
@@ -1144,7 +1182,7 @@ export class EffectsTools extends AssemblyTools {
     if (!mediaInfo?.success) return { success: false, error: 'Could not locate clip media: ' + mediaInfo?.error };
 
     try {
-      execSync(`ffmpeg -y -ss ${mediaInfo.sourceTimeSecs} -i "${mediaInfo.mediaPath}" -vframes 1 "${frameBefore}"`, { timeout: 15000 });
+      runFf('ffmpeg', ['-y', '-ss', String(mediaInfo.sourceTimeSecs), '-i', String(mediaInfo.mediaPath), '-frames:v', '1', '-update', '1', frameBefore], { timeoutMs: 15000 });
     } catch (e: any) { return { success: false, error: 'ffmpeg frame capture failed: ' + e.message?.slice(0,100) }; }
 
     // Step 2: apply the effect via QE
@@ -1152,7 +1190,7 @@ export class EffectsTools extends AssemblyTools {
       try {
         app.enableQE();
         var seq = qe.project.getActiveSequence();
-        var clip = seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        var clip = __qeClipByIndex(seq, 'video', ${trackIndex}, ${clipIndex});
         if (!clip) return JSON.stringify({success:false,error:'QE clip not found'});
         var domClip = app.project.activeSequence.videoTracks[${trackIndex}].clips[${clipIndex}];
         var before = domClip.components.numItems;
@@ -1174,12 +1212,12 @@ export class EffectsTools extends AssemblyTools {
 
     // Step 3: capture frame AFTER applying
     try {
-      execSync(`ffmpeg -y -ss ${mediaInfo.sourceTimeSecs} -i "${mediaInfo.mediaPath}" -vframes 1 "${frameAfter}"`, { timeout: 15000 });
+      runFf('ffmpeg', ['-y', '-ss', String(mediaInfo.sourceTimeSecs), '-i', String(mediaInfo.mediaPath), '-frames:v', '1', '-update', '1', frameAfter], { timeoutMs: 15000 });
     } catch (e: any) { return { success: false, error: 'Post-effect frame capture failed', verified: false }; }
 
     // Step 4: pixel diff
     try {
-      const psnrOut = execSync(`ffmpeg -i "${frameBefore}" -i "${frameAfter}" -lavfi psnr -f null - 2>&1`, { timeout: 10000 }).toString();
+      const psnrOut = runFf('ffmpeg', ['-hide_banner', '-i', frameBefore, '-i', frameAfter, '-lavfi', 'psnr', '-f', 'null', '-'], { timeoutMs: 10000, mergeStderr: true });
       const match = psnrOut.match(/psnr_avg:(\S+)/);
       const psnr = match?.[1] ? parseFloat(match[1]) : null;
       const identical = psnr !== null && psnr > 45;
@@ -1204,10 +1242,10 @@ export class EffectsTools extends AssemblyTools {
     }
   }
 
-  protected async getAllClipEffects(_seqId?: string): Promise<any> {
+  protected async getAllClipEffects(seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(seqId)};
         var report = [];
         for (var t=0;t<seq.videoTracks.numTracks;t++) {
           var track = seq.videoTracks[t];

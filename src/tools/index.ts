@@ -6,7 +6,6 @@
  */
 
 import { z } from 'zod';
-import { execSync } from 'child_process';
 // Synchronous fs/path/os bindings for the Node-side (non-ExtendScript) tools.
 // Kept separate from the `promises as fs` import above, which is the async API.
 import * as fsSync from 'node:fs';
@@ -52,6 +51,8 @@ import { TrimmingTools } from './domains/trimming.js';
 // importing this class. Re-exported because expanded.ts and the tests import it from here.
 export type { MCPTool } from './tool-types.js';
 import type { MCPTool } from './tool-types.js';
+import { runFf } from './ff-exec.js';
+import { withReportDialogGuard } from '../bridge/report-dialog-guard.js';
 
 // The header declarations and pure helpers moved to ./domains/shared.ts when this file was
 // split into one class per tool domain. Re-exported here: they were part of this module's
@@ -466,6 +467,21 @@ export class PremiereProTools extends TrimmingTools {
   }
 
   async executeTool(name: string, args: Record<string, any>, options?: { allowUnexposed?: boolean }): Promise<any> {
+    // Calls can raise an informational export-report dialog that blocks the engine until OK is
+    // clicked (see report-dialog-guard.ts). The guard polls once for every call in flight, so
+    // nested and concurrent calls are both covered.
+    const { result, guard } = await withReportDialogGuard(() => this.executeToolUnguarded(name, args, options));
+    if (guard.dismissed.length && result && typeof result === 'object' && !Array.isArray(result)) {
+      return {
+        ...result,
+        reportDialogsDismissed: guard.dismissed,
+        reportDialogNote: 'Premiere showed an informational report while this call was in flight (for example, effects an AAF or FCP XML cannot carry) and blocked until OK was clicked. It was dismissed by name; the export itself had already completed.',
+      };
+    }
+    return result;
+  }
+
+  private async executeToolUnguarded(name: string, args: Record<string, any>, options?: { allowUnexposed?: boolean }): Promise<any> {
     // Premiere truncates a string at the first NUL when it is assigned — a
     // marker named "p\0q" is created as "p" — and reports success for the
     // truncated result. JSON.stringify escapes the NUL on the way into the
@@ -663,7 +679,7 @@ export class PremiereProTools extends TrimmingTools {
 
         // Gaps & tracks
         case 'close_gap_at': return await this.closeGapAt(args.timecode, args.sequenceId);
-        case 'close_all_gaps': return await this.closeAllGaps(args.sequenceId, args.trackIndex);
+        case 'close_all_gaps': return await this.closeAllGaps(args.sequenceId, args.trackIndex, args.includeLeadingGap === true);
         case 'delete_empty_tracks': return await this.deleteEmptyTracks(args.sequenceId, args.video ?? true, args.audio ?? true);
 
         // Selection
@@ -693,6 +709,7 @@ export class PremiereProTools extends TrimmingTools {
         case 'letterbox': return await this.applyLetterbox(args.sequenceId, args.trackIndex ?? 0, args.clipIndex ?? 0, args.aspect, args.cropPercent);
         case 'ken_burns': return await this.kenBurns(args);
         case 'set_clip_scale_to_frame_size': return await this.setClipScaleToFrameSize(args.sequenceId, args.trackIndex ?? 0, args.clipIndex ?? 0, args.enabled ?? true);
+        case 'set_scale_to_frame_size_batch': return await this.setScaleToFrameSizeBatch(args.enabled ?? true, args.sequenceId, args.trackIndex, args.clipIds);
 
         // Batch 3: Audio
         case 'fade_in_audio': return await this.fadeAudio(args.sequenceId, args.audioTrackIndex ?? 0, args.clipIndex ?? 0, args.durationFrames, 'in');
@@ -825,13 +842,13 @@ export class PremiereProTools extends TrimmingTools {
 
         // Media Management
         case 'import_media':
-          return await this.importMedia(args.filePath, args.binName);
+          return await this.importMedia(args.filePath, args.binName, args.binId);
         case 'import_fcp_xml':
           return await this.importFcpXml(args.filePath);
         case 'import_edl':
           return await this.importEdl(args.filePath);
         case 'import_folder':
-          return await this.importFolder(args.folderPath, args.binName, args.recursive);
+          return await this.importFolder(args.folderPath, args.binName, args.recursive, args.binId);
         case 'create_bin':
           return await this.createBin(args.name, args.parentBinName, args.parentBinId);
 
@@ -1103,7 +1120,7 @@ export class PremiereProTools extends TrimmingTools {
         case 'compare_takes': return this.compareTakes(args.projectItemId1, args.projectItemId2, args.outputDir);
         case 'get_source_clip_info': return await this.getSourceClipInfo();
         case 'batch_log_from_csv': return await this.batchLogFromCsv(args.csvPath);
-        case 'storyboard_bin_to_sequence': return await this.storyboardBinToSequence(args.binName, args.sequenceId, args.startAtSecs);
+        case 'storyboard_bin_to_sequence': return await this.storyboardBinToSequence(args.binName, args.sequenceId, args.startAtSecs, args.binId);
         case 'snap_clips_to_grid': return await this.snapClipsToGrid(args.sequenceId);
         case 'conform_sequence_settings': return await this.conformSequenceSettings(args.sourceSequenceId, args.targetSequenceId);
         case 'get_sequence_info_extended': return await this.getSequenceInfoExtended(args.sequenceId);
@@ -1116,7 +1133,7 @@ export class PremiereProTools extends TrimmingTools {
         case 'sequence_from_markers': return await this.sequenceFromMarkers(args.sequenceId, args.markerType);
         case 'get_project_item_info_extended': return await this.getProjectItemInfoExtended(args.projectItemId);
         case 'verify_media_online': return await this.verifyMediaOnline(args.projectItemId);
-        case 'get_bin_contents_recursive': return await this.getBinContentsRecursive(args.binName);
+        case 'get_bin_contents_recursive': return await this.getBinContentsRecursive(args.binName, args.binId);
         case 'find_clips_by_source': return await this.findClipsBySource(args.projectItemId);
         case 'batch_relink_by_prefix': return await this.batchRelinkByPrefix(args.oldPrefix, args.newPrefix);
         case 'set_interpretation_frame_rate': return await this.setInterpretationFrameRate(args.projectItemId, args.frameRate);
@@ -1298,7 +1315,7 @@ export class PremiereProTools extends TrimmingTools {
         case 'flatten_multicam': return await this.flattenMulticam(args.sequenceId, args.trackIndex, args.clipIndex);
         case 'multicam_info': return await this.multicamInfo(args.sequenceId, args.trackIndex, args.clipIndex);
         case 'set_multicam_angle': return await this.setMulticamAngle(args.sequenceId, args.trackIndex, args.clipIndex, args.angleIndex);
-        case 'create_multicam_source_sequence': return await this.createMulticamSourceSequence(args.binName, args.newSequenceName, args.presetPath);
+        case 'create_multicam_source_sequence': return await this.createMulticamSourceSequence(args.binName, args.newSequenceName, args.presetPath, args.binId);
         case 'create_multicam_from_clips': return await this.createMulticamFromClips(args.projectItemIds, args.sequenceName, args.presetPath);
         case 'frame_diff': return await this.frameDiff(args.time1Secs, args.time2Secs, args.outputDir ?? '/tmp', args.sequenceId);
         case 'verify_effect_rendered': return await this.verifyEffectRendered(args.sequenceId, args.trackIndex, args.clipIndex, args.effectName, args.effectParam, args.effectParamValue, args.outputDir ?? '/tmp/premiere-mcp-bridge/generated-assets');
@@ -1329,7 +1346,7 @@ export class PremiereProTools extends TrimmingTools {
         case 'export_with_burn_ins': return await this.exportWithBurnIns(args.outputPath, args.presetPath);
         case 'archive_master': return await this.archiveMaster(args.outputDir, args.includeProxy ?? false);
         case 'start_encode_and_monitor': return await this.startEncodeAndMonitor(args.outputPath, args.presetPath, args.workAreaType ?? 0);
-        case 'export_per_marker_range': return await this.exportPerMarkerRange(args.outputDir, args.presetPath, args.markerNamePattern);
+        case 'export_per_marker_range': return await this.exportPerMarkerRange(args.outputDir, args.presetPath, args.markerNamePattern, args.sequenceId);
         case 'batch_export_sequences': return await this.batchExportSequences(args.sequenceIds, args.outputDir, args.presetPath);
         case 'export_omf_with_settings': return await this.exportOmfWithSettings(args.outputPath);
         case 'export_aaf_with_settings': return await this.exportAafWithSettings(args.outputPath);
@@ -1344,7 +1361,7 @@ export class PremiereProTools extends TrimmingTools {
         case 'countdown_leader': return await this.countdownLeader(args.startTimeSecs, args.count ?? 5, args.trackIndex ?? 1, args.sequenceId);
         case 'create_adjustment_layer_at': return await this.createAdjustmentLayerAt(args.startTimeSecs, args.durationSecs, args.trackIndex, args.sequenceId);
         case 'nest_all_v1_clips': return await this.nestAllV1Clips(args.newSequenceName, args.sequenceId);
-        case 'create_sequence_from_bin': return await this.createSequenceFromBin(args.binName, args.sequenceName, args.presetPath);
+        case 'create_sequence_from_bin': return await this.createSequenceFromBin(args.binName, args.sequenceName, args.presetPath, args.binId);
         case 'get_all_clip_effects': return await this.getAllClipEffects(args.sequenceId);
         case 'batch_replace_clips': return await this.batchReplaceClips(args.oldProjectItemId, args.newProjectItemId, args.sequenceId);
         case 'clear_sequence_in_out': return await this.clearSequenceInOut(args.sequenceId);
@@ -2469,7 +2486,7 @@ export class PremiereProTools extends TrimmingTools {
         if (!seq) return JSON.stringify({ success: false, error: 'No active sequence' });
         var track = seq.getVideoTrackAt(${trackIndex});
         if (!track) return JSON.stringify({ success: false, error: 'QE video track ${trackIndex} not found' });
-        var clip = track.getItemAt(${clipIndex});
+        var clip = __qeClipByIndex(seq, 'video', ${trackIndex}, ${clipIndex});
         if (!clip) return JSON.stringify({ success: false, error: 'QE clip ${clipIndex} not found' });
         var o = { success: true };
         // EIGHT QE CLIP PROPERTIES CANNOT BE READ ON 26.3.2, and reading one does not throw a
@@ -3023,9 +3040,9 @@ export class PremiereProTools extends TrimmingTools {
     `);
     if (!seqInfo?.success || !seqInfo?.mediaPath) return { success: false, error: 'Could not get media path', note: 'frame_diff works on the source media of the first V1 clip' };
     try {
-      execSync(`ffmpeg -y -ss ${time1} -i "${seqInfo.mediaPath}" -vframes 1 "${frame1}"`, { timeout: 15000 });
-      execSync(`ffmpeg -y -ss ${time2} -i "${seqInfo.mediaPath}" -vframes 1 "${frame2}"`, { timeout: 15000 });
-      const psnrOut = execSync(`ffmpeg -i "${frame1}" -i "${frame2}" -lavfi psnr -f null - 2>&1`, { timeout: 10000 }).toString();
+      runFf('ffmpeg', ['-y', '-ss', String(time1), '-i', String(seqInfo.mediaPath), '-frames:v', '1', '-update', '1', frame1], { timeoutMs: 15000 });
+      runFf('ffmpeg', ['-y', '-ss', String(time2), '-i', String(seqInfo.mediaPath), '-frames:v', '1', '-update', '1', frame2], { timeoutMs: 15000 });
+      const psnrOut = runFf('ffmpeg', ['-hide_banner', '-i', frame1, '-i', frame2, '-lavfi', 'psnr', '-f', 'null', '-'], { timeoutMs: 10000, mergeStderr: true });
       const match = psnrOut.match(/psnr_avg:(\S+)/);
       const psnr = match?.[1] ? parseFloat(match[1]) : null;
       return { success: true, frame1, frame2, psnr, identical: psnr !== null && psnr > 50, note: 'Higher PSNR = more similar. >40dB = nearly identical. Infinity = identical.' };
@@ -3110,7 +3127,8 @@ export class PremiereProTools extends TrimmingTools {
 
   private blackFrameScan(filePath: string, threshold: number, minDuration: number): any {
     try {
-      const out = execSync(`ffprobe -v error -f lavfi -i "movie=${filePath.replace(/'/g, "'\\''")}[out+adiff],blackdetect=d=${minDuration}:pix_th=${threshold}" -show_entries tags=lavfi.black_start,lavfi.black_end -of csv 2>&1`, { timeout: 30000 }).toString();
+      // blackdetect reports on stderr as "black_start:X black_end:Y", which the parser below reads.
+      const out = runFf('ffmpeg', ['-hide_banner', '-nostats', '-i', filePath, '-an', '-vf', `blackdetect=d=${Number(minDuration)}:pix_th=${Number(threshold)}`, '-f', 'null', '-'], { timeoutMs: 120000, mergeStderr: true });
       const lines = out.split('\n').filter((l: string) => l.trim());
       const ranges: any[] = [];
       let current: any = null;
@@ -3124,23 +3142,53 @@ export class PremiereProTools extends TrimmingTools {
     }
   }
 
-  private flashFrameScan(_filePath: string, threshold: number): any {
+  private flashFrameScan(filePath: string, threshold: number): any {
+    // This used to return success:true with a note and analyse nothing. A flash is a run of at
+    // most two frames whose mean luma reaches `threshold` (0-1) and sits clearly above the frames
+    // on both sides of it, so a hard cut to a bright shot is not reported as a flash.
     try {
-      return { success: true, note: 'Flash frame detection requires analyzing frame brightness differences. Use ffmpeg with signalstats filter for accurate results.', threshold };
+      const out = runFf('ffmpeg', ['-hide_banner', '-nostats', '-loglevel', 'error', '-i', filePath, '-an', '-vf', 'signalstats,metadata=print:key=lavfi.signalstats.YAVG:file=-', '-f', 'null', '-'], { timeoutMs: 180000 });
+      const frames: Array<{ t: number; y: number }> = [];
+      let t: number | null = null;
+      for (const line of out.split('\n')) {
+        const tm = line.match(/pts_time:([\d.]+)/);
+        if (tm?.[1]) { t = parseFloat(tm[1]); continue; }
+        const ym = line.match(/^lavfi\.signalstats\.YAVG=([\d.]+)/);
+        if (ym?.[1] && t !== null) { frames.push({ t, y: parseFloat(ym[1]) / 255 }); t = null; }
+      }
+      if (!frames.length) return { success: false, error: 'ffmpeg decoded no video frames from this file, so nothing was measured.' };
+      const MAX_RUN = 2, MARGIN = 0.25;
+      const flashes: Array<{ startSecs: number; frames: number; peakLuma: number; neighbourLuma: number }> = [];
+      for (let i = 0; i < frames.length; i++) {
+        if (frames[i]!.y < threshold) continue;
+        let j = i;
+        while (j + 1 < frames.length && frames[j + 1]!.y >= threshold) j++;
+        const run = j - i + 1;
+        const before = i > 0 ? frames[i - 1]!.y : null;
+        const after = j + 1 < frames.length ? frames[j + 1]!.y : null;
+        let peak = 0;
+        for (let k = i; k <= j; k++) peak = Math.max(peak, frames[k]!.y);
+        if (run <= MAX_RUN && before !== null && after !== null && peak - before >= MARGIN && peak - after >= MARGIN) {
+          flashes.push({ startSecs: frames[i]!.t, frames: run, peakLuma: Math.round(peak * 1000) / 1000, neighbourLuma: Math.round(Math.max(before, after) * 1000) / 1000 });
+        }
+        i = j;
+      }
+      return { success: true, framesAnalysed: frames.length, flashCount: flashes.length, flashes: flashes.slice(0, 100), criteria: `mean luma >= ${threshold}, at most ${MAX_RUN} frames long, at least ${MARGIN} brighter than the frames on both sides` };
     } catch (e: any) {
-      return { success: false, error: e.message?.slice(0, 200) };
+      return { success: false, error: e.message?.slice(0, 300) };
     }
   }
 
   private freezeFrameScan(filePath: string, minDuration: number): any {
     try {
-      const out = execSync(`ffprobe -v error -f lavfi -i "movie=${filePath.replace(/'/g, "'\\''")},freezedetect=n=-60dB:d=${minDuration}" -show_entries tags=lavfi.freezedetect.freeze_start,lavfi.freezedetect.freeze_end -of csv 2>&1`, { timeout: 30000 }).toString();
+      // freezedetect reports on stderr as "lavfi.freezedetect.freeze_start: X".
+      const out = runFf('ffmpeg', ['-hide_banner', '-nostats', '-i', filePath, '-an', '-vf', `freezedetect=n=-60dB:d=${Number(minDuration)}`, '-f', 'null', '-'], { timeoutMs: 120000, mergeStderr: true });
       const ranges: any[] = [];
       const lines = out.split('\n');
       let current: any = null;
       for (const line of lines) {
-        if (line.includes('freeze_start')) { const m = line.match(/freeze_start:([\d.]+)/); if (m?.[1]) current = { start: parseFloat(m[1]) }; }
-        if (line.includes('freeze_end') && current) { const m = line.match(/freeze_end:([\d.]+)/); if (m?.[1]) { current.end = parseFloat(m[1]); current.duration = current.end - current.start; ranges.push(current); current = null; } }
+        if (line.includes('freeze_start')) { const m = line.match(/freeze_start:\s*([\d.]+)/); if (m?.[1]) current = { start: parseFloat(m[1]) }; }
+        if (line.includes('freeze_end') && current) { const m = line.match(/freeze_end:\s*([\d.]+)/); if (m?.[1]) { current.end = parseFloat(m[1]); current.duration = current.end - current.start; ranges.push(current); current = null; } }
       }
       return { success: true, freezeRangeCount: ranges.length, ranges: ranges.slice(0, 50) };
     } catch (e: any) {

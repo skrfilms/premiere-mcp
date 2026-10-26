@@ -58,6 +58,7 @@ const ALLOW_RECOVER = process.argv.includes('--recover');
 /** How long one tool gets before the harness gives up on it and records a failure. */
 const TOOL_TIMEOUT_MS = 25_000;
 
+
 /**
  * The panel's own words when it rejects a call because a PREVIOUS script is still outstanding.
  * The same message continues: "Nothing was run for this command", which is what makes this
@@ -348,10 +349,11 @@ async function main() {
     };
 
     try {
+      let timer;
       const r = await Promise.race([
         tools.executeTool(name, args),
-        new Promise((_, rej) => setTimeout(() => rej(new Error(`harness timeout ${TOOL_TIMEOUT_MS / 1000}s`)), TOOL_TIMEOUT_MS)),
-      ]);
+        new Promise((_, rej) => { timer = setTimeout(() => rej(new Error(`harness timeout ${TOOL_TIMEOUT_MS / 1000}s`)), TOOL_TIMEOUT_MS); }),
+      ]).finally(() => clearTimeout(timer));
       if (r && r.success === false) {
         record(String(r.error ?? 'unknown'));
       } else {

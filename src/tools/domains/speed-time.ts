@@ -8,26 +8,26 @@ import { SourceMonitorTools } from './source-monitor.js';
 import { spawn } from 'child_process';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import { basename, dirname, extname, join } from 'node:path';
+import { TRIM_LIB } from '../trim-lib.js';
+import { runFf } from '../ff-exec.js';
 
 export class SpeedTimeTools extends SourceMonitorTools {
-  protected async setClipReverse(trackIndex: number, clipIndex: number, _reverse: boolean, sequenceId?: string): Promise<any> {
+  protected async setClipReverse(trackIndex: number, clipIndex: number, reverse: boolean, sequenceId?: string): Promise<any> {
+    // qeClip.setReverse() killed the engine on 26.3.2 and throws on 26.5.2. setSpeed() with the
+    // reverse flag works, with an in-point correction (see __setReversed in trim-lib.ts).
     return await this.bridge.executeScript(`
-      app.enableQE(); ${this.qeClipScript(trackIndex, clipIndex, sequenceId)}
-      if (!__clip) return JSON.stringify({success:false,error:'Clip not found'});
-      // qeClip.setReverse TERMINATES the entire evalScript on 26.3.2 — not a catchable exception,
-      // so this tool could only ever return the generic "ExtendScript execution failed". Measured
-      // one-call-per-script. Reading clip.reverse is fatal in the same way, though clip.reversed
-      // (one letter different) is safe to read.
-      //
-      // There IS a working alternative, so route the caller to it instead of failing blankly:
-      // qeClip.setSpeed takes reverse as its third argument and is verified working.
-      var currentlyReversed = null;
-      try { currentlyReversed = !!__clip.reversed; } catch (eRev) {}
-      return JSON.stringify({
-        success:false, verified:true, available:false,
-        currentlyReversed: currentlyReversed,
-        error:'qeClip.setReverse terminates the ExtendScript engine on this build (26.3.2), so this tool cannot run. Use set_clip_speed_qe with reverse: true instead (it takes clipId, not trackIndex/clipIndex — get_qe_clip_info returns the nodeId). Verified working on this build. The clip is currently reversed=' + currentlyReversed + '.'
-      });
+      ${TRIM_LIB}
+      try {
+        var seq = ${this.buildSeqRes(sequenceId)};
+        var track = seq.videoTracks[${Number(trackIndex)}];
+        var clip = track && track.clips[${Number(clipIndex)}];
+        if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
+        app.enableQE();
+        var r = __setReversed(seq, clip, ${reverse === false ? 'false' : 'true'}, false);
+        if (r.error) return JSON.stringify({ success: false, error: r.error });
+        return JSON.stringify({ success: r.problems.length === 0, verified: true, verifiedBy: 'isSpeedReversed() and start/end readback',
+          reversed: ${reverse === false ? 'false' : 'true'}, items: r.report, error: r.problems.length ? r.problems.join('; ') : undefined });
+      } catch (e) { return JSON.stringify({ success: false, error: e.toString() }); }
     `);
   }
 
@@ -80,13 +80,26 @@ export class SpeedTimeTools extends SourceMonitorTools {
     const outFile = (outputPath && outputPath.trim())
       || join(dirname(resolvedPath), `${basename(resolvedPath, extname(resolvedPath))}_${speedLabel}x${ext}`);
 
-    // Video: setpts scales presentation timestamps by 1/speed.
-    const argv: string[] = ['-y', '-i', resolvedPath as string, '-vf', `setpts=${(1 / speed).toFixed(6)}*PTS`];
+    // The source's own frame rate and sample rate, so the retime is exact rather than assumed.
+    let srcFps: string | null = null, srcRate = 48000;
+    try {
+      const probe = JSON.parse(runFf('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_type,r_frame_rate,sample_rate', '-of', 'json', resolvedPath as string], { timeoutMs: 15000 }));
+      for (const st of probe.streams ?? []) {
+        if (st.codec_type === 'video' && st.r_frame_rate && st.r_frame_rate !== '0/0') srcFps = String(st.r_frame_rate);
+        if (st.codec_type === 'audio' && Number(st.sample_rate) > 0) srcRate = Number(st.sample_rate);
+      }
+    } catch { /* fall back to ffmpeg's own choice below */ }
+    // Video: setpts scales presentation timestamps by 1/speed, then fps= resamples back onto the
+    // source frame grid. setpts alone leaves the muxer to pick frames, and it got the head wrong:
+    // measured on a frame-counter clip at 2x, the output began 0,1,2,3,5,7 instead of 0,2,4,6 and
+    // ran three frames behind for the rest of the clip.
+    const vf = `setpts=${(1 / speed).toFixed(6)}*PTS` + (srcFps ? `,fps=${srcFps}` : '');
+    const argv: string[] = ['-y', '-i', resolvedPath as string, '-vf', vf];
     if (includeAudio) {
       const audioFilter = preservePitch
         ? this.buildAtempoChain(speed)
-        // Pitch shifts with speed: resample the sample clock then reset to 48k.
-        : `asetrate=48000*${speed},aresample=48000`;
+        // Pitch shifts with speed: run the sample clock faster, then resample back to the source rate.
+        : `asetrate=${srcRate}*${speed},aresample=${srcRate}`;
       argv.push('-af', audioFilter);
     } else {
       argv.push('-an');
@@ -138,37 +151,46 @@ export class SpeedTimeTools extends SourceMonitorTools {
   }
 
   protected async speedChange(clipId: string, speed: number, maintainAudio = true): Promise<any> {
+    // QE setSpeed is miscalibrated on 26.5.2. Measured frame-exact on a clip with no tail handle:
+    // a requested rate r plays at 2r/(r+1) (2x -> 1.33x, 3x -> 1.5x) while the duration is cut to
+    // 1/r, so the clip silently loses the tail of its source range; on a clip with a neighbour it
+    // did nothing at all; and the linked audio is never retimed, which breaks sync. So: apply,
+    // verify BOTH the rate and the duration that rate implies, and on any mismatch undo it
+    // (qe.project.undo() restores the clip exactly) and say so. bake_speed_change renders a real
+    // retimed file with ffmpeg and is the dependable route.
     const script = `
       try {
         app.enableQE();
         var info = __findClip(${JSON.stringify(clipId)});
         if (!info) return JSON.stringify({ success: false, error: "Clip not found" });
-        var oldSpeed = info.clip.getSpeed();
-        // Addressed by id, not by whatever is on screen. __findClip() searches every
-        // sequence in the project, so a clip can be resolved out of one sequence and
-        // then, through getActiveSequence(), have the effect applied to whichever
-        // clip sits at the same track and index in a different one.
-        var qeSeq = __qeSequenceFor(info.sequence);
+        var requested = ${Number(speed)};
+        if (!(requested > 0)) return JSON.stringify({ success: false, error: "speed must be greater than 0 (use reverse_clip to reverse)." });
+        var clip = info.clip, track = info.track;
+        var b = { start: Number(clip.start.ticks), end: Number(clip.end.ticks), speed: Number(clip.getSpeed()) };
+        var findAgain = function () { for (var i = 0; i < track.clips.numItems; i++) { if (Number(track.clips[i].start.ticks) === b.start) return track.clips[i]; } return null; };
+        var qeSeq = __qeSequenceOpening(info.sequence);
         if (!qeSeq) return JSON.stringify({ success: false, error: "Could not address sequence '" + info.sequenceName + "' through the QE API." });
         var qeTrack = info.trackType === 'video' ? qeSeq.getVideoTrackAt(info.trackIndex) : qeSeq.getAudioTrackAt(info.trackIndex);
-        var qeClip = __findQeClipByDomClip(qeTrack, info.clip);
+        var qeClip = __findQeClipByDomClip(qeTrack, clip);
         if (!qeClip) return JSON.stringify({ success: false, error: "Could not resolve the QE clip for this item." });
-        // QE setSpeed's signature is (rate, durationTimecodeString, reverse,
-        // maintainAudioPitch, ripple). Passing a boolean where the duration
-        // string belongs throws "Illegal Parameter type" — that was the bug
-        // (the old call was setSpeed(rate, maintainAudio)). rate is a ratio
-        // (0.5 = 50%, 2.0 = 200%), matching this tool's schema. Verified live
-        // on 26.3.2: this call retimes the clip and getSpeed() reflects it.
-        try { qeClip.setSpeed(${speed}, "00:00:00:00", false, ${maintainAudio ? true : false}, false); } catch(e2) {
-          return JSON.stringify({ success: false, error: "Speed change via QE DOM failed: " + e2.toString(), oldSpeed: oldSpeed, requestedSpeed: ${speed} });
+        // (rate, durationTimecode, reverse, maintainAudioPitch, ripple)
+        try { qeClip.setSpeed(requested, "00:00:00:00", false, ${maintainAudio ? 'true' : 'false'}, false); } catch (e2) {
+          return JSON.stringify({ success: false, error: "Speed change via QE DOM failed: " + e2.toString(), oldSpeed: b.speed, requestedSpeed: requested });
         }
-        // Verify-after-write: read the speed back and only report success when
-        // the clip is actually at (approximately) the requested rate.
-        var newSpeed = info.clip.getSpeed();
-        if (Math.abs(Number(newSpeed) - Number(${speed})) > 0.02) {
-          return JSON.stringify({ success: false, verified: false, error: "Premiere did not apply the requested speed (clip is at " + newSpeed + "x, requested " + ${speed} + "x).", oldSpeed: oldSpeed, requestedSpeed: ${speed}, actualSpeed: newSpeed });
-        }
-        return JSON.stringify({ success: true, verified: true, oldSpeed: oldSpeed, newSpeed: newSpeed, requestedSpeed: ${speed} });
+        var tpf = Number(info.sequence.timebase) || 10584000000;
+        var now = findAgain() || clip;
+        var gotSpeed = Number(now.getSpeed()), gotDur = Number(now.end.ticks) - Number(now.start.ticks);
+        var wantDur = (b.end - b.start) * b.speed / requested;
+        var ok = Math.abs(gotSpeed - requested) <= 0.02 && Math.abs(gotDur - wantDur) <= tpf / 2;
+        if (ok) return JSON.stringify({ success: true, verified: true, verifiedBy: "getSpeed() and duration readback", oldSpeed: b.speed, newSpeed: gotSpeed, requestedSpeed: requested, durationSecs: gotDur / 254016000000,
+          note: "Linked audio is not retimed by QE setSpeed; check it, or use bake_speed_change for a retimed file." });
+        var undoError = null;
+        try { qe.project.undo(); } catch (eU) { undoError = eU.toString(); }
+        var back = findAgain() || clip;
+        var restored = Number(back.getSpeed()) === b.speed && Number(back.end.ticks) === b.end && Number(back.start.ticks) === b.start;
+        return JSON.stringify({ success: false, verified: true, verifiedBy: "getSpeed() and duration readback",
+          error: "Premiere applied the speed incorrectly (asked " + requested + "x, got " + gotSpeed + "x over " + (gotDur / 254016000000) + "s instead of " + (wantDur / 254016000000) + "s), so it was " + (restored ? "undone; the clip is unchanged." : "NOT fully undone" + (undoError ? " (" + undoError + ")" : "") + "; check the clip.") + " QE speed changes are unreliable on this build. Use bake_speed_change to render a retimed file and place that instead.",
+          oldSpeed: b.speed, requestedSpeed: requested, appliedSpeed: gotSpeed, rolledBack: restored });
       } catch (e) {
         return JSON.stringify({ success: false, error: e.toString() });
       }
@@ -178,42 +200,32 @@ export class SpeedTimeTools extends SourceMonitorTools {
   }
 
   protected async reverseClip(clipId: string, maintainAudioPitch?: boolean): Promise<any> {
-    const script = `
+    return await this.bridge.executeScript(`
+      ${TRIM_LIB}
       try {
         var info = __findClip(${JSON.stringify(clipId)});
         if (!info) return JSON.stringify({ success: false, error: "Clip not found" });
         var mediaPath = "";
         try { mediaPath = info.clip.projectItem && info.clip.projectItem.getMediaPath ? String(info.clip.projectItem.getMediaPath()) : ""; } catch (pathError) {}
         if (/\\.(png|jpg|jpeg|gif|tif|tiff)$/i.test(mediaPath)) {
-          return JSON.stringify({ success: true, clipId: ${JSON.stringify(clipId)}, reversed: true, changed: false, method: "still image already visually reversible" });
+          return JSON.stringify({ success: true, clipId: ${JSON.stringify(clipId)}, reversed: true, changed: false, method: "still image: reversing changes nothing" });
         }
         app.enableQE();
-        // Addressed by id, not by whatever is on screen. __findClip() searches every
-        // sequence in the project, so a clip can be resolved out of one sequence and
-        // then, through getActiveSequence(), have the effect applied to whichever
-        // clip sits at the same track and index in a different one.
-        var qeSeq = __qeSequenceFor(info.sequence);
-        if (!qeSeq) return JSON.stringify({ success: false, error: "Could not address sequence '" + info.sequenceName + "' through the QE API." });
-        var qeTrack = info.trackType === 'video' ? qeSeq.getVideoTrackAt(info.trackIndex) : qeSeq.getAudioTrackAt(info.trackIndex);
-        var qeClip = __findQeClipByDomClip(qeTrack, info.clip);
-        if (!qeClip || !qeClip.setReverse) return JSON.stringify({ success: false, error: "QE setReverse API unavailable" });
-        try { qeClip.setReverse(true); } catch (reverseError) { return JSON.stringify({ success: false, error: "Reverse via QE DOM not available: " + reverseError.toString() }); }
-        // No QE/DOM property reliably reports playback reversal on 26.x, so success
-        // here means setReverse() was accepted without throwing -- not an independent
-        // confirmation. Reported honestly as verified:false rather than overstated.
-        return JSON.stringify({ success: true, verified: false, clipId: ${JSON.stringify(clipId)}, reversed: true, changed: true, maintainAudioPitch: ${maintainAudioPitch !== false}, note: "setReverse() accepted; no readback API to confirm the clip now plays reversed." });
+        var r = __setReversed(info.sequence, info.clip, true, ${maintainAudioPitch ? 'true' : 'false'});
+        if (r.error) return JSON.stringify({ success: false, error: r.error });
+        return JSON.stringify({ success: r.problems.length === 0, verified: true, verifiedBy: 'isSpeedReversed() and start/end readback; source range restored after QE mirrors it',
+          clipId: ${JSON.stringify(clipId)}, reversed: true, items: r.report, error: r.problems.length ? r.problems.join('; ') : undefined });
       } catch (e) {
         return JSON.stringify({ success: false, error: e.toString() });
       }
-    `;
-    return await this.bridge.executeScript(script);
+    `);
   }
 
   protected async rateStretchToFill(trackIndex: number, clipIndex: number, targetDurationSecs?: number, seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq=qe.project.getActiveSequence();
+        var seq=${this.buildQSeqResolver(seqId)};
         var domSeq=${this.buildSeqRes(seqId)};
         var clip=domSeq.videoTracks[${trackIndex}].clips[${clipIndex}];
         if(!clip)return JSON.stringify({success:false,error:'Clip not found'});
@@ -224,7 +236,9 @@ export class SpeedTimeTools extends SourceMonitorTools {
           targetDur=nextClip?nextClip.start.seconds-clip.start.seconds:currentDur;
         }
         var ratio=currentDur/targetDur;
-        var qeClip=seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        // By start time, not DOM index: QE track items include gaps and transitions.
+        var qeClip=__findQeClipByDomClip(seq.getVideoTrackAt(${trackIndex}), clip);
+        if(!qeClip)return JSON.stringify({success:false,error:'Could not match the clip in QE'});
         var oldSpeed=null; try{ oldSpeed=Number(clip.getSpeed()); }catch(eB){}
         var oldDur=Number(clip.duration.seconds);
         var setError=null;
@@ -243,10 +257,14 @@ export class SpeedTimeTools extends SourceMonitorTools {
         // Speed and duration are two separate readbacks and they can disagree: a speed change
         // that Premiere applies without re-timing the clip leaves the gap this tool exists to
         // fill still open. Reporting only the speed hid that.
-        return JSON.stringify({success:false,verified:true,verifiedBy:'TrackItem.getSpeed() and TrackItem.duration readback',changed:oldSpeed!==newSpeed,ratio:ratio,targetDurationSecs:targetDur,oldSpeedRatio:oldSpeed,newSpeedRatio:newSpeed,durationBefore:oldDur,durationAfter:newDur,setError:setError,
-          error: !onTarget
+        // QE setSpeed is miscalibrated on 26.5.2 (see speedChange): undo rather than leave a clip
+        // retimed to something nobody asked for.
+        var undone=false;
+        if(oldSpeed!==newSpeed||Math.abs(newDur-oldDur)>0.001){ try{ qe.project.undo(); undone=Math.abs(Number(clip.getSpeed())-oldSpeed)<0.0001; }catch(eU){} }
+        return JSON.stringify({success:false,verified:true,verifiedBy:'TrackItem.getSpeed() and TrackItem.duration readback',changed:oldSpeed!==newSpeed,rolledBack:undone,ratio:ratio,targetDurationSecs:targetDur,oldSpeedRatio:oldSpeed,newSpeedRatio:newSpeed,durationBefore:oldDur,durationAfter:newDur,setError:setError,
+          error: (undone ? 'Undone; the clip is unchanged. ' : '') + (!onTarget
             ? ('Clip speed reads ' + newSpeed + ' instead of the requested ' + ratio + ', so the clip was not rate stretched to fill ' + targetDur + 's.')
-            : ('The speed landed at ' + newSpeed + ' but the clip duration reads ' + newDur + 's instead of ' + targetDur + 's, so the gap it was meant to fill is still open. setSpeed changes the rate without necessarily re-timing the clip on the timeline.')});
+            : ('The speed landed at ' + newSpeed + ' but the clip duration reads ' + newDur + 's instead of ' + targetDur + 's, so the gap it was meant to fill is still open. setSpeed changes the rate without necessarily re-timing the clip on the timeline.')) + ' QE speed changes are unreliable on this build; bake_speed_change renders a retimed file instead.'});
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
     `);
   }
@@ -282,7 +300,7 @@ export class SpeedTimeTools extends SourceMonitorTools {
       try {
         app.enableQE();
         var clip=${this.buildSeqRes(seqId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
-        var qeClip=qe.project.getActiveSequence().getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        var qeClip=__qeClipByIndex(${this.buildQSeqResolver(seqId)}, 'video', ${trackIndex}, ${clipIndex});
         return JSON.stringify({success:true,speed:clip.getSpeed?clip.getSpeed():1,durationSecs:clip.duration.seconds,isReversed:qeClip?qeClip.reversed:false,frameBlend:qeClip?qeClip.frameBlend:false,timeInterpolation:qeClip?qeClip.timeInterpolationType:0});
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
     `);
@@ -292,10 +310,11 @@ export class SpeedTimeTools extends SourceMonitorTools {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var qeClip=qe.project.getActiveSequence().getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
-        if(!qeClip)return JSON.stringify({success:false,error:'Clip not found'});
         var clip=${this.buildSeqRes(seqId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
         if(!clip)return JSON.stringify({success:false,error:'Clip not found on the DOM sequence at video track ${trackIndex} index ${clipIndex}'});
+        // By start time, not DOM index: QE track items include gaps and transitions.
+        var qeClip=__findQeClipByDomClip(${this.buildQSeqResolver(seqId)}.getVideoTrackAt(${trackIndex}), clip);
+        if(!qeClip)return JSON.stringify({success:false,error:'Could not match the clip in QE'});
         var oldSpeed=null; try{ oldSpeed=Number(clip.getSpeed()); }catch(eB){}
         var setError=null;
         try{ qeClip.setSpeed(1.0,'00:00:00:00',false,false,false); }catch(eS){ setError=eS.toString(); }

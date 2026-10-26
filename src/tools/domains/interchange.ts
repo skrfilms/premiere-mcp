@@ -13,7 +13,7 @@ export class InterchangeTools extends ColorTools {
   protected async vfxPullList(sequenceId: string | undefined, handles: number, trackIndex: number): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = ${sequenceId ? `(function(){var ss=app.project.sequences;for(var i=0;i<ss.numSequences;i++){if(ss[i].sequenceID===${JSON.stringify(sequenceId)})return ss[i];}return app.project.activeSequence;})()` : 'app.project.activeSequence'};
+        var seq = ${this.buildSeqRes(sequenceId)};
         if (!seq) return JSON.stringify({success:false,error:'No sequence'});
         var track = seq.videoTracks[${trackIndex}];
         if (!track) return JSON.stringify({success:false,error:'Track not found'});
@@ -88,11 +88,11 @@ export class InterchangeTools extends ColorTools {
     `);
   }
 
-  protected async syncLockTrack(_sequenceId: string | undefined, trackType: 'video' | 'audio', trackIndex: number, locked: boolean): Promise<any> {
+  protected async syncLockTrack(sequenceId: string | undefined, trackType: 'video' | 'audio', trackIndex: number, locked: boolean): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = qe.project.getActiveSequence();
+        var seq = ${this.buildQSeqResolver(sequenceId)};
         var track = ${trackType === 'audio' ? `seq.getAudioTrackAt(${trackIndex})` : `seq.getVideoTrackAt(${trackIndex})`};
         if (!track) return JSON.stringify({success:false,error:'Track not found'});
         var before = null; try { before = Boolean(track.isSyncLocked()); } catch(eB) {}
@@ -355,7 +355,7 @@ export class InterchangeTools extends ColorTools {
     // Export sequence as .prproj — AE can open Premiere projects and access sequences
     const script = `
       try {
-        var seq = ${sequenceId ? `(function(){ var seqs=app.project.sequences; for(var i=0;i<seqs.numSequences;i++){ if(seqs[i].sequenceID===${JSON.stringify(sequenceId)}) return seqs[i]; } return app.project.activeSequence; })()` : 'app.project.activeSequence'};
+        var seq = ${this.buildSeqRes(sequenceId)};
         if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
         var result = seq.exportAsProject(${JSON.stringify(outputPath)});
         var f = new File(${JSON.stringify(outputPath)});

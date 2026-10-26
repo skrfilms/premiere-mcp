@@ -413,6 +413,16 @@ export async function ensureHealthy(culprit, state) {
     verdict = probeEngine(20_000);
     if (verdict.state === 'HEALTHY') return { ok: true, verdict };
   }
+  // BUSY on a sentinel probe is not a wedge: it is an earlier probe (often our own, queued while a
+  // slow tool was still running) that the panel picked up as soon as it came free. Measured
+  // 2026-10-25: export_aaf ran past the harness timeout, the first probe queued behind it, and the
+  // re-probe found the panel inside that probe, which was refused as "another client's command"
+  // and aborted the sweep on a healthy host. Probes finish in well under a second, so wait them out.
+  for (let i = 0; i < 6 && verdict.state === 'BUSY' && /^sentinel-/.test(String(verdict.busyWith ?? '')); i++) {
+    await sleep(3000);
+    verdict = probeEngine(15_000);
+    if (verdict.state === 'HEALTHY') return { ok: true, verdict };
+  }
 
   // REFUSE BEFORE ESCAPE, NOT AFTER. Escape is a keystroke to the frontmost application, not to
   // Premiere's scripting host, so on a host somebody else is using it can cancel their export or

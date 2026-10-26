@@ -75,7 +75,7 @@ export class ReviewDeliveryTools extends MulticamTools {
   protected async versionUpSequence(sequenceId?: string, setActive?: boolean): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = ${sequenceId ? `(function(){var ss=app.project.sequences;for(var i=0;i<ss.numSequences;i++){if(ss[i].sequenceID===${JSON.stringify(sequenceId)})return ss[i];}return app.project.activeSequence;})()` : 'app.project.activeSequence'};
+        var seq = ${this.buildSeqRes(sequenceId)};
         if (!seq) return JSON.stringify({success:false,error:'Sequence not found'});
         var name = String(seq.name);
         // Try to bump version: _v001 -> _v002, _v01 -> _v02, or append _v001
@@ -177,7 +177,7 @@ export class ReviewDeliveryTools extends MulticamTools {
   protected async markersToNotes(outputPath: string, sequenceId?: string, format = 'text'): Promise<any> {
     const result = await this.bridge.executeScript(`
       try {
-        var seq = ${sequenceId ? `(function(){var ss=app.project.sequences;for(var i=0;i<ss.numSequences;i++){if(ss[i].sequenceID===${JSON.stringify(sequenceId)})return ss[i];}return app.project.activeSequence;})()` : 'app.project.activeSequence'};
+        var seq = ${this.buildSeqRes(sequenceId)};
         var markers = seq.markers;
         var rows = [];
         var m = markers.numMarkers > 0 ? markers.getFirstMarker() : null;
@@ -209,7 +209,7 @@ export class ReviewDeliveryTools extends MulticamTools {
   protected async deliveryQc(sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = ${sequenceId ? `(function(){var ss=app.project.sequences;for(var i=0;i<ss.numSequences;i++){if(ss[i].sequenceID===${JSON.stringify(sequenceId)})return ss[i];}return app.project.activeSequence;})()` : 'app.project.activeSequence'};
+        var seq = ${this.buildSeqRes(sequenceId)};
         if (!seq) return JSON.stringify({success:false,error:'No sequence'});
         var issues = [];
         // Check offline media
@@ -223,12 +223,14 @@ export class ReviewDeliveryTools extends MulticamTools {
         }
         if (offlineCount > 0) issues.push('OFFLINE_MEDIA: ' + offlineCount + ' clip(s) offline');
         // Check for gaps
-        var gaps = seq.getTimelineGaps ? seq.getTimelineGaps() : [];
-        if (gaps && gaps.length > 0) issues.push('TIMELINE_GAPS: ' + gaps.length + ' gap(s) detected');
+        // Program-level gaps (no video on any track = black). getTimelineGaps() does not exist on
+        // this host, so the old typeof-guarded call meant this check could never fire.
+        var gaps = __videoGaps(seq);
+        if (gaps.length > 0) issues.push('TIMELINE_GAPS: ' + gaps.length + ' gap(s) with no video on any track');
         // Check render status via QE
         try {
           app.enableQE();
-          var qseq = qe.project.getActiveSequence();
+          var qseq = ${this.buildQSeqResolver(sequenceId)};
           var red = qseq.getRedBarTimes();
           if (red && red.length > 0) issues.push('UNRENDERED: ' + (red.length/2) + ' range(s) need rendering');
         } catch(eqc){}

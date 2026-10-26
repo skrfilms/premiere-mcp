@@ -5,6 +5,7 @@
  * had grown to 19k lines; the method bodies are unchanged.
  */
 import { ToolsBase } from './base.js';
+import { TRIM_LIB } from '../trim-lib.js';
 
 export class AssemblyTools extends ToolsBase {
   protected async threePointEdit(projectItemId: string, sourceIn?: string, sourceOut?: string, sequenceTimecode?: string, mode = 'overwrite', videoTrack = 0, _audioTrack = 0): Promise<any> {
@@ -121,27 +122,31 @@ export class AssemblyTools extends ToolsBase {
 
   protected async removeFromTimeline(clipId: string, sequenceId?: string, deleteMode = 'ripple'): Promise<any> {
     const script = `
+      ${TRIM_LIB}
       try {
         var info = __findClip(${JSON.stringify(clipId)}, ${sequenceId ? JSON.stringify(sequenceId) : 'null'});
         if (!info) return JSON.stringify({ success: false, error: ${sequenceId ? JSON.stringify(`Clip not found in sequence: ${sequenceId}`) : '"Clip not found"'} });
         var clip = info.clip;
-        var clipName = clip.name;
+        var clipName = String(clip.name);
         var isRipple = ${JSON.stringify(deleteMode)} === "ripple";
-        var beforeCount = info.track.clips.numItems;
-        clip.remove(isRipple, true);
-        var afterCount = info.track.clips.numItems;
-        if (afterCount >= beforeCount) return JSON.stringify({ success: false, verified: false, error: "Premiere did not remove '" + clipName + "' (track clip count unchanged).", beforeCount: beforeCount, afterCount: afterCount });
+        // TrackItem.remove() removes only that item and never ripples on 26.5.2, so a "ripple"
+        // left a gap and both modes orphaned the linked audio. __removeGroup does both properly.
+        var r = __removeGroup(info.sequence, clip, isRipple);
+        if (r.error) return JSON.stringify({ success: false, error: r.error, deleteMode: ${JSON.stringify(deleteMode)} });
         return JSON.stringify({
-          success: true,
+          success: r.problems.length === 0,
           verified: true,
-          message: "Clip removed from timeline",
+          verifiedBy: "every linked item looked up after removal; rippled clips' starts read back",
+          message: r.problems.length ? undefined : "Clip removed from timeline",
           clipId: ${JSON.stringify(clipId)},
           clipName: clipName,
           sequenceId: info.sequenceId,
           sequenceName: info.sequenceName,
           deleteMode: ${JSON.stringify(deleteMode)},
-          beforeCount: beforeCount,
-          afterCount: afterCount
+          removed: r.removed,
+          rippledSecs: r.rippledSecs,
+          clipsRippled: r.clipsRippled,
+          error: r.problems.length ? "PARTIALLY APPLIED: " + r.problems.join("; ") + ". Undo to restore." : undefined
         });
       } catch (e) {
         return JSON.stringify({
@@ -160,35 +165,60 @@ export class AssemblyTools extends ToolsBase {
         app.enableQE();
         var info = __findClip(${JSON.stringify(clipId)});
         if (!info) return JSON.stringify({ success: false, error: "Clip not found" });
-        var splitSeconds = info.clip.start.seconds + ${splitTime};
+        var splitSeconds = info.clip.start.seconds + ${Number(splitTime)};
+        var clipDur = info.clip.end.seconds - info.clip.start.seconds;
+        if (!(${Number(splitTime)} > 0 && ${Number(splitTime)} < clipDur)) return JSON.stringify({ success: false, error: "splitTime is seconds from the START OF THE CLIP and must be between 0 and its duration (" + clipDur + "s); " + ${Number(splitTime)} + "s is outside it. The clip sits at " + info.clip.start.seconds + "s-" + info.clip.end.seconds + "s on the timeline. Nothing was changed." });
         // The timecode must come from the sequence the clip actually lives in, not
         // from whatever is on screen. Taking it from the active sequence put the cut
         // on the right timeline at the wrong frame whenever the two differed in frame
         // rate: a 24 fps clip razored using a 30 fps timebase lands three frames out.
         var seq = info.sequence;
-        var fps = seq && seq.timebase ? (254016000000 / parseInt(seq.timebase, 10)) : 30;
-        var totalFrames = Math.round(splitSeconds * fps);
-        var hours = Math.floor(totalFrames / (fps * 3600));
-        var mins = Math.floor((totalFrames % (fps * 3600)) / (fps * 60));
-        var secs = Math.floor((totalFrames % (fps * 60)) / fps);
-        var frames = Math.round(totalFrames % fps);
-        function pad(n) { return n < 10 ? "0" + n : "" + n; }
-        var tc = pad(hours) + ":" + pad(mins) + ":" + pad(secs) + ":" + pad(frames);
+        var tc = __qeTimecode(seq, splitSeconds);
         // Addressed by id, not by whatever is on screen. __findClip() searches every
         // sequence in the project, so a clip can be resolved out of one sequence and
         // then, through getActiveSequence(), have the effect applied to whichever
         // clip sits at the same track and index in a different one.
-        var qeSeq = __qeSequenceFor(info.sequence);
+        var qeSeq = __qeSequenceOpening(info.sequence);
         if (!qeSeq) return JSON.stringify({ success: false, error: "Could not address sequence '" + info.sequenceName + "' through the QE API." });
-        var qeTrack = info.trackType === 'video' ? qeSeq.getVideoTrackAt(info.trackIndex) : qeSeq.getAudioTrackAt(info.trackIndex);
-        var beforeCount = info.track.clips.numItems;
-        qeTrack.razor(tc);
-        var afterCount = info.track.clips.numItems;
+        // Premiere's razor cuts linked items together; QE razors one track. Cut every track that
+        // holds a linked partner too, or the video splits while its audio stays whole.
+        var cuts = [{ kind: info.trackType, index: info.trackIndex, track: info.track }];
+        try {
+          var linked = info.clip.getLinkedItems();
+          for (var li = 0; li < linked.numItems; li++) {
+            var it = linked[li];
+            var isAudio = String(it.mediaType) === 'Audio', tracks = isAudio ? seq.audioTracks : seq.videoTracks;
+            for (var ti = 0; ti < tracks.numTracks; ti++) {
+              var found = false;
+              for (var ci = 0; ci < tracks[ti].clips.numItems; ci++) {
+                var c = tracks[ti].clips[ci];
+                if (String(c.start.ticks) === String(it.start.ticks) && String(c.end.ticks) === String(it.end.ticks) && String(c.name) === String(it.name)) { found = true; break; }
+              }
+              if (found) {
+                var kind = isAudio ? 'audio' : 'video', dup = false;
+                for (var k = 0; k < cuts.length; k++) if (cuts[k].kind === kind && cuts[k].index === ti) dup = true;
+                if (!dup) cuts.push({ kind: kind, index: ti, track: tracks[ti] });
+                break;
+              }
+            }
+          }
+        } catch (eLinked) {}
+        var results = [], allSplit = true;
+        for (var r = 0; r < cuts.length; r++) {
+          var qeTrack = cuts[r].kind === 'video' ? qeSeq.getVideoTrackAt(cuts[r].index) : qeSeq.getAudioTrackAt(cuts[r].index);
+          var beforeCount = cuts[r].track.clips.numItems;
+          qeTrack.razor(tc);
+          var afterCount = cuts[r].track.clips.numItems;
+          var ok = afterCount > beforeCount;
+          if (!ok) allSplit = false;
+          results.push({ track: (cuts[r].kind === 'video' ? 'V' : 'A') + (cuts[r].index + 1), split: ok, beforeCount: beforeCount, afterCount: afterCount });
+        }
         // A razor that lands on a clip splits it, so the track's clip count rises by
         // one. If it did not, the cut fell in a gap or off the clip -- report that
         // honestly rather than claiming a split that did not happen.
-        if (afterCount <= beforeCount) return JSON.stringify({ success: false, verified: false, error: "Razor at " + tc + " did not split any clip (track clip count unchanged). The split time may fall in a gap or outside the clip.", beforeCount: beforeCount, afterCount: afterCount });
-        return JSON.stringify({ success: true, verified: true, message: "Clip split at " + tc, splitTime: ${splitTime}, timecode: tc, beforeCount: beforeCount, afterCount: afterCount });
+        if (!results[0].split) return JSON.stringify({ success: false, verified: false, error: "Razor at " + tc + " did not split any clip (track clip count unchanged). The split time may fall in a gap or outside the clip.", tracks: results });
+        if (!allSplit) return JSON.stringify({ success: false, verified: true, error: "PARTIALLY APPLIED: the clip split but a linked track did not, so picture and sound are now cut differently. See tracks[]. Undo to restore.", timecode: tc, tracks: results });
+        return JSON.stringify({ success: true, verified: true, message: "Clip split at " + tc, splitTime: ${Number(splitTime)}, timecode: tc, tracks: results, linkedTracksSplit: results.length - 1 });
       } catch (e) {
         return JSON.stringify({ success: false, error: "QE DOM error: " + e.toString() });
       }
@@ -227,7 +257,7 @@ export class AssemblyTools extends ToolsBase {
         function pad(n) { return n < 10 ? "0" + n : "" + n; }
         var tc = pad(hours) + ":" + pad(mins) + ":" + pad(secs) + ":" + pad(frames);
 
-        var qeSeq = __qeSequenceFor(sequence);
+        var qeSeq = __qeSequenceOpening(sequence);
         if (!qeSeq) return JSON.stringify({ success: false, error: "QE active sequence unavailable" });
 
         function buildIndices(count, requested) {
@@ -332,45 +362,58 @@ export class AssemblyTools extends ToolsBase {
 
   // Additional Clip Operations
   protected async duplicateClip(clipId: string, offset?: number): Promise<any> {
+    // overwriteClip() places a project item's MARKED range, so the old version dropped the whole
+    // source media (a 5s clip came back 10s long, from source 0) and overwrote whatever was at the
+    // destination, while reporting success. The clip's own source range is now marked on the item
+    // for the placement and the item's marks are restored afterwards; an occupied destination is
+    // refused. Effects, keyframes and speed are not carried over by overwriteClip().
     const script = `
       try {
         var info = __findClip(${JSON.stringify(clipId)});
         if (!info) return JSON.stringify({ success: false, error: "Clip not found" });
-        var clip = info.clip;
-        var projItem = clip.projectItem;
-        var insertTime = clip.end.seconds + ${offset !== undefined ? offset : 0};
-        var beforeCount = info.track.clips.numItems;
-        info.track.overwriteClip(projItem, insertTime);
-        var afterCount = info.track.clips.numItems;
-        // Verify by LOOKING FOR THE CLIP, not by counting.
-        //
-        // overwriteClip OVERWRITES: dropped onto occupied time it replaces what is there, so the
-        // track count legitimately stays the same and the old check reported a false negative for
-        // a duplicate that had in fact landed. Counting only works when the destination is empty,
-        // which is exactly the case a caller cannot guarantee.
-        var landed = null, tolerance = 0.04;
+        var clip = info.clip, projItem = clip.projectItem, seq = info.sequence;
+        if (!projItem) return JSON.stringify({ success: false, error: "This clip has no project item to duplicate." });
+        var srcIn = Number(clip.inPoint.seconds), dur = Number(clip.end.seconds) - Number(clip.start.seconds);
+        var insertTime = Number(clip.end.seconds) + ${offset !== undefined ? Number(offset) : 0};
+        var tracksToCheck = [info.track];
+        try { if (info.trackType === 'video' && seq.audioTracks[info.trackIndex]) tracksToCheck.push(seq.audioTracks[info.trackIndex]); } catch (eA) {}
+        for (var t = 0; t < tracksToCheck.length; t++) {
+          var tr = tracksToCheck[t];
+          for (var i = 0; i < tr.clips.numItems; i++) {
+            var o = tr.clips[i];
+            if (o.start.seconds < insertTime + dur - 0.001 && o.end.seconds > insertTime + 0.001) {
+              return JSON.stringify({ success: false, error: "The destination " + insertTime + "s-" + (insertTime + dur) + "s is occupied on " + tr.name + " by '" + o.name + "' (" + o.start.seconds + "s-" + o.end.seconds + "s). overwriteClip() would replace it, so nothing was placed. Pass an offset that lands on empty space." });
+            }
+          }
+        }
+        var oldIn = null, oldOut = null;
+        try { oldIn = projItem.getInPoint(4).seconds; oldOut = projItem.getOutPoint(4).seconds; } catch (eM) {}
+        var placeError = null;
+        try {
+          projItem.setInPoint(srcIn, 4);
+          projItem.setOutPoint(srcIn + dur, 4);
+          info.track.overwriteClip(projItem, insertTime);
+        } catch (eP) { placeError = eP.toString(); }
+        var marksRestored = false;
+        try { if (oldIn !== null) { projItem.setInPoint(oldIn, 4); projItem.setOutPoint(oldOut, 4); marksRestored = Math.abs(projItem.getInPoint(4).seconds - oldIn) < 0.001 && Math.abs(projItem.getOutPoint(4).seconds - oldOut) < 0.001; } } catch (eR) {}
+        var landed = null, tol = 0.04;
         for (var di = 0; di < info.track.clips.numItems; di++) {
           var cand = info.track.clips[di];
-          if (Math.abs(cand.start.seconds - insertTime) > tolerance) continue;
+          if (Math.abs(cand.start.seconds - insertTime) > tol) continue;
           var sameSource = false;
           try { sameSource = String(cand.projectItem.nodeId) === String(projItem.nodeId); } catch (eSrc) {}
           if (sameSource) { landed = cand; break; }
         }
-        if (!landed) return JSON.stringify({
-          success: false, verified: true,
-          error: "overwriteClip() ran but no clip referencing this source is present at " + insertTime + "s, so the duplicate did not land.",
-          beforeCount: beforeCount, afterCount: afterCount, insertSeconds: insertTime
-        });
+        if (!landed) return JSON.stringify({ success: false, verified: true, error: "overwriteClip() ran but no clip referencing this source is present at " + insertTime + "s, so the duplicate did not land." + (placeError ? " " + placeError : ""), marksRestored: marksRestored });
+        var gotDur = landed.end.seconds - landed.start.seconds, gotIn = landed.inPoint.seconds;
+        var exact = Math.abs(gotDur - dur) < tol && Math.abs(gotIn - srcIn) < tol;
         return JSON.stringify({
-          success: true, verified: true,
-          message: "Clip duplicated at " + insertTime + "s",
-          beforeCount: beforeCount, afterCount: afterCount,
-          // Same count with a clip present means an existing clip was overwritten rather than a
-          // new one appended. The caller should know which happened.
-          replacedExisting: afterCount === beforeCount,
-          insertSeconds: insertTime,
-          duplicateStartSeconds: landed.start.seconds,
-          duplicateEndSeconds: landed.end.seconds
+          success: exact, verified: true, verifiedBy: 'start/end/in readback of the placed clip',
+          message: exact ? "Clip duplicated at " + insertTime + "s" : undefined,
+          duplicateStartSeconds: landed.start.seconds, duplicateEndSeconds: landed.end.seconds, duplicateSourceInSeconds: gotIn,
+          originalSourceInSeconds: srcIn, originalDurationSeconds: dur, insertSeconds: insertTime, marksRestored: marksRestored,
+          note: "Effects, keyframes and speed changes are not carried over; use copy_effects_between_clips for effects.",
+          error: exact ? undefined : "The duplicate landed but its range differs from the original (" + gotIn + "s/" + gotDur + "s vs " + srcIn + "s/" + dur + "s)."
         });
       } catch (e) {
         return JSON.stringify({ success: false, error: e.toString() });
@@ -408,10 +451,10 @@ export class AssemblyTools extends ToolsBase {
     return await this.bridge.executeScript(script);
   }
 
-  protected async nestAllV1Clips(newSeqName: string, _seqId?: string): Promise<any> {
+  protected async nestAllV1Clips(newSeqName: string, seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(seqId)};
         var v1 = seq.videoTracks[0];
         if (!v1 || v1.clips.numItems === 0) return JSON.stringify({success:false,error:'No clips on V1'});
         var clips = [];

@@ -194,8 +194,71 @@ describe('bins that do not resolve', () => {
     await tools.executeTool('import_folder', { folderPath: '/tmp/x', binName: 'Nope' });
     const script = bridge.executeScript.mock.calls[0][0] as string;
 
-    expect(script).toContain('Destination bin not found');
+    expect(script).toContain('Nothing was imported.');
     expect(script).not.toContain('|| app.project.rootItem;');
+  });
+
+  /**
+   * The destination resolver used to be a local one-level scan of
+   * rootItem.children, so a bin nested inside another bin -- which is what
+   * create_bin returns whenever a parent is named -- could not be reached at all.
+   * These assert the import tools now go through the shared __resolveBin helper,
+   * which handles id, "/"-separated path and deep name.
+   */
+  it('import_folder resolves the destination through the shared resolver, not a local one-level scan', async () => {
+    await tools.executeTool('import_folder', { folderPath: '/tmp/x', binName: 'SC008_0710' });
+    const script = bridge.executeScript.mock.calls[0][0] as string;
+
+    expect(script).toContain('__resolveBin(');
+    expect(script).not.toContain('function __binByName(');
+  });
+
+  it('import_folder accepts a bin nodeId', async () => {
+    await tools.executeTool('import_folder', { folderPath: '/tmp/x', binId: '000f62fa' });
+    const script = bridge.executeScript.mock.calls[0][0] as string;
+
+    expect(script).toContain('__resolveBin("000f62fa", null)');
+  });
+
+  it('import_media targets the resolved bin instead of hardcoding the project root', async () => {
+    // Goes through the real bridge method: the hardcoded root destination lived
+    // in bridge.importMedia, not in the tool layer, which is why the tool layer's
+    // binName looked wired up while every import landed at the root.
+    const realBridge = new PremiereProBridge();
+    const spy = jest.spyOn(realBridge, 'executeScript').mockResolvedValue({ success: true } as never);
+
+    await realBridge.importMedia('/tmp/a.mp4', undefined, '000f62fa');
+    const script = spy.mock.calls[0]![0] as string;
+
+    expect(script).toContain('__resolveBin("000f62fa", null)');
+    expect(script).toContain('importFiles([file.fsName], true, __destBin, false)');
+    expect(script).not.toContain('importFiles([file.fsName], true, app.project.rootItem, false)');
+  });
+
+  it('import_media reports the bin it read back, not the bin it was asked for', async () => {
+    const fake = {
+      importMedia: async () => ({ success: true, id: 'X', binName: 'Root', treePath: '/Project/X.mp4' }),
+      executeScript: async () => ({ success: true }),
+    };
+    const t = new PremiereProTools(fake as never);
+
+    const result: any = await t.executeTool('import_media', { filePath: '/tmp/a.mp4', binName: 'SC008_0710' });
+
+    expect(result.binName).toBe('Root');
+    expect(result.treePath).toBe('/Project/X.mp4');
+  });
+
+  it('forwards binName and binId from the tool layer to the bridge', async () => {
+    const received: unknown[] = [];
+    const fake = {
+      importMedia: async (...args: unknown[]) => { received.push(...args); return { success: true }; },
+      executeScript: async () => ({ success: true }),
+    };
+    const t = new PremiereProTools(fake as never);
+
+    await t.executeTool('import_media', { filePath: '/tmp/a.mp4', binName: 'Scenes/008', binId: '000f62fa' });
+
+    expect(received).toEqual(['/tmp/a.mp4', 'Scenes/008', '000f62fa']);
   });
 });
 
@@ -252,20 +315,35 @@ describe('bins are resolved by walking, not by string key', () => {
     tools = new PremiereProTools(bridge as never);
   });
 
-  // import_folder still resolves a single-name destination with the original
-  // __binByName walker. create_bin gained id / path / deep-name resolution and
-  // walks with __binsByNameDeep, so the two are asserted separately rather than
-  // being pinned to one shared helper name they no longer share.
-  it('import_folder walks children by name', async () => {
+  // Both tools now resolve through the shared __resolveBin prelude helper, which
+  // deep-walks with __binsByNameDeep. import_folder's old __binByName scanned
+  // rootItem.children one level only, so a nested destination was unreachable.
+  it('import_folder deep-walks children by name', async () => {
     await tools.executeTool('import_folder', { folderPath: '/tmp/x', binName: 'Footage' });
     const script = bridge.executeScript.mock.calls[0][0] as string;
 
-    expect(script).toContain('__binByName(');
+    expect(script).toContain('__resolveBin(null, "Footage")');
     // Assert on the EMITTED script, not the template. `${JSON.stringify(` never
     // survives emission, so a not.toContain on it can never fail -- the same
     // source-versus-emitted confusion this change exists to fix.
     expect(script).not.toContain('children["Footage"]');
-    expect(script).toContain('__binByName(app.project.rootItem, "Footage")');
+  });
+
+  it('the prelude __resolveBin the import tools call deep-walks, and refuses an ambiguous name', async () => {
+    // The mock-bridge scripts above are templates without the prelude, so the
+    // resolver's own behaviour is asserted where it actually lives.
+    const realBridge = new PremiereProBridge();
+    const spy = jest.spyOn(realBridge, 'executeScript').mockResolvedValue({ success: true } as never);
+    await realBridge.importMedia('/tmp/a.mp4', 'Footage');
+    const emittedScript = spy.mock.calls[0]![0] as string;
+
+    expect(emittedScript).toContain('__resolveBin(null, "Footage")');
+    // The prelude is prepended by executeScript, so it is not in the spied
+    // argument; assert the helper text itself off the exported prelude.
+    const { EXTENDSCRIPT_HELPERS } = await import('../../bridge/index.js');
+    expect(EXTENDSCRIPT_HELPERS).toContain('function __resolveBin(');
+    expect(EXTENDSCRIPT_HELPERS).toContain('__binsByNameDeep(root, binName, [])');
+    expect(EXTENDSCRIPT_HELPERS).toContain('is ambiguous (');
   });
 
   it('create_bin deep-walks children by name', async () => {

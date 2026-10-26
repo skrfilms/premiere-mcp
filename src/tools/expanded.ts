@@ -5,6 +5,7 @@ import { deflateSync } from 'node:zlib';
 import type { PremiereProTransport } from '../bridge/types.js';
 import type { MCPTool } from './index.js';
 import { buildExpandedInputSchema, expandedToolSpec } from './expanded-schemas.js';
+import { TRIM_LIB } from './trim-lib.js';
 
 export const expandedToolNames = [
   'find_items_by_media_path',
@@ -615,6 +616,7 @@ async function deletePreviewFilesOnDisk(bridge: PremiereProTransport, args: Reco
 
 function buildExpandedToolScript(name: string, args: Record<string, any>): string {
   return `
+    ${TRIM_LIB}
     var toolName = ${JSON.stringify(name)};
     var args = ${JSON.stringify(args ?? {})};
 
@@ -727,6 +729,12 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
         var activeCandidate = qe.project.getActiveSequence();
         if (activeCandidate && String(activeCandidate.guid) === String(seq.sequenceID)) return activeCandidate;
       } catch (eActive) {}
+      // Still unseen: QE reaches any sequence that is ACTIVE, so open it (see __qeSequenceOpening).
+      try {
+        app.project.openSequence(seq.sequenceID);
+        var openedCandidate = qe.project.getActiveSequence();
+        if (openedCandidate && String(openedCandidate.guid) === String(seq.sequenceID)) return openedCandidate;
+      } catch (eOpened) {}
       return null;
     }
     function sequenceRequestError() {
@@ -873,6 +881,59 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
         return null;
       }
       return scan(seq.videoTracks, "video") || scan(seq.audioTracks, "audio");
+    }
+    // Scan ONE sequence for a clip id (or name). Shared by findClip's
+    // single-sequence path and the cross-sequence resolver below.
+    function scanSequenceForClip(seq, nodeId) {
+      if (!seq) return null;
+      function scan(collection, type) {
+        if (!collection) return null;
+        for (var t = 0; t < collection.numTracks; t++) {
+          var track = collection[t];
+          for (var c = 0; c < track.clips.numItems; c++) {
+            var clip = track.clips[c];
+            if (!nodeId || clip.nodeId === nodeId || clip.name === nodeId) {
+              return { clip: clip, track: track, trackIndex: t, clipIndex: c, trackType: type, sequence: seq, sequenceId: seq.sequenceID, sequenceName: String(seq.name) };
+            }
+          }
+        }
+        return null;
+      }
+      return scan(seq.videoTracks, "video") || scan(seq.audioTracks, "audio");
+    }
+    /*
+     * Resolve a clip id that may live in ANY sequence.
+     *
+     * findClip() only ever looks in one sequence -- args.sequenceId or the
+     * active one -- which made every two-clip tool implicitly same-sequence.
+     * copy_effects_between_clips reported "Source or target clip not found" for
+     * two perfectly valid ids whenever they sat in different sequences, which is
+     * the main reason to reach for it: lifting an effect stack off a reference
+     * sequence onto a new one.
+     *
+     * An explicit sequenceId is honoured exactly (and an unresolvable one is an
+     * error, never a fall back to the active sequence). With none given, the
+     * active sequence is tried first and then every other sequence. Returns
+     * { error: "..." } rather than null so the caller can say which side failed.
+     */
+    function findClipAnySequence(nodeId, explicitSequenceId, label) {
+      if (!nodeId) return { error: label + " clip id is required." };
+      if (explicitSequenceId !== undefined && explicitSequenceId !== null && String(explicitSequenceId) !== "") {
+        var named = findSequence(String(explicitSequenceId));
+        if (!named) return { error: "Sequence not found by id: " + explicitSequenceId + " (given for the " + label + " clip). Use list_sequences to obtain a valid sequence ID." };
+        var inNamed = scanSequenceForClip(named, nodeId);
+        if (!inNamed) return { error: label + " clip " + nodeId + " is not in sequence '" + String(named.name) + "'." };
+        return { found: inNamed };
+      }
+      var inActive = scanSequenceForClip(activeSequence(), nodeId);
+      if (inActive) return { found: inActive };
+      if (app.project && app.project.sequences) {
+        for (var si = 0; si < app.project.sequences.numSequences; si++) {
+          var hit = scanSequenceForClip(app.project.sequences[si], nodeId);
+          if (hit) return { found: hit };
+        }
+      }
+      return { error: label + " clip not found in any sequence: " + nodeId + "." };
     }
     function clipInfo(clip, trackType, trackIndex, clipIndex) {
       var item = {
@@ -1103,6 +1164,17 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
         if (normalizeName(component.displayName) === wanted || normalizeName(component.matchName) === wanted) return { component: component, index: i };
       }
       return null;
+    }
+    // The effect-component names present on a clip. Returned alongside a
+    // "nothing matched" failure so the caller can see WHY the match missed
+    // instead of guessing at spelling.
+    function componentNames(clip) {
+      var names = [];
+      if (!clip || !clip.components) return names;
+      for (var i = 0; i < clip.components.numItems; i++) {
+        try { names.push(String(clip.components[i].displayName)); } catch (e) {}
+      }
+      return names;
     }
     function componentProperties(component) {
       var props = [];
@@ -1848,11 +1920,12 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
         case "get_color_space":
           var colorItem = findItem(args.projectItemId || args.itemId || args.item_id || args.name) || firstMediaItem();
           if (!colorItem) return fail("Project item not found");
-          var colorSpaceResult = tryCall(colorItem, ["getOverrideColorSpace", "getColorSpace"], []);
-          var colorSpaceList = null;
-          try { if (colorItem.getOverrideColorSpaceList) colorSpaceList = colorItem.getOverrideColorSpaceList(); } catch (colorListError) {}
-          if (!colorSpaceResult.called && colorSpaceList === null) return fail(colorSpaceResult.error, { item: colorItem.name });
-          return ok({ item: projectItemInfo(colorItem), colorSpace: colorSpaceResult.called ? colorSpaceResult.result : null, overrideColorSpaceList: colorSpaceList });
+          // ColorSpace objects stringify to "[object Object]"; read their fields instead.
+          var csNow = null, csOverride = null;
+          try { csNow = __csInfo(colorItem.getColorSpace()); } catch (csNowError) {}
+          try { csOverride = __csInfo(colorItem.getOverrideColorSpace()); } catch (csOvError) {}
+          if (!csNow && !csOverride) return fail("This item exposes no colour space", { item: colorItem.name });
+          return ok({ item: projectItemInfo(colorItem), colorSpace: csNow, overrideColorSpace: (csOverride && !csOverride.empty) ? csOverride : null, overrideColorSpaceList: __colorSpaceNames(colorItem) });
 
         case "get_graphics_white_luminance":
           if (!app.project || !app.project.getGraphicsWhiteLuminance) return fail("app.project.getGraphicsWhiteLuminance is unavailable");
@@ -2312,11 +2385,11 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           if (!args.clipId && !args.node_id && !args.nodeId) return fail("ripple_delete requires clipId.");
           var rippleClip = findClip(args.clipId || args.node_id || args.nodeId);
           if (!rippleClip) return fail(pendingSequenceError || "Clip not found");
-          var rippleBeforeCount = rippleClip.track.clips.numItems;
-          rippleClip.clip.remove(true, true);
-          var rippleAfterCount = rippleClip.track.clips.numItems;
-          if (rippleAfterCount >= rippleBeforeCount) return fail("Premiere did not remove the clip (track clip count unchanged).", { beforeCount: rippleBeforeCount, afterCount: rippleAfterCount });
-          return ok({ removed: true, ripple: true, verified: true, clipId: args.clipId || args.node_id || args.nodeId, beforeCount: rippleBeforeCount, afterCount: rippleAfterCount });
+          // remove(true, true) removes only this item and never ripples on 26.5.2 (see trim-lib).
+          var rippleResult = __removeGroup(rippleClip.sequence, rippleClip.clip, true);
+          if (rippleResult.error) return fail(rippleResult.error);
+          if (rippleResult.problems.length) return fail("PARTIALLY APPLIED: " + rippleResult.problems.join("; ") + ". Undo to restore.", rippleResult);
+          return ok({ removed: rippleResult.removed, ripple: true, verified: true, rippledSecs: rippleResult.rippledSecs, clipsRippled: rippleResult.clipsRippled, clipId: args.clipId || args.node_id || args.nodeId });
 
         case "roll_edit":
         case "slide_edit":
@@ -2325,30 +2398,48 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           var trimClipInfo = findClip(args.clipId || args.node_id || args.nodeId);
           if (!trimClipInfo) return fail(pendingSequenceError || "Clip not found");
           var editDelta = Number(args.delta || args.deltaSeconds || args.amount || 0);
+          var editTicks = Math.round(editDelta * 254016000000);
+          var editSeq = trimClipInfo.sequence;
+          var editHalf = (Number(editSeq.timebase) || 10584000000) / 2;
+          if (Math.abs(editTicks) < editHalf) return ok({ edited: false, mode: toolName, deltaSeconds: editDelta, note: "A delta under half a frame changes nothing." });
+          // Built on the measured trim primitives (trim-lib): an inPoint write slips, a start write
+          // moves the head with its content, an end write trims the tail, move() is relative.
+          // Linked audio/video moves with the clip, media handles are checked, and every edit is
+          // read back. The old slide called move() with a bare number and never adjusted the
+          // neighbours; the old roll and slip ignored linked audio and handles.
           if (toolName === "slip_edit") {
-            trimClipInfo.clip.inPoint = secondsToTime(valueOfTime(trimClipInfo.clip.inPoint) + editDelta);
-            trimClipInfo.clip.outPoint = secondsToTime(valueOfTime(trimClipInfo.clip.outPoint) + editDelta);
-            return ok({ edited: true, mode: toolName, deltaSeconds: editDelta, clip: clipInfo(trimClipInfo.clip, trimClipInfo.trackType, trimClipInfo.trackIndex, trimClipInfo.clipIndex) });
+            var slip = __slipGroup(editSeq, trimClipInfo.clip, editTicks);
+            if (slip.error) return fail(slip.error + " Nothing was changed.");
+            if (slip.problems.length) return fail("PARTIALLY APPLIED: " + slip.problems.join("; ") + ". Undo to restore.");
+            return ok({ edited: true, mode: toolName, deltaSeconds: editDelta, verified: true, linkedItems: slip.ops.length - 1, clip: clipInfo(trimClipInfo.clip, trimClipInfo.trackType, trimClipInfo.trackIndex, trimClipInfo.clipIndex) });
           }
           if (toolName === "slide_edit") {
-            trimClipInfo.clip.move(editDelta);
-            return ok({ edited: true, mode: toolName, deltaSeconds: editDelta, clip: clipInfo(trimClipInfo.clip, trimClipInfo.trackType, trimClipInfo.trackIndex, trimClipInfo.clipIndex) });
+            var slide = __planSlide(editSeq, trimClipInfo.clip, editTicks);
+            if (slide.error) return fail(slide.error + " Nothing was changed.");
+            var heads = [], tails = [];
+            for (var so = 0; so < slide.ops.length; so++) (slide.ops[so].kind === "tail" ? tails : heads).push(slide.ops[so]);
+            // Free space before filling it: sliding later trims the next clip first and extends the
+            // previous one last; sliding earlier does the reverse.
+            var slideBad = [];
+            if (editTicks > 0) { slideBad = slideBad.concat(__applyOps(heads, editHalf)); slideBad = slideBad.concat(__applyRipple(slide.movers, editTicks)); slideBad = slideBad.concat(__applyOps(tails, editHalf)); }
+            else { slideBad = slideBad.concat(__applyOps(tails, editHalf)); slideBad = slideBad.concat(__applyRipple(slide.movers, editTicks)); slideBad = slideBad.concat(__applyOps(heads, editHalf)); }
+            if (slideBad.length) return fail("PARTIALLY APPLIED: " + slideBad.join("; ") + ". Undo to restore.");
+            return ok({ edited: true, mode: toolName, deltaSeconds: editDelta, verified: true, edits: __opsReport(slide.ops), clip: clipInfo(trimClipInfo.clip, trimClipInfo.trackType, trimClipInfo.trackIndex, trimClipInfo.clipIndex) });
           }
-          var adjacentIndex = trimClipInfo.clipIndex > 0 ? trimClipInfo.clipIndex - 1 : trimClipInfo.clipIndex + 1;
-          if (adjacentIndex < 0 || adjacentIndex >= trimClipInfo.track.clips.numItems) return fail("roll_edit requires an adjacent clip on the same track");
-          var adjacentClip = trimClipInfo.track.clips[adjacentIndex];
-          var beforeRoll = { clipStart: valueOfTime(trimClipInfo.clip.start), clipInPoint: valueOfTime(trimClipInfo.clip.inPoint), adjacentEnd: valueOfTime(adjacentClip.end) };
-          if (adjacentIndex < trimClipInfo.clipIndex) {
-            adjacentClip.end = secondsToTime(valueOfTime(adjacentClip.end) + editDelta);
-            trimClipInfo.clip.start = secondsToTime(valueOfTime(trimClipInfo.clip.start) + editDelta);
-            trimClipInfo.clip.inPoint = secondsToTime(valueOfTime(trimClipInfo.clip.inPoint) + editDelta);
-          } else {
-            trimClipInfo.clip.end = secondsToTime(valueOfTime(trimClipInfo.clip.end) + editDelta);
-            adjacentClip.start = secondsToTime(valueOfTime(adjacentClip.start) + editDelta);
-            adjacentClip.inPoint = secondsToTime(valueOfTime(adjacentClip.inPoint) + editDelta);
+          // roll_edit: move the cut this clip shares with its previous clip (or, for the first clip,
+          // its next one) by delta, rolling the neighbour.
+          var rollEdge = trimClipInfo.clipIndex > 0 ? "head" : "tail";
+          var rollOps = [], rollErrors = [], rollGroup = __withLinked(trimClipInfo.clip), rollRef = __st(trimClipInfo.clip);
+          for (var rg = 0; rg < rollGroup.length; rg++) {
+            var rgs = __st(rollGroup[rg]);
+            if ((rollEdge === "head" ? rgs.start : rgs.end) !== (rollEdge === "head" ? rollRef.start : rollRef.end)) continue;
+            var rollPlan = __planRoll(editSeq, rollGroup[rg], rollEdge, editTicks);
+            if (rollPlan.error) rollErrors.push(rollPlan.error); else rollOps = rollOps.concat(rollPlan.ops);
           }
-          var afterRoll = { clipStart: valueOfTime(trimClipInfo.clip.start), clipInPoint: valueOfTime(trimClipInfo.clip.inPoint), adjacentEnd: valueOfTime(adjacentClip.end) };
-          return ok({ edited: true, mode: toolName, deltaSeconds: editDelta, before: beforeRoll, after: afterRoll, clip: clipInfo(trimClipInfo.clip, trimClipInfo.trackType, trimClipInfo.trackIndex, trimClipInfo.clipIndex) });
+          if (rollErrors.length) return fail(rollErrors.join(" ") + " Nothing was changed.");
+          var rollBad = __applyOps(rollOps, editHalf);
+          if (rollBad.length) return fail("PARTIALLY APPLIED: " + rollBad.join("; ") + ". Undo to restore.");
+          return ok({ edited: true, mode: toolName, deltaSeconds: editDelta, verified: true, edge: rollEdge, edits: __opsReport(rollOps), clip: clipInfo(trimClipInfo.clip, trimClipInfo.trackType, trimClipInfo.trackIndex, trimClipInfo.clipIndex) });
 
         case "move_clip_to_track":
           if (!args.clipId && !args.node_id && !args.nodeId) return fail("move_clip_to_track requires clipId.");
@@ -2585,6 +2676,8 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           var speedRatio = speedInput <= 10 ? speedInput : (speedInput / 100);
           var requestedPercent = speedRatio * 100;
           var speedOldRatio = null; try { speedOldRatio = Number(speedClip.clip.getSpeed()); } catch (eGsOld) {}
+          var speedOldDur = Number(speedClip.clip.end.ticks) - Number(speedClip.clip.start.ticks);
+          var speedTpf = Number(speedClip.sequence.timebase) || 10584000000;
           try {
             speedQeClip.setSpeed(speedRatio, "00:00:00:00", Boolean(args.reverse), Boolean(args.maintainAudio !== false), false);
           } catch (speedSetError) {
@@ -2595,8 +2688,14 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           if (speedNewRatio === null || isNaN(speedNewRatio)) {
             return ok({ speed: requestedPercent, requestedRatio: speedRatio, maintainAudio: Boolean(args.maintainAudio !== false), changed: true, verified: false, note: "setSpeed did not throw but DOM getSpeed() was not readable to confirm." });
           }
-          if (Math.abs(speedNewRatio - speedRatio) > 0.02) {
-            return fail("Premiere did not apply the requested speed (clip is at " + (speedNewRatio * 100) + "%, requested " + requestedPercent + "%).", { actualPercent: speedNewRatio * 100, requestedPercent: requestedPercent, oldSpeed: speedOldRatio });
+          // QE setSpeed is miscalibrated on 26.5.2 (rate r plays at 2r/(r+1) while the duration is cut
+          // to 1/r), so check the duration that rate implies as well, and undo a wrong result.
+          var speedNewDur = Number(speedClip.clip.end.ticks) - Number(speedClip.clip.start.ticks);
+          var speedWantDur = speedOldRatio ? speedOldDur * speedOldRatio / speedRatio : speedNewDur;
+          if (Math.abs(speedNewRatio - speedRatio) > 0.02 || Math.abs(speedNewDur - speedWantDur) > speedTpf / 2) {
+            var speedUndone = false;
+            try { qe.project.undo(); speedUndone = Math.abs(Number(speedClip.clip.getSpeed()) - speedOldRatio) < 0.0001; } catch (eSpeedUndo) {}
+            return fail("Premiere applied the speed incorrectly (" + (speedNewRatio * 100) + "% over " + (speedNewDur / 254016000000) + "s, requested " + requestedPercent + "% over " + (speedWantDur / 254016000000) + "s)" + (speedUndone ? "; it was undone and the clip is unchanged." : "; it could NOT be undone, check the clip.") + " QE speed changes are unreliable on this build; bake_speed_change renders a retimed file instead.", { actualPercent: speedNewRatio * 100, requestedPercent: requestedPercent, oldSpeed: speedOldRatio, rolledBack: speedUndone });
           }
           return ok({ speed: requestedPercent, actualPercent: speedNewRatio * 100, requestedRatio: speedRatio, oldSpeed: speedOldRatio, maintainAudio: Boolean(args.maintainAudio !== false), reverse: Boolean(args.reverse), changed: true, verified: true });
 
@@ -2805,9 +2904,25 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
 
         case "copy_effects_between_clips":
         case "copy_effect_values":
-          var copySource = findClip(args.sourceClipId || args.source_clip_id || args.clipId);
-          var copyTarget = findClip(args.targetClipId || args.target_clip_id || args.destinationClipId);
-          if (!copySource || !copyTarget) return fail("Source or target clip not found");
+          // Resolved across sequences: the source and target legitimately live in
+          // different sequences when an effect stack is being lifted off a
+          // reference cut. Each side reports its own failure -- "Source or target
+          // clip not found" for two valid ids was a dead end.
+          var copySourceLookup = findClipAnySequence(
+            args.sourceClipId || args.source_clip_id || args.clipId,
+            args.sourceSequenceId || args.source_sequence_id || args.sequenceId || args.sequence_id,
+            "Source");
+          if (copySourceLookup.error) return fail(copySourceLookup.error);
+          var copyTargetLookup = findClipAnySequence(
+            args.targetClipId || args.target_clip_id || args.destinationClipId,
+            args.targetSequenceId || args.target_sequence_id || args.sequenceId || args.sequence_id,
+            "Target");
+          if (copyTargetLookup.error) return fail(copyTargetLookup.error);
+          var copySource = copySourceLookup.found;
+          var copyTarget = copyTargetLookup.found;
+          if (copySource.clip.nodeId === copyTarget.clip.nodeId && String(copySource.sequenceId) === String(copyTarget.sequenceId)) {
+            return fail("Source and target are the same clip in the same sequence; nothing to copy.");
+          }
           var copied = [];
           var copyComponentName = args.componentName || args.effectName || null;
           for (var cci = 0; cci < copySource.clip.components.numItems; cci++) {
@@ -2826,8 +2941,21 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
               } catch (copyError) {}
             }
           }
-          if (!copied.length) return fail("No matching effect properties could be copied");
-          return ok({ copied: copied.length, properties: copied });
+          if (!copied.length) return fail("No matching effect properties could be copied", {
+            sourceSequence: copySource.sequenceName,
+            targetSequence: copyTarget.sequenceName,
+            sourceComponents: componentNames(copySource.clip),
+            targetComponents: componentNames(copyTarget.clip)
+          });
+          return ok({
+            copied: copied.length,
+            properties: copied,
+            sourceSequence: copySource.sequenceName,
+            sourceSequenceId: copySource.sequenceId,
+            targetSequence: copyTarget.sequenceName,
+            targetSequenceId: copyTarget.sequenceId,
+            crossSequence: String(copySource.sequenceId) !== String(copyTarget.sequenceId)
+          });
 
         case "replace_clip_media":
           if (!args.projectItemId && !args.itemId && !args.item_id) return fail("replace_clip_media requires projectItemId or itemId.");
@@ -3338,11 +3466,9 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           if (!frameSeq) return fail("No active sequence");
           var framePath = String(args.outputPath || args.path || "");
           if (!framePath) return fail("capture_frame requires outputPath");
-          if (frameSeq.openInTimeline) {
-            try { frameSeq.openInTimeline(); } catch (frameOpenError) {}
-          }
           app.enableQE();
           var qeFrameSeq = qeSequenceFor(frameSeq);
+          if (!qeFrameSeq) { try { app.project.openSequence(frameSeq.sequenceID); } catch (frameOpenError) {} qeFrameSeq = qeSequenceFor(frameSeq); }
           if (!qeFrameSeq) return fail("Could not address sequence '" + frameSeq.name + "' through the QE API.");
           // Format -> QE method + extension, confirmed live. The method name is
           // case-sensitive, so the old "exportFrameTiff" silently failed every TIFF
@@ -3407,13 +3533,8 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
             try { qeFrameSeq[frameMethod](arg1, arg2); } catch (frameError) { frameExportError = frameError.toString(); return false; }
             return frameWritten(false) !== null;
           }
-          var frameExported =
-            tryFrameExport(frameTicks, frameStem) ||
-            tryFrameExport(frameStem, frameTicks) ||
-            tryFrameExport(frameTimeString, frameStem) ||
-            tryFrameExport(frameStem, frameTimeString) ||
-            tryFrameExport(frameSeconds, frameStem) ||
-            tryFrameExport(frameStem, frameSeconds);
+          // Timecode only: seconds/ticks strings are accepted and silently export frame 0.
+          var frameExported = tryFrameExport(__qeTimecode(frameSeq, frameSeconds), frameStem);
           var frameFinal = frameWritten(true);
           if (!frameExported && !frameFinal) return fail(frameExportError || "Frame export produced no file on disk", { verified: false });
           return ok({ exported: true, outputPath: frameFinal || (frameStem + frameExt), method: frameMethod, format: frameFormat, seconds: frameSeconds, verified: true });
@@ -3625,28 +3746,32 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
             return n;
           }
           var selBeforeTotal = selectionTotalClips();
-          var removedSelected = 0;
-          var selectedErrors = [];
-          for (var si = selectedCount - 1; si >= 0; si--) {
-            try {
-              var selectedClip = selectedItems[si];
-              if (!selectedClip && selectedItems.getItemAt) selectedClip = selectedItems.getItemAt(si);
-              if (!selectedClip || typeof selectedClip.remove !== "function") {
-                selectedErrors.push({ index: si, error: "Selected item is not a removable clip" });
-                continue;
-              }
-              selectedClip.remove(rippleSelected, true);
-              removedSelected++;
-            } catch (selectedError) {
-              selectedErrors.push({ index: si, error: selectedError.toString() });
-            }
+          // TrackItem.remove() never ripples and never takes linked items on 26.5.2, so extract left
+          // gaps. Each selected clip goes through __removeGroup (linked items, sync-locked ripple),
+          // latest first so the positions of earlier selections are not moved under us.
+          var selected = [];
+          for (var si = 0; si < selectedCount; si++) {
+            var selectedClip = selectedItems[si];
+            if (!selectedClip && selectedItems.getItemAt) selectedClip = selectedItems.getItemAt(si);
+            if (selectedClip && selectedClip.start !== undefined) selected.push(selectedClip);
+          }
+          selected.sort(function (x, y) { return Number(y.start.ticks) - Number(x.start.ticks); });
+          var doneKeys = {}, removedSelected = 0, selectedErrors = [], selRemoved = [];
+          for (var sk = 0; sk < selected.length; sk++) {
+            var sc = selected[sk];
+            if (doneKeys[__key(sc)]) continue;
+            var scGroup = __withLinked(sc);
+            for (var sg = 0; sg < scGroup.length; sg++) doneKeys[__key(scGroup[sg])] = true;
+            var scResult = __removeGroup(selectionSeq, sc, rippleSelected);
+            if (scResult.error) { selectedErrors.push({ clip: String(sc.name), error: scResult.error }); continue; }
+            if (scResult.problems.length) selectedErrors.push({ clip: String(sc.name), error: scResult.problems.join("; ") });
+            removedSelected += scResult.removed.length;
+            selRemoved = selRemoved.concat(scResult.removed);
           }
           if (!removedSelected) return fail("No selected clips were removed", { selectedCount: selectedCount, errors: selectedErrors });
           var selAfterTotal = selectionTotalClips();
-          // .remove() returns void and can no-op silently, so gate on the timeline
-          // actually losing clips rather than on the loop counter alone.
-          if (selAfterTotal >= selBeforeTotal) return fail("remove() ran but the timeline clip count did not drop.", { selectedCount: selectedCount, beforeCount: selBeforeTotal, afterCount: selAfterTotal, errors: selectedErrors });
-          return ok({ removed: removedSelected, selectedCount: selectedCount, ripple: rippleSelected, beforeCount: selBeforeTotal, afterCount: selAfterTotal, verified: true, errors: selectedErrors });
+          if (selectedErrors.length) return fail("PARTIALLY APPLIED: " + removedSelected + " item(s) removed; see details.errors. Undo to restore.", { removed: selRemoved, errors: selectedErrors });
+          return ok({ removed: removedSelected, items: selRemoved, selectedCount: selectedCount, ripple: rippleSelected, beforeCount: selBeforeTotal, afterCount: selAfterTotal, verified: true });
 
         case "link_selection":
         case "unlink_selection":

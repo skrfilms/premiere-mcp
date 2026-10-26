@@ -32,7 +32,7 @@ export class CaptionTools extends AudioTools {
   protected async exportCaptionsToSrt(outputPath: string, sequenceId?: string): Promise<any> {
     const result: any = await this.bridge.executeScript(`
       try {
-        var seq = ${this.buildSeqScript(sequenceId)};
+        var seq = ${this.buildSeqRes(sequenceId)};
         if (!seq) return JSON.stringify({success:false,error:'No sequence'});
         var captions = seq.captionTracks;
         if (!captions || captions.numTracks === 0) return JSON.stringify({success:false,error:'No caption tracks found'});
@@ -173,7 +173,7 @@ export class CaptionTools extends AudioTools {
       const cuesJson = JSON.stringify(cues);
       const result: any = await this.bridge.executeScript(`
         try {
-          var seq = ${this.buildSeqScript(sequenceId)};
+          var seq = ${this.buildSeqRes(sequenceId)};
           if (!seq) return JSON.stringify({success:false,error:'No sequence'});
           var cues = ${cuesJson};
           for (var i=0; i<cues.length; i++) {
