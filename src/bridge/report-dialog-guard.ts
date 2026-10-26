@@ -74,27 +74,56 @@ export function dialogGuardEnabled(): boolean {
   return process.platform === 'darwin' && process.env.PREMIERE_MCP_DIALOG_GUARD !== '0';
 }
 
-/** Run `fn`, dismissing listed report dialogs that appear while it is still running. */
+/*
+ * One poller for every call in flight. A per-call guard (or a per-instance depth counter) could not
+ * tell a nested call from a concurrent one: a second overlapping request ran unguarded, and the
+ * first to finish stopped the polling while the other was still blocked on a modal. Dismissals are
+ * credited to every call that was in flight when they happened.
+ */
+const inFlight = new Set<GuardOutcome>();
+let starter: NodeJS.Timeout | undefined;
+let interval: NodeJS.Timeout | undefined;
+let polling = false;
+let unavailable: string | undefined;
+
+async function tick(): Promise<void> {
+  if (polling || unavailable || inFlight.size === 0) return;
+  polling = true;
+  const r = await pollOnce();
+  polling = false;
+  if (r.dismissed) for (const g of inFlight) g.dismissed.push(r.dismissed);
+  else if (r.error && /not allowed|assistive|-1719|-25211|1002/i.test(r.error)) {
+    unavailable = r.error.slice(0, 200);
+    for (const g of inFlight) g.unavailable = unavailable;
+  }
+}
+
+function startPolling(): void {
+  if (starter || interval) return;
+  starter = setTimeout(() => {
+    starter = undefined;
+    void tick();
+    interval = setInterval(() => { void tick(); }, POLL_MS);
+  }, START_AFTER_MS);
+}
+
+function stopPollingIfIdle(): void {
+  if (inFlight.size > 0) return;
+  if (starter) { clearTimeout(starter); starter = undefined; }
+  if (interval) { clearInterval(interval); interval = undefined; }
+}
+
+/** Run `fn`, dismissing listed report dialogs that appear while it (or any other call) runs. */
 export async function withReportDialogGuard<T>(fn: () => Promise<T>): Promise<{ result: T; guard: GuardOutcome }> {
   const guard: GuardOutcome = { dismissed: [] };
   if (!dialogGuardEnabled()) return { result: await fn(), guard };
-  let done = false;
-  let polling = false;
-  const tick = async () => {
-    if (done || polling || guard.unavailable) return;
-    polling = true;
-    const r = await pollOnce();
-    polling = false;
-    if (r.dismissed) guard.dismissed.push(r.dismissed);
-    else if (r.error && /not allowed|assistive|-1719|-25211|1002/i.test(r.error)) guard.unavailable = r.error.slice(0, 200);
-  };
-  let interval: NodeJS.Timeout | undefined;
-  const starter = setTimeout(() => { void tick(); interval = setInterval(() => { void tick(); }, POLL_MS); }, START_AFTER_MS);
+  if (unavailable) guard.unavailable = unavailable;
+  inFlight.add(guard);
+  startPolling();
   try {
     return { result: await fn(), guard };
   } finally {
-    done = true;
-    clearTimeout(starter);
-    if (interval) clearInterval(interval);
+    inFlight.delete(guard);
+    stopPollingIfIdle();
   }
 }

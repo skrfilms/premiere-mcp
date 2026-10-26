@@ -10,7 +10,7 @@
  */
 
 import vm from 'node:vm';
-import { EXTENDSCRIPT_HELPERS } from '../../bridge/index.js';
+import { EXTENDSCRIPT_HELPERS, PremiereProBridge } from '../../bridge/index.js';
 import { PremiereProTools } from '../../tools/index.js';
 
 describe('bridge prelude array polyfills', () => {
@@ -124,10 +124,13 @@ describe('QE frame export time', () => {
   };
 
   it('builds a timecode from the sequence frame rate', () => {
-    expect(tc('10584000000', 2)).toBe('00;00;02;00'); // 24 fps
-    expect(tc('10584000000', 5.5)).toBe('00;00;05;12');
-    expect(tc('8475667200', 1)).toBe('00;00;01;00'); // 29.97 -> nominal 30
-    expect(tc('10584000000', 3725 + 1 / 24)).toBe('01;02;05;01');
+    expect(tc('10584000000', 2)).toBe('00:00:02:00'); // 24 fps
+    expect(tc('10584000000', 5.5)).toBe('00:00:05:12');
+    // 29.97: QE reads timecode as a NON-drop count at the nominal 30 (measured: 00;10;00;00 and
+    // 00:10:00:00 both export frame 18000), so 600s = frame 17982 = 00:09:59:12.
+    expect(tc('8475667200', 1)).toBe('00:00:01:00');
+    expect(tc('8475667200', 600)).toBe('00:09:59:12');
+    expect(tc('10584000000', 3725 + 1 / 24)).toBe('01:02:05:01');
   });
 
   it.each(['capture_program_output', 'export_frame', 'capture_frame', 'export_thumbnail'])('%s exports by timecode only', async (name) => {
@@ -180,5 +183,32 @@ describe('timecode to ticks', () => {
     expect(ticks('8475667200', '00:01:00:02')).toBe(String(1802 * 8475667200)); // 29.97 NDF
     expect(ticks('10584000000', '2.5')).toBe('635040000000');
     expect(ticks('10584000000', '00:00:00:24')).toBeNull(); // frame field out of range
+  });
+});
+
+describe('review fixes', () => {
+  const scriptOf = async (name: string, args: Record<string, unknown>): Promise<string> => {
+    let script = '';
+    const bridge = { executeScript: async (s: string) => { script = s; return { success: true }; } };
+    await new PremiereProTools(bridge as never).executeTool(name, args);
+    return script;
+  };
+
+  it('close_all_gaps keeps the leading gap unless asked', async () => {
+    expect(await scriptOf('close_all_gaps', { sequenceId: 'S' })).toContain('var includeLeading = false;');
+    expect(await scriptOf('close_all_gaps', { sequenceId: 'S', includeLeadingGap: true })).toContain('var includeLeading = true;');
+  });
+
+  it('close_gap_at parses timecode with the shared drop-frame-aware helper', async () => {
+    expect(await scriptOf('close_gap_at', { timecode: '00;01;00;02' })).toContain('__timecodeToTicks(seq, tc)');
+  });
+
+  it('linkAudio=false removes only the placed clip\'s linked audio', async () => {
+    let s = '';
+    const bridge = Object.create(PremiereProBridge.prototype);
+    bridge.executeScript = async (x: string) => { s = x; return { success: true }; };
+    await bridge.addToTimeline('S', 'P', 1, 10, false);
+    expect(s).toContain('__removeLinkedAudio(placedClip)');
+    expect(s).not.toMatch(/audioClip\.projectItem\.nodeId === projectItem\.nodeId/);
   });
 });

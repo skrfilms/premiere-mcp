@@ -23,8 +23,8 @@ export class TrimmingTools extends GraphicsTools {
       if (!(P > s0.start && P < s0.end)) return JSON.stringify({success:false,error:'Put the playhead inside the clip (' + (s0.start/__TPS) + 's to ' + (s0.end/__TPS) + 's); it is at ' + (P/__TPS) + 's. Nothing was changed.'});
       var d = P - s0.start, group = __withLinked(clip), ops = [], skip = {};
       for (var i = 0; i < group.length; i++) { var gs = __st(group[i]); skip[__key(group[i])] = true; if (gs.start === s0.start && gs.end === s0.end) ops.push({item:group[i], kind:'rippleHead', d:d, before:gs}); }
-      var rip = __planRipple(seq, s0.end, skip);
-      if (rip.blockers.length) return JSON.stringify({success:false,error:'A ripple at ' + (s0.end/__TPS) + 's would break sync: ' + rip.blockers.join(', ') + ' span' + (rip.blockers.length===1?'s':'') + ' that point. Nothing was changed.'});
+      var rip = __planRipple(seq, s0.end, skip, s0.end - d);
+      if (rip.blockers.length) return JSON.stringify({success:false,error:'A ripple from ' + (s0.end/__TPS) + 's back to ' + ((s0.end-d)/__TPS) + 's would land later clips on ' + rip.blockers.join(', ') + ', on another track, and break sync. Nothing was changed.'});
       var bad = __applyOps(ops, (Number(seq.timebase) || 10584000000) / 2).concat(__applyRipple(rip.movers, -d));
       return JSON.stringify({success:bad.length===0,verified:true,verifiedBy:'start/end/in readback of every edited and moved clip',trimmedSecs:d/__TPS,edits:__opsReport(ops),clipsRippled:rip.movers.length,
         error: bad.length ? 'PARTIALLY APPLIED: ' + bad.join('; ') + '. Undo to restore.' : undefined});
@@ -44,8 +44,8 @@ export class TrimmingTools extends GraphicsTools {
       if (!(P > s0.start && P < s0.end)) return JSON.stringify({success:false,error:'Put the playhead inside the clip (' + (s0.start/__TPS) + 's to ' + (s0.end/__TPS) + 's); it is at ' + (P/__TPS) + 's. Nothing was changed.'});
       var d = s0.end - P, group = __withLinked(clip), ops = [], skip = {};
       for (var i = 0; i < group.length; i++) { var gs = __st(group[i]); skip[__key(group[i])] = true; if (gs.start === s0.start && gs.end === s0.end) ops.push({item:group[i], kind:'tail', d:-d, before:gs}); }
-      var rip = __planRipple(seq, s0.end, skip);
-      if (rip.blockers.length) return JSON.stringify({success:false,error:'A ripple at ' + (s0.end/__TPS) + 's would break sync: ' + rip.blockers.join(', ') + ' span' + (rip.blockers.length===1?'s':'') + ' that point. Nothing was changed.'});
+      var rip = __planRipple(seq, s0.end, skip, s0.end - d);
+      if (rip.blockers.length) return JSON.stringify({success:false,error:'A ripple from ' + (s0.end/__TPS) + 's back to ' + ((s0.end-d)/__TPS) + 's would land later clips on ' + rip.blockers.join(', ') + ', on another track, and break sync. Nothing was changed.'});
       var bad = __applyOps(ops, (Number(seq.timebase) || 10584000000) / 2).concat(__applyRipple(rip.movers, -d));
       return JSON.stringify({success:bad.length===0,verified:true,verifiedBy:'start/end/in readback of every edited and moved clip',trimmedSecs:d/__TPS,edits:__opsReport(ops),clipsRippled:rip.movers.length,
         error: bad.length ? 'PARTIALLY APPLIED: ' + bad.join('; ') + '. Undo to restore.' : undefined});
@@ -145,17 +145,8 @@ export class TrimmingTools extends GraphicsTools {
           }
           return out;
         };
-        // Empty ranges across ALL tracks, from 0 up to the last edit.
-        var __gaps = function(){
-          var items = __items();
-          items.sort(function(x,y){ return x.start - y.start; });
-          var gaps = [], cursor = 0;
-          for (var i=0; i<items.length; i++) {
-            if (items[i].start > cursor) gaps.push({start:cursor, end:items[i].start});
-            if (items[i].end > cursor) cursor = items[i].end;
-          }
-          return gaps;
-        };
+        // Empty ranges across ALL tracks, from 0 up to the last edit (the shared prelude helper).
+        var __gaps = function(){ return __rangesGaps(__items()); };
         var __close = function(gap){
           var len = gap.end - gap.start;
           var items = __items();
@@ -179,14 +170,9 @@ export class TrimmingTools extends GraphicsTools {
   protected async closeGapAt(timecode: string, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(this.gapCloserScript(sequenceId, `
         var tc = ${JSON.stringify(String(timecode))};
-        var target = null;
-        var parts = tc.split(/[:;]/);
-        if (parts.length === 4) {
-          var fps = TPS / Number(seq.timebase);
-          target = Math.round(((Number(parts[0])*3600 + Number(parts[1])*60 + Number(parts[2])) + Number(parts[3])/fps) * TPS);
-        } else if (parts.length === 1 && !isNaN(Number(tc))) {
-          target = Math.round(Number(tc) * TPS);
-        }
+        // Shared parser: HH:MM:SS:FF, drop-frame HH;MM;SS;FF and seconds.
+        var targetStr = __timecodeToTicks(seq, tc);
+        var target = targetStr === null ? null : Number(targetStr);
         if (target === null || isNaN(target)) return JSON.stringify({success:false,error:'Could not read timecode "' + tc + '". Pass HH:MM:SS:FF or a number of seconds.'});
         var gaps = __gaps(), hit = null;
         for (var i=0; i<gaps.length; i++) { if (target >= gaps[i].start && target < gaps[i].end) { hit = gaps[i]; break; } }
@@ -198,21 +184,31 @@ export class TrimmingTools extends GraphicsTools {
     `));
   }
 
-  protected async closeAllGaps(sequenceId?: string, trackIndex?: number): Promise<any> {
+  protected async closeAllGaps(sequenceId?: string, trackIndex?: number, includeLeadingGap = false): Promise<any> {
     return await this.bridge.executeScript(this.gapCloserScript(sequenceId, `
         var limit = ${trackIndex === undefined ? 'null' : Number(trackIndex)};
-        var before = __gaps();
-        if (!before.length) return JSON.stringify({success:true,verified:true,verifiedBy:'gap scan',gapsClosed:0,message:'No gaps across all tracks.'});
+        // Empty time before the first clip is often deliberate (a slate, countdown or leader
+        // offset), so it is only closed when asked for.
+        var includeLeading = ${includeLeadingGap ? 'true' : 'false'};
+        var allGaps = __gaps(), before = [], leadingKept = null;
+        for (var gi = 0; gi < allGaps.length; gi++) {
+          if (allGaps[gi].start === 0 && !includeLeading) { leadingKept = allGaps[gi]; continue; }
+          before.push(allGaps[gi]);
+        }
+        var leadingNote = leadingKept ? 'The empty ' + ((leadingKept.end - leadingKept.start)/TPS) + 's before the first clip was left in place; pass includeLeadingGap:true to close it too.' : undefined;
+        if (!before.length) return JSON.stringify({success:true,verified:true,verifiedBy:'gap scan',gapsClosed:0,message:'No gaps across all tracks.',note:leadingNote});
         var closed = [];
         // Latest first: closing a gap moves everything after it, so working backwards keeps every
         // earlier gap where the scan found it.
         for (var i=before.length-1; i>=0; i--) closed.push(__close(before[i]));
-        var after = __gaps();
+        var afterAll = __gaps(), after = [];
+        for (var ai = 0; ai < afterAll.length; ai++) { if (afterAll[ai].start === 0 && !includeLeading) continue; after.push(afterAll[ai]); }
         var misplaced = 0;
         for (var k=0; k<closed.length; k++) misplaced += closed[k].misplaced.length;
         var ok = after.length === 0 && misplaced === 0;
         return JSON.stringify({success:ok,verified:ok,verifiedBy:'gap rescan + clip start readback',gapsFound:before.length,gapsClosed:closed.length,gapsRemaining:after.length,closed:closed,
           trackIndexNote: limit === null ? undefined : 'trackIndex is ignored: only gaps empty on every track are closed, because closing one track alone breaks sync.',
+          note: leadingNote,
           error: ok ? undefined : 'PARTIALLY APPLIED: ' + after.length + ' gap(s) remain and ' + misplaced + ' clip(s) are misplaced. Undo to restore.'});
     `));
   }

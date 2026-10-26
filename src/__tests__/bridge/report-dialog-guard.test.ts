@@ -26,4 +26,13 @@ describe('report dialog guard', () => {
   it('propagates a failure from the guarded call', async () => {
     await expect(withReportDialogGuard(async () => { throw new Error('boom'); })).rejects.toThrow('boom');
   });
+
+  it('keeps guarding while any call is in flight, not just the first', async () => {
+    let releaseA: () => void = () => {};
+    const a = withReportDialogGuard(() => new Promise<string>((res) => { releaseA = () => res('a'); }));
+    const b = withReportDialogGuard(async () => 'b');
+    await expect(b).resolves.toMatchObject({ result: 'b' });
+    releaseA();
+    await expect(a).resolves.toMatchObject({ result: 'a' });
+  });
 });

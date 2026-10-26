@@ -465,6 +465,52 @@ function __qeTransitionsAt(qeTrack, t, tol) {
   }
   return out;
 }
+/*
+ * linkAudio=false clean-up and overwrite reporting for placements.
+ *
+ * The old clean-up removed every audio clip from the same source that started at the placement
+ * time, so the user's OWN clip of that media starting there was deleted too (measured: a dual-mono
+ * sequence lost its A1 clip at 10-20s when a video-only piece was placed on V2 at 10s). Only the
+ * placed clip's linked audio is removed now. Overwrite placement of an A/V item also overwrites the
+ * audio tracks under it -- that is Premiere's overwrite edit -- so the audio there is snapshotted
+ * and anything it replaced is reported instead of passing silently.
+ */
+function __removeLinkedAudio(placed) {
+  var removed = 0;
+  try {
+    var l = placed.getLinkedItems();
+    var victims = [];
+    for (var i = 0; i < l.numItems; i++) { if (String(l[i].mediaType) === 'Audio') victims.push(l[i]); }
+    for (var k = 0; k < victims.length; k++) { try { victims[k].remove(false, false); removed++; } catch (eR) {} }
+  } catch (eL) {}
+  return removed;
+}
+function __audioUnder(seq, a, b) {
+  var out = [];
+  for (var t = 0; t < seq.audioTracks.numTracks; t++) {
+    var tr = seq.audioTracks[t];
+    for (var i = 0; i < tr.clips.numItems; i++) {
+      var c = tr.clips[i], cs = Number(c.start.seconds), ce = Number(c.end.seconds);
+      if (cs < b - 0.001 && ce > a + 0.001) out.push({ track: 'A' + (t + 1), nodeId: String(c.nodeId), name: String(c.name), start: cs, end: ce });
+    }
+  }
+  return out;
+}
+function __audioReplaced(seq, snapshot) {
+  var hit = [];
+  for (var s = 0; s < snapshot.length; s++) {
+    var w = snapshot[s], intact = false;
+    for (var t = 0; t < seq.audioTracks.numTracks && !intact; t++) {
+      var tr = seq.audioTracks[t];
+      for (var i = 0; i < tr.clips.numItems; i++) {
+        var c = tr.clips[i];
+        if (String(c.nodeId) === w.nodeId && Math.abs(Number(c.start.seconds) - w.start) < 0.001 && Math.abs(Number(c.end.seconds) - w.end) < 0.001) { intact = true; break; }
+      }
+    }
+    if (!intact) hit.push(w.track + ' "' + w.name + '" ' + w.start + '-' + w.end + 's');
+  }
+  return hit;
+}
 function __findClipInSequence(seq, nodeId) {
   if (!seq) return null;
   for (var t = 0; t < seq.videoTracks.numTracks; t++) {
@@ -738,7 +784,10 @@ function __qeTimecode(seq, seconds) {
   if (frames < 0) frames = 0;
   var ff = frames % nominal, totalSecs = Math.floor(frames / nominal);
   var ss = totalSecs % 60, mm = Math.floor(totalSecs / 60) % 60, hh = Math.floor(totalSecs / 3600);
-  return __padLeft(hh, 2) + ';' + __padLeft(mm, 2) + ';' + __padLeft(ss, 2) + ';' + __padLeft(ff, 2);
+  // ':' on purpose. QE reads either separator as a NON-drop frame count (measured on a 29.97
+  // sequence: 00;10;00;00 and 00:10:00:00 both export frame 18000), so the frames are laid out at the
+  // nominal rate whatever the sequence's display format; ';' only invited a drop-frame misreading.
+  return __padLeft(hh, 2) + ':' + __padLeft(mm, 2) + ':' + __padLeft(ss, 2) + ':' + __padLeft(ff, 2);
 }
 /*
  * Timecode -> tick string for a sequence. Accepts HH:MM:SS:FF (non-drop), HH;MM;SS;FF (drop-frame
@@ -2090,6 +2139,22 @@ export class PremiereProBridge implements PremiereProTransport {
             if (existingItem.getMediaPath && existingItem.getMediaPath() === file.fsName) {
               var __existingPath = null;
               try { __existingPath = String(existingItem.treePath); } catch (eTp) {}
+              // A caller who named a bin is relying on the media being there. The re-import does not
+              // move it, so success here would claim a bin the item is not in.
+              var __binWasRequested = ${binName !== undefined || binId !== undefined ? 'true' : 'false'};
+              var __inDest = false;
+              try { for (var xi = 0; xi < __destBin.children.numItems; xi++) { if (__destBin.children[xi].nodeId === existingItem.nodeId) { __inDest = true; break; } } } catch (eIn) {}
+              if (__binWasRequested && !__inDest) {
+                return JSON.stringify({
+                  success: false,
+                  alreadyImported: true,
+                  id: existingItem.nodeId,
+                  name: existingItem.name,
+                  treePath: __existingPath,
+                  movedToRequestedBin: false,
+                  error: "This file is already in the project at " + __existingPath + ", not in the requested bin '" + String(__destBin.name) + "'. Nothing was imported or moved; use move_item_to_bin to put it there."
+                });
+              }
               return JSON.stringify({
                 success: true,
                 id: existingItem.nodeId,
@@ -2173,6 +2238,10 @@ export class PremiereProBridge implements PremiereProTransport {
         // Only claim verified when the readback actually answered. An
         // unreadable children collection is "unknown", not "confirmed".
         if (__landedInRequestedBin !== null) __payload.verified = __landedInRequestedBin;
+        if (__landedInRequestedBin === false) {
+          __payload.success = false;
+          __payload.error = "The file was imported but did not land in the requested bin '" + String(__destBin.name) + "'; it is at " + __landedPath + ". Move it with move_item_to_bin.";
+        }
         return JSON.stringify(__payload);
       } catch (e) {
         return JSON.stringify({
@@ -2362,6 +2431,10 @@ export class PremiereProBridge implements PremiereProTransport {
         // exist on video and audio tracks in 26.0.2, so honour the request — and refuse
         // rather than silently overwriting if this build lacks insertClip, since falling
         // back would be the destructive direction.
+        // Audio already under the placement, so anything an overwrite replaces can be reported.
+        var __placeDur = 0;
+        try { __placeDur = (srcIn !== null && srcOut !== null) ? (srcOut - srcIn) : Number(projectItem.getOutPoint(4).seconds) - Number(projectItem.getInPoint(4).seconds); } catch (eDur) {}
+        var __audioSnapshotBefore = (${useInsert ? 'false' : 'true'} && __placeDur > 0) ? __audioUnder(sequence, ${time}, ${time} + __placeDur) : null;
         var requestedInsert = ${useInsert ? 'true' : 'false'};
         if (requestedInsert) {
           if (typeof track.insertClip !== "function") {
@@ -2411,27 +2484,8 @@ export class PremiereProBridge implements PremiereProTransport {
         // to scan audio tracks for the linked counterpart at the same start time and
         // remove it. The video on the target track is untouched.
         var unlinkedAudioRemoved = 0;
-        if (!isAudioOnly && ${linkAudio} === false) {
-          var videoStart = placedClip.start.seconds;
-          var tolerance = 0.1;
-          for (var at = 0; at < sequence.audioTracks.numTracks; at++) {
-            var audioTrack = sequence.audioTracks[at];
-            // iterate backwards because remove() may shift indices
-            for (var ai = audioTrack.clips.numItems - 1; ai >= 0; ai--) {
-              var audioClip = audioTrack.clips[ai];
-              if (audioClip && audioClip.projectItem &&
-                  audioClip.projectItem.nodeId === projectItem.nodeId &&
-                  Math.abs(audioClip.start.seconds - videoStart) < tolerance) {
-                try {
-                  audioClip.remove(false, false); // ripple=false, alignToVideo=false
-                  unlinkedAudioRemoved++;
-                } catch (rmErr) {
-                  // best effort — log but don't fail the whole add_to_timeline
-                }
-              }
-            }
-          }
-        }
+        if (!isAudioOnly && ${linkAudio} === false) unlinkedAudioRemoved = __removeLinkedAudio(placedClip);
+        var audioReplaced = __audioSnapshotBefore ? __audioReplaced(sequence, __audioSnapshotBefore) : [];
 
         return JSON.stringify({
           success: true,
@@ -2445,6 +2499,8 @@ export class PremiereProBridge implements PremiereProTransport {
           insertMode: ${JSON.stringify(useInsert ? 'insert' : 'overwrite')},
           linkAudio: ${linkAudio},
           unlinkedAudioRemoved: unlinkedAudioRemoved,
+          audioOverwritten: audioReplaced.length ? audioReplaced : undefined,
+          note: audioReplaced.length ? "Overwrite placement replaced existing audio under it (Premiere's overwrite edit lays the item's audio onto the audio tracks); see audioOverwritten. Undo if that was not intended." : undefined,
           appliedSourceInOut: appliedSourceInOut,
           sourceInOutError: sourceInOutError
         });
@@ -2583,27 +2639,8 @@ export class PremiereProBridge implements PremiereProTransport {
             // start time. The video on the target track is untouched.
             r.linkAudio = spec.linkAudio;
             r.unlinkedAudioRemoved = 0;
-            if (!isAudioOnly && spec.linkAudio === false) {
-              var videoStart = placedClip.start.seconds;
-              var tolerance = 0.1;
-              for (var at = 0; at < sequence.audioTracks.numTracks; at++) {
-                var audioTrack = sequence.audioTracks[at];
-                // iterate backwards because remove() may shift indices
-                for (var ai = audioTrack.clips.numItems - 1; ai >= 0; ai--) {
-                  var audioClip = audioTrack.clips[ai];
-                  if (audioClip && audioClip.projectItem &&
-                      audioClip.projectItem.nodeId === projectItem.nodeId &&
-                      Math.abs(audioClip.start.seconds - videoStart) < tolerance) {
-                    try {
-                      audioClip.remove(false, false); // ripple=false, alignToVideo=false
-                      r.unlinkedAudioRemoved++;
-                    } catch (rmErr) {
-                      // best effort — don't fail this clip over cleanup
-                    }
-                  }
-                }
-              }
-            }
+            // Only the placed clip's own linked audio (see __removeLinkedAudio).
+            if (!isAudioOnly && spec.linkAudio === false) r.unlinkedAudioRemoved = __removeLinkedAudio(placedClip);
           } catch (e) {
             r.error = e.toString();
           }

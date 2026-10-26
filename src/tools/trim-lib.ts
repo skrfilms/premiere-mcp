@@ -23,10 +23,39 @@ export const TRIM_LIB = `
 var __TPS = 254016000000;
 function __TT(ticks) { var t = new Time(); t.ticks = String(Math.round(ticks)); return t; }
 function __st(c) { return { start: Number(c.start.ticks), end: Number(c.end.ticks), inp: Number(c.inPoint.ticks) }; }
-function __key(c) { var s = __st(c); return String(c.mediaType) + '|' + s.start + '|' + s.end + '|' + String(c.name); }
+// Identity by TrackItem.nodeId, which is unique per track item and survives start/end/in writes and
+// move() (measured on 26.5.2). Keying by type+range+name made a dual-mono pair (A1 and A2 from one
+// source, same name and range) one clip: the second was dropped from every linked group and left
+// out of sync while the tool reported success.
+function __key(c) {
+  var id = null;
+  try { id = c.nodeId; } catch (eId) {}
+  if (id !== null && id !== undefined && String(id) !== '') return String(c.mediaType) + '#' + String(id);
+  var s = __st(c); return String(c.mediaType) + '|' + s.start + '|' + s.end + '|' + String(c.name);
+}
+// The real length of the media, NOT ProjectItem.getOutPoint(): that is the bin item's out MARK, so
+// a 10s file marked out at 4s refused every trim past 4s and mirrored reversal around the wrong
+// point. Column.Intrinsic.MediaDuration in the project metadata keeps the full length regardless of
+// marks (measured: 00:00:10:00 with the mark at 4s). The mark is only a fallback, and never wins
+// when it is shorter.
 function __mediaEnd(c) {
-  try { var o = c.projectItem.getOutPoint(); var v = Number(o.ticks); if (v > 0) return v; } catch (e) {}
-  return null;
+  var pi = null;
+  try { pi = c.projectItem; } catch (eP) {}
+  if (!pi) return null;
+  var best = null;
+  try {
+    var md = String(pi.getProjectMetadata());
+    var m = md.match(/MediaDuration>([^<]+)</);
+    if (m) {
+      var fps = null;
+      try { fps = Number(pi.getFootageInterpretation().frameRate); } catch (eF) {}
+      var probeSeq = { timebase: String(fps > 0 ? Math.round(__TPS / fps) : 10584000000) };
+      var t = __timecodeToTicks(probeSeq, String(m[1]).replace(/^\\s+|\\s+$/g, ''));
+      if (t !== null && Number(t) > 0) best = Number(t);
+    }
+  } catch (eM) {}
+  try { var o = Number(pi.getOutPoint(4).ticks); if (o > 0 && (best === null || o > best)) best = o; } catch (eO) {}
+  return best;
 }
 function __tracksOf(seq, c) { return String(c.mediaType) === 'Audio' ? seq.audioTracks : seq.videoTracks; }
 function __trackOf(seq, c) {
@@ -77,7 +106,11 @@ function __planRoll(seq, c, edge, d) {
       var ns = __st(neighbour);
       if (ns.end - (ns.start + d) < tpf) return { error: 'Rolling the edit would leave ' + __label(seq, neighbour) + ' shorter than one frame.' };
       if (d < 0 && ns.inp + d < -half) return { error: __label(seq, neighbour) + ' has only ' + (ns.inp / __TPS) + 's of media before its in-point, so the edit cannot roll ' + (-d / __TPS) + 's earlier.' };
-      ops.push({ item: neighbour, kind: 'headInPlace', d: d, before: ns });
+      // Free before fill: when this tail shrinks (d < 0) it must give up the space before the
+      // neighbour's head moves into it, so the neighbour goes second.
+      var nOp = { item: neighbour, kind: 'headInPlace', d: d, before: ns };
+      if (d < 0) { ops.push({ item: c, kind: 'tail', d: d, before: s }); ops.push(nOp); return { ops: ops }; }
+      ops.push(nOp);
     } else if (d > 0) {
       for (var j = 0; j < track.clips.numItems; j++) { var q = track.clips[j]; if (__key(q) === __key(c)) continue; var qs = __st(q); if (qs.start < newEnd - half && qs.end > s.end + half) return { error: __label(seq, q) + ' is in the way of extending ' + __label(seq, c) + '.' }; }
     }
@@ -91,7 +124,11 @@ function __planRoll(seq, c, edge, d) {
       var nb = __st(neighbour), nmedia = __mediaEnd(neighbour);
       if ((nb.end + d) - nb.start < tpf) return { error: 'Rolling the edit would leave ' + __label(seq, neighbour) + ' shorter than one frame.' };
       if (d > 0 && nmedia !== null && nb.inp + (nb.end + d - nb.start) > nmedia + half) return { error: __label(seq, neighbour) + ' has no media left to cover ' + (d / __TPS) + 's more.' };
-      ops.push({ item: neighbour, kind: 'tail', d: d, before: nb });
+      // Free before fill: when this head moves later (d > 0) it must vacate before the neighbour's
+      // tail extends into the space, so the neighbour goes second.
+      var tOp = { item: neighbour, kind: 'tail', d: d, before: nb };
+      if (d > 0) { ops.push({ item: c, kind: 'headInPlace', d: d, before: s }); ops.push(tOp); return { ops: ops }; }
+      ops.push(tOp);
     } else if (d < 0) {
       for (var m = 0; m < track.clips.numItems; m++) { var r = track.clips[m]; if (__key(r) === __key(c)) continue; var rs = __st(r); if (rs.end > newStart + half && rs.start < s.start - half) return { error: __label(seq, r) + ' is in the way of extending ' + __label(seq, c) + ' earlier.' }; }
     }
@@ -143,8 +180,12 @@ function __rollbackOps(ops, tol) {
   return true;
 }
 /* Everything that would move in a sync-locked ripple at \`at\`, and anything that blocks it. */
-function __planRipple(seq, at, skipKeys) {
+// \`gapLo\` (optional): the ripple will pull clips that start at \`at\` back to \`gapLo\`. Anything on any
+// track (other than the movers and the edited clips) that still occupies (gapLo, at) would be landed
+// on, so it blocks too -- not only clips spanning \`at\`.
+function __planRipple(seq, at, skipKeys, gapLo) {
   var half = (Number(seq.timebase) || 10584000000) / 2, movers = [], blockers = [];
+  if (gapLo === undefined || gapLo === null) gapLo = at;
   var groups = [seq.videoTracks, seq.audioTracks];
   for (var g = 0; g < 2; g++) for (var t = 0; t < groups[g].numTracks; t++) {
     var tr = groups[g][t];
@@ -152,7 +193,7 @@ function __planRipple(seq, at, skipKeys) {
       var c = tr.clips[i]; if (skipKeys[__key(c)]) continue;
       var s = __st(c);
       if (s.start >= at - half) movers.push({ item: c, start: s.start });
-      else if (s.end > at + half) blockers.push(__label(seq, c));
+      else if (s.end > gapLo + half) blockers.push(__label(seq, c));
     }
   }
   movers.sort(function (a, b) { return a.start - b.start; });

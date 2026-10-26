@@ -360,7 +360,9 @@ describe('PremiereProBridge', () => {
     expect(commandPayload.script).toContain('"linkAudio":true');
     // the counterpart-audio cleanup is mirrored from the single-call addToTimeline path
     expect(commandPayload.script).toContain('spec.linkAudio === false');
-    expect(commandPayload.script).toContain('audioClip.remove(false, false)');
+    // Only the placed clip's own linked audio is removed (a same-start clip from the same source
+    // on another track is the user's, measured on a dual-mono sequence).
+    expect(commandPayload.script).toContain('__removeLinkedAudio(placedClip)');
     expect(commandPayload.script).toContain('unlinkedAudioRemoved');
   });
 

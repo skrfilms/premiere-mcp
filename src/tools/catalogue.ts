@@ -342,10 +342,11 @@ export function buildToolCatalogue(): MCPTool[] {
       },
       {
         name: 'close_all_gaps',
-        description: 'Closes every gap that is empty on all tracks (including one at the start), latest first, by moving later clips left. Verified by rescanning for gaps and reading back every moved clip start.',
+        description: 'Closes every gap that is empty on all tracks (the one before the first clip only with includeLeadingGap), latest first, by moving later clips left. Verified by rescanning for gaps and reading back every moved clip start.',
         inputSchema: z.object({
           sequenceId: z.string().optional(),
-          trackIndex: z.number().optional().describe('Ignored: only gaps empty on every track are closed, because closing one track alone breaks sync. Kept for compatibility.')
+          trackIndex: z.number().optional().describe('Ignored: only gaps empty on every track are closed, because closing one track alone breaks sync. Kept for compatibility.'),
+          includeLeadingGap: z.boolean().optional().describe('Also close the empty time before the first clip. Default false, because that offset is often deliberate (slate, countdown, leader).')
         })
       },
       {

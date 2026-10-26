@@ -468,25 +468,18 @@ export class PremiereProTools extends TrimmingTools {
 
   async executeTool(name: string, args: Record<string, any>, options?: { allowUnexposed?: boolean }): Promise<any> {
     // Calls can raise an informational export-report dialog that blocks the engine until OK is
-    // clicked (see report-dialog-guard.ts). Nested executeTool calls are not guarded twice.
-    if (this.dialogGuardDepth > 0) return await this.executeToolUnguarded(name, args, options);
-    this.dialogGuardDepth++;
-    try {
-      const { result, guard } = await withReportDialogGuard(() => this.executeToolUnguarded(name, args, options));
-      if (guard.dismissed.length && result && typeof result === 'object' && !Array.isArray(result)) {
-        return {
-          ...result,
-          reportDialogsDismissed: guard.dismissed,
-          reportDialogNote: 'Premiere showed an informational report while this ran (for example, effects an AAF or FCP XML cannot carry) and blocked until OK was clicked. It was dismissed by name; the export itself had already completed.',
-        };
-      }
-      return result;
-    } finally {
-      this.dialogGuardDepth--;
+    // clicked (see report-dialog-guard.ts). The guard polls once for every call in flight, so
+    // nested and concurrent calls are both covered.
+    const { result, guard } = await withReportDialogGuard(() => this.executeToolUnguarded(name, args, options));
+    if (guard.dismissed.length && result && typeof result === 'object' && !Array.isArray(result)) {
+      return {
+        ...result,
+        reportDialogsDismissed: guard.dismissed,
+        reportDialogNote: 'Premiere showed an informational report while this call was in flight (for example, effects an AAF or FCP XML cannot carry) and blocked until OK was clicked. It was dismissed by name; the export itself had already completed.',
+      };
     }
+    return result;
   }
-
-  private dialogGuardDepth = 0;
 
   private async executeToolUnguarded(name: string, args: Record<string, any>, options?: { allowUnexposed?: boolean }): Promise<any> {
     // Premiere truncates a string at the first NUL when it is assigned — a
@@ -686,7 +679,7 @@ export class PremiereProTools extends TrimmingTools {
 
         // Gaps & tracks
         case 'close_gap_at': return await this.closeGapAt(args.timecode, args.sequenceId);
-        case 'close_all_gaps': return await this.closeAllGaps(args.sequenceId, args.trackIndex);
+        case 'close_all_gaps': return await this.closeAllGaps(args.sequenceId, args.trackIndex, args.includeLeadingGap === true);
         case 'delete_empty_tracks': return await this.deleteEmptyTracks(args.sequenceId, args.video ?? true, args.audio ?? true);
 
         // Selection
