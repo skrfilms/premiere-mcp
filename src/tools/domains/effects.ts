@@ -860,9 +860,15 @@ export class EffectsTools extends AssemblyTools {
         ${this.transitionVerificationScript()}
         var before = __readQeTransitionState(qeClip);
         var beforeXml = __transitionXmlCount(seq);
+        var edgeSecs = ${atEnd ? 'Number(info.clip.end.seconds)' : 'Number(info.clip.start.seconds)'};
+        var atEdgeBefore = __qeTransitionsAt(qeTrack, edgeSecs).length;
         // The second argument means AT START when true (measured on 26.5.2); passing atEnd put an
         // 'end' transition on the clip's start and vice versa.
         qeClip.addTransition(transition, ${!atEnd}, String(frames), "0", 0.5, true, true);
+        var atEdge = __qeTransitionsAt(qeTrack, edgeSecs);
+        if (atEdge.length > atEdgeBefore) {
+          return JSON.stringify({ success: true, status: "verified", verified: true, verifiedBy: "QE track transition list at the clip " + ${JSON.stringify(position)}, transitionName: ${JSON.stringify(transitionName)}, position: ${JSON.stringify(position)}, edgeSecs: edgeSecs, frames: frames, transitions: atEdge });
+        }
         var afterClip = __findQeClipByDomClip(qeTrack, info.clip);
         var after = __readQeTransitionState(afterClip);
         var afterXml = __transitionXmlCount(seq);
