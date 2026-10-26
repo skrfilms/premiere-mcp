@@ -1306,7 +1306,7 @@ export class ExportRenderTools extends PlaybackTools {
         // pass (path, timecode) with a timecode built at a hardcoded 24 fps, which wrote nothing.
         var tc=__qeTimecode(domSeq, playheadSecs);
         var outPath=${JSON.stringify(outputPath)};
-        var stem=outPath.replace(/\.(jpe?g)$/i,'');
+        var stem=outPath.replace(/\\.(jpe?g)$/i,'');
         var target=new File(stem+'.jpg');
         var stampBefore=target.exists&&target.modified?target.modified.getTime():null;
         var result=null;
