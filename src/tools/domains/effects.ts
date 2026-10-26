@@ -10,6 +10,7 @@ import { AssemblyTools } from './assembly.js';
 import * as fsSync from 'node:fs';
 import * as pathSync from 'node:path';
 import { runFf } from '../ff-exec.js';
+import { generatedAssetsDir } from '../../utils/scratch-paths.js';
 
 export class EffectsTools extends AssemblyTools {
   protected async removeEffectAtIndex(trackIndex: number, clipIndex: number, componentIndex: number, sequenceId?: string): Promise<any> {
@@ -1156,7 +1157,7 @@ export class EffectsTools extends AssemblyTools {
 
   protected async verifyEffectRendered(
     _seqId: string | undefined, trackIndex: number, clipIndex: number,
-    effectName: string, effectParam?: string, effectParamValue?: string, outputDir = '/tmp/premiere-mcp-bridge/generated-assets'
+    effectName: string, effectParam?: string, effectParamValue?: string, outputDir = generatedAssetsDir()
   ): Promise<any> {
     const pathMod = pathSync;
     const fs = fsSync;

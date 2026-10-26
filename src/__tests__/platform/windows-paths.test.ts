@@ -198,14 +198,20 @@ describe('createSecureTempDir — win32 branch', () => {
     expect(dir).toContain('premiere-bridge-abc123');
   });
 
-  it('falls back to C:\\Temp when TEMP is unset — which is NOT a per-user directory', () => {
+  it('falls back to C:\\Temp when TEMP and TMP are unset — which is NOT a per-user directory', () => {
     setPlatform('win32');
     delete process.env.TEMP;
-    // Documented, not endorsed. C:\Temp is machine-wide, and this directory holds the
-    // bridge auth token and the command files that execute ExtendScript inside
-    // Premiere. The panel tries TMP before falling back (bridge-cep.js); the server
-    // does not, so an environment with only TMP set sends the two to different places.
-    expect(createSecureTempDir('abc123').startsWith('C:\\Temp')).toBe(true);
+    // A real Windows host (the CI runner included) always sets TMP too, and TMP is honoured
+    // before the fallback, so leaving it in place tested TMP rather than C:\\Temp.
+    const savedTmp = process.env.TMP;
+    delete process.env.TMP;
+    try {
+      // Documented, not endorsed. C:\Temp is machine-wide, and this directory holds the
+      // bridge auth token and the command files that execute ExtendScript inside Premiere.
+      expect(createSecureTempDir('abc123').startsWith('C:\\Temp')).toBe(true);
+    } finally {
+      if (savedTmp === undefined) delete process.env.TMP; else process.env.TMP = savedTmp;
+    }
   });
 
   it('honours TMP on win32, in the same order as the panel', () => {

@@ -261,8 +261,8 @@ describe('hardcoded /tmp in src — ratchet, not a clean bill of health', () => 
   const PLATFORM_BRANCHED = new Set([
     // createSecureTempDir: the win32 branch is directly above this line.
     "utils/security.ts '/tmp'",
-    // bridgeTempDirForDocs: returns early for win32 before reaching this.
-    "resources/index.ts '/tmp/premiere-mcp-bridge'",
+    // defaultBridgeDir: returns the %TEMP%/%TMP% path for win32 before reaching this.
+    "utils/scratch-paths.ts '/tmp/premiere-mcp-bridge'",
   ]);
 
   it('has not grown past the recorded baseline', () => {
@@ -271,24 +271,23 @@ describe('hardcoded /tmp in src — ratchet, not a clean bill of health', () => 
     for (const file of sourceFiles(SRC)) {
       readFileSync(file, 'utf8').split('\n').forEach((line, i) => {
         for (const match of line.matchAll(/'\/tmp[^']*'/g)) {
-          const where = `${path.relative(SRC, file)}:${i + 1} ${match[0]}`;
-          const key = `${path.relative(SRC, file)} ${match[0]}`;
+          // Forward slashes whatever the host: on Windows path.relative() returns
+          // 'utils\\security.ts', which never matched the allowlist and failed CI there.
+          const rel = path.relative(SRC, file).split(path.sep).join('/');
+          const where = `${rel}:${i + 1} ${match[0]}`;
+          const key = `${rel} ${match[0]}`;
           (PLATFORM_BRANCHED.has(key) ? branched : hits).push(where);
         }
       });
     }
 
     /*
-     * 10 at the time of writing. These are POSIX-only defaults for outputDir and asset
-     * scratch space; on Windows '/tmp/...' resolves to <current drive>:\tmp\..., which
-     * does not exist, so the render-truth tools that write there return verified:false
-     * on every Windows call.
-     *
-     * This is a RATCHET and nothing more: it stops new ones landing. It does not claim
-     * the existing ones are acceptable. tmpdir() is already imported in tools/index.ts.
-     * When they are fixed, lower this number — do not delete the test.
+     * 0. The ten POSIX-only outputDir/asset defaults (which resolved to <drive>:\tmp\...
+     * on Windows, so the render-truth tools failed there) now come from
+     * utils/scratch-paths.ts. Any new '/tmp' literal outside an explicit platform branch
+     * fails here; use bridgeDir() / generatedAssetsDir() instead.
      */
-    expect(hits.length).toBeLessThanOrEqual(10);
+    expect(hits).toEqual([]);
 
     // Every allowlisted entry must still exist. Otherwise a deleted posix branch leaves a
     // stale exemption behind, and the next literal added at that path inherits it.

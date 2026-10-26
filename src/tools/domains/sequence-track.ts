@@ -10,6 +10,7 @@ import { EffectsTools } from './effects.js';
 import * as fsSync from 'node:fs';
 import * as pathSync from 'node:path';
 import { runFf } from '../ff-exec.js';
+import { generatedAssetsDir } from '../../utils/scratch-paths.js';
 
 export class SequenceTrackTools extends EffectsTools {
   protected async listSequences(): Promise<any> {
@@ -239,7 +240,7 @@ ${this.buildSequenceResolver(sequenceId)}
   protected sequenceThumbnailStrip(filePath: string, count: number, outputDir?: string): any {
     const path = pathSync;
     const fs = fsSync;
-    const dir = outputDir ?? '/tmp/premiere-mcp-bridge/generated-assets/';
+    const dir = outputDir ?? generatedAssetsDir();
     try {
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       const base = path.join(dir, 'thumb_%04d.jpg');
