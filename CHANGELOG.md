@@ -14,6 +14,44 @@ All notable changes are documented here. Releases use semantic versioning.
 - `copy_effects_between_clips` resolves its source and target clips across every
   sequence, so an effect stack can be lifted from one sequence onto another.
 
+### Fixed against Premiere 26.5.2, verified frame by frame
+
+Measured against a clip whose every frame encodes its own number, read back from
+the composited program frame rather than from API readbacks.
+
+- **Security:** about thirty ffmpeg/ffprobe calls ran through a shell with
+  caller-supplied paths interpolated, so a crafted `mediaPath` could execute
+  commands. All now pass argv arrays (`runFf`); a test bans the pattern.
+- **Frame capture:** QE `exportFrame*` takes a timecode; seconds/ticks were
+  accepted and exported frame 0. `capture_program_output`, `capture_frame`,
+  `export_frame`, `export_thumbnail` and the frame-strip tools all returned frame 0
+  whatever time was asked for. They are now frame-exact.
+- **Trimming:** `ripple_trim_in/out`, `extend_edit`, `j_cut`, `l_cut`, `trim_clip`
+  and `nudge_clip` were built on wrong assumptions about what in/out/start/end
+  writes do (in-point writes slip, out-point writes do nothing visible, `move()` is
+  relative). Rebuilt on a measured trim library with neighbour rolls, sync-locked
+  ripples, media-handle checks, linked audio and rollback.
+- **QE addressing:** QE lists sequences in a different order from the DOM, and
+  lists gaps and transitions as track items, so QE tools hit the wrong sequence or
+  the wrong clip. Resolved by guid and by start time; a sequence QE cannot see is
+  opened first.
+- **Engine:** a cold 26.5.2 engine lacks `Array.prototype.map/filter/indexOf` and
+  `Array.isArray`; the prelude installs them (about twenty tools threw).
+- **Modals:** `export_aaf` and FCP XML exports raise blocking report dialogs; on
+  macOS the server now dismisses those two named dialogs while a call runs.
+- **Reverse and speed:** `reverse_clip`/`set_clip_reverse` reverse with the right
+  frames; QE speed changes are miscalibrated on this build, so `speed_change`,
+  `set_clip_speed_qe` and `rate_stretch_to_fill` verify rate and duration and undo
+  a wrong result. `bake_speed_change` is frame-exact.
+- `split_clip`, `duplicate_clip`, `add_to_timeline` (left marks on the item),
+  `copy_markers_between_sequences` (hung the host), `create_marker`,
+  `duration_marker_add`, `flip_horizontal/vertical`, `close_gap_at`,
+  `close_all_gaps`, `get_sequence_gaps`, `delivery_qc`, `match_shot_color`, the
+  colour-space tools, `false_color_frame`, `flash_frame_scan`,
+  `freeze_frame_scan`, `broadcast_safe_check` and `audio_peaks_report` each had a
+  defect that made them fail, act on the wrong thing, or report success without
+  doing the work. See the commit log for each.
+
 ### Added
 
 - `set_scale_to_frame_size_batch`: scale-to-frame-size for a track, every video

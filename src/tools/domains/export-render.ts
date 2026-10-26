@@ -1669,26 +1669,31 @@ export class ExportRenderTools extends PlaybackTools {
   }
 
   protected async exportOmfWithSettings(outputPath: string): Promise<any> {
+    // exportOMF(sequence, path, title, sampleRate, bitsPerSample, encapsulated, audioFileFormat,
+    // trimAudioFiles, handleFrames, includePan). The old call passed strings and booleans where
+    // numbers belong, Premiere rejected it, and a zero-argument fallback ran that cannot take a
+    // path. Measured on 26.5.2: this typed form writes the file (returns 1). No fallback.
     return await this.exportInterchange('OMF', outputPath, `
       try {
-        app.project.exportOMF(app.project.activeSequence, ${JSON.stringify(outputPath)}, '', '', '', '', false, false, 0, false);
+        var seq = app.project.activeSequence;
+        if (!seq) return JSON.stringify({called:false,error:'No active sequence'});
+        app.project.exportOMF(seq, ${JSON.stringify(outputPath)}, String(seq.name), 48000, 16, 1, 0, 0, 0, 0);
         return JSON.stringify({called:true,fallbackUsed:false});
-      } catch(e) {
-        try { app.project.exportOMF(); return JSON.stringify({called:true,fallbackUsed:true,firstError:e.toString()}); }
-        catch(e2) { return JSON.stringify({called:false,error:e2.toString(),firstError:e.toString()}); }
-      }
+      } catch(e) { return JSON.stringify({called:false,error:e.toString()}); }
     `);
   }
 
   protected async exportAafWithSettings(outputPath: string): Promise<any> {
+    // Same typed argument list export_aaf uses (seq, path, mixDownVideo, explodeToMono, sampleRate,
+    // bitsPerSample, embedAudio, audioFileFormat, trimSources, handleFrames). The old string/boolean
+    // list was rejected and fell back to a zero-argument call that cannot take a path.
     return await this.exportInterchange('AAF', outputPath, `
       try {
-        app.project.exportAAF(app.project.activeSequence, ${JSON.stringify(outputPath)}, '', '', false, false, 0, false, false, false);
+        var seq = app.project.activeSequence;
+        if (!seq) return JSON.stringify({called:false,error:'No active sequence'});
+        app.project.exportAAF(seq, ${JSON.stringify(outputPath)}, 1, 0, 48000, 16, 0, 0, 1, 0);
         return JSON.stringify({called:true,fallbackUsed:false});
-      } catch(e) {
-        try { app.project.exportAAF(); return JSON.stringify({called:true,fallbackUsed:true,firstError:e.toString()}); }
-        catch(e2) { return JSON.stringify({called:false,error:e2.toString(),firstError:e.toString()}); }
-      }
+      } catch(e) { return JSON.stringify({called:false,error:e.toString()}); }
     `);
   }
 
