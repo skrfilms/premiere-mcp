@@ -1551,7 +1551,7 @@ export function buildToolCatalogue(): MCPTool[] {
         description: 'Splits a clip at a specific time point, creating two separate clips.',
         inputSchema: z.object({
           clipId: z.string().describe('The ID of the clip to split'),
-          splitTime: z.number().describe('The time in seconds where to split the clip')
+          splitTime: z.number().describe('Where to cut, in seconds from the START OF THE CLIP (not the sequence). Must be inside the clip.')
         })
       },
       {

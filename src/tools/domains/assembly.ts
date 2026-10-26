@@ -160,35 +160,60 @@ export class AssemblyTools extends ToolsBase {
         app.enableQE();
         var info = __findClip(${JSON.stringify(clipId)});
         if (!info) return JSON.stringify({ success: false, error: "Clip not found" });
-        var splitSeconds = info.clip.start.seconds + ${splitTime};
+        var splitSeconds = info.clip.start.seconds + ${Number(splitTime)};
+        var clipDur = info.clip.end.seconds - info.clip.start.seconds;
+        if (!(${Number(splitTime)} > 0 && ${Number(splitTime)} < clipDur)) return JSON.stringify({ success: false, error: "splitTime is seconds from the START OF THE CLIP and must be between 0 and its duration (" + clipDur + "s); " + ${Number(splitTime)} + "s is outside it. The clip sits at " + info.clip.start.seconds + "s-" + info.clip.end.seconds + "s on the timeline. Nothing was changed." });
         // The timecode must come from the sequence the clip actually lives in, not
         // from whatever is on screen. Taking it from the active sequence put the cut
         // on the right timeline at the wrong frame whenever the two differed in frame
         // rate: a 24 fps clip razored using a 30 fps timebase lands three frames out.
         var seq = info.sequence;
-        var fps = seq && seq.timebase ? (254016000000 / parseInt(seq.timebase, 10)) : 30;
-        var totalFrames = Math.round(splitSeconds * fps);
-        var hours = Math.floor(totalFrames / (fps * 3600));
-        var mins = Math.floor((totalFrames % (fps * 3600)) / (fps * 60));
-        var secs = Math.floor((totalFrames % (fps * 60)) / fps);
-        var frames = Math.round(totalFrames % fps);
-        function pad(n) { return n < 10 ? "0" + n : "" + n; }
-        var tc = pad(hours) + ":" + pad(mins) + ":" + pad(secs) + ":" + pad(frames);
+        var tc = __qeTimecode(seq, splitSeconds);
         // Addressed by id, not by whatever is on screen. __findClip() searches every
         // sequence in the project, so a clip can be resolved out of one sequence and
         // then, through getActiveSequence(), have the effect applied to whichever
         // clip sits at the same track and index in a different one.
         var qeSeq = __qeSequenceOpening(info.sequence);
         if (!qeSeq) return JSON.stringify({ success: false, error: "Could not address sequence '" + info.sequenceName + "' through the QE API." });
-        var qeTrack = info.trackType === 'video' ? qeSeq.getVideoTrackAt(info.trackIndex) : qeSeq.getAudioTrackAt(info.trackIndex);
-        var beforeCount = info.track.clips.numItems;
-        qeTrack.razor(tc);
-        var afterCount = info.track.clips.numItems;
+        // Premiere's razor cuts linked items together; QE razors one track. Cut every track that
+        // holds a linked partner too, or the video splits while its audio stays whole.
+        var cuts = [{ kind: info.trackType, index: info.trackIndex, track: info.track }];
+        try {
+          var linked = info.clip.getLinkedItems();
+          for (var li = 0; li < linked.numItems; li++) {
+            var it = linked[li];
+            var isAudio = String(it.mediaType) === 'Audio', tracks = isAudio ? seq.audioTracks : seq.videoTracks;
+            for (var ti = 0; ti < tracks.numTracks; ti++) {
+              var found = false;
+              for (var ci = 0; ci < tracks[ti].clips.numItems; ci++) {
+                var c = tracks[ti].clips[ci];
+                if (String(c.start.ticks) === String(it.start.ticks) && String(c.end.ticks) === String(it.end.ticks) && String(c.name) === String(it.name)) { found = true; break; }
+              }
+              if (found) {
+                var kind = isAudio ? 'audio' : 'video', dup = false;
+                for (var k = 0; k < cuts.length; k++) if (cuts[k].kind === kind && cuts[k].index === ti) dup = true;
+                if (!dup) cuts.push({ kind: kind, index: ti, track: tracks[ti] });
+                break;
+              }
+            }
+          }
+        } catch (eLinked) {}
+        var results = [], allSplit = true;
+        for (var r = 0; r < cuts.length; r++) {
+          var qeTrack = cuts[r].kind === 'video' ? qeSeq.getVideoTrackAt(cuts[r].index) : qeSeq.getAudioTrackAt(cuts[r].index);
+          var beforeCount = cuts[r].track.clips.numItems;
+          qeTrack.razor(tc);
+          var afterCount = cuts[r].track.clips.numItems;
+          var ok = afterCount > beforeCount;
+          if (!ok) allSplit = false;
+          results.push({ track: (cuts[r].kind === 'video' ? 'V' : 'A') + (cuts[r].index + 1), split: ok, beforeCount: beforeCount, afterCount: afterCount });
+        }
         // A razor that lands on a clip splits it, so the track's clip count rises by
         // one. If it did not, the cut fell in a gap or off the clip -- report that
         // honestly rather than claiming a split that did not happen.
-        if (afterCount <= beforeCount) return JSON.stringify({ success: false, verified: false, error: "Razor at " + tc + " did not split any clip (track clip count unchanged). The split time may fall in a gap or outside the clip.", beforeCount: beforeCount, afterCount: afterCount });
-        return JSON.stringify({ success: true, verified: true, message: "Clip split at " + tc, splitTime: ${splitTime}, timecode: tc, beforeCount: beforeCount, afterCount: afterCount });
+        if (!results[0].split) return JSON.stringify({ success: false, verified: false, error: "Razor at " + tc + " did not split any clip (track clip count unchanged). The split time may fall in a gap or outside the clip.", tracks: results });
+        if (!allSplit) return JSON.stringify({ success: false, verified: true, error: "PARTIALLY APPLIED: the clip split but a linked track did not, so picture and sound are now cut differently. See tracks[]. Undo to restore.", timecode: tc, tracks: results });
+        return JSON.stringify({ success: true, verified: true, message: "Clip split at " + tc, splitTime: ${Number(splitTime)}, timecode: tc, tracks: results, linkedTracksSplit: results.length - 1 });
       } catch (e) {
         return JSON.stringify({ success: false, error: "QE DOM error: " + e.toString() });
       }
