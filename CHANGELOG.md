@@ -56,6 +56,9 @@ the composited program frame rather than from API readbacks.
 
 - `set_scale_to_frame_size_batch`: scale-to-frame-size for a track, every video
   track, or a list of clip ids in one call, with a per-clip readback.
+- `npm run canary` (`scripts/api-canary.mjs`, `docs/API-CANARY.md`): re-measures the 17
+  Premiere scripting behaviours the tools depend on, mostly from rendered frames, and diffs each
+  run against the last. Run it after every Premiere update.
 
 ## [1.3.1] - 2026-10-21
 
