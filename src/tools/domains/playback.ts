@@ -9,7 +9,7 @@ import { SequenceTrackTools } from './sequence-track.js';
 export class PlaybackTools extends SequenceTrackTools {
   protected async goToSequenceStart(sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
-      var seq = ${this.buildSequenceResolver2(sequenceId)};
+      var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
       var r = __setPlayheadVerified(seq, 0);
       return JSON.stringify({success:r.moved,verified:r.verified,error:r.error,ticks:String(r.actualTicks),secs:r.actualSeconds,sequenceName:String(seq.name)});
@@ -18,7 +18,7 @@ export class PlaybackTools extends SequenceTrackTools {
 
   protected async goToSequenceEnd(sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
-      var seq = ${this.buildSequenceResolver2(sequenceId)};
+      var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
       // Sequence.end is a TICKS string, not a Time object — reading .ticks off it gave
       // undefined, which setPlayerPosition swallowed while this tool still claimed verified
@@ -32,7 +32,7 @@ export class PlaybackTools extends SequenceTrackTools {
 
   protected async goToInPoint(sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
-      var seq = ${this.buildSequenceResolver2(sequenceId)};
+      var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
       // getInPoint() returns a SECONDS string here, not a Time — .ticks was undefined.
       var ticks = __seqInTicks(seq);
@@ -44,7 +44,7 @@ export class PlaybackTools extends SequenceTrackTools {
 
   protected async goToOutPoint(sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
-      var seq = ${this.buildSequenceResolver2(sequenceId)};
+      var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
       // getOutPoint() returns a SECONDS string here, not a Time — .ticks was undefined.
       var ticks = __seqOutTicks(seq);
@@ -56,7 +56,7 @@ export class PlaybackTools extends SequenceTrackTools {
 
   protected async stepFrames(frames: number, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
-      var seq = ${this.buildSequenceResolver2(sequenceId)};
+      var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
       var beforeTicks = __timeFieldToNumber(seq.getPlayerPosition());
       if (beforeTicks === null) return JSON.stringify({success:false,verified:false,error:'Could not read the current playhead position, so no move was attempted.'});
@@ -77,7 +77,7 @@ export class PlaybackTools extends SequenceTrackTools {
 
   protected async getPlaybackState(sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
-      var seq = ${this.buildSequenceResolver2(sequenceId)};
+      var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
       var pos = seq.getPlayerPosition();
       return JSON.stringify({success:true,ticks:String(pos.ticks),secs:pos.seconds,sequenceName:String(seq.name),frameSizeH:seq.frameSizeHorizontal,frameSizeV:seq.frameSizeVertical});
@@ -86,7 +86,7 @@ export class PlaybackTools extends SequenceTrackTools {
 
   protected async getSequenceSelection(sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
-      var seq = ${this.buildSequenceResolver2(sequenceId)};
+      var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No sequence'});
       var sel = seq.getSelection();
       var items = [];
@@ -100,7 +100,7 @@ export class PlaybackTools extends SequenceTrackTools {
   protected async setSequenceSelection(clips: Array<{trackIndex: number, clipIndex: number}>, sequenceId?: string): Promise<any> {
     const clipsJson = JSON.stringify(clips);
     return await this.bridge.executeScript(`
-      var seq = ${this.buildSequenceResolver2(sequenceId)};
+      var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No sequence'});
       var clipList = ${clipsJson};
       var toSelect = [];
@@ -130,7 +130,7 @@ export class PlaybackTools extends SequenceTrackTools {
 
   protected async goToNextMarker(sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
-      var seq = ${this.buildSeqScript(sequenceId)};
+      var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No sequence'});
       var pos = seq.getPlayerPosition();
       var m = seq.markers.getFirstMarker();
@@ -144,7 +144,7 @@ export class PlaybackTools extends SequenceTrackTools {
 
   protected async goToPrevMarker(sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
-      var seq = ${this.buildSeqScript(sequenceId)};
+      var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No sequence'});
       var pos = seq.getPlayerPosition();
       var m = seq.markers.getLastMarker();
@@ -158,7 +158,7 @@ export class PlaybackTools extends SequenceTrackTools {
 
   protected async goToTimecode(timecode: string, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
-      var seq = ${this.buildSeqScript(sequenceId)};
+      var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No sequence'});
       var parts = ${JSON.stringify(timecode)}.split(':');
       var fps = seq.timebase ? (254016000000 / Number(seq.timebase)) : 24;
@@ -175,7 +175,7 @@ export class PlaybackTools extends SequenceTrackTools {
 
   protected async playInToOut(sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
-      var seq = ${this.buildSeqScript(sequenceId)};
+      var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No sequence'});
       var ip = seq.getInPoint();
       seq.setPlayerPosition(String(ip.ticks));
@@ -368,7 +368,7 @@ export class PlaybackTools extends SequenceTrackTools {
           // so the caller knows to stop retrying and what to use instead.
           return JSON.stringify({
             success: false, verified: false,
-            error: "The work area did not move (reads back in " + inNow + "s / out " + outNow + "s). setWorkAreaInPoint/setWorkAreaOutPoint are accepted but inert on this build (26.3.2), as is QE setWorkInOutPoints, so the work area cannot be set by script here. Retrying will not help. Use set_sequence_in_out_points instead — it is verified working — and export with workAreaType set to the in/out range.",
+            error: "The work area did not move (reads back in " + inNow + "s / out " + outNow + "s). setWorkAreaInPoint/setWorkAreaOutPoint are accepted but inert (measured on 26.3.2 and again on 26.5.2, with the work area enabled and every argument form: seconds, ticks, Time, and QE setWorkInOutPoints with a timecode), so the work area cannot be set by script here. Retrying will not help. Use set_sequence_in_out_points instead — it is verified working — and export with workAreaType set to the in/out range.",
             workAreaEnabled: __workAreaEnabled(sequence),
             requested: { inPoint: ${inPoint}, outPoint: ${outPoint} }, actual: { inPoint: inNow, outPoint: outNow }
           });
@@ -451,10 +451,10 @@ export class PlaybackTools extends SequenceTrackTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async selectAllOnTrack(trackIndex: number, startSecs?: number, endSecs?: number, _seqId?: string): Promise<any> {
+  protected async selectAllOnTrack(trackIndex: number, startSecs?: number, endSecs?: number, seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(seqId)};
         var track = seq.videoTracks[${trackIndex}];
         if (!track) return JSON.stringify({success:false,error:'Track not found'});
         var toSelect = [];

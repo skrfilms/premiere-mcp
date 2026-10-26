@@ -5,9 +5,11 @@
  * had grown to 19k lines; the method bodies are unchanged.
  */
 import { ExportRenderTools } from './export-render.js';
-import { spawn, execSync } from 'child_process';
+import { spawn } from 'child_process';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import { basename, dirname, extname, join } from 'node:path';
+import { runFf } from '../ff-exec.js';
+import { TRIM_LIB } from '../trim-lib.js';
 
 export class AudioTools extends ExportRenderTools {
   protected async setEssentialSoundCategory(projectItemId: string, category: string): Promise<any> {
@@ -31,79 +33,45 @@ export class AudioTools extends ExportRenderTools {
   }
 
   protected async jCut(sequenceId: string | undefined, videoTrackIndex: number, clipIndex: number, frames: number): Promise<any> {
-    return await this.bridge.executeScript(`
-      var seq = ${this.buildSequenceResolver2(sequenceId)};
-      if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
-      var vTrack = seq.videoTracks[${videoTrackIndex}];
-      var vClip = vTrack && vTrack.clips[${clipIndex}];
-      if (!vClip) return JSON.stringify({success:false,error:'Video clip not found'});
-      var linked = vClip.getLinkedItems();
-      var aClip = null;
-      for (var i = 0; i < linked.numItems; i++) { if (linked[i].mediaType === 'Audio') { aClip = linked[i]; break; } }
-      if (!aClip) return JSON.stringify({success:false,error:'No linked audio clip found'});
-      var ticksPerFrame = Number(seq.timebase) || 10584000000;
-      var before = String(aClip.start.ticks);
-      var inBefore = String(aClip.inPoint.ticks);
-      var newAIn = new Time(); newAIn.ticks = String(Math.max(0, Math.round(Number(inBefore) - ${frames} * ticksPerFrame)));
-      aClip.inPoint = newAIn;
-      var after = String(aClip.start.ticks);
-      var inAfter = String(aClip.inPoint.ticks);
-      // A J-cut is two effects of one write: the source in-point moves AND the clip's
-      // timeline start pulls earlier. Reporting only "start changed" hid the half-applied
-      // case where the in-point moved and the clip did not, which is a silently trimmed
-      // clip rather than a J-cut.
-      var sourceMoved = inAfter !== inBefore;
-      var timelineMoved = after !== before;
-      if (sourceMoved && timelineMoved) {
-        return JSON.stringify({success:true,verified:true,verifiedBy:'TrackItem.inPoint and TrackItem.start readback',changed:true,frames:${frames},audioStartBefore:before,audioStartAfter:after,sourceInBefore:inBefore,sourceInAfter:inAfter,type:'j_cut'});
-      }
-      if (sourceMoved && !timelineMoved) {
-        return JSON.stringify({success:false,verified:true,verifiedBy:'TrackItem.inPoint and TrackItem.start readback',changed:true,partial:true,frames:${frames},audioStartBefore:before,audioStartAfter:after,sourceInBefore:inBefore,sourceInAfter:inAfter,type:'j_cut',
-          error:'HALF APPLIED: the audio source in-point moved but the clip did not extend earlier on the timeline, so the audio was trimmed instead of J-cut. The clip to its left is probably in the way. Undo, clear the space, and retry.'});
-      }
-      return JSON.stringify({success:false,verified:true,verifiedBy:'TrackItem.inPoint and TrackItem.start readback',changed:false,frames:${frames},audioStartBefore:before,audioStartAfter:after,sourceInBefore:inBefore,sourceInAfter:inAfter,type:'j_cut',
-        error:'Nothing moved. The linked audio has no source handle left before its in-point, so it cannot start earlier.'});
-    `);
+    // J-cut: the clip's linked audio starts \`frames\` earlier than its picture. The audio edit
+    // point rolls, so the previous audio clip on that track (if it abuts) gives up the same span.
+    return await this.audioRoll(sequenceId, videoTrackIndex, clipIndex, frames, 'head', 'j_cut');
   }
 
   protected async lCut(sequenceId: string | undefined, videoTrackIndex: number, clipIndex: number, frames: number): Promise<any> {
+    // L-cut: the clip's linked audio runs \`frames\` past the end of its picture, rolling the next
+    // audio clip's head if it abuts.
+    return await this.audioRoll(sequenceId, videoTrackIndex, clipIndex, frames, 'tail', 'l_cut');
+  }
+
+  private async audioRoll(sequenceId: string | undefined, videoTrackIndex: number, clipIndex: number, frames: number, edge: 'head' | 'tail', type: string): Promise<any> {
+    // The old versions wrote the audio inPoint/outPoint and waited for the timeline to follow.
+    // inPoint only slips and outPoint does nothing visible (see trim-lib.ts), so they could only
+    // ever report a half-applied edit or nothing at all.
     return await this.bridge.executeScript(`
-      var seq = ${this.buildSequenceResolver2(sequenceId)};
-      if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
-      var vTrack = seq.videoTracks[${videoTrackIndex}];
-      var vClip = vTrack && vTrack.clips[${clipIndex}];
+      ${TRIM_LIB}
+      var seq = ${this.buildSeqRes(sequenceId)};
+      var vTrack = seq.videoTracks[${Number(videoTrackIndex)}];
+      var vClip = vTrack && vTrack.clips[${Number(clipIndex)}];
       if (!vClip) return JSON.stringify({success:false,error:'Video clip not found'});
-      var linked = vClip.getLinkedItems();
-      var aClip = null;
-      for (var i = 0; i < linked.numItems; i++) { if (linked[i].mediaType === 'Audio') { aClip = linked[i]; break; } }
-      if (!aClip) return JSON.stringify({success:false,error:'No linked audio clip found'});
-      var ticksPerFrame = Number(seq.timebase) || 10584000000;
-      var before = String(aClip.end.ticks);
-      var outBefore = String(aClip.outPoint.ticks);
-      var newAOut = new Time(); newAOut.ticks = String(Math.round(Number(outBefore) + ${frames} * ticksPerFrame));
-      aClip.outPoint = newAOut;
-      var after = String(aClip.end.ticks);
-      var outAfter = String(aClip.outPoint.ticks);
-      // Same half-applied hazard as j_cut: the source out-point can move while the clip
-      // refuses to extend later on the timeline, which trims rather than L-cuts.
-      var sourceMoved = outAfter !== outBefore;
-      var timelineMoved = after !== before;
-      if (sourceMoved && timelineMoved) {
-        return JSON.stringify({success:true,verified:true,verifiedBy:'TrackItem.outPoint and TrackItem.end readback',changed:true,frames:${frames},audioEndBefore:before,audioEndAfter:after,sourceOutBefore:outBefore,sourceOutAfter:outAfter,type:'l_cut'});
-      }
-      if (sourceMoved && !timelineMoved) {
-        return JSON.stringify({success:false,verified:true,verifiedBy:'TrackItem.outPoint and TrackItem.end readback',changed:true,partial:true,frames:${frames},audioEndBefore:before,audioEndAfter:after,sourceOutBefore:outBefore,sourceOutAfter:outAfter,type:'l_cut',
-          error:'HALF APPLIED: the audio source out-point moved but the clip did not extend later on the timeline, so the audio was trimmed instead of L-cut. The clip to its right is probably in the way. Undo, clear the space, and retry.'});
-      }
-      return JSON.stringify({success:false,verified:true,verifiedBy:'TrackItem.outPoint and TrackItem.end readback',changed:false,frames:${frames},audioEndBefore:before,audioEndAfter:after,sourceOutBefore:outBefore,sourceOutAfter:outAfter,type:'l_cut',
-        error:'Nothing moved. The linked audio has no source handle left after its out-point, so it cannot run later.'});
+      var group = __withLinked(vClip), aClips = [];
+      for (var i = 0; i < group.length; i++) if (String(group[i].mediaType) === 'Audio') aClips.push(group[i]);
+      if (!aClips.length) return JSON.stringify({success:false,error:'No linked audio clip found'});
+      var tpf = Number(seq.timebase) || 10584000000;
+      var d = ${edge === 'head' ? '-' : ''}${Number(frames)} * tpf;
+      var ops = [], errors = [];
+      for (var k = 0; k < aClips.length; k++) { var plan = __planRoll(seq, aClips[k], ${JSON.stringify(edge)}, d); if (plan.error) errors.push(plan.error); else ops = ops.concat(plan.ops); }
+      if (errors.length) return JSON.stringify({success:false,type:${JSON.stringify(type)},frames:${Number(frames)},error:errors.join(' ') + ' Nothing was changed.'});
+      var bad = __applyOps(ops, (Number(seq.timebase) || 10584000000) / 2);
+      return JSON.stringify({success:bad.length===0,verified:true,verifiedBy:'start/end/in readback of every edited clip',type:${JSON.stringify(type)},frames:${Number(frames)},edits:__opsReport(ops),
+        error: bad.length ? 'PARTIALLY APPLIED: ' + bad.join('; ') + '. Undo to restore.' : undefined});
     `);
   }
 
-  protected async fadeAudio(_sequenceId: string | undefined, ati: number, ci: number, durationFrames: number, direction: 'in' | 'out'): Promise<any> {
+  protected async fadeAudio(sequenceId: string | undefined, ati: number, ci: number, durationFrames: number, direction: 'in' | 'out'): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(sequenceId)};
         var clip = seq.audioTracks[${ati}].clips[${ci}];
         if (!clip) return JSON.stringify({success:false,error:'Audio clip not found'});
         // Find volume/level param
@@ -138,10 +106,10 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected async setClipGain(_sequenceId: string | undefined, ati: number, ci: number, gainDb: number): Promise<any> {
+  protected async setClipGain(sequenceId: string | undefined, ati: number, ci: number, gainDb: number): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(sequenceId)};
         var clip = seq.audioTracks[${ati}].clips[${ci}];
         if (!clip) return JSON.stringify({success:false,error:'Audio clip not found'});
         var gainProp = null;
@@ -153,7 +121,7 @@ export class AudioTools extends ExportRenderTools {
           }
           if (gainProp) break;
         }
-        if (!gainProp) return JSON.stringify({success:false,error:'Gain param not found',note:'Try set_clip_volume for rubber-band volume'});
+        if (!gainProp) return JSON.stringify({success:false,error:'This clip exposes no gain parameter to scripting. On 26.5.2 an audio clip carries only Volume (Bypass, Level); clip gain lives in the Audio Gain dialog, which no script can reach. Nothing was changed.',note:'set_clip_volume sets Volume > Level, which changes loudness the same way for a static offset.'});
         var before = null; try { before = gainProp.getValue(); } catch(eB) {}
         var setError = null;
         try { gainProp.setValue(${gainDb}, true); } catch(eS) { setError = eS.toString(); }
@@ -191,24 +159,33 @@ export class AudioTools extends ExportRenderTools {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var domSeq = ${this.buildSeqScript(sequenceId)};
+        var domSeq = ${this.buildSeqRes(sequenceId)};
         if (!domSeq) return JSON.stringify({success:false,error:'No active sequence'});
-        var qeSeq = __qeSequenceFor(domSeq);
+        var qeSeq = __qeSequenceOpening(domSeq);
         if (!qeSeq) return JSON.stringify({success:false,error:"Could not address sequence '" + String(domSeq.name) + "' through the QE API."});
         var track = qeSeq.getAudioTrackAt(${ati});
-        var clip = track ? track.getItemAt(${clipIndex}) : null;
+        var clip = track ? __qeClipByIndex(qeSeq, 'audio', ${ati}, ${clipIndex}) : null;
         if (!clip) return JSON.stringify({success:false,error:'No audio clip at audio track ${ati} index ${clipIndex}'});
         var domTrack = domSeq.audioTracks[${ati}];
         var domClip = domTrack ? domTrack.clips[${clipIndex}] : null;
         var transition = qe.project.getAudioTransitionByName('Constant Power');
         if (!transition) return JSON.stringify({success:false,error:'The Constant Power audio transition is not present on this build. Use list_available_audio_transitions to see what is.'});
         ${this.transitionVerificationScript()}
+        // The second argument puts the transition at the clip's START when true (measured on
+        // 26.5.2), so this used to crossfade the head of the clip -- usually not a cut at all --
+        // and the XML count never noticed. false = the clip's end = the cut with the next clip.
+        var cutSecs = domClip ? Number(domClip.end.seconds) : null;
+        var atCutBefore = cutSecs === null ? [] : __qeTransitionsAt(track, cutSecs);
         var before = __readQeTransitionState(clip);
         var beforeXml = __transitionXmlCount(domSeq);
         var addError = null;
         try {
-          clip.addTransition(transition, true, String(${durationFrames}), "0", 0.5, true, true);
+          clip.addTransition(transition, false, String(${durationFrames}), "0", 0.5, true, true);
         } catch (eAdd) { addError = eAdd.toString(); }
+        var atCutAfter = cutSecs === null ? [] : __qeTransitionsAt(track, cutSecs);
+        if (atCutAfter.length > atCutBefore.length) {
+          return JSON.stringify({success:true,verified:true,verifiedBy:'QE track transition list at the cut',durationFrames:${durationFrames},edge:'end',cutSecs:cutSecs,transitions:atCutAfter});
+        }
         var afterClip = domClip ? __findQeClipByDomClip(track, domClip) : clip;
         var after = __readQeTransitionState(afterClip || clip);
         var afterXml = __transitionXmlCount(domSeq);
@@ -233,10 +210,10 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected async muteClipAudio(_sequenceId: string | undefined, ti: number, ci: number, mute: boolean): Promise<any> {
+  protected async muteClipAudio(sequenceId: string | undefined, ti: number, ci: number, mute: boolean): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(sequenceId)};
         var vClip = seq.videoTracks[${ti}].clips[${ci}];
         if (!vClip) return JSON.stringify({success:false,error:'Video clip not found'});
         var linked = vClip.getLinkedItems();
@@ -272,10 +249,8 @@ export class AudioTools extends ExportRenderTools {
 
   protected loudnessReport(filePath: string): any {
     try {
-      const result = execSync(
-        `ffmpeg -i ${JSON.stringify(filePath)} -filter_complex ebur128=peak=true -f null /dev/null 2>&1 | tail -20`,
-        { encoding: 'utf8', timeout: 30000 }
-      );
+      // ebur128 prints its summary at the end of stderr.
+      const result = runFf('ffmpeg', ['-hide_banner', '-nostats', '-i', filePath, '-vn', '-filter_complex', 'ebur128=peak=true', '-f', 'null', '-'], { timeoutMs: 180000, mergeStderr: true }).split('\n').slice(-20).join('\n');
       const lufsMatch = result.match(/I:\s*([-\d.]+)\s*LUFS/);
       const peakMatch = result.match(/Peak:\s*([-\d.]+)/);
       const lraMatch = result.match(/LRA:\s*([-\d.]+)\s*LU/);
@@ -296,7 +271,7 @@ export class AudioTools extends ExportRenderTools {
     // Get the source media path first
     const pathResult = await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(sequenceId)};
         var clip = seq.audioTracks[${ati}].clips[${ci}];
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         return JSON.stringify({success:true,path:clip.projectItem ? String(clip.projectItem.getMediaPath()) : null,name:String(clip.name)});
@@ -305,15 +280,7 @@ export class AudioTools extends ExportRenderTools {
     if (!pathResult.success || !pathResult.path) return { success: false, error: 'Could not get media path' };
     // Analyze peak
     try {
-      execSync(
-        `ffprobe -v error -of json -show_streams ${JSON.stringify(pathResult.path)} 2>&1`,
-        { encoding: 'utf8', timeout: 10000 }
-      );
-      // Use ffmpeg volumedetect
-      const vol = execSync(
-        `ffmpeg -i ${JSON.stringify(pathResult.path)} -filter:a volumedetect -f null /dev/null 2>&1 | grep max_volume`,
-        { encoding: 'utf8', timeout: 15000 }
-      );
+      const vol = runFf('ffmpeg', ['-hide_banner', '-nostats', '-i', String(pathResult.path), '-vn', '-filter:a', 'volumedetect', '-f', 'null', '-'], { timeoutMs: 60000, mergeStderr: true });
       const maxVol = vol.match(/max_volume:\s*([-\d.]+)/);
       if (!maxVol) return { success: false, error: 'Could not detect peak volume' };
       const currentPeakDb = parseFloat(maxVol[1] ?? 'NaN');
@@ -324,18 +291,18 @@ export class AudioTools extends ExportRenderTools {
     }
   }
 
-  protected async renderAudio(_sequenceId?: string): Promise<any> {
+  protected async renderAudio(sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = qe.project.getActiveSequence();
+        var seq = ${this.buildQSeqResolver(sequenceId)};
         seq.renderAudio();
         return JSON.stringify({success:true,verified:false,note:'renderAudio() dispatched. Audio rendering is async.',sequenceName:String(seq.name)});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
 
-  protected async applyAudioEffectQe(trackIndex: number, clipIndex: number, effectName: string, audioTrack: boolean, _sequenceId?: string): Promise<any> {
+  protected async applyAudioEffectQe(trackIndex: number, clipIndex: number, effectName: string, audioTrack: boolean, sequenceId?: string): Promise<any> {
     const remapped = AudioTools.OBSOLETE_AUDIO_EFFECTS[effectName];
     const requested = effectName;
     const target = remapped ?? effectName;
@@ -343,10 +310,10 @@ export class AudioTools extends ExportRenderTools {
     const result: any = await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = qe.project.getActiveSequence();
+        var seq = ${this.buildQSeqResolver(sequenceId)};
         var track = ${audioTrack} ? seq.getAudioTrackAt(${trackIndex}) : seq.getVideoTrackAt(${trackIndex});
         if (!track) return JSON.stringify({success:false,error:'Track not found at index ${trackIndex}'});
-        var clip = track.getItemAt(${clipIndex});
+        var clip = __qeClipByIndex(seq, ${audioTrack} ? 'audio' : 'video', ${trackIndex}, ${clipIndex});
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
 
         // Resolve against the live catalogue first. Asking for a name this build does not
@@ -367,7 +334,7 @@ export class AudioTools extends ExportRenderTools {
 
         var eff = qe.project.getAudioEffectByName(exact);
         if (!eff) return JSON.stringify({success:false,error:'getAudioEffectByName returned nothing for: '+exact});
-        var domSeq = app.project.activeSequence;
+        var domSeq = ${this.buildSeqRes(sequenceId)};
         var domTrack = ${audioTrack} ? domSeq.audioTracks[${trackIndex}] : domSeq.videoTracks[${trackIndex}];
         var domClip = domTrack.clips[${clipIndex}];
         var before = domClip.components.numItems;
@@ -393,14 +360,14 @@ export class AudioTools extends ExportRenderTools {
     return await this.applyAudioEffectQe(trackIndex, clipIndex, 'DeNoise', true, sequenceId);
   }
 
-  protected async listAudioEffectsOnClip(trackIndex: number, clipIndex: number, _sequenceId?: string): Promise<any> {
+  protected async listAudioEffectsOnClip(trackIndex: number, clipIndex: number, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = qe.project.getActiveSequence();
-        var clip = seq.getAudioTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        var seq = ${this.buildQSeqResolver(sequenceId)};
+        var clip = __qeClipByIndex(seq, 'audio', ${trackIndex}, ${clipIndex});
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
-        var domClip = app.project.activeSequence.audioTracks[${trackIndex}].clips[${clipIndex}];
+        var domClip = ${this.buildSeqRes(sequenceId)}.audioTracks[${trackIndex}].clips[${clipIndex}];
         var comps = [];
         for (var i = 0; i < domClip.components.numItems; i++) {
           var dc = domClip.components[i];
@@ -416,11 +383,18 @@ export class AudioTools extends ExportRenderTools {
 
   protected audioPeaksReport(filePath: string): any {
     try {
-      const out = execSync(
-        `ffprobe -v error -f lavfi -i amovie=${JSON.stringify(filePath)},astats=metadata=1:reset=1 -show_entries frame_tags=lavfi.astats.Overall.RMS_level,lavfi.astats.Overall.Peak_level -of default=noprint_wrappers=1 2>/dev/null | head -20`,
-        { encoding: 'utf8', timeout: 30000 }
-      );
-      return { success: true, filePath, analysis: out.trim().split('\n').slice(0, 20) };
+      // Whole-file astats summary from stderr. The old amovie= source put the path inside a
+      // filtergraph through a shell, and reset=1 reported only the first 20 audio frames.
+      const out = runFf('ffmpeg', ['-hide_banner', '-nostats', '-i', filePath, '-vn', '-af', 'astats=measure_perchannel=none', '-f', 'null', '-'], { timeoutMs: 180000, mergeStderr: true });
+      // The Overall block follows the per-channel ones; read its fields only.
+      const overall = out.slice(out.lastIndexOf('Overall'));
+      const field = (label: string): number | null => {
+        const m = overall.match(new RegExp(label + ':\\s*(-?[\\d.]+)'));
+        return m?.[1] !== undefined ? parseFloat(m[1]) : null;
+      };
+      const res = { peakDb: field('Peak level dB'), rmsDb: field('RMS level dB'), crestFactor: field('Crest factor'), dcOffset: field('DC offset') };
+      if (res.peakDb === null && res.rmsDb === null) return { success: false, error: 'ffmpeg reported no audio statistics; the file may have no audio stream.' };
+      return { success: true, filePath, ...res };
     } catch (e: any) { return { success: false, error: e.message }; }
   }
 
@@ -428,7 +402,7 @@ export class AudioTools extends ExportRenderTools {
     const kfJson = JSON.stringify(keyframes);
     return await this.bridge.executeScript(`
       try {
-        var seq = ${this.buildSeqScript(sequenceId)};
+        var seq = ${this.buildSeqRes(sequenceId)};
         if (!seq) return JSON.stringify({success:false,error:'No sequence'});
         var track = seq.audioTracks[${trackIndex}];
         if (!track || track.clips.numItems === 0) return JSON.stringify({success:false,error:'Audio track not found or empty'});
@@ -453,8 +427,8 @@ export class AudioTools extends ExportRenderTools {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var qseq = qe.project.getActiveSequence();
-        var seq = ${this.buildSeqScript(sequenceId)};
+        var qseq = ${this.buildQSeqResolver(sequenceId)};
+        var seq = ${this.buildSeqRes(sequenceId)};
         if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
         var transition = qe.project.getAudioTransitionByName('Constant Power');
         if (!transition) return JSON.stringify({success:false,error:'The Constant Power audio transition is not present on this build. Use list_available_audio_transitions to see what is.'});
@@ -468,19 +442,25 @@ export class AudioTools extends ExportRenderTools {
         var added = 0, attempted = 0;
         var failures = [];
         var beforeXml = __transitionXmlCount(seq);
+        // Walk DOM clips, not QE items: QE lists gaps ("Empty") as items, so "item c and item c+1"
+        // is not a cut. A cut is where one clip ends exactly where the next begins. The crossfade
+        // goes on the outgoing clip's END (second argument false; true means its START).
+        var cutsDone = [];
         for (var t=0; t<seq.audioTracks.numTracks; t++) {
           var qatrack = qseq.getAudioTrackAt(t);
-          var numItems = qatrack ? qatrack.numItems : 0;
-          for (var c=0; c<numItems-1; c++) {
+          var dclips = seq.audioTracks[t].clips;
+          for (var c=0; c<dclips.numItems-1; c++) {
+            var outgoing = dclips[c], incoming = dclips[c+1];
+            var cut = Number(outgoing.end.seconds);
+            if (Math.abs(Number(incoming.start.seconds) - cut) > 0.5 / fps) continue;
             attempted++;
-            var clip = qatrack.getItemAt(c);
-            if (!clip) { failures.push('track ' + t + ' clip ' + c + ': QE clip not found'); continue; }
-            var cBefore = __readQeTransitionState(clip);
+            var clip = __findQeClipByDomClip(qatrack, outgoing);
+            if (!clip) { failures.push('A' + (t+1) + ' cut at ' + cut + 's: QE clip not found'); continue; }
+            var nBefore = __qeTransitionsAt(qatrack, cut).length;
             var addErr = null;
-            try { clip.addTransition(transition, true, String(frames), "0", 0.5, true, true); } catch(e2) { addErr = e2.toString(); }
-            var cAfter = __readQeTransitionState(qatrack.getItemAt(c) || clip);
-            if (__transitionWasVerified(cBefore, cAfter)) added++;
-            else failures.push('track ' + t + ' clip ' + c + ': ' + (addErr ? addErr : 'no transition appeared (the cut may have no source handles)'));
+            try { clip.addTransition(transition, false, String(frames), "0", 0.5, true, true); } catch(e2) { addErr = e2.toString(); }
+            if (__qeTransitionsAt(qatrack, cut).length > nBefore) { added++; cutsDone.push('A' + (t+1) + '@' + cut + 's'); }
+            else failures.push('A' + (t+1) + ' cut at ' + cut + 's: ' + (addErr ? addErr : 'no transition appeared (the clips may have no source handles at the cut)'));
           }
         }
         var afterXml = __transitionXmlCount(seq);
@@ -490,7 +470,7 @@ export class AudioTools extends ExportRenderTools {
             note:'This sequence has no audio cut with a clip on both sides, so there was nothing to crossfade.'});
         }
         if (added === attempted) {
-          return JSON.stringify({success:true,verified:true,verifiedBy:'QE clip transition enumeration per cut',crossfadesAdded:added,cutsAttempted:attempted,durationSeconds:${durationSeconds},durationFrames:frames,xmlTransitionDelta:xmlDelta});
+          return JSON.stringify({success:true,verified:true,verifiedBy:'QE track transition list at each cut',crossfadesAdded:added,cutsAttempted:attempted,cuts:cutsDone,durationSeconds:${durationSeconds},durationFrames:frames,xmlTransitionDelta:xmlDelta});
         }
         return JSON.stringify({success:false,verified:true,verifiedBy:'QE clip transition enumeration per cut',crossfadesAdded:added,cutsAttempted:attempted,durationSeconds:${durationSeconds},durationFrames:frames,xmlTransitionDelta:xmlDelta,failures:failures,
           error: added === 0
@@ -1093,7 +1073,7 @@ export class AudioTools extends ExportRenderTools {
         // Make target active so QE DOM can address it
         var __priorActive = app.project.activeSequence;
         app.project.activeSequence = seq;
-        var qeSeq = __qeSequenceFor(seq);
+        var qeSeq = __qeSequenceOpening(seq);
         if (!qeSeq) return JSON.stringify({ success: false, error: "Could not address sequence '" + seq.name + "' through the QE API." });
         var effect = qe.project.getAudioEffectByName(${JSON.stringify(effectName)});
         if (!effect) return JSON.stringify({ success: false, error: "Audio effect not found: " + ${JSON.stringify(effectName)} });
@@ -1211,14 +1191,14 @@ export class AudioTools extends ExportRenderTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async setParametricEq(_seqId: string|undefined, trackIndex: number, clipIndex: number, band: number, frequency?: number, gain?: number, q?: number): Promise<any> {
+  protected async setParametricEq(seqId: string|undefined, trackIndex: number, clipIndex: number, band: number, frequency?: number, gain?: number, q?: number): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = qe.project.getActiveSequence();
+        var seq = ${this.buildQSeqResolver(seqId)};
         var atrack = seq.getAudioTrackAt(${trackIndex});
         if (!atrack) return JSON.stringify({success:false,error:'Audio track not found'});
-        var clip = atrack.getItemAt(${clipIndex});
+        var clip = __qeClipByIndex(seq, 'audio', ${trackIndex}, ${clipIndex});
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         var set = 0;
         for (var ci = 0; ci < (clip.numComponents||10); ci++) {
@@ -1239,12 +1219,12 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected async setCompressor(_seqId: string|undefined, trackIndex: number, clipIndex: number, threshold?: number, ratio?: number, attack?: number, release?: number): Promise<any> {
+  protected async setCompressor(seqId: string|undefined, trackIndex: number, clipIndex: number, threshold?: number, ratio?: number, attack?: number, release?: number): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = qe.project.getActiveSequence();
-        var clip = seq.getAudioTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        var seq = ${this.buildQSeqResolver(seqId)};
+        var clip = __qeClipByIndex(seq, 'audio', ${trackIndex}, ${clipIndex});
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         var set = 0;
         for (var ci = 0; ci < 20; ci++) {
@@ -1264,12 +1244,12 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected async setLimiter(_seqId: string|undefined, trackIndex: number, clipIndex: number, ceiling: number): Promise<any> {
+  protected async setLimiter(seqId: string|undefined, trackIndex: number, clipIndex: number, ceiling: number): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = qe.project.getActiveSequence();
-        var clip = seq.getAudioTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        var seq = ${this.buildQSeqResolver(seqId)};
+        var clip = __qeClipByIndex(seq, 'audio', ${trackIndex}, ${clipIndex});
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         for (var ci = 0; ci < 20; ci++) {
           try { var comp = clip.getComponentAt(ci); if (!comp) break;
@@ -1285,17 +1265,17 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected async dereverbClip(_seqId: string|undefined, trackIndex: number, clipIndex: number, amount: number): Promise<any> {
+  protected async dereverbClip(seqId: string|undefined, trackIndex: number, clipIndex: number, amount: number): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = qe.project.getActiveSequence();
+        var seq = ${this.buildQSeqResolver(seqId)};
         var atrack = seq.getAudioTrackAt(${trackIndex});
-        var clip = atrack && atrack.getItemAt(${clipIndex});
+        var clip = atrack && __qeClipByIndex(seq, 'audio', ${trackIndex}, ${clipIndex});
         if (!clip) return JSON.stringify({success:false,error:'Audio clip not found'});
         var eff = qe.project.getAudioEffectByName('DeReverb');
         if (!eff) return JSON.stringify({success:false,error:'DeReverb effect not found in effect list'});
-        var domClip = app.project.activeSequence.audioTracks[${trackIndex}].clips[${clipIndex}];
+        var domClip = ${this.buildSeqRes(seqId)}.audioTracks[${trackIndex}].clips[${clipIndex}];
         var before = domClip.components.numItems;
         clip.addAudioEffect(eff);
         var after = domClip.components.numItems;
@@ -1309,11 +1289,11 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected async normalizeTrackPeaks(_seqId: string|undefined, trackIndex: number, targetDbfs: number): Promise<any> {
+  protected async normalizeTrackPeaks(seqId: string|undefined, trackIndex: number, targetDbfs: number): Promise<any> {
     // Node.js side: get clips, probe each, set gain
     return await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(seqId)};
         var track = seq.audioTracks[${trackIndex}];
         if (!track) return JSON.stringify({success:false,error:'Audio track not found'});
         var results = [];
@@ -1328,10 +1308,10 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected async fillRoomTone(_seqId: string|undefined, trackIndex: number, gapStart: number, gapDuration: number, roomToneItemId: string): Promise<any> {
+  protected async fillRoomTone(seqId: string|undefined, trackIndex: number, gapStart: number, gapDuration: number, roomToneItemId: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(seqId)};
         var item = __findProjectItem(${JSON.stringify(roomToneItemId)});
         if (!item) return JSON.stringify({success:false,error:'Room tone item not found'});
         var track = seq.audioTracks[${trackIndex}];
@@ -1343,11 +1323,11 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected async stemExport(_seqId: string|undefined, trackIndices: number[], outputDir: string, format: string): Promise<any> {
+  protected async stemExport(seqId: string|undefined, trackIndices: number[], outputDir: string, format: string): Promise<any> {
     // Mute all except target, export audio only, repeat
     return await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(seqId)};
         var results = [];
         var allTracks = seq.audioTracks;
         for (var ti = 0; ti < ${JSON.stringify(trackIndices)}.length; ti++) {
@@ -1367,10 +1347,10 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected async channelRemapReport(_seqId?: string): Promise<any> {
+  protected async channelRemapReport(seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(seqId)};
         var report = {audioTracks:[]};
         for (var t = 0; t < seq.audioTracks.numTracks; t++) {
           var track = seq.audioTracks[t];
@@ -1389,7 +1369,7 @@ export class AudioTools extends ExportRenderTools {
 
   protected audioSilenceScan(filePath: string, noiseDb: number, minDuration: number): any {
     try {
-      const out = execSync(`ffmpeg -i "${filePath}" -af "silencedetect=noise=${noiseDb}dB:d=${minDuration}" -f null - 2>&1`, { timeout: 30000 }).toString();
+      const out = runFf('ffmpeg', ['-hide_banner', '-nostats', '-i', filePath, '-vn', '-af', `silencedetect=noise=${Number(noiseDb)}dB:d=${Number(minDuration)}`, '-f', 'null', '-'], { timeoutMs: 120000, mergeStderr: true });
       const ranges: any[] = [];
       let current: any = null;
       for (const line of out.split('\n')) {

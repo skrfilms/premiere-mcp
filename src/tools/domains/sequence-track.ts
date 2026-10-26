@@ -5,11 +5,11 @@
  * had grown to 19k lines; the method bodies are unchanged.
  */
 import { EffectsTools } from './effects.js';
-import { execSync } from 'child_process';
 // Synchronous fs/path/os bindings for the Node-side (non-ExtendScript) tools.
 // Kept separate from the `promises as fs` import above, which is the async API.
 import * as fsSync from 'node:fs';
 import * as pathSync from 'node:path';
+import { runFf } from '../ff-exec.js';
 
 export class SequenceTrackTools extends EffectsTools {
   protected async listSequences(): Promise<any> {
@@ -121,16 +121,11 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(script);
   }
 
-  protected buildSequenceResolver2(sequenceId?: string): string {
-    if (!sequenceId) return 'app.project.activeSequence';
-    return `(function(){ var seqs=app.project.sequences; for(var i=0;i<seqs.numSequences;i++){ if(seqs[i].sequenceID===${JSON.stringify(sequenceId)}) return seqs[i]; } return app.project.activeSequence; })()`;
-  }
-
-  protected async deleteEmptyTracks(_sequenceId: string | undefined, video: boolean, audio: boolean): Promise<any> {
+  protected async deleteEmptyTracks(sequenceId: string | undefined, video: boolean, audio: boolean): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = qe.project.getActiveSequence();
+        var seq = ${this.buildQSeqResolver(sequenceId)};
         var beforeV = seq.numVideoTracks; var beforeA = seq.numAudioTracks;
         if (${video}) seq.removeEmptyVideoTracks();
         if (${audio}) seq.removeEmptyAudioTracks();
@@ -140,11 +135,11 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  protected async setSequenceInOutQe(inPoint?: string, outPoint?: string, _sequenceId?: string): Promise<any> {
+  protected async setSequenceInOutQe(inPoint?: string, outPoint?: string, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = qe.project.getActiveSequence();
+        var seq = ${this.buildQSeqResolver(sequenceId)};
         if (!seq) return JSON.stringify({success:false,error:'No sequence'});
         ${inPoint ? `try { seq.setInPoint(${JSON.stringify(inPoint)}, true, false); } catch(e) {}` : ''}
         ${outPoint ? `try { seq.setOutPoint(${JSON.stringify(outPoint)}, true, false); } catch(e) {}` : ''}
@@ -153,11 +148,11 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  protected async getQeSequenceProps(_sequenceId?: string): Promise<any> {
+  protected async getQeSequenceProps(sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = qe.project.getActiveSequence();
+        var seq = ${this.buildQSeqResolver(sequenceId)};
         if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
         var cti = seq.CTI; var ip = seq.inPoint; var op = seq.outPoint; var wi = seq.workInPoint; var wo = seq.workOutPoint;
         return JSON.stringify({
@@ -178,7 +173,7 @@ ${this.buildSequenceResolver(sequenceId)}
 
   protected async getEditPointList(sequenceId?: string, videoOnly?: boolean): Promise<any> {
     return await this.bridge.executeScript(`
-      var seq = ${this.buildSeqScript(sequenceId)};
+      var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No sequence'});
       var cuts = [];
       for (var t = 0; t < seq.videoTracks.numTracks; t++) {
@@ -204,7 +199,7 @@ ${this.buildSequenceResolver(sequenceId)}
 
   protected async detectSettingsMismatch(sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
-      var seq = ${this.buildSeqScript(sequenceId)};
+      var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No sequence'});
       var seqFps = seq.timebase ? Math.round(254016000000/Number(seq.timebase)*100)/100 : 0;
       var seqW = seq.frameSizeHorizontal; var seqH = seq.frameSizeVertical;
@@ -228,7 +223,7 @@ ${this.buildSequenceResolver(sequenceId)}
 
   protected async countTracksUsed(sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
-      var seq = ${this.buildSeqScript(sequenceId)};
+      var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No sequence'});
       var result = {videoTracks:[],audioTracks:[]};
       for (var t = 0; t < seq.videoTracks.numTracks; t++) {
@@ -248,9 +243,9 @@ ${this.buildSequenceResolver(sequenceId)}
     try {
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       const base = path.join(dir, 'thumb_%04d.jpg');
-      const dur = parseFloat(execSync(`ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${filePath}"`, { encoding: 'utf8' }).trim());
+      const dur = parseFloat(runFf('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', filePath], { timeoutMs: 15000 }).trim());
       const fps = count / dur;
-      execSync(`ffmpeg -y -i "${filePath}" -vf "fps=${fps}" -vframes ${count} "${base}" 2>/dev/null`, { encoding: 'utf8' });
+      runFf('ffmpeg', ['-y', '-loglevel', 'error', '-i', filePath, '-vf', `fps=${fps}`, '-frames:v', String(count), base], { timeoutMs: 120000 });
       const files: string[] = [];
       for (let i = 1; i <= count; i++) {
         const p = path.join(dir, `thumb_${String(i).padStart(4,'0')}.jpg`);
@@ -282,8 +277,8 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var qseq = qe.project.getActiveSequence();
-        var seq = ${this.buildSeqScript(sequenceId)};
+        var qseq = ${this.buildQSeqResolver(sequenceId)};
+        var seq = ${this.buildSeqRes(sequenceId)};
         if (!seq || !qseq) return JSON.stringify({success:false,error:'No sequence'});
         var firstStart = null; var lastEnd = null;
         for (var t=0; t<seq.videoTracks.numTracks; t++) {
@@ -303,11 +298,11 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  protected async flushSequenceCache(_sequenceId?: string): Promise<any> {
+  protected async flushSequenceCache(sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var qseq = qe.project.getActiveSequence();
+        var qseq = ${this.buildQSeqResolver(sequenceId)};
         qseq.flushCache();
         return JSON.stringify({success:true,sequenceName:String(qseq.name)});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
@@ -705,7 +700,7 @@ ${this.buildSequenceResolver(sequenceId)}
         if (!seq) return JSON.stringify({ success: false, error: "Sequence not found" });
         var __priorActive = app.project.activeSequence;
         app.project.activeSequence = seq;
-        var qeSeq = __qeSequenceFor(seq);
+        var qeSeq = __qeSequenceOpening(seq);
         if (!qeSeq) return JSON.stringify({ success: false, error: "Could not address sequence '" + seq.name + "' through the QE API." });
 
         // Calculate insertion index based on position
@@ -800,7 +795,7 @@ ${this.buildSequenceResolver(sequenceId)}
             // reported as such, naming it, rather than deleting a track from
             // the timeline that happens to be on screen.
             var activeSeq = app.project.activeSequence;
-            var qeSeq = __qeSequenceFor(sequence);
+            var qeSeq = __qeSequenceOpening(sequence);
             if (!qeSeq) {
               return JSON.stringify({
                 success: false,
@@ -1260,20 +1255,16 @@ ${this.buildSequenceResolver(sequenceId)}
         var seq=${this.buildSeqRes(seqId)};
         var markerCount=0;var m=seq.markers.getFirstMarker();while(m){markerCount++;m=seq.markers.getNextMarker(m);}
         var clipCount=0;for(var t=0;t<seq.videoTracks.numTracks;t++)clipCount+=seq.videoTracks[t].clips.numItems;
-        app.enableQE();var qseq=qe.project.getActiveSequence();
+        var qseq=${this.buildQSeqResolver(seqId)};
         return JSON.stringify({success:true,name:String(seq.name),sequenceID:String(seq.sequenceID),width:seq.frameSizeHorizontal,height:seq.frameSizeVertical,videoTracks:seq.videoTracks.numTracks,audioTracks:seq.audioTracks.numTracks,clipCount:clipCount,markerCount:markerCount,workAreaIn:seq.getWorkAreaInPoint?seq.getWorkAreaInPoint().seconds:0,workAreaOut:seq.getWorkAreaOutPoint?seq.getWorkAreaOutPoint().seconds:0,previewCodecPath:qseq?String(qseq.previewPresetPath):null});
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
     `);
   }
 
   protected async setSequenceZeroPoint(timecode: string, seqId?: string): Promise<any> {
-    return await this.bridge.executeScript(`
-      try {
-        var seq=${this.buildSeqRes(seqId)};
-        seq.setZeroPoint(${JSON.stringify(timecode)});
-        return JSON.stringify({success:true,timecode:${JSON.stringify(timecode)},sequenceName:String(seq.name)});
-      }catch(e){return JSON.stringify({success:false,error:e.toString()});}
-    `);
+    // Same operation as set_sequence_start_timecode; this one passed the timecode straight to
+    // setZeroPoint (which takes ticks) and reported success with no readback.
+    return await this.setSequenceStartTimecode(timecode, seqId);
   }
 
   protected async sequenceFromMarkers(seqId?: string, markerType = 'Chapter'): Promise<any> {
@@ -1396,11 +1387,11 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  protected async qeSequenceInfo(_seqId?: string): Promise<any> {
+  protected async qeSequenceInfo(seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq=qe.project.getActiveSequence();
+        var seq=${this.buildQSeqResolver(seqId)};
         if(!seq)return JSON.stringify({success:false,error:'No active QE sequence'});
         return JSON.stringify({success:true,name:String(seq.name),guid:String(seq.guid||''),CTI:{ticks:String(seq.CTI.ticks),secs:seq.CTI.secs},inPoint:{ticks:String(seq.inPoint.ticks)},outPoint:{ticks:String(seq.outPoint.ticks)},workInPoint:{ticks:String(seq.workInPoint.ticks)},workOutPoint:{ticks:String(seq.workOutPoint.ticks)},editingMode:String(seq.editingMode),numVideoTracks:seq.numVideoTracks,numAudioTracks:seq.numAudioTracks,previewPresetPath:String(seq.previewPresetPath||''),previewPresetCodec:String(seq.previewPresetCodec||''),useMaxBitDepth:seq.useMaxBitDepth,useMaxRenderQuality:seq.useMaxRenderQuality});
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
@@ -1523,31 +1514,35 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(script);
   }
 
-  protected async createSequenceFromBin(binName: string, seqName: string, presetPath?: string): Promise<any> {
+  /**
+   * The bin lookup scanned rootItem.children one level deep and did not check that the match
+   * was a bin, so a nested bin -- which is what create_bin returns whenever a parent is named --
+   * could not be reached at all, and a CLIP sharing the name would win. Uses the shared
+   * __resolveBin prelude helper (id, "/"-separated path, or deep name with an ambiguity refusal).
+   */
+  protected async createSequenceFromBin(binName: string, seqName: string, presetPath?: string, binId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var bin = null;
-        var root = app.project.rootItem;
-        for (var i=0;i<root.children.numItems;i++) {
-          if (String(root.children[i].name) === ${JSON.stringify(binName)}) { bin = root.children[i]; break; }
-        }
-        if (!bin) return JSON.stringify({success:false,error:'Bin not found: ' + ${JSON.stringify(binName)}});
+        var req = __resolveBin(${JSON.stringify(binId??null)}, ${JSON.stringify(binName)});
+        if (req.error) return JSON.stringify({success:false,error:req.error+' No sequence was created.',binName:${JSON.stringify(binName)},binId:${JSON.stringify(binId??null)},matchCount:req.matchCount});
+        var bin = req.bin;
         var items = [];
         for (var j=0;j<bin.children.numItems;j++) {
           if (bin.children[j].type === 1) items.push(bin.children[j]);
         }
-        if (items.length === 0) return JSON.stringify({success:false,error:'No footage items in bin'});
+        if (items.length === 0) return JSON.stringify({success:false,error:'No footage items in bin "'+String(bin.name)+'" ('+String(bin.treePath)+'). No sequence was created.',binId:String(bin.nodeId)});
         var seq = app.project.createNewSequenceFromClips(${JSON.stringify(seqName)}, items, ${JSON.stringify(presetPath ?? '')});
         if (!seq) return JSON.stringify({success:false,error:'createNewSequenceFromClips returned null'});
-        return JSON.stringify({success:true,sequenceId:String(seq.sequenceID),name:String(seq.name),clipCount:items.length});
+        return JSON.stringify({success:true,sequenceId:String(seq.sequenceID),name:String(seq.name),clipCount:items.length,
+          binId:String(bin.nodeId),binName:String(bin.name),binResolvedBy:req.resolvedBy});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
 
-  protected async clearSequenceInOut(_seqId?: string): Promise<any> {
+  protected async clearSequenceInOut(seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = __findSequence(${JSON.stringify(_seqId ?? null)});
+        var seq = __findSequence(${JSON.stringify(seqId ?? null)});
         if (!seq) return JSON.stringify({success:false,error:'Sequence not found'});
         // clearInPoint/clearOutPoint are ProjectItem methods and are UNDEFINED on Sequence
         // (measured on 26.3.2), so this threw on every call. There is no true "clear" for a
@@ -1576,26 +1571,28 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  protected async setSequenceStartTimecode(timecode: string, _seqId?: string): Promise<any> {
+  protected async setSequenceStartTimecode(timecode: string, seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(seqId)};
         if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
         // Reported success with no readback of any kind. setZeroPoint takes TICKS as a string;
         // a timecode string is not a tick count, so this call was very likely inert.
         var before = null; try { before = String(seq.zeroPoint); } catch(eB) {}
+        var wantTicks = __timecodeToTicks(seq, ${JSON.stringify(String(timecode))});
+        if (wantTicks === null) return JSON.stringify({success:false,error:'Could not read timecode "' + ${JSON.stringify(String(timecode))} + '". Pass HH:MM:SS:FF, HH;MM;SS;FF (drop-frame) or seconds.'});
         var setError = null;
-        try { seq.setZeroPoint(${JSON.stringify(timecode)}); } catch(eS) { setError = eS.toString(); }
+        try { seq.setZeroPoint(wantTicks); } catch(eS) { setError = eS.toString(); }
         var after = null; try { after = String(seq.zeroPoint); } catch(eA) {}
         if (after === null) {
           return JSON.stringify({success:true,verified:false,timecode:${JSON.stringify(timecode)},sequenceName:String(seq.name),before:before,setError:setError,
             unverifiedReason:'Sequence.zeroPoint is not readable on this build, so the start timecode cannot be confirmed.'});
         }
-        if (after === before) {
-          return JSON.stringify({success:false,verified:true,verifiedBy:'Sequence.zeroPoint readback',changed:false,timecode:${JSON.stringify(timecode)},sequenceName:String(seq.name),before:before,after:after,setError:setError,
-            error:'The sequence zero point did not move: it still reads ' + after + ' ticks. setZeroPoint() expects a TICK COUNT as a string, not a timecode. Convert with timecode_to_frames and pass ticks, or set the start timecode in the Sequence Settings dialog.'});
+        if (after !== wantTicks) {
+          return JSON.stringify({success:false,verified:true,verifiedBy:'Sequence.zeroPoint readback',changed:after!==before,timecode:${JSON.stringify(timecode)},sequenceName:String(seq.name),before:before,after:after,wantTicks:wantTicks,setError:setError,
+            error:'The sequence zero point reads ' + after + ' ticks, not the ' + wantTicks + ' that ' + ${JSON.stringify(String(timecode))} + ' converts to.'});
         }
-        return JSON.stringify({success:true,verified:true,verifiedBy:'Sequence.zeroPoint readback',changed:true,timecode:${JSON.stringify(timecode)},sequenceName:String(seq.name),before:before,after:after});
+        return JSON.stringify({success:true,verified:true,verifiedBy:'Sequence.zeroPoint readback',changed:after!==before,timecode:${JSON.stringify(timecode)},sequenceName:String(seq.name),before:before,after:after});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
@@ -1603,12 +1600,7 @@ ${this.buildSequenceResolver(sequenceId)}
   protected async getSequenceDuration(seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
-        var seqId = ${JSON.stringify(seqId ?? '')};
-        if (seqId) {
-          var seqs = app.project.sequences;
-          for (var i=0;i<seqs.numSequences;i++) { if(seqs[i].sequenceID===seqId) { seq=seqs[i]; break; } }
-        }
+        var seq = ${this.buildSeqRes(seqId)};
         if (!seq) return JSON.stringify({success:false,error:'Sequence not found'});
         // seq.end is TICKS, not a Time. .seconds was undefined, which made frames NaN and
         // reported a sequence with no duration at all.

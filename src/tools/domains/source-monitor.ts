@@ -5,11 +5,11 @@
  * had grown to 19k lines; the method bodies are unchanged.
  */
 import { ReviewDeliveryTools } from './review-delivery.js';
-import { execSync } from 'child_process';
 // Synchronous fs/path/os bindings for the Node-side (non-ExtendScript) tools.
 // Kept separate from the `promises as fs` import above, which is the async API.
 import * as fsSync from 'node:fs';
 import * as pathSync from 'node:path';
+import { runFf } from '../ff-exec.js';
 
 export class SourceMonitorTools extends ReviewDeliveryTools {
   protected async openProjectItemInSource(projectItemId: string, timecode?: string): Promise<any> {
@@ -78,12 +78,12 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
     try {
       if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
       // Get duration first
-      const dur = parseFloat(execSync(`ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "${mediaPath}"`, { encoding: 'utf8', timeout: 10000 }).trim());
+      const dur = parseFloat(runFf('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=nw=1:nk=1', mediaPath], { timeoutMs: 10000 }).trim());
       const paths: string[] = [];
       for (let i = 0; i < count; i++) {
         const t = (dur / (count + 1)) * (i + 1);
         const outPath = path.join(outputDir, `scrub_${i.toString().padStart(3,'0')}.jpg`);
-        execSync(`ffmpeg -y -ss ${t.toFixed(3)} -i "${mediaPath}" -frames:v 1 -q:v 3 "${outPath}"`, { timeout: 10000 });
+        runFf('ffmpeg', ['-y', '-ss', t.toFixed(3), '-i', mediaPath, '-frames:v', '1', '-update', '1', '-q:v', '3', outPath], { timeoutMs: 10000 });
         if (fs.existsSync(outPath)) paths.push(outPath);
       }
       return { success: true, count: paths.length, paths };
@@ -130,13 +130,19 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
     } catch (e: any) { return { success: false, error: e.message }; }
   }
 
-  protected async storyboardBinToSequence(binName: string, seqId?: string, startAtSecs = 0): Promise<any> {
+  /**
+   * The local findBin deep-walked but returned the FIRST name match, so with two bins of the
+   * same name (one per scene, which is the normal shape of a show project) this assembled the
+   * wrong bin onto the timeline and reported success. The shared __resolveBin prelude helper
+   * refuses an ambiguous bare name instead of guessing, and also accepts a path or an id.
+   */
+  protected async storyboardBinToSequence(binName: string, seqId?: string, startAtSecs = 0, binId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq=${this.buildSeqRes(seqId)};
-        function findBin(bin,name){for(var i=0;i<bin.children.numItems;i++){var c=bin.children[i];if(c.type===2&&String(c.name)===name)return c;if(c.type===2){var r=findBin(c,name);if(r)return r;}}return null;}
-        var bin=findBin(app.project.rootItem,${JSON.stringify(binName)});
-        if(!bin)return JSON.stringify({success:false,error:'Bin not found: '+${JSON.stringify(binName)}});
+        var req=__resolveBin(${JSON.stringify(binId??null)},${JSON.stringify(binName)});
+        if(req.error)return JSON.stringify({success:false,error:req.error+' Nothing was placed on the timeline.',binName:${JSON.stringify(binName)},binId:${JSON.stringify(binId??null)},matchCount:req.matchCount});
+        var bin=req.bin;
         var pos=new Time();pos.seconds=${startAtSecs};
         var placed=0;
         for(var i=0;i<bin.children.numItems;i++){
@@ -146,7 +152,9 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
           var dur=item.getOutPoint().seconds-item.getInPoint().seconds;
           pos.seconds+=dur;placed++;
         }
-        return JSON.stringify({success:true,placed:placed,finalPositionSecs:pos.seconds});
+        return JSON.stringify({success:placed>0,placed:placed,finalPositionSecs:pos.seconds,
+          binId:String(bin.nodeId),binName:String(bin.name),binResolvedBy:req.resolvedBy,
+          error:placed===0?'Bin "'+String(bin.name)+'" ('+String(bin.treePath)+') holds no footage items, so nothing was placed.':undefined});
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
     `);
   }
@@ -178,7 +186,7 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
         app.enableQE();
         var seq = qe.project.getActiveSequence();
         var track = seq && seq.getVideoTrackAt(${trackIndex});
-        var clip = track && track.getItemAt(${clipIndex});
+        var clip = track && __qeClipByIndex(seq, 'video', ${trackIndex}, ${clipIndex});
         if (!clip) return JSON.stringify({ success: false, error: 'QE clip not found' });
         var pi = clip.getProjectItem();
         if (!pi) return JSON.stringify({ success: false, error: 'getProjectItem() returned nothing' });

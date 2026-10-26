@@ -5,7 +5,7 @@
  * had grown to 19k lines; the method bodies are unchanged.
  */
 import { ProjectMediaTools } from './project-media.js';
-import { spawn, execSync } from 'child_process';
+import { spawn } from 'child_process';
 // Synchronous fs/path/os bindings for the Node-side (non-ExtendScript) tools.
 // Kept separate from the `promises as fs` import above, which is the async API.
 import * as fsSync from 'node:fs';
@@ -14,6 +14,7 @@ import * as osSync from 'node:os';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import { basename, dirname, extname, join } from 'node:path';
 import type { ClipPlanColor } from './shared.js';
+import { runFf } from '../ff-exec.js';
 
 export class ColorTools extends ProjectMediaTools {
   protected hasColorAdjustments(color?: ClipPlanColor): boolean {
@@ -54,7 +55,7 @@ export class ColorTools extends ProjectMediaTools {
   ): string {
     return `
       try {
-        var seq = ${seqId ? `(function(){var ss=app.project.sequences;for(var i=0;i<ss.numSequences;i++){if(ss[i].sequenceID===${JSON.stringify(seqId)})return ss[i];}return app.project.activeSequence;})()` : 'app.project.activeSequence'};
+        var seq = ${this.buildSeqRes(seqId)};
         if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
         var track = seq.videoTracks[${ti}];
         if (!track) return JSON.stringify({success:false,error:'Video track ${ti} not found'});
@@ -155,7 +156,7 @@ export class ColorTools extends ProjectMediaTools {
   protected async lumetriReport(sequenceId: string | undefined, ti: number, ci: number): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = ${sequenceId ? `(function(){var ss=app.project.sequences;for(var i=0;i<ss.numSequences;i++){if(ss[i].sequenceID===${JSON.stringify(sequenceId)})return ss[i];}return app.project.activeSequence;})()` : 'app.project.activeSequence'};
+        var seq = ${this.buildSeqRes(sequenceId)};
         var clip = seq.videoTracks[${ti}].clips[${ci}];
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         var lumetri = null;
@@ -222,7 +223,7 @@ export class ColorTools extends ProjectMediaTools {
     // successful write is not proof Premiere has finished analysing.
     return await this.bridge.executeScript(`
       try {
-        var seq = ${sequenceId ? `(function(){var ss=app.project.sequences;for(var i=0;i<ss.numSequences;i++){if(ss[i].sequenceID===${JSON.stringify(sequenceId)})return ss[i];}return app.project.activeSequence;})()` : 'app.project.activeSequence'};
+        var seq = ${this.buildSeqRes(sequenceId)};
         if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
         var track = seq.videoTracks[${ti}];
         var clip = track && track.clips[${ci}];
@@ -312,33 +313,24 @@ export class ColorTools extends ProjectMediaTools {
         function findById(bin,id){for(var i=0;i<bin.children.numItems;i++){var c=bin.children[i];if(c.nodeId===id)return c;if(c.type===2){var r=findById(c,id);if(r)return r;}}return null;}
         var item = findById(root, ${JSON.stringify(projectItemId)});
         if (!item) return JSON.stringify({success:false,error:'Item not found'});
-        var orig = item.getOriginalColorSpace ? String(item.getOriginalColorSpace()) : 'N/A';
-        var ovr = item.getOverrideColorSpace ? String(item.getOverrideColorSpace()) : 'N/A';
-        var list = [];
-        try { var l = item.getOverrideColorSpaceList ? item.getOverrideColorSpaceList() : null; if (l) list = String(l).split(',').map(function(s){return s.replace(/^\\s+|\\s+$/g,'');}); } catch(e){}
-        return JSON.stringify({success:true,projectItemId:${JSON.stringify(projectItemId)},originalColorSpace:orig,overrideColorSpace:ovr,availableOverrides:list.slice(0,20)});
+        var orig = null, ovr = null;
+        try { orig = __csInfo(item.getOriginalColorSpace()); } catch(eO) {}
+        try { ovr = __csInfo(item.getOverrideColorSpace()); } catch(eV) {}
+        return JSON.stringify({success:true,projectItemId:${JSON.stringify(projectItemId)},originalColorSpace:orig,overrideColorSpace:(ovr && !ovr.empty) ? ovr : null,availableOverrides:__colorSpaceNames(item)});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
 
   protected async setClipColorSpace(projectItemId: string, colorSpaceName: string): Promise<any> {
-    return await this.bridge.executeScript(`
-      try {
-        var root = app.project.rootItem;
-        function findById(bin,id){for(var i=0;i<bin.children.numItems;i++){var c=bin.children[i];if(c.nodeId===id)return c;if(c.type===2){var r=findById(c,id);if(r)return r;}}return null;}
-        var item = findById(root, ${JSON.stringify(projectItemId)});
-        if (!item) return JSON.stringify({success:false,error:'Item not found'});
-        item.setOverrideColorSpace(${JSON.stringify(colorSpaceName)});
-        var after = item.getOverrideColorSpace ? String(item.getOverrideColorSpace()) : 'N/A';
-        return JSON.stringify({success:true,verified:true,colorSpaceName:${JSON.stringify(colorSpaceName)},applied:after});
-      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
-    `);
+    // Same operation as set_color_space_override. This used to pass the name string straight to
+    // setOverrideColorSpace(), which takes a ColorSpace object and threw "Illegal Parameter type".
+    return await this.setColorSpaceOverride(projectItemId, colorSpaceName);
   }
 
   protected async applyLutToClip(trackIndex: number, clipIndex: number, lutPath: string, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = ${this.buildSeqScript(sequenceId)};
+        var seq = ${this.buildSeqRes(sequenceId)};
         var clip = seq.videoTracks[${trackIndex}].clips[${clipIndex}];
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         var comps = clip.components;
@@ -475,7 +467,7 @@ export class ColorTools extends ProjectMediaTools {
         // sequence in the project, so a clip can be resolved out of one sequence and
         // then, through getActiveSequence(), have the effect applied to whichever
         // clip sits at the same track and index in a different one.
-        var qeSeq = __qeSequenceFor(info.sequence);
+        var qeSeq = __qeSequenceOpening(info.sequence);
         if (!qeSeq) return JSON.stringify({ success: false, error: "Could not address sequence '" + info.sequenceName + "' through the QE API." });
         var qeTrack = qeSeq.getVideoTrackAt(info.trackIndex);
         var qeClip = __findQeClipByDomClip(qeTrack, info.clip);
@@ -655,15 +647,17 @@ export class ColorTools extends ProjectMediaTools {
 
   protected broadcastSafeCheck(mediaPath: string): any {
     try {
-      const out = execSync(`ffprobe -v error -f lavfi -i "movie=${mediaPath},signalstats" -show_entries frame_tags=lavfi.signalstats.YMAX,lavfi.signalstats.YMIN -of csv 2>/dev/null`, { encoding: 'utf8', timeout: 30000 });
-      const lines = out.trim().split('\n').filter((l: string) => l);
-      let illegalHigh = 0, illegalLow = 0;
-      lines.forEach((l: string) => {
-        const parts = l.split(',');
-        if (parts[1] && Number(parts[1]) > 235) illegalHigh++;
-        if (parts[2] && Number(parts[2]) < 16) illegalLow++;
-      });
-      return { success: true, totalFrames: lines.length, illegalHighFrames: illegalHigh, illegalLowFrames: illegalLow, broadcastSafe: illegalHigh === 0 && illegalLow === 0 };
+      // signalstats per frame, printed by the metadata filter to stdout. The old movie= source put
+      // the path inside a filtergraph unescaped and through a shell.
+      const out = runFf('ffmpeg', ['-hide_banner', '-nostats', '-loglevel', 'error', '-i', mediaPath, '-an', '-vf', 'signalstats,metadata=print:file=-', '-f', 'null', '-'], { timeoutMs: 180000 });
+      let frames = 0, illegalHigh = 0, illegalLow = 0;
+      for (const l of out.split('\n')) {
+        if (l.startsWith('frame:')) frames++;
+        const hi = l.match(/^lavfi\.signalstats\.YMAX=(\d+)/); if (hi && Number(hi[1]) > 235) illegalHigh++;
+        const lo = l.match(/^lavfi\.signalstats\.YMIN=(\d+)/); if (lo && Number(lo[1]) < 16) illegalLow++;
+      }
+      if (frames === 0) return { success: false, error: 'ffmpeg decoded no video frames from this file, so nothing was measured.' };
+      return { success: true, totalFrames: frames, illegalHighFrames: illegalHigh, illegalLowFrames: illegalLow, broadcastSafe: illegalHigh === 0 && illegalLow === 0, note: 'Limits are 8-bit studio range: luma above 235 or below 16.' };
     } catch (e: any) { return { success: false, error: e.message }; }
   }
 
@@ -675,7 +669,7 @@ export class ColorTools extends ProjectMediaTools {
       // to a single output path ("Conversion failed!"). The default (stats_mode=full)
       // computes one palette across the whole range, and -frames:v 1 pins the output to
       // exactly one image.
-      execSync(`ffmpeg -y -ss ${startSecs} -t ${durationSecs} -i "${mediaPath}" -vf "palettegen=max_colors=${colorCount}" -frames:v 1 "${palettePath}"`, { timeout: 30000 });
+      runFf('ffmpeg', ['-y', '-ss', String(startSecs), '-t', String(durationSecs), '-i', mediaPath, '-vf', `palettegen=max_colors=${Number(colorCount)}`, '-frames:v', '1', '-update', '1', palettePath], { timeoutMs: 30000 });
       return { success: true, palettePath, note: 'Palette PNG written. Use image tools to extract hex values from the palette image.' };
     } catch (e: any) { return { success: false, error: e.message }; }
   }
@@ -685,44 +679,64 @@ export class ColorTools extends ProjectMediaTools {
       try {
         var item=${this.findItemById(projectItemId)};
         if(!item)return JSON.stringify({success:false,error:'Item not found'});
-        var valid=item.isValidOverrideColorSpace?item.isValidOverrideColorSpace(${JSON.stringify(colorSpaceName)}):true;
-        if(!valid)return JSON.stringify({success:false,error:'Invalid color space: '+${JSON.stringify(colorSpaceName)}});
-        var before=null; try{ before=String(item.getOverrideColorSpace()); }catch(eB){}
+        var cs=__findColorSpace(${JSON.stringify(colorSpaceName)}, item);
+        if(!cs)return JSON.stringify({success:false,error:'No colour space named '+${JSON.stringify(JSON.stringify(colorSpaceName))}+' is available. Pass one of availableColorSpaces.',availableColorSpaces:__colorSpaceNames(item)});
+        var valid=true; try{ valid=item.isValidOverrideColorSpace(cs); }catch(eV){}
+        if(!valid)return JSON.stringify({success:false,error:'Premiere rejects '+String(cs.name)+' as an override for this item.',availableColorSpaces:__colorSpaceNames(item)});
+        var before=null; try{ before=__csInfo(item.getOverrideColorSpace()); }catch(eB){}
         var setError=null;
-        try{ item.setOverrideColorSpace(${JSON.stringify(colorSpaceName)}); }catch(eS){ setError=eS.toString(); }
-        var back=null; try{ back=String(item.getOverrideColorSpace()); }catch(eA){}
-        if(back===null){
-          return JSON.stringify({success:true,verified:false,colorSpace:${JSON.stringify(colorSpaceName)},before:before,setError:setError,
+        try{ item.setOverrideColorSpace(cs); }catch(eS){ setError=eS.toString(); }
+        var back=null; try{ back=__csInfo(item.getOverrideColorSpace()); }catch(eA){}
+        if(!back){
+          return JSON.stringify({success:true,verified:false,colorSpace:String(cs.name),setError:setError,
             unverifiedReason:'getOverrideColorSpace() is not readable for this item, so the override cannot be confirmed.'});
         }
-        if(back.indexOf(${JSON.stringify(colorSpaceName)})<0){
-          return JSON.stringify({success:false,verified:true,verifiedBy:'getOverrideColorSpace() readback',changed:back!==before,colorSpace:${JSON.stringify(colorSpaceName)},before:before,readback:back,setError:setError,
-            error:'The item colour space reads "' + back + '", which does not contain the requested ' + ${JSON.stringify(colorSpaceName)} + '. isValidOverrideColorSpace accepted the name, so the override was refused at write time.'});
+        if(back.empty || back.name!==String(cs.name)){
+          return JSON.stringify({success:false,verified:true,verifiedBy:'getOverrideColorSpace() readback',colorSpace:String(cs.name),before:before,readback:back,setError:setError,
+            error:'The override reads "'+back.name+'" after the write, not '+String(cs.name)+'.'});
         }
-        return JSON.stringify({success:true,verified:true,verifiedBy:'getOverrideColorSpace() readback',changed:back!==before,colorSpace:${JSON.stringify(colorSpaceName)},before:before,readback:back,
-          note: back === before ? 'The item was already overridden to this colour space; nothing changed.' : undefined});
+        var unchanged = before && !before.empty && before.name===back.name;
+        return JSON.stringify({success:true,verified:true,verifiedBy:'getOverrideColorSpace() readback',changed:!unchanged,colorSpace:back,before:(before && !before.empty) ? before : null,
+          note:'An override cannot be cleared by script on this build; set it back to the original colour space instead.'});
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
     `);
   }
 
   protected async matchShotColor(srcTrack: number, srcClip: number, tgtTrack: number, tgtClip: number, seqId?: string): Promise<any> {
+    // Copies every Lumetri Color value the host will read and write, matched by position AND
+    // display name (both clips carry the same Lumetri layout), and reads each one back. The old
+    // version copied nine Basic parameters, swallowed every write error, reported a count with no
+    // verification, and threw "null is not an object" when a clip index did not exist.
     return await this.bridge.executeScript(`
       try {
         var seq=${this.buildSeqRes(seqId)};
-        var src=seq.videoTracks[${srcTrack}].clips[${srcClip}];
-        var tgt=seq.videoTracks[${tgtTrack}].clips[${tgtClip}];
-        var srcL=null,tgtL=null;
-        for(var i=0;i<src.components.numItems;i++)if(src.components[i].displayName==='Lumetri Color'){srcL=src.components[i];break;}
-        for(var j=0;j<tgt.components.numItems;j++)if(tgt.components[j].displayName==='Lumetri Color'){tgtL=tgt.components[j];break;}
-        if(!srcL||!tgtL)return JSON.stringify({success:false,error:'Lumetri Color not found on both clips'});
-        var namedParams=['Exposure','Contrast','Highlights','Shadows','Whites','Blacks','Temperature','Tint','Saturation'];
-        var srcProps=srcL.properties,tgtProps=tgtL.properties;
-        var applied=0;
-        for(var k=0;k<srcProps.numItems;k++){
-          var pname=String(srcProps[k].displayName);
-          if(namedParams.indexOf(pname)>=0){try{tgtProps[k].setValue(srcProps[k].getValue(),true);applied++;}catch(ev){}}
+        var st=seq.videoTracks[${srcTrack}], tt=seq.videoTracks[${tgtTrack}];
+        if(!st||!tt)return JSON.stringify({success:false,error:'Video track not found (source ${srcTrack}, target ${tgtTrack})'});
+        var src=st.clips[${srcClip}], tgt=tt.clips[${tgtClip}];
+        if(!src)return JSON.stringify({success:false,error:'Source clip ${srcClip} not found on video track ${srcTrack}'});
+        if(!tgt)return JSON.stringify({success:false,error:'Target clip ${tgtClip} not found on video track ${tgtTrack}'});
+        var findL=function(c){for(var i=0;i<c.components.numItems;i++)if(String(c.components[i].displayName)==='Lumetri Color')return c.components[i];return null;};
+        var srcL=findL(src),tgtL=findL(tgt);
+        if(!srcL)return JSON.stringify({success:false,error:'The source clip has no Lumetri Color, so there is no grade to copy.'});
+        if(!tgtL)return JSON.stringify({success:false,error:'The target clip has no Lumetri Color. Apply one first (apply_effect with Lumetri Color), then retry.'});
+        var sp=srcL.properties,tp=tgtL.properties;
+        if(sp.numItems!==tp.numItems)return JSON.stringify({success:false,error:'The two Lumetri Color instances expose different parameter counts ('+sp.numItems+' vs '+tp.numItems+'), so they cannot be matched by position.'});
+        var same=function(a,b){if(a===b)return true;try{return a.toSource()===b.toSource();}catch(e){return false;}};
+        var copied=0,unchanged=0,mismatched=[],unreadable=0;
+        for(var k=0;k<sp.numItems;k++){
+          var n=String(sp[k].displayName);
+          if(String(tp[k].displayName)!==n){mismatched.push(k+':'+n+' (layout differs)');continue;}
+          var v;try{v=sp[k].getValue();}catch(eR){unreadable++;continue;}
+          if(v===undefined||v===null){unreadable++;continue;}
+          var cur;try{cur=tp[k].getValue();}catch(eC){}
+          if(same(cur,v)){unchanged++;continue;}
+          try{tp[k].setValue(v,true);}catch(eW){}
+          var back;try{back=tp[k].getValue();}catch(eB){}
+          if(same(back,v))copied++;else mismatched.push(k+':'+n);
         }
-        return JSON.stringify({success:true,paramsApplied:applied});
+        var ok=mismatched.length===0;
+        return JSON.stringify({success:ok,verified:true,verifiedBy:'per-parameter getValue() readback',paramsCopied:copied,paramsAlreadyMatching:unchanged,paramsUnreadable:unreadable,paramsNotMatched:mismatched.slice(0,40),
+          error:ok?undefined:'PARTIALLY APPLIED: '+mismatched.length+' Lumetri parameter(s) did not take the source value. See paramsNotMatched.'});
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
     `);
   }
@@ -759,9 +773,18 @@ export class ColorTools extends ProjectMediaTools {
 
   protected falseColorFrame(mediaPath: string, timeSecs: number, outputPath: string): any {
     try {
-      execSync(`ffmpeg -y -ss ${timeSecs} -i "${mediaPath}" -frames:v 1 -vf "scale=1280:-1,lutrgb=r=if(gt(r\\,200)\\,r\\,0):g=if(between(r\\,100\\,200)\\,255\\,0):b=if(lt(r\\,100)\\,255\\,0)" "${outputPath}"`, { timeout: 20000 });
+      // Exposure false colour on luma. lutrgb names the pixel value `val`; the old expression used
+      // `r`, which lutrgb does not define, so ffmpeg rejected it on every call. After format=gray the
+      // three channels all carry luma, so each band can be painted from it: clipped highlights
+      // (>235) red, crushed blacks (<16) blue, the 18%-grey/skin band (110-140) green, the rest grey.
+      const band = (hi: number, lo: number, mid: number) => `'if(gt(val,235),${hi},if(lt(val,16),${lo},if(between(val,110,140),${mid},val)))'`;
+      const vf = `scale=1280:-2,format=gray,format=rgb24,lutrgb=r=${band(255, 0, 0)}:g=${band(0, 0, 255)}:b=${band(0, 255, 0)}`;
       const fs = fsSync;
-      return { success: fs.existsSync(outputPath), outputPath };
+      const before = fs.existsSync(outputPath) ? fs.statSync(outputPath).mtimeMs : null;
+      runFf('ffmpeg', ['-y', '-loglevel', 'error', '-ss', String(timeSecs), '-i', mediaPath, '-frames:v', '1', '-update', '1', '-vf', vf, outputPath], { timeoutMs: 20000 });
+      const st = fs.existsSync(outputPath) ? fs.statSync(outputPath) : null;
+      if (!st || st.size === 0 || (before !== null && st.mtimeMs === before)) return { success: false, error: 'ffmpeg ran but no new image was written to outputPath.' };
+      return { success: true, verified: true, verifiedBy: 'output file written', outputPath, bytes: st.size, legend: { red: 'luma > 235 (clipped)', blue: 'luma < 16 (crushed)', green: 'luma 110-140 (mid grey / skin)', grey: 'everything else' } };
     } catch (e: any) { return { success: false, error: e.message }; }
   }
 
@@ -796,10 +819,10 @@ export class ColorTools extends ProjectMediaTools {
         if (!item) return JSON.stringify({ success: false, error: 'Project item not found: ' + ${JSON.stringify(projectItemId)} });
         var o = { success: true, name: String(item.name) };
         try { o.isColorManagedMedia = item.isColorManagedMedia(); } catch(e1) {}
-        try { o.originalColorSpace = String(item.getOriginalColorSpace()); } catch(e2) {}
-        try { o.overrideColorSpace = String(item.getOverrideColorSpace()); } catch(e3) {}
-        try { o.overrideColorSpaceList = String(item.getOverrideColorSpaceList); } catch(e4) {}
-        try { o.colorSpace = String(item.getColorSpace()); } catch(e5) {}
+        try { o.originalColorSpace = __csInfo(item.getOriginalColorSpace()); } catch(e2) {}
+        try { var ov = __csInfo(item.getOverrideColorSpace()); o.overrideColorSpace = (ov && !ov.empty) ? ov : null; } catch(e3) {}
+        try { o.overrideColorSpaceList = __colorSpaceNames(item); } catch(e4) {}
+        try { o.colorSpace = __csInfo(item.getColorSpace()); } catch(e5) {}
         try { o.embeddedLUTID = String(item.getEmbeddedLUTID()); } catch(e6) {}
         try { o.inputLUTID = String(item.getInputLUTID()); } catch(e7) {}
         try { o.isReference = item.isReference(); } catch(e8) {}
@@ -886,7 +909,7 @@ export class ColorTools extends ProjectMediaTools {
     if (!mediaInfo?.success) return { success: false, error: mediaInfo?.error, verified: false };
 
     try {
-      execSync(`ffmpeg -y -ss ${mediaInfo.sourceTimeSecs} -i "${mediaInfo.mediaPath}" -vframes 1 "${frameBefore}"`, { timeout: 15000 });
+      runFf('ffmpeg', ['-y', '-ss', String(mediaInfo.sourceTimeSecs), '-i', String(mediaInfo.mediaPath), '-frames:v', '1', '-update', '1', frameBefore], { timeoutMs: 15000 });
     } catch (e: any) { return { success: false, error: 'Pre-grade capture failed', verified: false }; }
 
     // Apply grade params
@@ -911,8 +934,8 @@ export class ColorTools extends ProjectMediaTools {
     if (!gradeResult?.success) return { success: false, error: 'Grade apply failed: ' + gradeResult?.error, verified: false };
 
     try {
-      execSync(`ffmpeg -y -ss ${mediaInfo.sourceTimeSecs} -i "${mediaInfo.mediaPath}" -vframes 1 "${frameAfter}"`, { timeout: 15000 });
-      const psnrOut = execSync(`ffmpeg -i "${frameBefore}" -i "${frameAfter}" -lavfi psnr -f null - 2>&1`, { timeout: 10000 }).toString();
+      runFf('ffmpeg', ['-y', '-ss', String(mediaInfo.sourceTimeSecs), '-i', String(mediaInfo.mediaPath), '-frames:v', '1', '-update', '1', frameAfter], { timeoutMs: 15000 });
+      const psnrOut = runFf('ffmpeg', ['-hide_banner', '-i', frameBefore, '-i', frameAfter, '-lavfi', 'psnr', '-f', 'null', '-'], { timeoutMs: 10000, mergeStderr: true });
       const match = psnrOut.match(/psnr_avg:(\S+)/);
       const psnr = match?.[1] ? parseFloat(match[1]) : null;
       const gradeLanded = psnr !== null && psnr < 45;
@@ -932,10 +955,10 @@ export class ColorTools extends ProjectMediaTools {
     }
   }
 
-  protected async setMogrtColor(_seqId: string|undefined, trackIndex: number, clipIndex: number, paramName: string, r: number, g: number, b: number): Promise<any> {
+  protected async setMogrtColor(seqId: string|undefined, trackIndex: number, clipIndex: number, paramName: string, r: number, g: number, b: number): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var clip = app.project.activeSequence.videoTracks[${trackIndex}].clips[${clipIndex}];
+        var clip = ${this.buildSeqRes(seqId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
         if (!clip || !clip.isMGT()) return JSON.stringify({success:false,error:'Clip is not a MOGRT'});
         var comp = clip.getMGTComponent();
         if (!comp) return JSON.stringify({success:false,error:'Could not get MGT component'});

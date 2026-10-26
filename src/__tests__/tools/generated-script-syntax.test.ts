@@ -248,16 +248,21 @@ describe("generated ExtendScript is syntactically valid", () => {
       expect(detach).toContain("did not detach the proxy");
     });
 
-    it("ripple_delete / remove_selected_clips gate on a dropped clip count", async () => {
+    it("ripple_delete and the selection removers go through __removeGroup", async () => {
+      // TrackItem.remove() never ripples and never takes linked items on 26.5.2, so ripple_delete
+      // goes through __removeGroup, which looks every linked item up again after removing it.
       const ripple = await capture("ripple_delete");
-      expect(ripple).toContain("did not remove the clip");
+      expect(ripple).toContain("__removeGroup(rippleClip.sequence, rippleClip.clip, true)");
+      expect(ripple).toContain("is still on the timeline");
       const removeSel = await capture("remove_selected_clips");
-      expect(removeSel).toContain("timeline clip count did not drop");
+      expect(removeSel).toContain("__removeGroup(selectionSeq, sc, rippleSelected)");
+      expect(removeSel).toContain("No selected clips were removed");
     });
 
     it("set_clip_speed_qe / set_clip_start_time / set_zero_point verify the value", async () => {
       const speed = await capture("set_clip_speed_qe");
-      expect(speed).toContain("did not apply the requested speed");
+      expect(speed).toContain("applied the speed incorrectly");
+      expect(speed).toContain("qe.project.undo()");
       const startTime = await capture("set_clip_start_time");
       expect(startTime).toContain("did not move the clip start");
       const zero = await capture("set_zero_point");
@@ -345,7 +350,7 @@ describe("generated ExtendScript is syntactically valid", () => {
       const enable = await captureLocal("enable_disable_clip");
       expect(enable).toContain("nowEnabled");
       const dup = await captureLocal("duplicate_clip");
-      expect(dup).toContain("afterCount");
+      expect(dup).toContain("duplicateSourceInSeconds");
       const replace = await captureLocal("replace_clip");
       expect(replace).toContain("nodeId");
     });
@@ -369,9 +374,11 @@ describe("generated ExtendScript is syntactically valid", () => {
       expect(rmKf).toContain("keyExistsAtTime");
     });
 
-    it("reverse_clip / refresh_media honestly report verified:false", async () => {
+    it("reverse_clip verifies by isSpeedReversed(); refresh_media honestly reports verified:false", async () => {
+      // 26.5.2 exposes TrackItem.isSpeedReversed(), so reversal is now read back, not assumed.
       const rev = await captureLocal("reverse_clip");
-      expect(rev).toContain("verified: false");
+      expect(rev).toContain("isSpeedReversed()");
+      expect(rev).toContain("__setReversed(");
       const refresh = await captureLocal("refresh_media");
       expect(refresh).toContain("verified: false");
     });

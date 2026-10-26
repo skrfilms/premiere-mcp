@@ -5,140 +5,212 @@
  * had grown to 19k lines; the method bodies are unchanged.
  */
 import { GraphicsTools } from './graphics.js';
+import { TRIM_LIB } from '../trim-lib.js';
 
 export class TrimmingTools extends GraphicsTools {
   protected async rippleTrimIn(sequenceId: string | undefined, trackIndex: number, clipIndex: number): Promise<any> {
+    // Q: remove from the clip head up to the playhead and close the space. The clip stays where
+    // it starts and plays from the playhead's source frame; everything after it, on every track,
+    // moves left by the same amount so sync holds. See trim-lib.ts for the measured primitives.
     return await this.bridge.executeScript(`
-      var seq = ${this.buildSequenceResolver2(sequenceId)};
-      if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
-      var track = seq.videoTracks[${trackIndex}];
-      if (!track) return JSON.stringify({success:false,error:'Track not found'});
-      var clip = track.clips[${clipIndex}];
+      ${TRIM_LIB}
+      var seq = ${this.buildSeqRes(sequenceId)};
+      var track = seq.videoTracks[${Number(trackIndex)}];
+      if (!track) return JSON.stringify({success:false,error:'Video track ${Number(trackIndex)} not found'});
+      var clip = track.clips[${Number(clipIndex)}];
       if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
-      var playhead = seq.getPlayerPosition();
-      var beforeStart = String(clip.start.ticks);
-      // Ripple trim: set clip start to playhead by adjusting inPoint
-      var frameDelta = Number(playhead.ticks) - Number(clip.start.ticks);
-      var newInTicks = Number(clip.inPoint.ticks) + frameDelta;
-      if (newInTicks < 0) return JSON.stringify({success:false,error:'Not enough head room to trim to playhead'});
-      var newIn = new Time(); newIn.ticks = String(Math.round(newInTicks));
-      // TrackItem exposes inPoint as a writable property; there is no setInPoint()
-      // method on it (confirmed by reflection on 26.3.2). Read back to prove it took.
-      var __inBefore = Number(clip.inPoint.ticks);
-      clip.inPoint = newIn;
-      var __inAfter = Number(clip.inPoint.ticks);
-      if (__inAfter === __inBefore) return JSON.stringify({success:false,verified:false,error:'Assigning clip.inPoint did not change it (property may be read-only on this build). No ripple performed.',requestedTicks:String(newIn.ticks)});
-      var afterStart = String(clip.start.ticks);
-      // Three outcomes, and they must not be collapsed. Previously this returned
-      // success:true with verified:false and NO reason, which tells a caller nothing:
-      //   - frameDelta 0: nothing was asked for, so nothing changing is correct.
-      //   - start moved: the ripple landed.
-      //   - inPoint moved but start did not: the edit is HALF-APPLIED. The source in-point
-      //     changed while the clip did not move on the timeline, which is worse than a
-      //     failure because the project is now in a state the caller did not ask for.
-      if (frameDelta === 0) return JSON.stringify({success:true,verified:true,changed:false,note:'Playhead is already at the clip start; nothing to trim.',beforeStart:beforeStart,afterStart:afterStart});
-      if (afterStart === beforeStart) return JSON.stringify({success:false,verified:true,changed:true,halfApplied:true,error:'The source in-point moved but the clip did not ripple on the timeline, so this edit is half-applied: clip.inPoint is now '+String(clip.inPoint.ticks)+' ticks while clip.start is unchanged at '+beforeStart+'. Undo before retrying.',beforeStart:beforeStart,afterStart:afterStart,inPointTicks:String(clip.inPoint.ticks)});
-      return JSON.stringify({success:true,verified:true,changed:true,beforeStart:beforeStart,afterStart:afterStart,playheadTicks:String(playhead.ticks)});
+      var P = Number(seq.getPlayerPosition().ticks), s0 = __st(clip);
+      if (!(P > s0.start && P < s0.end)) return JSON.stringify({success:false,error:'Put the playhead inside the clip (' + (s0.start/__TPS) + 's to ' + (s0.end/__TPS) + 's); it is at ' + (P/__TPS) + 's. Nothing was changed.'});
+      var d = P - s0.start, group = __withLinked(clip), ops = [], skip = {};
+      for (var i = 0; i < group.length; i++) { var gs = __st(group[i]); skip[__key(group[i])] = true; if (gs.start === s0.start && gs.end === s0.end) ops.push({item:group[i], kind:'rippleHead', d:d, before:gs}); }
+      var rip = __planRipple(seq, s0.end, skip, s0.end - d);
+      if (rip.blockers.length) return JSON.stringify({success:false,error:'A ripple from ' + (s0.end/__TPS) + 's back to ' + ((s0.end-d)/__TPS) + 's would land later clips on ' + rip.blockers.join(', ') + ', on another track, and break sync. Nothing was changed.'});
+      var bad = __applyOps(ops, (Number(seq.timebase) || 10584000000) / 2).concat(__applyRipple(rip.movers, -d));
+      return JSON.stringify({success:bad.length===0,verified:true,verifiedBy:'start/end/in readback of every edited and moved clip',trimmedSecs:d/__TPS,edits:__opsReport(ops),clipsRippled:rip.movers.length,
+        error: bad.length ? 'PARTIALLY APPLIED: ' + bad.join('; ') + '. Undo to restore.' : undefined});
     `);
   }
 
   protected async rippleTrimOut(sequenceId: string | undefined, trackIndex: number, clipIndex: number): Promise<any> {
+    // W: remove from the playhead to the clip tail and close the space, sync-locked.
     return await this.bridge.executeScript(`
-      var seq = ${this.buildSequenceResolver2(sequenceId)};
-      if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
-      var track = seq.videoTracks[${trackIndex}];
-      if (!track) return JSON.stringify({success:false,error:'Track not found'});
-      var clip = track.clips[${clipIndex}];
+      ${TRIM_LIB}
+      var seq = ${this.buildSeqRes(sequenceId)};
+      var track = seq.videoTracks[${Number(trackIndex)}];
+      if (!track) return JSON.stringify({success:false,error:'Video track ${Number(trackIndex)} not found'});
+      var clip = track.clips[${Number(clipIndex)}];
       if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
-      var playhead = seq.getPlayerPosition();
-      var beforeEnd = String(clip.end.ticks);
-      var frameDelta = Number(clip.end.ticks) - Number(playhead.ticks);
-      var newOutTicks = Number(clip.outPoint.ticks) - frameDelta;
-      var newOut = new Time(); newOut.ticks = String(Math.round(newOutTicks));
-      var __outBefore = Number(clip.outPoint.ticks);
-      clip.outPoint = newOut;
-      var __outAfter = Number(clip.outPoint.ticks);
-      if (__outAfter === __outBefore) return JSON.stringify({success:false,verified:false,error:'Assigning clip.outPoint did not change it (property may be read-only on this build). No ripple performed.',requestedTicks:String(newOut.ticks)});
-      var afterEnd = String(clip.end.ticks);
-      if (afterEnd === beforeEnd) return JSON.stringify({success:false,verified:true,changed:true,halfApplied:true,error:'The source out-point moved but the clip end did not change on the timeline, so this edit is half-applied: clip.outPoint is now '+String(clip.outPoint.ticks)+' ticks while clip.end is unchanged at '+beforeEnd+'. Undo before retrying.',beforeEnd:beforeEnd,afterEnd:afterEnd,outPointTicks:String(clip.outPoint.ticks)});
-      return JSON.stringify({success:true,verified:true,changed:true,beforeEnd:beforeEnd,afterEnd:afterEnd,playheadTicks:String(playhead.ticks)});
+      var P = Number(seq.getPlayerPosition().ticks), s0 = __st(clip);
+      if (!(P > s0.start && P < s0.end)) return JSON.stringify({success:false,error:'Put the playhead inside the clip (' + (s0.start/__TPS) + 's to ' + (s0.end/__TPS) + 's); it is at ' + (P/__TPS) + 's. Nothing was changed.'});
+      var d = s0.end - P, group = __withLinked(clip), ops = [], skip = {};
+      for (var i = 0; i < group.length; i++) { var gs = __st(group[i]); skip[__key(group[i])] = true; if (gs.start === s0.start && gs.end === s0.end) ops.push({item:group[i], kind:'tail', d:-d, before:gs}); }
+      var rip = __planRipple(seq, s0.end, skip, s0.end - d);
+      if (rip.blockers.length) return JSON.stringify({success:false,error:'A ripple from ' + (s0.end/__TPS) + 's back to ' + ((s0.end-d)/__TPS) + 's would land later clips on ' + rip.blockers.join(', ') + ', on another track, and break sync. Nothing was changed.'});
+      var bad = __applyOps(ops, (Number(seq.timebase) || 10584000000) / 2).concat(__applyRipple(rip.movers, -d));
+      return JSON.stringify({success:bad.length===0,verified:true,verifiedBy:'start/end/in readback of every edited and moved clip',trimmedSecs:d/__TPS,edits:__opsReport(ops),clipsRippled:rip.movers.length,
+        error: bad.length ? 'PARTIALLY APPLIED: ' + bad.join('; ') + '. Undo to restore.' : undefined});
     `);
   }
 
   protected async extendEdit(sequenceId: string | undefined, trackIndex: number, clipIndex: number): Promise<any> {
+    // E: move the clip's nearest edit point to the playhead. An abutting neighbour is rolled so no
+    // gap or overlap opens; linked audio/video moves with it. Media handles are checked first,
+    // because extending past the end of the media is accepted by the API and plays black.
     return await this.bridge.executeScript(`
-      var seq = ${this.buildSequenceResolver2(sequenceId)};
-      if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
-      var track = seq.videoTracks[${trackIndex}];
-      var clip = track && track.clips[${clipIndex}];
+      ${TRIM_LIB}
+      var seq = ${this.buildSeqRes(sequenceId)};
+      var track = seq.videoTracks[${Number(trackIndex)}];
+      if (!track) return JSON.stringify({success:false,error:'Video track ${Number(trackIndex)} not found'});
+      var clip = track.clips[${Number(clipIndex)}];
       if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
-      var playhead = seq.getPlayerPosition();
-      var ph = Number(playhead.ticks);
-      var distToIn = Math.abs(ph - Number(clip.start.ticks));
-      var distToOut = Math.abs(ph - Number(clip.end.ticks));
-      var extendIn = distToIn < distToOut;
-      var beforeTick = extendIn ? String(clip.start.ticks) : String(clip.end.ticks);
-      var t = new Time(); t.ticks = String(ph);
-      if (extendIn) { clip.inPoint = t; } else { clip.outPoint = t; }
-      var afterTick = extendIn ? String(clip.start.ticks) : String(clip.end.ticks);
-      if (afterTick === beforeTick) return JSON.stringify({success:false,verified:true,changed:false,error:'The '+(extendIn?'in':'out')+' edge did not move. The playhead may already be at that edge, or the clip has no room to extend in that direction (check the adjacent clip and available source handles).',extendedEdge:extendIn?'in':'out',before:beforeTick,after:afterTick});
-      return JSON.stringify({success:true,verified:true,changed:true,extendedEdge:extendIn?'in':'out',before:beforeTick,after:afterTick});
+      var P = Number(seq.getPlayerPosition().ticks), s0 = __st(clip);
+      var edge = Math.abs(P - s0.start) < Math.abs(P - s0.end) ? 'head' : 'tail';
+      var d = P - (edge === 'head' ? s0.start : s0.end);
+      if (Math.abs(d) < (Number(seq.timebase) || 10584000000) / 2) return JSON.stringify({success:true,verified:true,changed:false,edge:edge,note:'The playhead is already on that edit point; nothing to extend.'});
+      var group = __withLinked(clip), ops = [], errors = [];
+      for (var i = 0; i < group.length; i++) {
+        var gs = __st(group[i]);
+        if ((edge === 'head' ? gs.start : gs.end) !== (edge === 'head' ? s0.start : s0.end)) continue;
+        var plan = __planRoll(seq, group[i], edge, d);
+        if (plan.error) errors.push(plan.error); else ops = ops.concat(plan.ops);
+      }
+      if (errors.length) return JSON.stringify({success:false,edge:edge,deltaSecs:d/__TPS,error:errors.join(' ') + ' Nothing was changed.'});
+      var bad = __applyOps(ops, (Number(seq.timebase) || 10584000000) / 2);
+      return JSON.stringify({success:bad.length===0,verified:true,verifiedBy:'start/end/in readback of every edited clip',changed:true,edge:edge,deltaSecs:d/__TPS,edits:__opsReport(ops),
+        error: bad.length ? 'PARTIALLY APPLIED: ' + bad.join('; ') + '. Undo to restore.' : undefined});
     `);
   }
 
   protected async nudgeClip(sequenceId: string | undefined, trackIndex: number, clipIndex: number, frames: number): Promise<any> {
+    // move() takes a RELATIVE offset and moves only the item it is called on (measured on
+    // 26.5.2). This used to pass the absolute new start, so a clip at 6s nudged one frame went
+    // ~6s, and its linked audio stayed behind. The linked group now moves together, after every
+    // destination is checked for room.
     return await this.bridge.executeScript(`
-      var seq = ${this.buildSequenceResolver2(sequenceId)};
-      if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
-      var track = seq.videoTracks[${trackIndex}];
-      var clip = track && track.clips[${clipIndex}];
+      ${TRIM_LIB}
+      var seq = ${this.buildSeqRes(sequenceId)};
+      var track = seq.videoTracks[${Number(trackIndex)}];
+      var clip = track && track.clips[${Number(clipIndex)}];
       if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
-      var ticksPerFrame = Number(seq.timebase) || 10584000000;
-      var before = String(clip.start.ticks);
-      var wantTicks = Math.max(0, Math.round(Number(before) + ${frames} * ticksPerFrame));
-      var newStart = new Time(); newStart.ticks = String(wantTicks);
-      clip.move(newStart, ${trackIndex});
-      var after = String(clip.start.ticks);
-      // Enumerate the outcomes rather than shipping a bare inequality. A nudge of 0
-      // frames, a nudge clamped at 0, and a nudge Premiere refused all read back with
-      // before === after, and only the last of those is a failure.
-      var onTarget = Math.abs(Number(after) - wantTicks) < ticksPerFrame / 2;
-      var changed = after !== before;
-      if (onTarget) {
-        return JSON.stringify({success:true,verified:true,verifiedBy:'TrackItem.start readback',changed:changed,frames:${frames},before:before,after:after,
-          note: changed ? undefined : 'The clip was already at the requested position, so nothing moved.'});
-      }
-      return JSON.stringify({success:false,verified:true,verifiedBy:'TrackItem.start readback',changed:changed,frames:${frames},before:before,after:after,wantTicks:String(wantTicks),
-        error:'The clip did not land at the requested position. move() is blocked when the destination overlaps another clip on the same track, and it clamps at 0. Clear the destination or move to an empty track first.'});
-    `);
-  }
-
-  protected async closeGapAt(timecode: string, _sequenceId?: string): Promise<any> {
-    return await this.bridge.executeScript(`
-      var seq = app.project.activeSequence;
-      if (!seq) return JSON.stringify({success:false,error:'No sequence'});
-      var gaps = seq.getTimelineGaps();
-      if (!gaps || !gaps.length) return JSON.stringify({success:true,message:'No gaps found',gapsClosed:0});
-      // Find gap containing our timecode (as seconds for comparison)
-      var targetSecs = ${JSON.stringify(timecode)}.indexOf(':') >= 0 ? 0 : Number(${JSON.stringify(timecode)});
-      var closed = 0;
-      for (var i = 0; i < gaps.length; i++) {
-        var g = gaps[i];
-        if (g && g.start !== undefined) {
-          seq.videoTracks[0].clips[i] && seq.rippleDelete ? null : null; // placeholder
+      var tpf = Number(seq.timebase) || 10584000000, half = tpf / 2;
+      var delta = ${Number(frames)} * tpf;
+      if (delta === 0) return JSON.stringify({success:true,verified:true,changed:false,frames:0,note:'A nudge of 0 frames moves nothing.'});
+      var group = __withLinked(clip), skip = {}, plan = [];
+      for (var i = 0; i < group.length; i++) skip[__key(group[i])] = true;
+      for (var g = 0; g < group.length; g++) {
+        var it = group[g], st = __st(it), tr = __trackOf(seq, it);
+        if (st.start + delta < -half) return JSON.stringify({success:false,error:__label(seq, it) + ' would start before 0. Nothing was changed.'});
+        for (var k = 0; tr && k < tr.clips.numItems; k++) {
+          var o = tr.clips[k]; if (skip[__key(o)]) continue;
+          var os = __st(o);
+          if (os.start < st.end + delta - half && os.end > st.start + delta + half) return JSON.stringify({success:false,error:__label(seq, o) + ' is in the way of ' + __label(seq, it) + '. Nothing was changed.'});
         }
+        plan.push({item:it, start:st.start});
       }
-      return JSON.stringify({success:true,note:'Gap closing requires ripple-delete on the gap range. Use ripple_delete tool with the gap timecodes from get_timeline_gaps.',gapCount:gaps.length});
+      var bad = __applyRipple(plan, delta);
+      var moved = [];
+      for (var m = 0; m < plan.length; m++) moved.push({clip:String(plan[m].item.name), mediaType:String(plan[m].item.mediaType), startSecs:Number(plan[m].item.start.ticks)/__TPS});
+      return JSON.stringify({success:bad.length===0,verified:true,verifiedBy:'TrackItem.start readback of every linked item',changed:true,frames:${Number(frames)},moved:moved,
+        error: bad.length ? 'PARTIALLY APPLIED: ' + bad.join('; ') + '. Undo to restore.' : undefined});
     `);
   }
 
-  protected async closeAllGaps(sequenceId?: string, _trackIndex?: number): Promise<any> {
-    return await this.bridge.executeScript(`
-      var seq = ${this.buildSequenceResolver2(sequenceId)};
-      if (!seq) return JSON.stringify({success:false,error:'No sequence'});
-      var gaps = seq.getTimelineGaps ? seq.getTimelineGaps() : [];
-      return JSON.stringify({success:true,gapCount:gaps ? gaps.length : 0,note:'Use get_timeline_gaps to enumerate, then ripple_delete each gap range.'});
-    `);
+
+  /**
+   * Shared ExtendScript for the gap tools. A gap here is a range where NO track, video or audio,
+   * has material: closing anything narrower would pull one track against another and break sync.
+   * TrackItem.move() takes a relative offset and moves only the item it is called on (measured on
+   * 26.5.2: moving V1 left its linked A1 where it was), so every clip after the gap is moved
+   * individually, earliest first so nothing is moved onto a neighbour, and every start is read
+   * back. This replaces two stubs: close_gap_at was a syntax error, and close_all_gaps reported
+   * success without moving anything.
+   */
+  private gapCloserScript(sequenceId: string | undefined, body: string): string {
+    return `
+      try {
+        var seq = ${this.buildSeqRes(sequenceId)};
+        if (!seq) return JSON.stringify({success:false,error:'No sequence'});
+        var TPS = 254016000000;
+        var __items = function(){
+          var out = [];
+          var groups = [seq.videoTracks, seq.audioTracks];
+          for (var g=0; g<2; g++) {
+            for (var ti=0; ti<groups[g].numTracks; ti++) {
+              var tr = groups[g][ti];
+              for (var ci=0; ci<tr.clips.numItems; ci++) {
+                var c = tr.clips[ci];
+                out.push({clip:c, kind:g===0?'V':'A', track:ti, start:Number(c.start.ticks), end:Number(c.end.ticks)});
+              }
+            }
+          }
+          return out;
+        };
+        // Empty ranges across ALL tracks, from 0 up to the last edit (the shared prelude helper).
+        var __gaps = function(){ return __rangesGaps(__items()); };
+        var __close = function(gap){
+          var len = gap.end - gap.start;
+          var items = __items();
+          var movers = [];
+          for (var i=0; i<items.length; i++) { if (items[i].start >= gap.end) movers.push(items[i]); }
+          movers.sort(function(x,y){ return x.start - y.start; });
+          var off = new Time(); off.ticks = String(-len);
+          var bad = [];
+          for (var m=0; m<movers.length; m++) {
+            movers[m].clip.move(off);
+            var now = Number(movers[m].clip.start.ticks);
+            if (now !== movers[m].start - len) bad.push(movers[m].kind + (movers[m].track+1) + ' clip at ' + (movers[m].start/TPS) + 's is now at ' + (now/TPS) + 's');
+          }
+          return {startSecs:gap.start/TPS, endSecs:gap.end/TPS, durationSecs:len/TPS, clipsMoved:movers.length, misplaced:bad};
+        };
+        ${body}
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `;
+  }
+
+  protected async closeGapAt(timecode: string, sequenceId?: string): Promise<any> {
+    return await this.bridge.executeScript(this.gapCloserScript(sequenceId, `
+        var tc = ${JSON.stringify(String(timecode))};
+        // Shared parser: HH:MM:SS:FF, drop-frame HH;MM;SS;FF and seconds.
+        var targetStr = __timecodeToTicks(seq, tc);
+        var target = targetStr === null ? null : Number(targetStr);
+        if (target === null || isNaN(target)) return JSON.stringify({success:false,error:'Could not read timecode "' + tc + '". Pass HH:MM:SS:FF or a number of seconds.'});
+        var gaps = __gaps(), hit = null;
+        for (var i=0; i<gaps.length; i++) { if (target >= gaps[i].start && target < gaps[i].end) { hit = gaps[i]; break; } }
+        if (!hit) return JSON.stringify({success:false,error:'There is no gap across all tracks at ' + (target/TPS) + 's. Something occupies that time on at least one video or audio track, and closing a gap on one track alone would break sync. Nothing was changed.',gapsInSequence:gaps.length});
+        var r = __close(hit);
+        var ok = r.misplaced.length === 0;
+        return JSON.stringify({success:ok,verified:ok,verifiedBy:'clip start readback',gap:r,
+          error: ok ? undefined : 'PARTIALLY APPLIED: some clips did not land where expected. See gap.misplaced. Undo to restore.'});
+    `));
+  }
+
+  protected async closeAllGaps(sequenceId?: string, trackIndex?: number, includeLeadingGap = false): Promise<any> {
+    return await this.bridge.executeScript(this.gapCloserScript(sequenceId, `
+        var limit = ${trackIndex === undefined ? 'null' : Number(trackIndex)};
+        // Empty time before the first clip is often deliberate (a slate, countdown or leader
+        // offset), so it is only closed when asked for.
+        var includeLeading = ${includeLeadingGap ? 'true' : 'false'};
+        var allGaps = __gaps(), before = [], leadingKept = null;
+        for (var gi = 0; gi < allGaps.length; gi++) {
+          if (allGaps[gi].start === 0 && !includeLeading) { leadingKept = allGaps[gi]; continue; }
+          before.push(allGaps[gi]);
+        }
+        var leadingNote = leadingKept ? 'The empty ' + ((leadingKept.end - leadingKept.start)/TPS) + 's before the first clip was left in place; pass includeLeadingGap:true to close it too.' : undefined;
+        if (!before.length) return JSON.stringify({success:true,verified:true,verifiedBy:'gap scan',gapsClosed:0,message:'No gaps across all tracks.',note:leadingNote});
+        var closed = [];
+        // Latest first: closing a gap moves everything after it, so working backwards keeps every
+        // earlier gap where the scan found it.
+        for (var i=before.length-1; i>=0; i--) closed.push(__close(before[i]));
+        var afterAll = __gaps(), after = [];
+        for (var ai = 0; ai < afterAll.length; ai++) { if (afterAll[ai].start === 0 && !includeLeading) continue; after.push(afterAll[ai]); }
+        var misplaced = 0;
+        for (var k=0; k<closed.length; k++) misplaced += closed[k].misplaced.length;
+        var ok = after.length === 0 && misplaced === 0;
+        return JSON.stringify({success:ok,verified:ok,verifiedBy:'gap rescan + clip start readback',gapsFound:before.length,gapsClosed:closed.length,gapsRemaining:after.length,closed:closed,
+          trackIndexNote: limit === null ? undefined : 'trackIndex is ignored: only gaps empty on every track are closed, because closing one track alone breaks sync.',
+          note: leadingNote,
+          error: ok ? undefined : 'PARTIALLY APPLIED: ' + after.length + ' gap(s) remain and ' + misplaced + ' clip(s) are misplaced. Undo to restore.'});
+    `));
   }
 
   protected async trimClip(clipId: string, inPoint?: number, outPoint?: number, duration?: number): Promise<any> {
@@ -149,212 +221,85 @@ export class TrimmingTools extends GraphicsTools {
         errorCode: 'INVALID_TRIM_ARGUMENTS'
       };
     }
-
-    const script = `
-      try {
-        var info = __findClip(${JSON.stringify(clipId)});
-        if (!info) return JSON.stringify({ success: false, error: "Clip not found" });
-        var clip = info.clip;
-        function secondsOf(value) {
-          if (value === undefined || value === null) return null;
-          if (typeof value === "number") return value;
-          if (value.seconds !== undefined) return Number(value.seconds);
-          if (value.ticks !== undefined) return Number(value.ticks) / 254016000000.0;
-          return null;
+    // inPoint/outPoint are SOURCE times; the trim keeps every remaining frame where it was on the
+    // timeline (the clip's start moves with a new in-point). This used to write inPoint, which only
+    // slips, and outPoint, which changes nothing visible, then report "trimmed and verified" from
+    // those same readbacks. Linked audio/video is trimmed with it so sync holds.
+    const num = (v: number | undefined) => (v === undefined ? 'null' : String(Number(v)));
+    return await this.bridge.executeScript(`
+      ${TRIM_LIB}
+      var info = __findClip(${JSON.stringify(clipId)});
+      if (!info) return JSON.stringify({ success: false, error: "Clip not found" });
+      var clip = info.clip, seq = info.sequence;
+      var tpf = Number(seq.timebase) || 10584000000, half = tpf / 2;
+      var s0 = __st(clip), media = __mediaEnd(clip);
+      var reqIn = ${num(inPoint)}, reqOut = ${num(outPoint)}, reqDur = ${num(duration)};
+      var newIn = reqIn === null ? s0.inp : Math.round(reqIn * __TPS);
+      if (newIn < 0) return JSON.stringify({success:false,errorCode:'TRIM_OUT_OF_RANGE',error:'inPoint cannot be negative.'});
+      var newStart = s0.start + (newIn - s0.inp);
+      if (newStart < 0) return JSON.stringify({success:false,errorCode:'TRIM_OUT_OF_RANGE',error:'That in-point would start the clip before 0 on the timeline.'});
+      var newEnd = s0.end;
+      if (reqOut !== null) newEnd = newStart + (Math.round(reqOut * __TPS) - newIn);
+      if (reqDur !== null) newEnd = newStart + Math.round(reqDur * __TPS);
+      // Snap to the sequence frame grid relative to the clip, the same way Premiere does.
+      newStart = s0.start + Math.round((newStart - s0.start) / tpf) * tpf;
+      newIn = s0.inp + (newStart - s0.start);
+      newEnd = newStart + Math.round((newEnd - newStart) / tpf) * tpf;
+      if (newEnd - newStart < tpf) return JSON.stringify({success:false,errorCode:'TRIM_OUT_OF_RANGE',error:'The trimmed clip would be shorter than one frame.'});
+      if (media !== null && newIn + (newEnd - newStart) > media + half) return JSON.stringify({success:false,errorCode:'TRIM_UNSUPPORTED_FOR_CLIP',error:'The media is only ' + (media/__TPS) + 's long; that trim would need source up to ' + ((newIn + newEnd - newStart)/__TPS) + 's and the rest would play black. Nothing was changed.'});
+      var group = __withLinked(clip), skip = {}, ops = [];
+      for (var i = 0; i < group.length; i++) skip[__key(group[i])] = true;
+      for (var g = 0; g < group.length; g++) {
+        var it = group[g], st = __st(it);
+        if (st.start !== s0.start || st.end !== s0.end) continue;
+        var tr = __trackOf(seq, it);
+        for (var k = 0; tr && k < tr.clips.numItems; k++) {
+          var o = tr.clips[k]; if (skip[__key(o)]) continue; var os = __st(o);
+          var grows = (newStart < s0.start && os.end > newStart + half && os.start < s0.start - half) || (newEnd > s0.end && os.start < newEnd - half && os.end > s0.end + half);
+          if (grows) return JSON.stringify({success:false,errorCode:'TRIM_BLOCKED',error:__label(seq, o) + ' is in the way. Nothing was changed.'});
         }
-        function frameDurationOf(sequence) {
-          try {
-            if (sequence && sequence.timebase !== undefined) {
-              var value = Number(sequence.timebase) / 254016000000.0;
-              if (value > 0 && isFinite(value)) return value;
-            }
-          } catch (frameError) {}
-          return 1 / 48;
-        }
-        var frameDurationSeconds = frameDurationOf(info.sequence);
-        function exactEnough(a, b) {
-          return a !== null && b !== null && Math.abs(a - b) < 0.000001;
-        }
-        function closeEnough(a, b) {
-          return a !== null && b !== null && Math.abs(a - b) <= (frameDurationSeconds / 2) + 0.000001;
-        }
-        function timeFromSeconds(seconds) {
-          var t = new Time();
-          t.seconds = Number(seconds);
-          return t;
-        }
-        function capturedTime(value) {
-          if (value === undefined || value === null) return null;
-          var captured = { seconds: secondsOf(value), ticks: null };
-          try {
-            if (value.ticks !== undefined && value.ticks !== null) captured.ticks = String(value.ticks);
-          } catch (ticksError) {}
-          return captured;
-        }
-        function timeFromCaptured(captured) {
-          if (!captured) return null;
-          var t = new Time();
-          if (captured.ticks !== null) t.ticks = captured.ticks;
-          else t.seconds = Number(captured.seconds);
-          return t;
-        }
-        function stateOf() {
-          return {
-            inPoint: secondsOf(clip.inPoint),
-            outPoint: secondsOf(clip.outPoint),
-            start: secondsOf(clip.start),
-            end: secondsOf(clip.end),
-            duration: secondsOf(clip.duration)
-          };
-        }
-
-        var before = stateOf();
-        var original = {
-          inPoint: capturedTime(clip.inPoint),
-          outPoint: capturedTime(clip.outPoint),
-          start: capturedTime(clip.start),
-          end: capturedTime(clip.end)
-        };
-        var writeErrors = [];
-        function recordWriteError(propertyName, error) {
-          writeErrors.push({ property: propertyName, error: error.toString() });
-        }
-
-        ${inPoint !== undefined ? `
-        if (!exactEnough(before.inPoint, ${inPoint})) {
-          try { clip.inPoint = timeFromSeconds(${inPoint}); }
-          catch (inPointError) { recordWriteError("inPoint", inPointError); }
-        }
-        ` : ''}
-        ${outPoint !== undefined ? `
-        if (!exactEnough(before.outPoint, ${outPoint})) {
-          try { clip.outPoint = timeFromSeconds(${outPoint}); }
-          catch (outPointError) { recordWriteError("outPoint", outPointError); }
-        }
-        ` : ''}
-        ${duration !== undefined ? `
-        var targetDuration = ${duration};
-        if (!exactEnough(before.duration, targetDuration)) {
-          try {
-            clip.end = timeFromSeconds(secondsOf(clip.start) + targetDuration);
-          } catch (timelineError) {
-            recordWriteError("end", timelineError);
-          }
-        }
-        ` : ''}
-
-        var after = stateOf();
-        var verified = true;
-        var verificationErrors = [];
-        ${inPoint !== undefined ? `
-        if (!closeEnough(after.inPoint, ${inPoint})) {
-          verified = false;
-          verificationErrors.push("inPoint did not change to requested value");
-        }
-        ` : ''}
-        ${outPoint !== undefined ? `
-        if (!closeEnough(after.outPoint, ${outPoint})) {
-          verified = false;
-          verificationErrors.push("outPoint did not change to requested value");
-        }
-        ` : ''}
-        ${duration !== undefined ? `
-        if (!closeEnough(after.duration, ${duration})) {
-          verified = false;
-          verificationErrors.push("timeline duration did not change to requested value");
-        }
-        ` : ''}
-
-        if (!verified) {
-          var attempted = after;
-          var rollbackErrors = [];
-          function rollback(propertyName, captured) {
-            try {
-              if (captured) clip[propertyName] = timeFromCaptured(captured);
-            } catch (rollbackError) {
-              rollbackErrors.push({ property: propertyName, error: rollbackError.toString() });
-            }
-          }
-          ${duration !== undefined ? 'if (!exactEnough(attempted.end, before.end)) rollback("end", original.end);' : ''}
-          ${outPoint !== undefined || duration !== undefined ? 'if (!exactEnough(attempted.outPoint, before.outPoint)) rollback("outPoint", original.outPoint);' : ''}
-          ${inPoint !== undefined ? 'if (!exactEnough(attempted.inPoint, before.inPoint)) rollback("inPoint", original.inPoint);' : ''}
-          var restored = stateOf();
-          var rolledBack =
-            exactEnough(restored.inPoint, before.inPoint) &&
-            exactEnough(restored.outPoint, before.outPoint) &&
-            exactEnough(restored.start, before.start) &&
-            exactEnough(restored.end, before.end);
-          var errorCode = "TRIM_NOT_APPLIED";
-          ${duration !== undefined ? `
-          if (${duration} > before.duration && closeEnough(attempted.duration, before.duration)) {
-            errorCode = "TRIM_UNSUPPORTED_FOR_CLIP";
-          }
-          ` : ''}
-          return JSON.stringify({
-            success: false,
-            error: errorCode === "TRIM_UNSUPPORTED_FOR_CLIP"
-              ? "Premiere Pro does not support extending this clip to the requested duration"
-              : "Premiere Pro did not apply the requested trim",
-            errorCode: errorCode,
-            clipId: ${JSON.stringify(clipId)},
-            requested: {
-              inPoint: ${inPoint !== undefined ? inPoint : 'null'},
-              outPoint: ${outPoint !== undefined ? outPoint : 'null'},
-              duration: ${duration !== undefined ? duration : 'null'}
-            },
-            before: before,
-            after: after,
-            attempted: attempted,
-            restored: restored,
-            rolledBack: rolledBack,
-            verificationErrors: verificationErrors,
-            writeErrors: writeErrors,
-            rollbackErrors: rollbackErrors,
-            frameDurationSeconds: frameDurationSeconds
-          });
-        }
-
-        return JSON.stringify({
-          success: true,
-          message: "Clip trimmed and verified",
-          clipId: ${JSON.stringify(clipId)},
-          oldInPoint: before.inPoint,
-          oldOutPoint: before.outPoint,
-          oldDuration: before.duration,
-          newInPoint: after.inPoint,
-          newOutPoint: after.outPoint,
-          newDuration: after.duration,
-          before: before,
-          after: after,
-          writeErrors: writeErrors,
-          frameDurationSeconds: frameDurationSeconds
-        });
-      } catch (e) {
-        return JSON.stringify({
-          success: false,
-          error: e.toString()
-        });
+        ops.push({item:it, kind:'set', to:{start:newStart, end:newEnd}, before:st});
       }
-    `;
-
-    return await this.bridge.executeScript(script);
+      var bad = __applyOps(ops, half);
+      var a = __st(clip), rolledBack = null, code = null;
+      if (bad.length) {
+        rolledBack = __rollbackOps(ops, half);
+        // A write Premiere ignores outright (a native Graphic will not extend, for one) leaves the
+        // edge where it was: that is unsupported for this clip, not a half-applied edit.
+        code = (Math.abs(a.end - s0.end) <= half && newEnd !== s0.end) || (Math.abs(a.start - s0.start) <= half && newStart !== s0.start) ? 'TRIM_UNSUPPORTED_FOR_CLIP' : 'TRIM_NOT_APPLIED';
+      }
+      var r = bad.length ? __st(clip) : a;
+      return JSON.stringify({ success: bad.length === 0, verified: true, verifiedBy: 'start/end/in readback of the clip and its linked items',
+        message: bad.length ? undefined : "Clip trimmed and verified", clipId: ${JSON.stringify(clipId)},
+        oldDuration: (s0.end - s0.start)/__TPS, newDuration: (r.end - r.start)/__TPS, newInPoint: r.inp/__TPS,
+        before: { startSecs: s0.start/__TPS, endSecs: s0.end/__TPS, sourceInSecs: s0.inp/__TPS, durationSecs: (s0.end-s0.start)/__TPS },
+        attempted: { startSecs: a.start/__TPS, endSecs: a.end/__TPS, sourceInSecs: a.inp/__TPS, durationSecs: (a.end-a.start)/__TPS },
+        after: { startSecs: r.start/__TPS, endSecs: r.end/__TPS, sourceInSecs: r.inp/__TPS, sourceOutSecs: (r.inp + r.end - r.start)/__TPS, durationSecs: (r.end-r.start)/__TPS },
+        linkedItemsTrimmed: ops.length - 1, rolledBack: rolledBack, errorCode: code || undefined,
+        error: !bad.length ? undefined : (code === 'TRIM_UNSUPPORTED_FOR_CLIP' ? 'Premiere Pro does not support trimming this clip to the requested range (the edge did not move). ' : 'Premiere Pro did not apply the requested trim: ' + bad.join('; ') + '. ') + (rolledBack ? 'The clip was restored.' : 'The clip could NOT be fully restored; undo.') });
+    `);
   }
 
-  protected async getSequenceGaps(_seqId?: string, _trackIndex?: number): Promise<any> {
+  protected async getSequenceGaps(seqId?: string, trackIndex?: number): Promise<any> {
+    // Computed from clip ranges: getTimelineGaps() does not exist on this host, and the old
+    // typeof-guarded call reported gapCount:0 on every sequence, gaps or not.
     return await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
-        var gaps = seq.getTimelineGaps ? seq.getTimelineGaps() : [];
-        if (!gaps) return JSON.stringify({success:true,gapCount:0,gaps:[]});
-        var result = [];
-        if (typeof gaps.length === 'number') {
-          for (var i=0;i<gaps.length;i++) {
-            var g = gaps[i];
-            result.push({startTicks:g.start?String(g.start.ticks):'0',endTicks:g.end?String(g.end.ticks):'0',startSecs:g.start?g.start.seconds:0,durationSecs:g.duration?g.duration.seconds:0});
-          }
+        var seq = ${this.buildSeqRes(seqId)};
+        var only = ${trackIndex === undefined ? 'null' : Number(trackIndex)};
+        if (only !== null && !seq.videoTracks[only]) return JSON.stringify({success:false,error:'Video track ' + only + ' not found'});
+        var TPS = 254016000000, result = [];
+        for (var t=0; t<seq.videoTracks.numTracks; t++) {
+          if (only !== null && t !== only) continue;
+          var g = __trackGaps(seq.videoTracks[t]);
+          for (var i=0; i<g.length; i++) result.push({trackIndex:t,startTicks:String(g[i].start),endTicks:String(g[i].end),startSecs:g[i].start/TPS,endSecs:g[i].end/TPS,durationSecs:(g[i].end-g[i].start)/TPS});
         }
-        return JSON.stringify({success:true,gapCount:result.length,gaps:result.slice(0,50)});
+        var black = __videoGaps(seq), blackOut = [];
+        for (var b=0; b<black.length; b++) blackOut.push({startSecs:black[b].start/TPS,endSecs:black[b].end/TPS,durationSecs:(black[b].end-black[b].start)/TPS});
+        return JSON.stringify({success:true,gapCount:result.length,gaps:result.slice(0,200),truncated:result.length>200,
+          programGaps:blackOut,programGapsNote:'Ranges where no video track has a clip, so the program shows black.'});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
+
 }

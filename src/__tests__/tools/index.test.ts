@@ -109,7 +109,7 @@ describe('PremiereProTools', () => {
       expect(toolNames).toContain('apply_video_effect');
       expect(toolNames).toContain('get_timeline_render_status');
       expect(toolNames).toContain('transact_sequence_edits');
-      expect(availableTools).toHaveLength(647);
+      expect(availableTools).toHaveLength(648);
       expect(unimplementedExpandedToolNames).toEqual([]);
       for (const name of expandedToolNames) {
         expect(toolNames).toContain(name);
@@ -460,7 +460,7 @@ describe('PremiereProTools', () => {
           sequenceId: 'seq-guid', time: 15, outputPath: '/tmp/f.png',
         });
 
-        expect(script).toContain('var qeSequence = __qeSequenceFor(sequence);');
+        expect(script).toContain('var qeSequence = __qeSequenceOpening(sequence);');
         // Match the assignment, not the bare call: the surrounding comment
         // names getActiveSequence() to explain what it replaced.
         expect(script).not.toContain('var qeSequence = qe.project.getActiveSequence()');
@@ -474,8 +474,9 @@ describe('PremiereProTools', () => {
         });
 
         expect(script).toContain('var exportStem = requestedPath;');
-        expect(script).toContain('tryExport(timeNumber, exportStem)');
-        expect(script).not.toContain('tryExport(timeNumber, "/tmp/shot.png")');
+        // By timecode: QE exports frame 0 for a seconds or ticks value.
+        expect(script).toContain('tryExport(exportTimecode, exportStem)');
+        expect(script).not.toContain('tryExport(timeNumber');
       });
 
       it('reports the path it actually wrote rather than the one requested', async () => {
@@ -613,8 +614,8 @@ describe('PremiereProTools', () => {
       expect(result.success).toBe(true);
       // The full catalogue is exposed by default (no profile env set). The
       // catalog block now also reports the active profile for introspection.
-      expect(result.catalog.tools).toBe(647);
-      expect(result.catalog.toolsInFullCatalog).toBe(647);
+      expect(result.catalog.tools).toBe(648);
+      expect(result.catalog.toolsInFullCatalog).toBe(648);
       // Resource and prompt counts must be COMPUTED from the modules that own them, not
       // stated. They were hardcoded as 13 and 10 while the real resource count had already
       // drifted to 21, so get_capabilities was publishing a false number to every client.
@@ -964,7 +965,7 @@ describe('PremiereProTools', () => {
         filePath: '/path/to/video.mp4'
       });
 
-      expect(mockBridge.importMedia).toHaveBeenCalledWith('/path/to/video.mp4');
+      expect(mockBridge.importMedia).toHaveBeenCalledWith('/path/to/video.mp4', undefined, undefined);
       expect(result.success).toBe(true);
       expect(result.id).toBe('item-123');
     });
@@ -1520,12 +1521,13 @@ describe('PremiereProTools', () => {
 
       expect(result.success).toBe(true);
       const script = mockBridge.executeScript.mock.calls[0][0];
-      expect(script).not.toContain('clip.outPoint = timeFromSeconds(targetOutPoint)');
-      expect(script).toContain('clip.end = timeFromSeconds(secondsOf(clip.start) + targetDuration)');
-      expect(script).not.toContain('new Time(clip.inPoint.seconds + 2.5)');
-      expect(script).toContain('timeline duration did not change to requested value');
+      // outPoint writes have no visible effect on 26.5.2, so a duration is applied through end
+      // and verified by reading start/end back, with a rollback when it does not take.
+      expect(script).not.toMatch(/\bclip\.outPoint\s*=/);
+      expect(script).toContain("kind:'set'");
+      expect(script).toContain('__applyOps(ops, half)');
       expect(script).toContain('TRIM_UNSUPPORTED_FOR_CLIP');
-      expect(script).toContain('rollback("outPoint", original.outPoint)');
+      expect(script).toContain('__rollbackOps(ops, half)');
     });
 
     it('rejects conflicting trim_clip duration and outPoint arguments before calling Premiere', async () => {
@@ -1581,8 +1583,8 @@ describe('PremiereProTools', () => {
 
       expect(parsed.success).toBe(false);
       expect(parsed.errorCode).toBe('TRIM_UNSUPPORTED_FOR_CLIP');
-      expect(parsed.attempted.outPoint).toBeCloseTo(3604.96803333333);
-      expect(parsed.restored.outPoint).toBeCloseTo(3604.96803333333);
+      expect(parsed.attempted.durationSecs).toBeCloseTo(4.97163333333333);
+      expect(parsed.after.durationSecs).toBeCloseTo(4.97163333333333);
       expect(parsed.rolledBack).toBe(true);
       expect(outPointWrites).toBe(0);
     });
@@ -1631,9 +1633,29 @@ describe('PremiereProTools', () => {
       await tools.executeTool('trim_clip', { clipId: 'clip-123', duration: 5.0333666667 });
       const script = mockBridge.executeScript.mock.calls[0][0];
 
-      expect(script).toContain('if (!exactEnough(before.duration, targetDuration))');
-      expect(script).not.toContain('if (!closeEnough(before.duration, targetDuration))');
-      expect(script).toContain('frameDurationSeconds / 2');
+      const ticksPerSecond = 254016000000;
+      class FakeTime {
+        private value = 0;
+        get seconds() { return this.value; }
+        set seconds(value: number) { this.value = value; }
+        get ticks() { return String(Math.round(this.value * ticksPerSecond)); }
+        set ticks(value: string) { this.value = Number(value) / ticksPerSecond; }
+      }
+      const at = (seconds: number) => { const t = new FakeTime(); t.seconds = seconds; return t; };
+      let endWrites = 0;
+      let timelineEnd = at(5);
+      const clip: any = { inPoint: at(0), start: at(0) };
+      Object.defineProperty(clip, 'end', { get: () => timelineEnd, set: (v) => { endWrites++; timelineEnd = v; } });
+      const parsed = JSON.parse(new Function('__findClip', 'Time', script)(
+        () => ({ clip, sequence: { timebase: String(Math.round(ticksPerSecond * 1001 / 30000)) } }),
+        FakeTime
+      ));
+      // One frame at 29.97 is within any "close enough" window, so a fuzzy no-op test would skip
+      // this write. It must be written.
+      expect(endWrites).toBe(1);
+      expect(parsed.success).toBe(true);
+      // Snapped to the 29.97 frame grid, so within half a frame of the request.
+      expect(Math.abs(parsed.newDuration - 5.0333666667)).toBeLessThanOrEqual(1001 / 30000 / 2);
     });
 
     it('generates a non-destructive export readiness validation script', async () => {
@@ -1734,10 +1756,11 @@ describe('PremiereProTools', () => {
       expect(result.success).toBe(true);
       const script = mockBridge.executeScript.mock.calls[0][0];
       expect(script).toContain('var info2 = __findClip("clip-2")');
-      expect(script).toContain('qeClip.addTransition(transition, info2 ? false : true, String(frames), "0"');
+      // true means the clip START on 26.5.2; between two clips the transition goes on the
+      // outgoing clip's end and is verified at the cut itself.
+      expect(script).toContain('qeClip.addTransition(transition, atStart, String(frames), "0"');
       expect(script).not.toContain('frames + ":00"');
-      expect(script).toContain('__transitionWasVerified(before, after)');
-      expect(script).toContain('__transitionWasVerifiedByXml(beforeXml, afterXml)');
+      expect(script).toContain('__qeTransitionsAt(qeTrack, cutSecs)');
       expect(script).toContain('Transition call completed but Premiere Pro did not expose a verified transition change');
     });
 
@@ -1797,7 +1820,7 @@ describe('PremiereProTools', () => {
 
       expect(result.success).toBe(false);
       const script = mockBridge.executeScript.mock.calls[0][0];
-      expect(script).toContain('qeClip.addTransition(transition, true, String(frames), "0"');
+      expect(script).toContain('qeClip.addTransition(transition, false, String(frames), "0"');
       expect(script).not.toContain('frames + ":00"');
       expect(script).toContain('No transitions were verifiably added');
     });
@@ -1963,7 +1986,7 @@ describe('PremiereProTools', () => {
       await tools.executeTool('delete_track', { sequenceId: 'seq-target', trackType: 'video', trackIndex: 1 });
 
       const script = mockBridge.executeScript.mock.calls[0][0] as string;
-      expect(script).toContain('var qeSeq = __qeSequenceFor(sequence);');
+      expect(script).toContain('var qeSeq = __qeSequenceOpening(sequence);');
       expect(script).not.toContain('activeSeq.sequenceID !== sequence.sequenceID');
       expect(script).not.toContain('var qeSeq = qe.project.getActiveSequence()');
     });

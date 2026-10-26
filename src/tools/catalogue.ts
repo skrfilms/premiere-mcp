@@ -258,7 +258,7 @@ export function buildToolCatalogue(): MCPTool[] {
       // Trimming & Edit Point Operations
       {
         name: 'ripple_trim_in',
-        description: 'Ripple-trims the in-point of a clip to the current playhead (Q-key equivalent). Removes the head of the clip and ripples everything earlier. Verified via clip start + move.',
+        description: 'Ripple-trims the head of a clip to the current playhead (Q-key equivalent): removes the material before the playhead, keeps the clip where it starts, and moves everything after it left on every track so sync holds. Linked audio is trimmed with it. Refuses if the playhead is outside the clip or a clip on another track spans the edit. Verified by start/end/in readback.',
         inputSchema: z.object({
           sequenceId: z.string().optional(),
           trackIndex: z.number().describe('0-based video track index'),
@@ -267,7 +267,7 @@ export function buildToolCatalogue(): MCPTool[] {
       },
       {
         name: 'ripple_trim_out',
-        description: 'Ripple-trims the out-point of a clip to the current playhead (W-key equivalent). Removes the tail and ripples everything later. Verified via clip end + move.',
+        description: 'Ripple-trims the tail of a clip to the current playhead (W-key equivalent): removes the material after the playhead and moves everything later left on every track so sync holds. Linked audio is trimmed with it. Verified by start/end/in readback.',
         inputSchema: z.object({
           sequenceId: z.string().optional(),
           trackIndex: z.number().describe('0-based video track index'),
@@ -276,7 +276,7 @@ export function buildToolCatalogue(): MCPTool[] {
       },
       {
         name: 'extend_edit',
-        description: 'Extends the nearest edit point to the current playhead (E-key equivalent) — rolling trim. Verified via clip in/out readback.',
+        description: 'Moves the nearest edit point of the clip to the current playhead (E-key equivalent). An abutting neighbour is rolled so no gap or overlap opens; linked audio/video moves with it. Refuses when the media has no handle left (extending past the media would play black). Verified by start/end/in readback.',
         inputSchema: z.object({
           sequenceId: z.string().optional(),
           trackIndex: z.number().describe('0-based video track index'),
@@ -285,7 +285,7 @@ export function buildToolCatalogue(): MCPTool[] {
       },
       {
         name: 'nudge_clip',
-        description: 'Nudges a clip ±N frames on the timeline (Alt+Left/Right equivalent). Verified via clip start time readback.',
+        description: 'Nudges a clip and its linked audio/video ±N frames on the timeline (Alt+Left/Right equivalent). Refuses when the destination is occupied. Verified by start readback of every linked item.',
         inputSchema: z.object({
           sequenceId: z.string().optional(),
           trackIndex: z.number().describe('0-based video track index'),
@@ -297,7 +297,7 @@ export function buildToolCatalogue(): MCPTool[] {
       // J-Cut and L-Cut
       {
         name: 'j_cut',
-        description: 'Creates a J-cut: extends the audio of clip N under clip N-1 (audio leads video). Sets the audio in-point earlier than the video cut. Verified via clip in/out readback.',
+        description: 'Creates a J-cut: the linked audio of clip N starts the given number of frames before its picture (audio leads video), rolling the audio edit so the previous audio clip gives up the same span. Refuses when the audio has no head handle. Verified by start/end/in readback.',
         inputSchema: z.object({
           sequenceId: z.string().optional(),
           videoTrackIndex: z.number().describe('0-based video track index'),
@@ -307,7 +307,7 @@ export function buildToolCatalogue(): MCPTool[] {
       },
       {
         name: 'l_cut',
-        description: 'Creates an L-cut: extends the audio of clip N under clip N+1 (audio trails video). Sets the audio out-point later than the video cut. Verified via clip in/out readback.',
+        description: 'Creates an L-cut: the linked audio of clip N runs the given number of frames past its picture (audio trails video), rolling the audio edit so the next audio clip gives up the same span. Refuses when the audio has no tail handle. Verified by start/end/in readback.',
         inputSchema: z.object({
           sequenceId: z.string().optional(),
           videoTrackIndex: z.number().describe('0-based video track index'),
@@ -334,18 +334,19 @@ export function buildToolCatalogue(): MCPTool[] {
       // Gap operations
       {
         name: 'close_gap_at',
-        description: 'Closes a gap at a specific timecode by ripple-deleting it. Verified via getTimelineGaps + ripple delete.',
+        description: 'Closes the gap containing a time by moving every later clip on every track left by the gap length. Only gaps empty on ALL video and audio tracks are closed, so sync holds; anything narrower is refused. Verified by reading back every moved clip start.',
         inputSchema: z.object({
-          timecode: z.string().describe('Timecode within the gap to close'),
+          timecode: z.string().describe('A time inside the gap: HH:MM:SS:FF, or a number of seconds'),
           sequenceId: z.string().optional()
         })
       },
       {
         name: 'close_all_gaps',
-        description: 'Closes all gaps in the active sequence by ripple-deleting each one. Reports count of gaps closed. Verified via getTimelineGaps.',
+        description: 'Closes every gap that is empty on all tracks (the one before the first clip only with includeLeadingGap), latest first, by moving later clips left. Verified by rescanning for gaps and reading back every moved clip start.',
         inputSchema: z.object({
           sequenceId: z.string().optional(),
-          trackIndex: z.number().optional().describe('Limit to one track. Default: closes gaps on all tracks.')
+          trackIndex: z.number().optional().describe('Ignored: only gaps empty on every track are closed, because closing one track alone breaks sync. Kept for compatibility.'),
+          includeLeadingGap: z.boolean().optional().describe('Also close the empty time before the first clip. Default false, because that offset is often deliberate (slate, countdown, leader).')
         })
       },
       {
@@ -483,7 +484,7 @@ export function buildToolCatalogue(): MCPTool[] {
       // ── Batch 2: Motion, Transform, Layout ────────────────────────────────
       {
         name: 'flip_horizontal',
-        description: 'Flips a clip horizontally by applying the Transform effect and setting its horizontal flip param. Verified via component fingerprint.',
+        description: 'Flips a clip horizontally by applying the Horizontal Flip effect. Verified by component readback; a clip already carrying the effect is reported as already flipped.',
         inputSchema: z.object({
           sequenceId: z.string().optional(),
           trackIndex: z.number().optional(),
@@ -492,7 +493,7 @@ export function buildToolCatalogue(): MCPTool[] {
       },
       {
         name: 'flip_vertical',
-        description: 'Flips a clip vertically by applying the Transform effect. Verified via component fingerprint.',
+        description: 'Flips a clip vertically by applying the Vertical Flip effect. Verified by component readback; a clip already carrying the effect is reported as already flipped.',
         inputSchema: z.object({
           sequenceId: z.string().optional(),
           trackIndex: z.number().optional(),
@@ -566,12 +567,22 @@ export function buildToolCatalogue(): MCPTool[] {
       },
       {
         name: 'set_clip_scale_to_frame_size',
-        description: 'Applies scale-to-frame-size to a clip via QE. Verified via QE setScaleToFrameSize().',
+        description: 'Applies scale-to-frame-size to ONE clip via QE, confirmed by a qeClip.scaleToFrameSize readback. To normalise a whole track or a list of clips in a single call, use set_scale_to_frame_size_batch instead of looping this.',
         inputSchema: z.object({
           sequenceId: z.string().optional(),
           trackIndex: z.number().optional(),
           clipIndex: z.number().optional(),
           enabled: z.boolean().optional().describe('Default true'),
+        })
+      },
+      {
+        name: 'set_scale_to_frame_size_batch',
+        description: 'Applies scale-to-frame-size to MANY clips in one call — a whole video track, every video track, or an explicit clip-id list. Each clip is confirmed by a qeClip.scaleToFrameSize readback and reported individually in applied[]/failed[]/unverified[], so a partial result is visible rather than averaged into one success. QE items are matched to clips by start time, not index, so gaps and transitions on the track do not shift the target.',
+        inputSchema: z.object({
+          enabled: z.boolean().optional().describe('Default true. Passed to QE setScaleToFrameSize() as an explicit boolean — that method throws "Not Enough Parameters" when called with no argument, so there is no implicit default at the Premiere level.'),
+          sequenceId: z.string().optional().describe('Sequence to act on. Defaults to the active sequence.'),
+          trackIndex: z.number().optional().describe('0-based video track index. Omit to cover EVERY video track in the sequence.'),
+          clipIds: z.array(z.string()).optional().describe('Only touch these clip nodeIds. Ids not found in the scanned tracks are reported in notFoundClipIds[] and make the call unsuccessful, rather than being ignored.'),
         })
       },
 
@@ -1010,7 +1021,7 @@ export function buildToolCatalogue(): MCPTool[] {
 
       // ── Batch G: Clip property utilities ───────────────────────────────────
       { name: 'get_clip_color_space', description: 'Returns the original and override color space of a project item.', inputSchema: z.object({ projectItemId: z.string() }) },
-      { name: 'set_clip_color_space', description: 'Sets the color space override on a project item. Pass a valid color space name from getOverrideColorSpaceList.', inputSchema: z.object({ projectItemId: z.string(), colorSpaceName: z.string() }) },
+      { name: 'set_clip_color_space', description: 'Sets the color space override on a project item (same as set_color_space_override). Pass a name from get_item_color_management overrideColorSpaceList, e.g. "Rec. 709", "Rec. 2100 PQ". Verified by readback.', inputSchema: z.object({ projectItemId: z.string(), colorSpaceName: z.string() }) },
       { name: 'get_clip_info_extended', description: 'Returns comprehensive clip info: speed, reverse state, color space, in/out points, linked items, effect count, marker count, type flags.', inputSchema: z.object({ projectItemId: z.string() }) },
       { name: 'batch_relink_by_pattern', description: 'Relinks offline project items by transforming their paths: replace oldPrefix with newPrefix. Reports how many items were relinked.', inputSchema: z.object({ oldPrefix: z.string(), newPrefix: z.string() }) },
       { name: 'set_item_poster_frame', description: 'Sets the poster frame timecode on a project item via setStartTime.', inputSchema: z.object({ projectItemId: z.string(), timeSecs: z.number() }) },
@@ -1053,7 +1064,7 @@ export function buildToolCatalogue(): MCPTool[] {
       { name: 'lumetri_hsl_secondary_set', description: 'Sets Lumetri HSL Secondary keying params: showMask, invertMask, temperature, tint, contrast, saturation. All confirmed scriptable via setValue.', inputSchema: z.object({ trackIndex: z.number(), clipIndex: z.number(), showMask: z.boolean().optional(), invertMask: z.boolean().optional(), temperature: z.number().optional(), tint: z.number().optional(), contrast: z.number().optional(), saturation: z.number().optional(), denoise: z.number().optional(), blur: z.number().optional(), sequenceId: z.string().optional() }) },
       { name: 'broadcast_safe_check', description: 'Runs ffprobe signalstats on a media file to detect illegal luma/chroma levels. Returns frame count with levels outside 0-100 IRE.', inputSchema: z.object({ mediaPath: z.string().describe('Absolute path to media file to check') }) },
       { name: 'extract_palette', description: 'Uses ffmpeg palettegen to extract the dominant colors from a clip. Returns array of hex color strings.', inputSchema: z.object({ mediaPath: z.string(), startSecs: z.number().optional().default(0), durationSecs: z.number().optional().default(10), colorCount: z.number().optional().default(8) }) },
-      { name: 'set_color_space_override', description: 'Sets override color space on a project item. Color space name must be one returned by item.getOverrideColorSpaceList().', inputSchema: z.object({ projectItemId: z.string(), colorSpaceName: z.string() }) },
+      { name: 'set_color_space_override', description: 'Sets the override color space on a project item. Pass a name from get_item_color_management overrideColorSpaceList, e.g. "Rec. 709", "Rec. 2100 HLG". Verified by readback. An override cannot be cleared by script; set it back to the original instead.', inputSchema: z.object({ projectItemId: z.string(), colorSpaceName: z.string() }) },
       { name: 'match_shot_color', description: 'Copies the Lumetri grade from a source clip to a target clip (reads all params from source, applies to target).', inputSchema: z.object({ sourceTrackIndex: z.number(), sourceClipIndex: z.number(), targetTrackIndex: z.number(), targetClipIndex: z.number(), sequenceId: z.string().optional() }) },
       { name: 'grade_snapshot', description: 'Saves all readable Lumetri params for a clip to a JSON file for later restoration or reference.', inputSchema: z.object({ trackIndex: z.number(), clipIndex: z.number(), outputPath: z.string().describe('Absolute path for the JSON output file'), sequenceId: z.string().optional() }) },
       { name: 'false_color_frame', description: 'Exports a single frame with a false-color exposure visualization via ffmpeg. Args: mediaPath, timeSecs, outputPath.', inputSchema: z.object({ mediaPath: z.string(), timeSecs: z.number(), outputPath: z.string() }) },
@@ -1073,7 +1084,7 @@ export function buildToolCatalogue(): MCPTool[] {
       { name: 'list_export_presets', description: 'Lists all .epr preset files in the Adobe AME presets directory. Returns name and path for each.', inputSchema: z.object({ filter: z.string().optional().describe('Filter presets by name (case-insensitive substring)') }) },
       { name: 'get_export_progress', description: 'Returns the current AME encode queue status: whether encoding is complete, file extension in use.', inputSchema: z.object({ sequenceId: z.string().optional() }) },
       { name: 'export_edl', description: 'Exports the active sequence as a CMX3600 EDL file. Uses FCPXML as an intermediate format, converted on the Node.js side.', inputSchema: z.object({ outputPath: z.string().describe('Absolute output path for the .edl file'), sequenceId: z.string().optional() }) },
-      { name: 'export_per_marker_segments', description: 'Exports a separate media file for each Chapter marker segment in the sequence. Uses exportAsMediaDirect.', inputSchema: z.object({ presetPath: z.string().describe('Path to .epr preset file'), outputDir: z.string(), filePrefix: z.string().optional().default('segment'), sequenceId: z.string().optional() }) },
+      { name: 'export_per_marker_segments', description: 'REPORT ONLY -- this does NOT export anything. It lists the Chapter markers in the sequence with their start/end ticks so you can drive the exports yourself; presetPath, outputDir and filePrefix are accepted but ignored. For an export that actually writes files, use export_per_marker_range (marker PAIRS) or call export_in_out_range per range.', inputSchema: z.object({ presetPath: z.string().describe('Path to .epr preset file'), outputDir: z.string(), filePrefix: z.string().optional().default('segment'), sequenceId: z.string().optional() }) },
 
       // Source & logging
       { name: 'log_clip', description: 'Opens a project item in the Source Monitor, sets in/out points, name, and color label in one call.', inputSchema: z.object({ projectItemId: z.string(), inPoint: z.string().optional().describe('Timecode e.g. "00:00:01:00"'), outPoint: z.string().optional(), name: z.string().optional(), labelColor: z.number().optional().describe('Label color index 0-7') }) },
@@ -1082,7 +1093,7 @@ export function buildToolCatalogue(): MCPTool[] {
       { name: 'compare_takes', description: 'Extracts a frame at 50% duration from each of two project items for visual comparison. Returns two image paths.', inputSchema: z.object({ projectItemId1: z.string(), projectItemId2: z.string(), outputDir: z.string() }) },
       { name: 'get_source_clip_info', description: 'Returns info about what is currently loaded in the Source Monitor: item name, path, in/out points, duration.', inputSchema: z.object({}) },
       { name: 'batch_log_from_csv', description: 'Reads a CSV file (name, inTimecode, outTimecode, label columns) and sets in/out + label on matching project items.', inputSchema: z.object({ csvPath: z.string().describe('Absolute path to CSV file'), sequenceId: z.string().optional() }) },
-      { name: 'storyboard_bin_to_sequence', description: 'Takes all items in a bin (by name) in order and assembles them into a sequence via sequential overwrite edits.', inputSchema: z.object({ binName: z.string(), sequenceId: z.string().optional().describe('Target sequence. Defaults to active sequence.'), startAtSecs: z.number().optional().default(0) }) },
+      { name: 'storyboard_bin_to_sequence', description: 'Takes all footage items in a bin, in project-panel order, and assembles them onto V1 of a sequence via sequential overwrite edits. The bin is resolved by binId, a "/"-separated path, or a deep-searched name; an ambiguous or missing bin places nothing. Reports the bin actually used and refuses (placed:0) when it holds no footage.', inputSchema: z.object({ binName: z.string().describe('Source bin by name. Use a "/"-separated path ("Scenes/Scene 008/SC008_0710") for a nested bin, or a single name to deep-search the tree (ambiguous single names are rejected rather than guessed).'), binId: z.string().optional().describe('Bin nodeId -- the unambiguous way to target a nested bin, e.g. the binId returned by create_bin. Takes precedence over binName.'), sequenceId: z.string().optional().describe('Target sequence. Defaults to active sequence.'), startAtSecs: z.number().optional().default(0) }) },
 
       // Sequence utilities
       { name: 'snap_clips_to_grid', description: 'Ensures all clip start times align to whole-frame boundaries. Reports any clips that were moved.', inputSchema: z.object({ sequenceId: z.string().optional() }) },
@@ -1099,7 +1110,7 @@ export function buildToolCatalogue(): MCPTool[] {
       // Clip info & project utilities
       { name: 'get_project_item_info_extended', description: 'Returns comprehensive project item info: name, path, type, duration, fps, resolution, colorSpace, embeddedLUTID, proxyPath, marker count, treePath.', inputSchema: z.object({ projectItemId: z.string() }) },
       { name: 'verify_media_online', description: 'Checks if a project item\'s source file exists on disk. Returns exists, path, and file size.', inputSchema: z.object({ projectItemId: z.string() }) },
-      { name: 'get_bin_contents_recursive', description: 'Returns all items in a bin and all sub-bins as a flat list with their tree paths.', inputSchema: z.object({ binName: z.string().optional().describe('Bin name to recurse. Defaults to root.') }) },
+      { name: 'get_bin_contents_recursive', description: 'Returns all items in a bin and all of its sub-bins as a flat list with their tree paths. The bin is resolved by binId, a "/"-separated path, or a deep-searched name; a name that does not resolve is an ERROR -- it does NOT silently fall back to listing the whole project. The response reports the bin actually walked as binId/binName/scope.', inputSchema: z.object({ binName: z.string().optional().describe('Bin to recurse. Use a "/"-separated path ("Scenes/Scene 008/SC008_0710") for a nested bin, or a single name to deep-search the tree (ambiguous single names are rejected rather than guessed). Omit to list the whole project.'), binId: z.string().optional().describe('Bin nodeId -- the unambiguous way to target a nested bin, e.g. the binId returned by create_bin. Takes precedence over binName.') }) },
       { name: 'find_clips_by_source', description: 'Finds all timeline clips across all sequences that reference a given project item by nodeId.', inputSchema: z.object({ projectItemId: z.string() }) },
       { name: 'batch_relink_by_prefix', description: 'For all offline items whose path starts with oldPrefix, attempts to relink by replacing with newPrefix.', inputSchema: z.object({ oldPrefix: z.string(), newPrefix: z.string() }) },
       { name: 'set_interpretation_frame_rate', description: 'Sets an override frame rate on a project item. Confirmed via item.setOverrideFrameRate(fps).', inputSchema: z.object({ projectItemId: z.string(), frameRate: z.number() }) },
@@ -1378,10 +1389,11 @@ export function buildToolCatalogue(): MCPTool[] {
       // Media Management
       {
         name: 'import_media',
-        description: 'Imports a media file (video, audio, image) into the current Premiere Pro project.',
+        description: 'Imports a media file (video, audio, image) into the current Premiere Pro project. Target a nested bin with binId (a bin nodeId, unambiguous — preferred) or binName, which also accepts a "/"-separated path. An unresolvable bin fails without importing; the bin actually used is read back in the response as binId/binName/treePath. A file already in the project is reported with alreadyImported=true and is NOT moved into the requested bin.',
         inputSchema: z.object({
           filePath: z.string().describe('The absolute path to the media file to import'),
-          binName: z.string().optional().describe('The name of the bin to import the media into. If not provided, it will be imported into the root.')
+          binName: z.string().optional().describe('Destination bin by name. Use a "/"-separated path ("Scenes/Scene 008/SC008_0710") for a nested bin, or a single name to deep-search the tree (ambiguous single names are rejected rather than guessed). Omit to import to the project root.'),
+          binId: z.string().optional().describe('Destination bin nodeId — the unambiguous way to target a nested bin, e.g. the binId returned by create_bin. Takes precedence over binName.')
         })
       },
       {
@@ -1400,11 +1412,12 @@ export function buildToolCatalogue(): MCPTool[] {
       },
       {
         name: 'import_folder',
-        description: 'Imports all media files from a folder into the current Premiere Pro project.',
+        description: 'Imports all media files from a folder into the current Premiere Pro project. Target a nested bin with binId (a bin nodeId, unambiguous — preferred, e.g. straight from create_bin) or binName, which also accepts a "/"-separated path. An unresolvable or ambiguous bin fails before anything is imported; the bin actually used is reported back.',
         inputSchema: z.object({
           folderPath: z.string().describe('The absolute path to the folder containing media files'),
-          binName: z.string().optional().describe('The name of the bin to import the media into'),
-          recursive: z.boolean().optional().describe('Whether to import from subfolders recursively')
+          binName: z.string().optional().describe('Destination bin by name. Use a "/"-separated path ("Scenes/Scene 008/SC008_0710") for a nested bin, or a single name to deep-search the tree (ambiguous single names are rejected). Omit to import to the project root.'),
+          recursive: z.boolean().optional().describe('Whether to import from subfolders recursively'),
+          binId: z.string().optional().describe('Destination bin nodeId — the unambiguous way to target a nested bin. Takes precedence over binName.')
         })
       },
       {
@@ -1524,7 +1537,7 @@ export function buildToolCatalogue(): MCPTool[] {
       },
       {
         name: 'trim_clip',
-        description: 'Adjusts the in and out points of a clip on the timeline, effectively shortening it.',
+        description: 'Trims a clip (and its linked audio/video) to new SOURCE in/out points, or to a timeline duration, keeping every remaining frame where it was on the timeline. Snaps to the frame grid, refuses trims past the media or into a neighbour, and restores the clip if Premiere does not apply the edit.',
         inputSchema: z.object({
           clipId: z.string().describe('The ID of the clip on the timeline to trim'),
           inPoint: z.number().optional().describe('The new in point in seconds from the start of the clip'),
@@ -1539,7 +1552,7 @@ export function buildToolCatalogue(): MCPTool[] {
         description: 'Splits a clip at a specific time point, creating two separate clips.',
         inputSchema: z.object({
           clipId: z.string().describe('The ID of the clip to split'),
-          splitTime: z.number().describe('The time in seconds where to split the clip')
+          splitTime: z.number().describe('Where to cut, in seconds from the START OF THE CLIP (not the sequence). Must be inside the clip.')
         })
       },
       {
@@ -2619,7 +2632,7 @@ export function buildToolCatalogue(): MCPTool[] {
       { name: 'flatten_multicam', description: 'Flattens a multicam clip by disabling multicam mode (setMulticam(false)), converting it to a single-stream clip at the current active angle.', inputSchema: z.object({ sequenceId: z.string().optional(), trackIndex: z.number(), clipIndex: z.number() }) },
       { name: 'multicam_info', description: 'Returns multicam status of a clip: isMulticamClip, canDoMulticam, multicamEnabled from the QE clip.', inputSchema: z.object({ sequenceId: z.string().optional(), trackIndex: z.number(), clipIndex: z.number() }) },
       { name: 'set_multicam_angle', description: 'Switches the active multicam angle via QE setSwitchSources(sourceIndex). Args: trackIndex, clipIndex, angleIndex.', inputSchema: z.object({ sequenceId: z.string().optional(), trackIndex: z.number(), clipIndex: z.number(), angleIndex: z.number().describe('0-based angle index') }) },
-      { name: 'create_multicam_source_sequence', description: 'Creates a multicam source sequence by placing clips from a bin on separate video tracks aligned at their media start timecode. Args: binName, newSeqName, presetPath.', inputSchema: z.object({ binName: z.string().describe('Name of the bin containing camera angles'), newSequenceName: z.string().describe('Name for the new multicam source sequence'), presetPath: z.string().optional().describe('Sequence preset path') }) },
+      { name: 'create_multicam_source_sequence', description: 'Creates a multicam source sequence by placing clips from a bin on separate video tracks aligned at their media start timecode. Args: binName, newSeqName, presetPath.', inputSchema: z.object({ binName: z.string().describe('Bin containing the camera angles. Use a "/"-separated path ("Scenes/Scene 008/SC008_0710") for a nested bin, or a single name to deep-search the tree (ambiguous single names are rejected rather than guessed).'), binId: z.string().optional().describe('Bin nodeId -- the unambiguous way to target a nested bin, e.g. the binId returned by create_bin. Takes precedence over binName.'), newSequenceName: z.string().describe('Name for the new multicam source sequence'), presetPath: z.string().optional().describe('Sequence preset path') }) },
       { name: 'create_multicam_from_clips', description: 'Creates a multicam sequence from a list of project item IDs placed on separate tracks, synced at their timecodes.', inputSchema: z.object({ projectItemIds: z.array(z.string()).describe('Array of project item nodeIds (one per angle)'), sequenceName: z.string(), presetPath: z.string().optional() }) },
 
       // Render truth / verification
@@ -2723,10 +2736,10 @@ export function buildToolCatalogue(): MCPTool[] {
       { name: 'export_with_burn_ins', description: 'Exports the sequence with timecode burn-in: applies a Metadata & Timecode Burn-in effect on an adjustment layer, exports, then removes it. Returns output path.', inputSchema: z.object({ outputPath: z.string().describe('Output file path'), presetPath: z.string().optional().describe('AME preset path. Default: H.264.') }) },
       { name: 'archive_master', description: 'Exports the active sequence and copies all source media to an archive folder, writing a manifest.json with file names and sizes. Args: outputDir.', inputSchema: z.object({ outputDir: z.string().describe('Directory to write the archive into'), includeProxy: z.boolean().optional().describe('Include proxy files. Default false.') }) },
       { name: 'start_encode_and_monitor', description: 'Adds the active sequence to the AME queue and starts encoding. Returns job status immediately. Use get_export_progress to poll.', inputSchema: z.object({ outputPath: z.string().describe('Output file path'), presetPath: z.string().optional().describe('AME .epr preset path'), workAreaType: z.number().optional().describe('0=entire, 1=work area. Default 0.') }) },
-      { name: 'export_per_marker_range', description: 'Exports separate clips for each pair of sequence in/out markers (by name pattern). Sets sequence work area to each range and calls exportAsMediaDirect.', inputSchema: z.object({ outputDir: z.string().describe('Output directory'), presetPath: z.string().optional().describe('AME preset path'), markerNamePattern: z.string().optional().describe('Filter markers by name prefix. Default: all marker pairs.') }) },
+      { name: 'export_per_marker_range', description: 'Exports one media file per PAIR of sequence markers (marker 1 to marker 2, marker 3 to marker 4, ...), by setting the sequence in/out to each range and calling exportAsMediaDirect. Output filenames are built from the opening marker name and assume a .mp4 extension, so a preset that writes another container will be reported under missing[] rather than as a success. Every output is stat\'ed on disk: success is true only when every range produced a file. The sequence in/out points are saved before the run and restored afterwards (inOutPointsRestored says whether that worked).', inputSchema: z.object({ outputDir: z.string().describe('Output directory'), presetPath: z.string().optional().describe('AME preset path'), markerNamePattern: z.string().optional().describe('Filter markers by name prefix. Default: all marker pairs.'), sequenceId: z.string().optional().describe('Sequence to export from. Defaults to the active sequence.') }) },
       { name: 'batch_export_sequences', description: 'Exports multiple sequences with the same AME preset. Args: sequenceIds, outputDir, preset. Returns list of output paths.', inputSchema: z.object({ sequenceIds: z.array(z.string()).describe('Sequence IDs to export'), outputDir: z.string().describe('Output directory'), presetPath: z.string().optional().describe('AME .epr preset path') }) },
-      { name: 'export_omf_with_settings', description: 'Exports the active sequence as OMF via app.project.exportOMF(), then verifies it by checking that a new file arrived at outputPath (the API reports nothing about its own result). Only the path is honoured; this API exposes no other settings. If Premiere rejects the full argument list, a zero-argument fallback runs, which cannot write to outputPath and is reported as a failure.', inputSchema: z.object({ outputPath: z.string().describe('Output .omf file path') }) },
-      { name: 'export_aaf_with_settings', description: 'Exports the active sequence as AAF via app.project.exportAAF(), then verifies it by checking that a new file arrived at outputPath (the API reports nothing about its own result). Only the path is honoured; this API exposes no other settings. If Premiere rejects the full argument list, a zero-argument fallback runs, which cannot write to outputPath and is reported as a failure.', inputSchema: z.object({ outputPath: z.string().describe('Output .aaf file path') }) },
+      { name: 'export_omf_with_settings', description: 'Exports the active sequence as OMF via app.project.exportOMF(), then verifies it by checking that a new file arrived at outputPath (the API reports nothing about its own result). Only the path is honoured. 48 kHz / 16-bit.', inputSchema: z.object({ outputPath: z.string().describe('Output .omf file path') }) },
+      { name: 'export_aaf_with_settings', description: 'Exports the active sequence as AAF via app.project.exportAAF(), then verifies it by checking that a new file arrived at outputPath (the API reports nothing about its own result). Only the path is honoured. 48 kHz / 16-bit.', inputSchema: z.object({ outputPath: z.string().describe('Output .aaf file path') }) },
       { name: 'verify_export_file', description: 'Uses ffprobe to verify an exported file: returns duration, fps, resolution, codec, file size, and whether they match expected sequence settings.', inputSchema: z.object({ filePath: z.string().describe('Path to the exported file to verify'), expectedDurationSecs: z.number().optional(), expectedFps: z.number().optional(), expectedWidth: z.number().optional(), expectedHeight: z.number().optional() }) },
 
       // Title & MOGRT tools
@@ -2742,7 +2755,7 @@ export function buildToolCatalogue(): MCPTool[] {
       // Sequence ops
       { name: 'create_adjustment_layer_at', description: 'Creates an adjustment layer clip at the specified time/track by importing a transparent solid and placing it. Returns clip info.', inputSchema: z.object({ startTimeSecs: z.number().describe('Start time in seconds'), durationSecs: z.number().describe('Duration in seconds'), trackIndex: z.number().optional().describe('Video track index. Default top track.'), sequenceId: z.string().optional() }) },
       { name: 'nest_all_v1_clips', description: 'Selects all clips on V1 and nests them into a new subsequence. Uses seq.setSelection + nest_clips. Returns the new nested sequence info.', inputSchema: z.object({ newSequenceName: z.string().describe('Name for the nested sequence'), sequenceId: z.string().optional() }) },
-      { name: 'create_sequence_from_bin', description: 'Creates a new sequence and populates it with all clips from a named bin, placed sequentially on V1. Args: binName, sequenceName, presetPath.', inputSchema: z.object({ binName: z.string().describe('Name of the bin containing source clips'), sequenceName: z.string().describe('Name for the new sequence'), presetPath: z.string().optional().describe('Sequence preset path') }) },
+      { name: 'create_sequence_from_bin', description: 'Creates a new sequence and populates it with all clips from a named bin, placed sequentially on V1. Args: binName, sequenceName, presetPath.', inputSchema: z.object({ binName: z.string().describe('Bin containing the source clips. Use a "/"-separated path ("Scenes/Scene 008/SC008_0710") for a nested bin, or a single name to deep-search the tree (ambiguous single names are rejected rather than guessed).'), binId: z.string().optional().describe('Bin nodeId -- the unambiguous way to target a nested bin, e.g. the binId returned by create_bin. Takes precedence over binName.'), sequenceName: z.string().describe('Name for the new sequence'), presetPath: z.string().optional().describe('Sequence preset path') }) },
       { name: 'get_all_clip_effects', description: 'Returns a report of all effects on all clips across all video tracks in the active sequence — clip name, track, effect name, effect matchName.', inputSchema: z.object({ sequenceId: z.string().optional() }) },
       { name: 'batch_replace_clips', description: 'Replaces all timeline clips that reference oldItemId with newItemId across all sequences. Returns count of replaced clips.', inputSchema: z.object({ oldProjectItemId: z.string().describe('NodeId of the project item to replace'), newProjectItemId: z.string().describe('NodeId of the replacement project item'), sequenceId: z.string().optional().describe('Limit to one sequence. Default: all sequences.') }) },
       { name: 'clear_sequence_in_out', description: 'Clears the sequence in/out points (work area markers) back to full sequence length.', inputSchema: z.object({ sequenceId: z.string().optional() }) },

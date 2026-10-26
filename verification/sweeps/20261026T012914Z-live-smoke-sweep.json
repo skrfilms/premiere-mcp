@@ -1,0 +1,2923 @@
+{
+  "environment": {
+    "ranAt": "2026-10-26T01:29:14Z",
+    "harness": "live-smoke-sweep",
+    "mode": "mutate",
+    "gitSha": "a1f1c143d0102eac4ff2840a98fe27fedf9ec594",
+    "gitDirty": true,
+    "premiereVersion": "26.5.2 (build 5)",
+    "platform": "darwin 25.6.0 arm64",
+    "catalogueSize": 648
+  },
+  "tools": [
+    {
+      "name": "activate_tools",
+      "outcome": "pass"
+    },
+    {
+      "name": "add_adjustment_layer",
+      "outcome": "pass"
+    },
+    {
+      "name": "add_audio_keyframes",
+      "outcome": "fail",
+      "detail": "Volume component not found on clip (locale-aware lookup failed)"
+    },
+    {
+      "name": "add_custom_metadata_field",
+      "outcome": "fail",
+      "detail": "Project item not found"
+    },
+    {
+      "name": "add_keyframe",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "add_marker",
+      "outcome": "pass"
+    },
+    {
+      "name": "add_marker_to_project_item",
+      "outcome": "fail",
+      "detail": "Project item marker API unavailable"
+    },
+    {
+      "name": "add_metadata_schema_field",
+      "outcome": "pass"
+    },
+    {
+      "name": "add_text_overlay",
+      "outcome": "fail",
+      "detail": "Text overlay requires a MOGRT file path. Use the mogrtPath parameter with a .mogrt template file, or use import_mogrt tool."
+    },
+    {
+      "name": "add_to_render_queue",
+      "outcome": "skipped_unsafe",
+      "detail": "launches AME"
+    },
+    {
+      "name": "add_to_timeline",
+      "outcome": "fail",
+      "detail": "Placement could not be confirmed: no clip from this project item appears at 1s on the target track. Nothing was reported back and no linked audio was removed."
+    },
+    {
+      "name": "add_to_timeline_batch",
+      "outcome": "skipped_args",
+      "detail": "clips[0] has no time; time is required in \"absolute\" mode (use mode:\"append\" to chain clips end-to-end)."
+    },
+    {
+      "name": "add_track",
+      "outcome": "pass"
+    },
+    {
+      "name": "add_tracks",
+      "outcome": "pass"
+    },
+    {
+      "name": "add_transition",
+      "outcome": "fail",
+      "detail": "Transition call completed but Premiere Pro did not expose a verified transition change"
+    },
+    {
+      "name": "add_transition_to_clip",
+      "outcome": "pass",
+      "verified": false
+    },
+    {
+      "name": "adjust_audio_levels",
+      "outcome": "fail",
+      "detail": "Volume component not found on clip"
+    },
+    {
+      "name": "align_clips_spatial",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "api_surface_report",
+      "outcome": "pass"
+    },
+    {
+      "name": "apply_audio_effect",
+      "outcome": "fail",
+      "detail": "Effect add did not create a new component on the target clip"
+    },
+    {
+      "name": "apply_audio_effect_qe",
+      "outcome": "fail",
+      "detail": "Effect not found on this build: Opacity"
+    },
+    {
+      "name": "apply_audio_effect_to_all_clips",
+      "outcome": "pass"
+    },
+    {
+      "name": "apply_dynamics",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "apply_effect",
+      "outcome": "fail",
+      "detail": "Effect add did not create a new component on the target clip"
+    },
+    {
+      "name": "apply_lumetri_preset",
+      "outcome": "fail",
+      "detail": "Preset not found: synth_name. Use list_lumetri_presets for the exact names."
+    },
+    {
+      "name": "apply_lut",
+      "outcome": "fail",
+      "detail": "LUT: 0 of 1 properties verified. Not applied: Input LUT (setvalue_threw). A property reported as no_matching_property does not exist under that name on this build of Lumetri."
+    },
+    {
+      "name": "apply_lut_to_clip",
+      "outcome": "fail",
+      "detail": "Error: Illegal Parameter type"
+    },
+    {
+      "name": "apply_morph_cut",
+      "outcome": "fail",
+      "detail": "The Morph Cut did not appear: neither the QE transition list nor the sequence XML gained a transition. A clip with no source handle past its out-point cannot take one."
+    },
+    {
+      "name": "apply_video_effect",
+      "outcome": "fail",
+      "detail": "Effect add created no new component on the clip — a silent no-op (some builds ignore QE structural edits)."
+    },
+    {
+      "name": "archive_master",
+      "outcome": "skipped_unsafe",
+      "detail": "copies media on disk"
+    },
+    {
+      "name": "assemble_product_spot",
+      "outcome": "pass"
+    },
+    {
+      "name": "assemble_review_reel",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "assert_clips_unchanged",
+      "outcome": "fail",
+      "detail": "Cannot read snapshot: Unexpected token '\u0000', \"\u0000\u0000\u0000 ftypis\"... is not valid JSON"
+    },
+    {
+      "name": "attach_custom_property",
+      "outcome": "fail",
+      "detail": "Project item not found"
+    },
+    {
+      "name": "attach_sequence_custom_property",
+      "outcome": "pass",
+      "verified": false
+    },
+    {
+      "name": "audio_crossfade_at_cut",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "audio_peaks_report",
+      "outcome": "pass"
+    },
+    {
+      "name": "audio_silence_scan",
+      "outcome": "pass"
+    },
+    {
+      "name": "auto_reframe_sequence",
+      "outcome": "skipped_unsafe",
+      "detail": "long-running, creates sequences"
+    },
+    {
+      "name": "auto_white_balance",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "bake_keyframe_ease",
+      "outcome": "fail",
+      "detail": "endTime (1) must be greater than startTime (1)"
+    },
+    {
+      "name": "bake_speed_change",
+      "outcome": "skipped_unsafe",
+      "detail": "long ffmpeg render"
+    },
+    {
+      "name": "batch_add_audio_crossfades",
+      "outcome": "fail",
+      "detail": "No crossfade could be added at any of the 1 audio cuts. See failures[]."
+    },
+    {
+      "name": "batch_add_transitions",
+      "outcome": "fail",
+      "detail": "No transitions were verifiably added"
+    },
+    {
+      "name": "batch_apply_effect",
+      "outcome": "pass"
+    },
+    {
+      "name": "batch_enable_disable",
+      "outcome": "pass"
+    },
+    {
+      "name": "batch_enable_disable_clips",
+      "outcome": "pass"
+    },
+    {
+      "name": "batch_execute",
+      "outcome": "skipped_unsafe",
+      "detail": "arbitrary code; tested separately"
+    },
+    {
+      "name": "batch_export_sequences",
+      "outcome": "skipped_unsafe",
+      "detail": "launches AME repeatedly"
+    },
+    {
+      "name": "batch_log_from_csv",
+      "outcome": "pass"
+    },
+    {
+      "name": "batch_mogrt_from_data",
+      "outcome": "fail",
+      "detail": "All 1 graphic(s) failed. Nothing was produced; see the per-item results for each reason."
+    },
+    {
+      "name": "batch_relink_by_pattern",
+      "outcome": "skipped_unsafe",
+      "detail": "rewrites media links in bulk"
+    },
+    {
+      "name": "batch_relink_by_prefix",
+      "outcome": "skipped_unsafe",
+      "detail": "rewrites media links in bulk"
+    },
+    {
+      "name": "batch_rename_clips",
+      "outcome": "pass"
+    },
+    {
+      "name": "batch_rename_project_items",
+      "outcome": "pass"
+    },
+    {
+      "name": "batch_replace_clips",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive swap"
+    },
+    {
+      "name": "batch_set_label",
+      "outcome": "pass"
+    },
+    {
+      "name": "black_frame_scan",
+      "outcome": "pass"
+    },
+    {
+      "name": "blur_clip",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "broadcast_safe_check",
+      "outcome": "pass"
+    },
+    {
+      "name": "build_brand_spot_from_mogrt_and_assets",
+      "outcome": "pass"
+    },
+    {
+      "name": "build_motion_graphics_demo",
+      "outcome": "pass"
+    },
+    {
+      "name": "call_tool",
+      "outcome": "fail",
+      "detail": "Tool 'synth_name' does not exist in this build. Call find_tool with a keyword to search the catalogue."
+    },
+    {
+      "name": "caption_qc_fix",
+      "outcome": "pass"
+    },
+    {
+      "name": "caption_qc_report",
+      "outcome": "pass"
+    },
+    {
+      "name": "captions_from_transcript_json",
+      "outcome": "pass"
+    },
+    {
+      "name": "captions_to_markers",
+      "outcome": "pass"
+    },
+    {
+      "name": "capture_frame",
+      "outcome": "pass"
+    },
+    {
+      "name": "capture_program_output",
+      "outcome": "pass"
+    },
+    {
+      "name": "change_list_report",
+      "outcome": "pass"
+    },
+    {
+      "name": "channel_remap_report",
+      "outcome": "pass"
+    },
+    {
+      "name": "chapter_markers_to_youtube",
+      "outcome": "pass"
+    },
+    {
+      "name": "check_offline_media",
+      "outcome": "pass"
+    },
+    {
+      "name": "clear_item_in_out",
+      "outcome": "fail",
+      "detail": "Project item not found"
+    },
+    {
+      "name": "clear_sequence_in_out",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "clear_work_area",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "close_all_gaps",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "close_all_source_clips",
+      "outcome": "pass"
+    },
+    {
+      "name": "close_gap_at",
+      "outcome": "fail",
+      "detail": "There is no gap across all tracks at 1s. Something occupies that time on at least one video or audio track, and closing a gap on one track alone would break sync. Nothing was changed."
+    },
+    {
+      "name": "close_project",
+      "outcome": "skipped_unsafe",
+      "detail": "closes the project out from under the sweep"
+    },
+    {
+      "name": "close_sequence",
+      "outcome": "pass"
+    },
+    {
+      "name": "close_source_monitor",
+      "outcome": "pass"
+    },
+    {
+      "name": "color_correct",
+      "outcome": "fail",
+      "detail": "No colour adjustments provided. Supply at least one of: brightness (=exposure), exposure, contrast, saturation, vibrance, highlights, shadows, whites, blacks, temperature, tint."
+    },
+    {
+      "name": "compare_takes",
+      "outcome": "fail",
+      "detail": "unknown"
+    },
+    {
+      "name": "conform_sequence_settings",
+      "outcome": "pass"
+    },
+    {
+      "name": "consolidate_and_transfer",
+      "outcome": "skipped_unsafe",
+      "detail": "copies media on disk"
+    },
+    {
+      "name": "consolidate_duplicates",
+      "outcome": "pass"
+    },
+    {
+      "name": "convert_project_to_production",
+      "outcome": "skipped_unsafe",
+      "detail": "mutates Creative Cloud production state"
+    },
+    {
+      "name": "copy_effect_values",
+      "outcome": "fail",
+      "detail": "Source and target are the same clip in the same sequence; nothing to copy."
+    },
+    {
+      "name": "copy_effects_between_clips",
+      "outcome": "fail",
+      "detail": "Source and target are the same clip in the same sequence; nothing to copy."
+    },
+    {
+      "name": "copy_grade",
+      "outcome": "pass"
+    },
+    {
+      "name": "copy_markers_between_sequences",
+      "outcome": "fail",
+      "detail": "Source and target are the same sequence. Copying the markers of a sequence onto itself would only duplicate every marker, so nothing was done."
+    },
+    {
+      "name": "count_tracks_used",
+      "outcome": "pass"
+    },
+    {
+      "name": "countdown_leader",
+      "outcome": "skipped_unsafe",
+      "detail": "dialog: newUniversalCountingLeader prompts"
+    },
+    {
+      "name": "create_adjustment_layer_at",
+      "outcome": "skipped_unsafe",
+      "detail": "dialog: newTransparentVideo prompts"
+    },
+    {
+      "name": "create_bars_and_tone",
+      "outcome": "skipped_unsafe",
+      "detail": "dialog: newBarsAndTone prompts"
+    },
+    {
+      "name": "create_bin",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "create_bin_qe",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "create_caption_track",
+      "outcome": "fail",
+      "detail": "Caption project item not found"
+    },
+    {
+      "name": "create_custom_export_preset",
+      "outcome": "fail",
+      "detail": "create_custom_export_preset requires the AME bridge (app.encoder). Use execute_extendscript with: var exp = app.encoder.getExporters(); then find your format, call getPresets(), setExportParamValue(k,v) for each param, writeToFile(path)."
+    },
+    {
+      "name": "create_marker",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "create_multicam_from_clips",
+      "outcome": "fail",
+      "detail": "No project items found"
+    },
+    {
+      "name": "create_multicam_source_sequence",
+      "outcome": "fail",
+      "detail": "Bin name \"synth_name\" is ambiguous (4 bins share it). Pass binId, or a \"/\"-separated path, to disambiguate. No sequence was created."
+    },
+    {
+      "name": "create_project",
+      "outcome": "skipped_unsafe",
+      "detail": "opens a second project and makes it active, escaping the scratch guard"
+    },
+    {
+      "name": "create_proxy_qe",
+      "outcome": "pass",
+      "verified": false
+    },
+    {
+      "name": "create_recovery_checkpoint",
+      "outcome": "pass"
+    },
+    {
+      "name": "create_sequence",
+      "outcome": "pass"
+    },
+    {
+      "name": "create_sequence_from_bin",
+      "outcome": "fail",
+      "detail": "Bin name \"synth_name\" is ambiguous (4 bins share it). Pass binId, or a \"/\"-separated path, to disambiguate. No sequence was created."
+    },
+    {
+      "name": "create_sequence_from_clips",
+      "outcome": "fail",
+      "detail": "No project items found for sequence creation"
+    },
+    {
+      "name": "create_sequence_from_preset",
+      "outcome": "pass"
+    },
+    {
+      "name": "create_smart_bin",
+      "outcome": "pass"
+    },
+    {
+      "name": "create_subclip",
+      "outcome": "fail",
+      "detail": "Project item not found"
+    },
+    {
+      "name": "create_subclips_from_markers",
+      "outcome": "pass"
+    },
+    {
+      "name": "create_subsequence",
+      "outcome": "pass"
+    },
+    {
+      "name": "crop_clip",
+      "outcome": "fail",
+      "detail": "Crop effect add did not create a new component on the target clip"
+    },
+    {
+      "name": "cut_list_csv",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "deactivate_tools",
+      "outcome": "pass"
+    },
+    {
+      "name": "delete_bin",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive"
+    },
+    {
+      "name": "delete_empty_tracks",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive (removes tracks)"
+    },
+    {
+      "name": "delete_marker",
+      "outcome": "pass"
+    },
+    {
+      "name": "delete_multiple_project_items",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive"
+    },
+    {
+      "name": "delete_preview_files",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive (throws away renders)"
+    },
+    {
+      "name": "delete_project_item",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive"
+    },
+    {
+      "name": "delete_sequence",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive"
+    },
+    {
+      "name": "delete_track",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive"
+    },
+    {
+      "name": "delivery_qc",
+      "outcome": "pass"
+    },
+    {
+      "name": "denoise_clip",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "dereverb_clip",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "deselect_all_clips",
+      "outcome": "pass"
+    },
+    {
+      "name": "detach_proxy",
+      "outcome": "skipped_unsafe",
+      "detail": "mutates proxy attachment"
+    },
+    {
+      "name": "detect_scene_edits",
+      "outcome": "skipped_unsafe",
+      "detail": "long-running analysis"
+    },
+    {
+      "name": "detect_settings_mismatch",
+      "outcome": "pass"
+    },
+    {
+      "name": "detect_silence",
+      "outcome": "pass"
+    },
+    {
+      "name": "diff_sequences",
+      "outcome": "skipped_wedged",
+      "detail": "nothing ran: panel was executing bef3b2a4-4025-4d60-a6fb-44b359b386ac"
+    },
+    {
+      "name": "distribute_clips_evenly",
+      "outcome": "pass"
+    },
+    {
+      "name": "duplicate_clip",
+      "outcome": "fail",
+      "detail": "The destination 3.08333333333333s-5.16666666666667s is occupied on Video 1 by 'synth_name' (2.08333333333333s-8.08333333333333s). overwriteClip() would replace it, so nothing was placed. Pass an offset that lands on empty space."
+    },
+    {
+      "name": "duplicate_sequence",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "duration_marker_add",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "effect_stack_report",
+      "outcome": "pass"
+    },
+    {
+      "name": "enable_disable_all_effects",
+      "outcome": "fail",
+      "detail": "PARTIALLY APPLIED: 1 of 6 user effects were toggled; the rest are unchanged, so the clip is in a mixed state. See notToggleable[]."
+    },
+    {
+      "name": "enable_disable_clip",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "enable_disable_effect",
+      "outcome": "fail",
+      "detail": "Matched 1 component(s), but none could be toggled. On this build an effect is enabled/disabled through its \"Active\" parameter; effects without one cannot be toggled by script. Details in notToggleable[]."
+    },
+    {
+      "name": "enable_multicam",
+      "outcome": "fail",
+      "detail": "canDoMulticam() returned false for this clip, so multicam cannot be enabled on it. Only a clip whose source is a multicam source sequence can be switched to multicam."
+    },
+    {
+      "name": "encode_file",
+      "outcome": "skipped_unsafe",
+      "detail": "launches AME"
+    },
+    {
+      "name": "encode_project_item",
+      "outcome": "skipped_unsafe",
+      "detail": "launches AME"
+    },
+    {
+      "name": "evaluate_expression",
+      "outcome": "skipped_unsafe",
+      "detail": "arbitrary code; tested separately"
+    },
+    {
+      "name": "execute_extendscript",
+      "outcome": "skipped_unsafe",
+      "detail": "arbitrary code; tested separately"
+    },
+    {
+      "name": "export_aaf",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "export_aaf_with_settings",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "export_as_fcp_xml",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "export_as_project",
+      "outcome": "pass"
+    },
+    {
+      "name": "export_audio_only",
+      "outcome": "pass"
+    },
+    {
+      "name": "export_captions_to_srt",
+      "outcome": "fail",
+      "detail": "No caption tracks found"
+    },
+    {
+      "name": "export_edl",
+      "outcome": "pass"
+    },
+    {
+      "name": "export_frame",
+      "outcome": "pass"
+    },
+    {
+      "name": "export_gif",
+      "outcome": "pass"
+    },
+    {
+      "name": "export_in_out_range",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "export_omf",
+      "outcome": "pass"
+    },
+    {
+      "name": "export_omf_with_settings",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "export_per_marker_range",
+      "outcome": "skipped_unsafe",
+      "detail": "many long exports"
+    },
+    {
+      "name": "export_per_marker_segments",
+      "outcome": "skipped_unsafe",
+      "detail": "many long exports"
+    },
+    {
+      "name": "export_project_as_fcp_xml",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "export_sequence",
+      "outcome": "skipped_args",
+      "detail": "presetPath or presetName required — Adobe encodeSequence requires an absolute .epr preset file."
+    },
+    {
+      "name": "export_sequence_as_project",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "export_social_preset",
+      "outcome": "pass"
+    },
+    {
+      "name": "export_stills_batch",
+      "outcome": "pass"
+    },
+    {
+      "name": "export_thumbnail",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "export_with_burn_ins",
+      "outcome": "skipped_unsafe",
+      "detail": "long render + mutates then restores effects"
+    },
+    {
+      "name": "extend_edit",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "extract_palette",
+      "outcome": "pass"
+    },
+    {
+      "name": "extract_selection",
+      "outcome": "fail",
+      "detail": "No selected clips"
+    },
+    {
+      "name": "fade_in_audio",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "fade_in_video",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "fade_out_audio",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "fade_out_video",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "false_color_frame",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "fill_room_tone",
+      "outcome": "fail",
+      "detail": "Room tone item not found"
+    },
+    {
+      "name": "find_clips_by_source",
+      "outcome": "pass"
+    },
+    {
+      "name": "find_clips_with_effect",
+      "outcome": "pass"
+    },
+    {
+      "name": "find_items_by_media_path",
+      "outcome": "pass"
+    },
+    {
+      "name": "find_items_matching_media_path",
+      "outcome": "pass"
+    },
+    {
+      "name": "find_keyframe_near_time",
+      "outcome": "pass"
+    },
+    {
+      "name": "find_project_item_by_name",
+      "outcome": "pass"
+    },
+    {
+      "name": "find_tool",
+      "outcome": "pass"
+    },
+    {
+      "name": "find_unused_sequences",
+      "outcome": "pass"
+    },
+    {
+      "name": "fit_clip_duration",
+      "outcome": "fail",
+      "detail": "The speed landed at 1 but the clip duration reads 2.08333333333333s instead of 2s, so the gap it was meant to fill is still open. setSpeed changes the rate without necessarily re-timing the clip on the timeline. QE speed changes are unrelia"
+    },
+    {
+      "name": "flash_frame_scan",
+      "outcome": "pass"
+    },
+    {
+      "name": "flatten_multicam",
+      "outcome": "pass"
+    },
+    {
+      "name": "flip_horizontal",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "flip_vertical",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "flush_sequence_cache",
+      "outcome": "pass"
+    },
+    {
+      "name": "frame_diff",
+      "outcome": "pass"
+    },
+    {
+      "name": "frame_io_notes_to_markers",
+      "outcome": "fail",
+      "detail": "No comments found in Frame.io export"
+    },
+    {
+      "name": "frames_to_timecode",
+      "outcome": "pass"
+    },
+    {
+      "name": "freeze_frame",
+      "outcome": "fail",
+      "detail": "None of these methods are available: setFrameHold, freezeFrame"
+    },
+    {
+      "name": "freeze_frame_scan",
+      "outcome": "pass"
+    },
+    {
+      "name": "generate_scope",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_active_sequence",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_all_clip_effects",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_all_markers",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_all_project_paths",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_app_property",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_app_state",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_autosave_settings",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_bin_contents",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_bin_contents_recursive",
+      "outcome": "fail",
+      "detail": "TypeError: undefined is not an object"
+    },
+    {
+      "name": "get_bin_tree",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_capabilities",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_clip_adjustment_layer",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_clip_at_playhead",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_clip_at_position",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_clip_color_space",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_clip_flags",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_clip_info_extended",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_clip_links",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_clip_markers",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_clip_properties",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_clip_speed",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_clip_speed_info",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_cloud_queue_info",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_color_label",
+      "outcome": "fail",
+      "detail": "Project item not found"
+    },
+    {
+      "name": "get_color_management_options",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_color_space",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_conflicts",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_duplicate_media",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_ea_login_status",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_ea_status",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_ea_user_info",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_edit_point_list",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_effect_properties",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_encoder_presets",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_encoder_state",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_export_file_extension",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_export_progress",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_footage_interpretation",
+      "outcome": "fail",
+      "detail": "Project item not found"
+    },
+    {
+      "name": "get_full_clip_info",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_full_project_overview",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_full_sequence_info",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_graphics_white_luminance",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_insertion_bin",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_item_color_management",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_item_info",
+      "outcome": "fail",
+      "detail": "Project item not found"
+    },
+    {
+      "name": "get_item_metadata_columns",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_item_treepath",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_item_video_components",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_item_xmp_metadata",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_keyframes",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_linked_items",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_location_copy_settings",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_lumetri_preset_list",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_media_processing_status",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_metadata",
+      "outcome": "fail",
+      "detail": "Project item not found"
+    },
+    {
+      "name": "get_mogrt_component",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_mogrt_text_all",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_multicam_angle_count",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_next_edit_point",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_offline_media",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_open_project_count",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_panel_visibility",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_playback_state",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_playhead_position",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_premiere_state",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_production_info",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_production_list",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_project_info",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_project_item_info",
+      "outcome": "fail",
+      "detail": "Project item not found"
+    },
+    {
+      "name": "get_project_item_info_extended",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_project_panel_columns",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_project_panel_metadata",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_project_panel_selection",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_project_property",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_project_scratch_disks",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_project_stats",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_proxies_enabled",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "get_proxy_status",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_qe_clip_info",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_qe_clip_settings",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_qe_component_params",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_qe_project_info",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_qe_sequence_props",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_qe_sequence_settings",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_render_queue_status",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_renderer_names",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_selected_clips",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_sequence_count",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_sequence_duration",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_sequence_gaps",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_sequence_in_out_points",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_sequence_info_extended",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_sequence_markers_by_type",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_sequence_render_status",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_sequence_selection",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_sequence_settings",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_sequence_structure",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_source_clip_info",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_source_clip_info_qe",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_source_monitor_info",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_source_monitor_position",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_source_position",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_target_tracks",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_timeline_gaps",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_timeline_render_status",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_timeline_summary",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_tool_typings",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_total_clip_count",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_track_info",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_unused_media",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_used_media_report",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_value_at_time",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_version_info",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_work_area",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_workspaces",
+      "outcome": "pass"
+    },
+    {
+      "name": "get_xmp_metadata",
+      "outcome": "pass"
+    },
+    {
+      "name": "go_to_in_point",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "go_to_next_marker",
+      "outcome": "pass"
+    },
+    {
+      "name": "go_to_out_point",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "go_to_prev_marker",
+      "outcome": "pass"
+    },
+    {
+      "name": "go_to_sequence_end",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "go_to_sequence_start",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "go_to_timecode",
+      "outcome": "pass"
+    },
+    {
+      "name": "grade_snapshot",
+      "outcome": "pass"
+    },
+    {
+      "name": "grid_layout",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "has_proxy",
+      "outcome": "fail",
+      "detail": "Project item not found"
+    },
+    {
+      "name": "honesty_selftest",
+      "outcome": "skipped_unsafe",
+      "detail": "would recurse into this sweep"
+    },
+    {
+      "name": "hover_scrub_frames",
+      "outcome": "pass"
+    },
+    {
+      "name": "import_edl",
+      "outcome": "skipped_unsafe",
+      "detail": "dialog: EDL import prompts for sequence/source media"
+    },
+    {
+      "name": "import_fcp_xml",
+      "outcome": "pass"
+    },
+    {
+      "name": "import_folder",
+      "outcome": "pass"
+    },
+    {
+      "name": "import_image_sequence",
+      "outcome": "pass"
+    },
+    {
+      "name": "import_media",
+      "outcome": "pass"
+    },
+    {
+      "name": "import_media_qe",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "import_mogrt",
+      "outcome": "skipped_unsafe",
+      "detail": "dialog risk + writes to project"
+    },
+    {
+      "name": "import_mogrt_from_library",
+      "outcome": "skipped_unsafe",
+      "detail": "dialog risk + writes to project"
+    },
+    {
+      "name": "import_project_items",
+      "outcome": "skipped_unsafe",
+      "detail": "mutates project structure"
+    },
+    {
+      "name": "import_sequences",
+      "outcome": "pass"
+    },
+    {
+      "name": "import_sequences_from_project",
+      "outcome": "pass"
+    },
+    {
+      "name": "index_footage",
+      "outcome": "fail",
+      "detail": "rootPath is not a folder: <repo>/.scratch/media/fixture_a_146.mp4"
+    },
+    {
+      "name": "insert_from_source",
+      "outcome": "fail",
+      "detail": "Need active sequence and source monitor item"
+    },
+    {
+      "name": "insert_srt_cue",
+      "outcome": "pass"
+    },
+    {
+      "name": "inspect_dom_object",
+      "outcome": "pass"
+    },
+    {
+      "name": "invert_selection",
+      "outcome": "pass"
+    },
+    {
+      "name": "is_work_area_enabled",
+      "outcome": "pass"
+    },
+    {
+      "name": "j_cut",
+      "outcome": "fail",
+      "detail": "A1 \"fixture_a_146_5.mp4\" at 0s cannot start before 0. Nothing was changed."
+    },
+    {
+      "name": "ken_burns",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "keyframe_zoom_in",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "keyframe_zoom_out",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "l_cut",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "letterbox",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "lift_selection",
+      "outcome": "fail",
+      "detail": "PARTIALLY APPLIED: 5 item(s) removed; see details.errors. Undo to restore."
+    },
+    {
+      "name": "link_audio_video",
+      "outcome": "pass"
+    },
+    {
+      "name": "link_media_qe",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "link_selection",
+      "outcome": "pass"
+    },
+    {
+      "name": "lint_timeline",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_all_encoder_presets",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_audio_effects_on_clip",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_audio_transitions",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_available_audio_effects",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_available_audio_transitions",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_available_effects",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_available_transitions",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_clip_effects",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_effects_on_clip_qe",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_export_presets",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_lumetri_presets",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_markers",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_open_projects",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_project_items",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_recent_projects",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_recovery_checkpoints",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_sequence_tracks",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_sequences",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_sequences_by_name",
+      "outcome": "pass"
+    },
+    {
+      "name": "list_video_transitions",
+      "outcome": "pass"
+    },
+    {
+      "name": "lock_track",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "log_clip",
+      "outcome": "pass"
+    },
+    {
+      "name": "loudness_report",
+      "outcome": "pass"
+    },
+    {
+      "name": "lower_third_preset",
+      "outcome": "fail",
+      "detail": "All 1 text layer(s) failed. Nothing was produced; see the per-item results for each reason."
+    },
+    {
+      "name": "lumetri_basic_set",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "lumetri_creative_set",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "lumetri_hsl_secondary_set",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "lumetri_report",
+      "outcome": "pass"
+    },
+    {
+      "name": "lumetri_vignette_set",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "manage_proxies",
+      "outcome": "skipped_unsafe",
+      "detail": "mutates proxy attachment"
+    },
+    {
+      "name": "marker_to_subclip",
+      "outcome": "pass"
+    },
+    {
+      "name": "markers_from_csv",
+      "outcome": "pass"
+    },
+    {
+      "name": "markers_to_csv",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "markers_to_notes",
+      "outcome": "pass"
+    },
+    {
+      "name": "match_frame",
+      "outcome": "pass"
+    },
+    {
+      "name": "match_shot_color",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "match_transform",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "mogrt_params_report",
+      "outcome": "fail",
+      "detail": "Clip is not a MOGRT — check isMGT()"
+    },
+    {
+      "name": "move_clip",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "move_clip_to_track",
+      "outcome": "pass"
+    },
+    {
+      "name": "move_item_to_bin",
+      "outcome": "pass"
+    },
+    {
+      "name": "move_items_to_bin",
+      "outcome": "pass"
+    },
+    {
+      "name": "move_playhead_to_edit",
+      "outcome": "pass"
+    },
+    {
+      "name": "multicam_info",
+      "outcome": "pass"
+    },
+    {
+      "name": "multiple_undo",
+      "outcome": "skipped_unsafe",
+      "detail": "rewinds the sweep"
+    },
+    {
+      "name": "mute_clip_audio",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "mute_track",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "nest_all_v1_clips",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive restructure"
+    },
+    {
+      "name": "nest_clips",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive restructure"
+    },
+    {
+      "name": "normalize_clip_peaks",
+      "outcome": "fail",
+      "detail": "This clip exposes no gain parameter to scripting. On 26.5.2 an audio clip carries only Volume (Bypass, Level); clip gain lives in the Audio Gain dialog, which no script can reach. Nothing was changed."
+    },
+    {
+      "name": "normalize_loudness",
+      "outcome": "fail",
+      "detail": "ffmpeg could not measure the source loudness (loudnorm pass 1 produced no JSON). The file may have no audio stream or be unreadable."
+    },
+    {
+      "name": "normalize_track_peaks",
+      "outcome": "pass"
+    },
+    {
+      "name": "notes_to_markers",
+      "outcome": "pass"
+    },
+    {
+      "name": "nudge_clip",
+      "outcome": "fail",
+      "detail": "V1 \"fixture_b_146.mp4\" at 2.08333333333333s is in the way of V1 \"fixture_a_146_5.mp4\" at 0s. Nothing was changed."
+    },
+    {
+      "name": "open_fcp_xml",
+      "outcome": "skipped_unsafe",
+      "detail": "swaps/creates project state"
+    },
+    {
+      "name": "open_fcp_xml_project",
+      "outcome": "skipped_unsafe",
+      "detail": "swaps/creates project state"
+    },
+    {
+      "name": "open_file_in_source",
+      "outcome": "pass"
+    },
+    {
+      "name": "open_in_source",
+      "outcome": "fail",
+      "detail": "Project item not found"
+    },
+    {
+      "name": "open_item_in_source_qe",
+      "outcome": "fail",
+      "detail": "The Source Monitor holds \"fixture_a_146_5.mp4\", not the requested \"fixture_a_146_5.mp4\", so openInSource() did not take."
+    },
+    {
+      "name": "open_project",
+      "outcome": "skipped_unsafe",
+      "detail": "swaps the project mid-sweep"
+    },
+    {
+      "name": "open_project_item_in_source",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "overwrite_clip",
+      "outcome": "fail",
+      "detail": "Need sequence and project item"
+    },
+    {
+      "name": "overwrite_from_source",
+      "outcome": "fail",
+      "detail": "Need active sequence and source monitor item"
+    },
+    {
+      "name": "paste_grade_to_clips",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "pause_growing_file",
+      "outcome": "pass",
+      "verified": false
+    },
+    {
+      "name": "ping",
+      "outcome": "pass"
+    },
+    {
+      "name": "pip_layout",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "play_in_to_out",
+      "outcome": "skipped_unsafe",
+      "detail": "starts playback"
+    },
+    {
+      "name": "play_source_monitor",
+      "outcome": "skipped_unsafe",
+      "detail": "starts playback"
+    },
+    {
+      "name": "play_timeline",
+      "outcome": "skipped_unsafe",
+      "detail": "starts playback"
+    },
+    {
+      "name": "probe_media",
+      "outcome": "pass"
+    },
+    {
+      "name": "production_sync_status",
+      "outcome": "pass"
+    },
+    {
+      "name": "project_file_edit",
+      "outcome": "fail",
+      "detail": "Project-file surgery is disabled. It rewrites a .prproj outside Premiere, so it is opt-in: set PREMIERE_MCP_ALLOW_PROJECT_FILE_SURGERY=1 in the server's environment and restart. project_file_inspect is read-only and always available."
+    },
+    {
+      "name": "project_file_inspect",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "project_media_report",
+      "outcome": "pass"
+    },
+    {
+      "name": "qe_sequence_info",
+      "outcome": "pass"
+    },
+    {
+      "name": "rate_stretch_to_fill",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "razor_all_tracks",
+      "outcome": "pass"
+    },
+    {
+      "name": "razor_timeline_at_time",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "read_clipboard",
+      "outcome": "pass"
+    },
+    {
+      "name": "read_sequence_captions",
+      "outcome": "pass"
+    },
+    {
+      "name": "read_srt",
+      "outcome": "pass"
+    },
+    {
+      "name": "redo",
+      "outcome": "skipped_unsafe",
+      "detail": "replays unknown state"
+    },
+    {
+      "name": "reflect_dom_object",
+      "outcome": "pass"
+    },
+    {
+      "name": "refresh_media",
+      "outcome": "fail",
+      "detail": "Project item not found"
+    },
+    {
+      "name": "refresh_ui",
+      "outcome": "pass",
+      "verified": false
+    },
+    {
+      "name": "relink_media",
+      "outcome": "skipped_unsafe",
+      "detail": "rewrites media links"
+    },
+    {
+      "name": "remove_all_effects",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive"
+    },
+    {
+      "name": "remove_all_effects_qe",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive"
+    },
+    {
+      "name": "remove_effect",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive"
+    },
+    {
+      "name": "remove_effect_at_index",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive"
+    },
+    {
+      "name": "remove_effect_by_name",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive"
+    },
+    {
+      "name": "remove_from_timeline",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive"
+    },
+    {
+      "name": "remove_keyframe",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive"
+    },
+    {
+      "name": "remove_keyframe_range",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive"
+    },
+    {
+      "name": "remove_mogrt_clip",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive"
+    },
+    {
+      "name": "remove_selected_clips",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive"
+    },
+    {
+      "name": "remove_srt_cue",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive to file"
+    },
+    {
+      "name": "remove_time_remap",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive"
+    },
+    {
+      "name": "rename_bin",
+      "outcome": "pass"
+    },
+    {
+      "name": "rename_clip",
+      "outcome": "pass"
+    },
+    {
+      "name": "rename_project_item",
+      "outcome": "fail",
+      "detail": "Project item not found"
+    },
+    {
+      "name": "rename_timeline_clip",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "rename_track",
+      "outcome": "pass"
+    },
+    {
+      "name": "render_audio",
+      "outcome": "skipped_unsafe",
+      "detail": "long render"
+    },
+    {
+      "name": "render_needs_preview",
+      "outcome": "pass"
+    },
+    {
+      "name": "render_sequence_previews",
+      "outcome": "skipped_unsafe",
+      "detail": "long render"
+    },
+    {
+      "name": "reorder_effects",
+      "outcome": "pass"
+    },
+    {
+      "name": "replace_clip",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive swap"
+    },
+    {
+      "name": "replace_clip_media",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive swap"
+    },
+    {
+      "name": "reset_motion_to_defaults",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "reset_transform",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "resolve_conflict",
+      "outcome": "skipped_unsafe",
+      "detail": "mutates shared production"
+    },
+    {
+      "name": "restore_recovery_checkpoint",
+      "outcome": "skipped_unsafe",
+      "detail": "replaces sequence state"
+    },
+    {
+      "name": "reverse_clip",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "ripple_delete",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive"
+    },
+    {
+      "name": "ripple_trim_in",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "ripple_trim_out",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "roll_edit",
+      "outcome": "fail",
+      "detail": "V1 \"synth_name\" at 2.08333333333333s is in the way of extending V1 \"synth_name\" at 1s. Nothing was changed."
+    },
+    {
+      "name": "safe_area_check",
+      "outcome": "pass"
+    },
+    {
+      "name": "save_project",
+      "outcome": "pass"
+    },
+    {
+      "name": "save_project_as",
+      "outcome": "skipped_unsafe",
+      "detail": "writes a new project file"
+    },
+    {
+      "name": "scene_edit_detection",
+      "outcome": "skipped_unsafe",
+      "detail": "long-running analysis"
+    },
+    {
+      "name": "scrub_source_to",
+      "outcome": "pass"
+    },
+    {
+      "name": "search_footage",
+      "outcome": "pass"
+    },
+    {
+      "name": "search_project_items",
+      "outcome": "pass"
+    },
+    {
+      "name": "select_all_clips",
+      "outcome": "pass"
+    },
+    {
+      "name": "select_all_on_track",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "select_clips_by_color",
+      "outcome": "pass"
+    },
+    {
+      "name": "select_clips_by_name",
+      "outcome": "pass"
+    },
+    {
+      "name": "select_clips_in_range",
+      "outcome": "pass"
+    },
+    {
+      "name": "select_clips_in_time_range",
+      "outcome": "pass"
+    },
+    {
+      "name": "select_disabled_clips",
+      "outcome": "pass"
+    },
+    {
+      "name": "select_item",
+      "outcome": "fail",
+      "detail": "Project item not found"
+    },
+    {
+      "name": "send_to_after_effects",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "sequence_from_markers",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "sequence_thumbnail_strip",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_active_sequence",
+      "outcome": "skipped_unsafe",
+      "detail": "moves the target out from under later probes"
+    },
+    {
+      "name": "set_all_tracks_targeted",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_anti_alias_quality",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_app_property",
+      "outcome": "fail",
+      "detail": "The property reads back as \"\" rather than the requested value. Many app properties are read-only or coerce the value they are given."
+    },
+    {
+      "name": "set_autosave_settings",
+      "outcome": "skipped_unsafe",
+      "detail": "rewrites the user's global Auto Save preferences"
+    },
+    {
+      "name": "set_blend_mode",
+      "outcome": "fail",
+      "detail": "Blend Mode is a numeric index on this build, not a name. Passing undefined raises an Illegal Parameter type error from Premiere. Pass an integer, or its digits as a string. This clip current Blend Mode index is 18. No name-to-index table is"
+    },
+    {
+      "name": "set_clip_anchor_point",
+      "outcome": "fail",
+      "detail": "Error: Illegal Parameter type"
+    },
+    {
+      "name": "set_clip_border_color",
+      "outcome": "fail",
+      "detail": "qeClip.setBorderColor terminates the ExtendScript engine on this build (26.3.2), so this tool cannot run. No scripted alternative exists for clip borders; set them in the Effect Controls panel."
+    },
+    {
+      "name": "set_clip_border_width",
+      "outcome": "fail",
+      "detail": "qeClip.setBorderWidth terminates the ExtendScript engine on this build (26.3.2), so this tool cannot run. No scripted alternative exists for clip borders; set them in the Effect Controls panel."
+    },
+    {
+      "name": "set_clip_color_space",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "set_clip_crop",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "set_clip_gain",
+      "outcome": "fail",
+      "detail": "This clip exposes no gain parameter to scripting. On 26.5.2 an audio clip carries only Volume (Bypass, Level); clip gain lives in the Audio Gain dialog, which no script can reach. Nothing was changed."
+    },
+    {
+      "name": "set_clip_opacity",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_clip_pan",
+      "outcome": "fail",
+      "detail": "Volume component not found and no pan API is exposed for this clip"
+    },
+    {
+      "name": "set_clip_position",
+      "outcome": "fail",
+      "detail": "Error: Illegal Parameter type"
+    },
+    {
+      "name": "set_clip_properties",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "set_clip_properties_batch",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_clip_reverse",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "set_clip_rotation",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_clip_scale",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_clip_scale_to_frame_size",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "set_clip_selection",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_clip_speed_qe",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_clip_start_time",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_clip_volume",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_color_label",
+      "outcome": "fail",
+      "detail": "Project item not found"
+    },
+    {
+      "name": "set_color_space_override",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "set_color_value",
+      "outcome": "fail",
+      "detail": "Error: Illegal Parameter type"
+    },
+    {
+      "name": "set_compressor",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_effect_property",
+      "outcome": "fail",
+      "detail": "Error: Illegal Parameter type"
+    },
+    {
+      "name": "set_encoder_xmp_options",
+      "outcome": "pass",
+      "verified": false
+    },
+    {
+      "name": "set_essential_sound_category",
+      "outcome": "pass",
+      "verified": false
+    },
+    {
+      "name": "set_footage_interpretation",
+      "outcome": "fail",
+      "detail": "Project item not found"
+    },
+    {
+      "name": "set_frame_blend",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_frame_blend_qe",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_graphics_white_luminance",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_interpretation_frame_rate",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "set_item_in_out",
+      "outcome": "fail",
+      "detail": "Project item not found"
+    },
+    {
+      "name": "set_item_metadata",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_item_pixel_aspect_ratio",
+      "outcome": "pass",
+      "verified": false
+    },
+    {
+      "name": "set_item_poster_frame",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_keyframe_interpolation",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_limiter",
+      "outcome": "fail",
+      "detail": "No limiter component found. Add a Limiter or Dynamics Processing effect first."
+    },
+    {
+      "name": "set_location_copy_settings",
+      "outcome": "pass",
+      "verified": false
+    },
+    {
+      "name": "set_log_color_management",
+      "outcome": "pass",
+      "verified": false
+    },
+    {
+      "name": "set_lut_interpolation",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "set_marker_type",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "set_metadata",
+      "outcome": "fail",
+      "detail": "Project item not found"
+    },
+    {
+      "name": "set_mogrt_color",
+      "outcome": "fail",
+      "detail": "Clip is not a MOGRT"
+    },
+    {
+      "name": "set_mogrt_param",
+      "outcome": "fail",
+      "detail": "Clip is not a MOGRT"
+    },
+    {
+      "name": "set_mogrt_text",
+      "outcome": "fail",
+      "detail": "Clip is not a Motion Graphics Template (MOGRT)"
+    },
+    {
+      "name": "set_multicam_angle",
+      "outcome": "fail",
+      "detail": "Error: Unknown error exception"
+    },
+    {
+      "name": "set_offline",
+      "outcome": "skipped_unsafe",
+      "detail": "breaks media links"
+    },
+    {
+      "name": "set_override_frame_rate",
+      "outcome": "fail",
+      "detail": "Project item not found"
+    },
+    {
+      "name": "set_override_pixel_aspect_ratio",
+      "outcome": "fail",
+      "detail": "Project item not found"
+    },
+    {
+      "name": "set_parametric_eq",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_playhead_position",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "set_poster_frame",
+      "outcome": "fail",
+      "detail": "Project item not found"
+    },
+    {
+      "name": "set_preview_quality",
+      "outcome": "pass",
+      "verified": false
+    },
+    {
+      "name": "set_project_panel_columns",
+      "outcome": "pass",
+      "verified": false
+    },
+    {
+      "name": "set_project_panel_metadata",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_project_panel_selection",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "set_project_property",
+      "outcome": "fail",
+      "detail": "Error: Invalid parameter."
+    },
+    {
+      "name": "set_project_scratch_disk",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_proxies_enabled",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "set_qe_component_param",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_render_preview_quality",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_renderer",
+      "outcome": "pass",
+      "verified": false
+    },
+    {
+      "name": "set_scale_to_frame_size",
+      "outcome": "fail",
+      "detail": "Project item not found"
+    },
+    {
+      "name": "set_scale_to_frame_size_batch",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "set_scale_width_height",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_scratch_disk_path",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_sequence_audio_settings",
+      "outcome": "fail",
+      "detail": "Illegal Parameter type"
+    },
+    {
+      "name": "set_sequence_display_format",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_sequence_field_type",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_sequence_frame_rate",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_sequence_in_out_from_clips",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_sequence_in_out_points",
+      "outcome": "fail",
+      "detail": "setInPoint() ran but the sequence in point reads back as -400000 s, not the requested 1 s."
+    },
+    {
+      "name": "set_sequence_in_out_qe",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_sequence_pixel_aspect_ratio",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_sequence_resolution",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_sequence_selection",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "set_sequence_settings",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_sequence_start_timecode",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "set_sequence_zero_point",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "set_source_in_out",
+      "outcome": "fail",
+      "detail": "Project item not found"
+    },
+    {
+      "name": "set_source_in_out_qe",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_start_time",
+      "outcome": "fail",
+      "detail": "Project item not found"
+    },
+    {
+      "name": "set_target_track",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_time_interpolation",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_time_interpolation_type",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_track_lock_qe",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "set_track_volume_keyframes",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "set_transcode_on_ingest",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_uniform_scale",
+      "outcome": "pass"
+    },
+    {
+      "name": "set_work_area",
+      "outcome": "fail",
+      "detail": "The work area did not move (reads back in 0s / out 8.08333333333333s). setWorkAreaInPoint/setWorkAreaOutPoint are accepted but inert (measured on 26.3.2 and again on 26.5.2, with the work area enabled and every argument form: seconds, ticks"
+    },
+    {
+      "name": "set_workspace",
+      "outcome": "skipped_unsafe",
+      "detail": "rearranges the UI"
+    },
+    {
+      "name": "set_xmp_metadata",
+      "outcome": "fail",
+      "detail": "Project item not found"
+    },
+    {
+      "name": "set_zero_point",
+      "outcome": "pass"
+    },
+    {
+      "name": "setup_ducking",
+      "outcome": "fail",
+      "detail": "Volume component not found on clip (locale-aware lookup failed)"
+    },
+    {
+      "name": "share_production",
+      "outcome": "skipped_unsafe",
+      "detail": "publishes to team"
+    },
+    {
+      "name": "sharpen_clip",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "shift_srt_timing",
+      "outcome": "pass"
+    },
+    {
+      "name": "shot_status_report",
+      "outcome": "pass"
+    },
+    {
+      "name": "shotgrid_status_sync",
+      "outcome": "fail",
+      "detail": "CSV must have shot_name and status columns"
+    },
+    {
+      "name": "slide_edit",
+      "outcome": "fail",
+      "detail": "A slide needs clips directly before and after V1 \"synth_name\" at 1s on the same track. Nothing was changed."
+    },
+    {
+      "name": "slip_edit",
+      "outcome": "pass"
+    },
+    {
+      "name": "slowmo_quality_report",
+      "outcome": "pass"
+    },
+    {
+      "name": "snap_clips_to_grid",
+      "outcome": "pass"
+    },
+    {
+      "name": "snapshot_state",
+      "outcome": "pass"
+    },
+    {
+      "name": "speed_change",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "speed_ramp_bake",
+      "outcome": "skipped_unsafe",
+      "detail": "long ffmpeg render"
+    },
+    {
+      "name": "split_clip",
+      "outcome": "fail",
+      "detail": "Razor at 00;00;02;00 did not split any clip (track clip count unchanged). The split time may fall in a gap or outside the clip."
+    },
+    {
+      "name": "split_screen_layout",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "srt_diff",
+      "outcome": "pass"
+    },
+    {
+      "name": "stabilize_clip",
+      "outcome": "skipped_unsafe",
+      "detail": "long-running warp analysis"
+    },
+    {
+      "name": "start_batch_encode",
+      "outcome": "skipped_unsafe",
+      "detail": "launches AME"
+    },
+    {
+      "name": "start_encode_and_monitor",
+      "outcome": "skipped_unsafe",
+      "detail": "launches AME"
+    },
+    {
+      "name": "stem_export",
+      "outcome": "fail",
+      "detail": "Error: Illegal Parameter type"
+    },
+    {
+      "name": "step_frames",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "step_source_monitor",
+      "outcome": "pass"
+    },
+    {
+      "name": "stop_playback",
+      "outcome": "pass"
+    },
+    {
+      "name": "stop_source_monitor",
+      "outcome": "pass"
+    },
+    {
+      "name": "storyboard_bin_to_sequence",
+      "outcome": "fail",
+      "detail": "Bin name \"synth_name\" is ambiguous (4 bins share it). Pass binId, or a \"/\"-separated path, to disambiguate. Nothing was placed on the timeline."
+    },
+    {
+      "name": "sync_lock_track",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "sync_production",
+      "outcome": "skipped_unsafe",
+      "detail": "syncs to server"
+    },
+    {
+      "name": "three_point_edit",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "timecode_burn_in",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "timecode_to_frames",
+      "outcome": "pass"
+    },
+    {
+      "name": "timeline_fingerprint",
+      "outcome": "pass"
+    },
+    {
+      "name": "title_card",
+      "outcome": "fail",
+      "detail": "unknown"
+    },
+    {
+      "name": "todo_marker_report",
+      "outcome": "pass"
+    },
+    {
+      "name": "toggle_track_visibility",
+      "outcome": "pass"
+    },
+    {
+      "name": "toggle_uniform_scale",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "transact_sequence_edits",
+      "outcome": "skipped_args",
+      "detail": "could not synthesise: steps (steps: Invalid input: expected array, received undefined)"
+    },
+    {
+      "name": "transcribe_to_srt",
+      "outcome": "skipped_unsafe",
+      "detail": "long-running ML transcription"
+    },
+    {
+      "name": "trim_clip",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "undo",
+      "outcome": "skipped_unsafe",
+      "detail": "rewinds the sweep"
+    },
+    {
+      "name": "unlink_selection",
+      "outcome": "pass"
+    },
+    {
+      "name": "unnest_sequence",
+      "outcome": "skipped_unsafe",
+      "detail": "destructive restructure"
+    },
+    {
+      "name": "update_marker",
+      "outcome": "fail",
+      "detail": "unknown"
+    },
+    {
+      "name": "update_srt_cue",
+      "outcome": "fail",
+      "detail": "cue index 0 is out of range (file has 1 cue)."
+    },
+    {
+      "name": "validate_project_for_export",
+      "outcome": "pass"
+    },
+    {
+      "name": "validate_srt",
+      "outcome": "pass"
+    },
+    {
+      "name": "verify_clip_visible",
+      "outcome": "pass"
+    },
+    {
+      "name": "verify_color_grade",
+      "outcome": "pass",
+      "verified": false
+    },
+    {
+      "name": "verify_effect_rendered",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "verify_export",
+      "outcome": "pass"
+    },
+    {
+      "name": "verify_export_file",
+      "outcome": "pass"
+    },
+    {
+      "name": "verify_media_online",
+      "outcome": "pass"
+    },
+    {
+      "name": "verify_premiere_connection",
+      "outcome": "pass"
+    },
+    {
+      "name": "verify_speed_duration",
+      "outcome": "pass"
+    },
+    {
+      "name": "version_up_sequence",
+      "outcome": "pass",
+      "verified": true
+    },
+    {
+      "name": "vfx_pull_list",
+      "outcome": "pass"
+    },
+    {
+      "name": "watermark_apply",
+      "outcome": "pass"
+    },
+    {
+      "name": "write_clipboard",
+      "outcome": "skipped_unsafe",
+      "detail": "overwrites the user's system clipboard"
+    },
+    {
+      "name": "write_sidecar_file",
+      "outcome": "pass"
+    },
+    {
+      "name": "write_srt",
+      "outcome": "pass",
+      "verified": true
+    }
+  ]
+}

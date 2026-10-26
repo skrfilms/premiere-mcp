@@ -13,29 +13,39 @@ import { MARKER_COLOR_NAMES } from '../catalogue-schemas.js';
 export class MarkerTools extends KeyframeTools {
   protected async createMarker(timeSecs: number, name?: string, comment?: string, type?: string, colorIndex?: number, durationSecs?: number, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
-      var seq = ${this.buildSequenceResolver2(sequenceId)};
+      var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No sequence'});
       var markers = seq.markers;
       var m = markers.createMarker(${timeSecs});
-      ${name ? `try { m.name = ${JSON.stringify(name)}; } catch(e) {}` : ''}
-      ${comment ? `try { m.comments = ${JSON.stringify(comment)}; } catch(e) {}` : ''}
-      ${type ? `try { m.type = ${JSON.stringify(type)}; } catch(e) {}` : ''}
-      ${colorIndex !== undefined ? `try { m.colorByIndex = ${colorIndex}; } catch(e) {}` : ''}
-      ${durationSecs ? `try { var endT = new Time(); endT.seconds = ${timeSecs} + ${durationSecs}; m.end = endT; } catch(e) {}` : ''}
-      return JSON.stringify({success:true,verified:true,timeSecs:${timeSecs},name:String(m.name),type:String(m.type),ticks:String(m.start.ticks)});
+      if (!m) return JSON.stringify({success:false,error:'createMarker() returned nothing, so no marker was added.'});
+      // Every write used to be swallowed by an empty catch and the call still claimed
+      // verified:true. Measured on 26.5.2: Marker.end takes a NUMBER of seconds and rejects a Time
+      // ("Illegal Parameter type"); colour is set by setColorByIndex(), and assigning the
+      // colorByIndex property does nothing. Each requested field is now read back.
+      var mismatches = [];
+      ${name ? `try { m.name = ${JSON.stringify(name)}; } catch(e) {} if (String(m.name) !== ${JSON.stringify(name)}) mismatches.push('name');` : ''}
+      ${comment ? `try { m.comments = ${JSON.stringify(comment)}; } catch(e) {} if (String(m.comments) !== ${JSON.stringify(comment)}) mismatches.push('comment');` : ''}
+      ${type ? `try { m.type = ${JSON.stringify(type)}; } catch(e) {} if (String(m.type) !== ${JSON.stringify(type)}) mismatches.push('type');` : ''}
+      ${colorIndex !== undefined ? `try { m.setColorByIndex(${Number(colorIndex)}); } catch(e) {} var cb = null; try { cb = m.getColorByIndex(); } catch(e) {} if (cb !== ${Number(colorIndex)}) mismatches.push('colour');` : ''}
+      ${durationSecs ? `try { m.end = ${Number(timeSecs) + Number(durationSecs)}; } catch(e) {} if (Math.abs(Number(m.end.seconds) - ${Number(timeSecs) + Number(durationSecs)}) > 0.001) mismatches.push('duration');` : ''}
+      var colorNow = null; try { colorNow = m.getColorByIndex(); } catch(e) {}
+      var info = {timeSecs:Number(m.start.seconds),endSecs:Number(m.end.seconds),name:String(m.name),comment:String(m.comments),type:String(m.type),colorIndex:colorNow,ticks:String(m.start.ticks)};
+      if (mismatches.length) return JSON.stringify({success:false,verified:true,verifiedBy:'marker field readback',markerCreated:true,marker:info,
+        error:'HALF APPLIED: the marker was created but these fields did not take: ' + mismatches.join(', ') + '. Fix it with update_marker or delete it.'});
+      return JSON.stringify({success:true,verified:true,verifiedBy:'marker field readback',timeSecs:info.timeSecs,endSecs:info.endSecs,name:info.name,type:info.type,colorIndex:info.colorIndex,ticks:info.ticks});
     `);
   }
 
   protected async markersToCsv(outputPath: string, sequenceId?: string): Promise<any> {
     const result = await this.bridge.executeScript(`
       try {
-        var seq = ${sequenceId ? `(function(){var ss=app.project.sequences;for(var i=0;i<ss.numSequences;i++){if(ss[i].sequenceID===${JSON.stringify(sequenceId)})return ss[i];}return app.project.activeSequence;})()` : 'app.project.activeSequence'};
+        var seq = ${this.buildSeqRes(sequenceId)};
         if (!seq) return JSON.stringify({success:false,error:'No sequence'});
         var markers = seq.markers;
         var rows = [];
         var m = markers.numMarkers > 0 ? markers.getFirstMarker() : null;
         while (m) {
-          rows.push({ time: m.start ? m.start.seconds : 0, name: String(m.name||''), comment: String(m.comments||''), type: String(m.type||'Comment'), color: m.colorByIndex||0 });
+          rows.push({ time: m.start ? m.start.seconds : 0, name: String(m.name||''), comment: String(m.comments||''), type: String(m.type||'Comment'), color: (function(){ try { return m.getColorByIndex(); } catch(eC) { return 0; } })() });
           try { m = markers.getNextMarker(m); } catch(e) { break; }
         }
         return JSON.stringify({success:true,rows:rows,count:rows.length});
@@ -247,7 +257,8 @@ ${this.buildSequenceResolver(sequenceId)}
         // try{}catch(ee){} while the response claimed verified:true — so a zero-length marker
         // was indistinguishable from a duration marker. Read the end back and compare.
         var endError=null;
-        try{var et=new Time();et.seconds=${startSecs+durationSecs};m.end=et;}catch(ee){endError=ee.toString();}
+        // Marker.end takes a number of seconds; a Time object is rejected on 26.5.2.
+        try{m.end=${Number(startSecs)+Number(durationSecs)};}catch(ee){endError=ee.toString();}
         var endBack=null; try{ endBack=Number(m.end.seconds); }catch(eE){}
         var startBack=null; try{ startBack=Number(m.start.seconds); }catch(eS){}
         var wantEnd=${startSecs+durationSecs};
@@ -337,14 +348,35 @@ ${this.buildSequenceResolver(sequenceId)}
           if(seqs[i].sequenceID===${JSON.stringify(tgtSeqId)})tgt=seqs[i];
         }
         if(!src||!tgt)return JSON.stringify({success:false,error:'Source or target sequence not found'});
-        var count=0;
+        // Copying a sequence onto itself used to hang the host: the loop walked the same
+        // marker list it was appending to, so it never reached the end and the panel could
+        // not cancel it. Refuse it, and snapshot the source before writing anything so the
+        // walk can never see a marker this call created.
+        if(src===tgt||src.sequenceID===tgt.sequenceID)return JSON.stringify({success:false,error:'Source and target are the same sequence. Copying the markers of a sequence onto itself would only duplicate every marker, so nothing was done.'});
+        var snap=[];
         var m=src.markers.getFirstMarker();
         while(m){
-          var nm=tgt.markers.createMarker(m.start.seconds);
-          nm.name=m.name;nm.comments=m.comments;nm.type=m.type;nm.colorByIndex=m.colorByIndex;
-          count++;m=src.markers.getNextMarker(m);
+          var endT=null;try{endT=m.end?m.end.seconds:null;}catch(eE){}
+          var cbi=null;try{cbi=m.getColorByIndex?m.getColorByIndex():null;}catch(eC){}
+          snap.push({start:m.start.seconds,end:endT,name:String(m.name),comments:String(m.comments),type:String(m.type),color:cbi});
+          m=src.markers.getNextMarker(m);
         }
-        return JSON.stringify({success:true,markersCopied:count});
+        var before=tgt.markers.numMarkers;
+        var count=0,warnings=[];
+        for(var k=0;k<snap.length;k++){
+          var s=snap[k];
+          var nm=tgt.markers.createMarker(s.start);
+          if(!nm){warnings.push('createMarker returned nothing at '+s.start+'s');continue;}
+          nm.name=s.name;nm.comments=s.comments;
+          try{if(s.type&&s.type!=='Comment'){nm.type=s.type;}}catch(eT){warnings.push('type not set at '+s.start+'s');}
+          try{if(s.end!==null&&s.end>s.start){nm.end=s.end;}}catch(eD){warnings.push('duration not set at '+s.start+'s');}
+          try{if(s.color!==null&&nm.setColorByIndex){nm.setColorByIndex(s.color);}}catch(eS){warnings.push('colour not set at '+s.start+'s');}
+          count++;
+        }
+        var after=tgt.markers.numMarkers;
+        var verified=(after-before)===snap.length;
+        return JSON.stringify({success:verified,verified:verified,verifiedBy:'target markers.numMarkers before/after',sourceMarkers:snap.length,markersCopied:count,targetBefore:before,targetAfter:after,warnings:warnings,
+          error:verified?undefined:'Expected the target to gain '+snap.length+' markers but it gained '+(after-before)+'.'});
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
     `);
   }
@@ -374,7 +406,7 @@ ${this.buildSequenceResolver(sequenceId)}
         for(var i=0;i<seqs.numSequences;i++){
           var seq=seqs[i];var seqName=String(seq.name);
           var m=seq.markers.getFirstMarker();
-          while(m){all.push({sequenceName:seqName,name:String(m.name),comment:String(m.comments),type:String(m.type),secs:m.start.seconds,color:m.colorByIndex});m=seq.markers.getNextMarker(m);}
+          while(m){all.push({sequenceName:seqName,name:String(m.name),comment:String(m.comments),type:String(m.type),secs:m.start.seconds,color:(function(){try{return m.getColorByIndex();}catch(eC){return null;}})()});m=seq.markers.getNextMarker(m);}
         }
         return JSON.stringify({success:true,count:all.length,markers:all});
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
@@ -399,7 +431,7 @@ ${this.buildSequenceResolver(sequenceId)}
 
       const markerScript = `
         try {
-          var seq = ${sequenceId ? `(function(){ var seqs=app.project.sequences; for(var i=0;i<seqs.numSequences;i++){ if(seqs[i].sequenceID===${JSON.stringify(sequenceId)}) return seqs[i]; } return app.project.activeSequence; })()` : 'app.project.activeSequence'};
+          var seq = ${this.buildSeqRes(sequenceId)};
           if (!seq) return JSON.stringify({success:false,error:'No sequence'});
           var comments = ${JSON.stringify(comments)};
           var created = 0;
@@ -408,7 +440,7 @@ ${this.buildSequenceResolver(sequenceId)}
             var m = seq.markers.createMarker(c.time);
             m.name = c.author ? '[' + c.author + ']' : 'Frame.io';
             m.comments = c.text;
-            m.colorByIndex = ${markerColor};
+            try { m.setColorByIndex(${markerColor}); } catch(eC) {}
             created++;
           }
           return JSON.stringify({success:true,verified:true,markersCreated:created,sequenceName:String(seq.name)});
@@ -420,10 +452,29 @@ ${this.buildSequenceResolver(sequenceId)}
     }
   }
 
-  protected async exportPerMarkerRange(outputDir: string, presetPath?: string, markerPattern?: string): Promise<any> {
+  /**
+   * Three defects, all in the same call:
+   *
+   * 1. It finished with `seq.clearInPoint(0); seq.clearOutPoint(0)`. Those are ProjectItem
+   *    methods and are UNDEFINED on Sequence (measured on 26.3.2 — the same fact is written
+   *    down in clearSequenceInOut one domain over), so the line threw AFTER every export had
+   *    already run. The tool therefore reported success:false on a run that fully succeeded,
+   *    and left the caller's in/out points sitting on the last exported range.
+   * 2. exportAsMediaDirect's result was discarded and no file was ever stat'ed, so the
+   *    response listed output paths that need not exist and called itself success:true.
+   * 3. It hardcoded the active sequence with no way to name another one.
+   *
+   * The in/out points are now captured up front and restored with setInPoint/setOutPoint,
+   * and every output is stat'ed so `verified` reflects files that are actually on disk.
+   */
+  protected async exportPerMarkerRange(outputDir: string, presetPath?: string, markerPattern?: string, seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(seqId)};
+        if (!seq) return JSON.stringify({success:false,error:'No sequence to export from.'});
+        // Captured BEFORE any range is set, so the caller's range can be put back.
+        var priorIn = null, priorOut = null;
+        try { priorIn = seq.getInPointAsTime().seconds; priorOut = seq.getOutPointAsTime().seconds; } catch(ePrior) {}
         var markers = seq.markers;
         var m = markers.getFirstMarker();
         var ranges = [];
@@ -440,19 +491,40 @@ ${this.buildSequenceResolver(sequenceId)}
           }
           m = markers.getNextMarker(m);
         }
-        // Export each range
-        var exported = [];
+        // Export each range, then stat the file. A queued-but-absent output is a failure.
+        var exported = [], missing = [];
         for (var i = 0; i < ranges.length; i++) {
           var r = ranges[i];
+          // The extension is assumed to be .mp4. A preset that writes something else lands at a
+          // different path, which shows up below as a missing file rather than a false success.
           var outPath = ${JSON.stringify(outputDir)} + '/' + r.name.replace(/[^a-zA-Z0-9_-]/g,'_') + '_' + i + '.mp4';
           var inT = new Time(); inT.seconds = r.inSecs;
           var outT = new Time(); outT.seconds = r.outSecs;
           seq.setInPoint(inT); seq.setOutPoint(outT);
-          seq.exportAsMediaDirect(outPath, ${JSON.stringify(presetPath ?? '')}, 1);
-          exported.push({range:r, outputPath:outPath});
+          var callResult = null;
+          try { callResult = seq.exportAsMediaDirect(outPath, ${JSON.stringify(presetPath ?? '')}, 1); } catch(eExp) { callResult = 'threw: ' + eExp.toString(); }
+          var f = new File(outPath);
+          if (f.exists) exported.push({range:r, outputPath:outPath, fileSize:f.length});
+          else missing.push({range:r, outputPath:outPath, exportAsMediaDirectReturned:String(callResult)});
         }
-        seq.clearInPoint(0); seq.clearOutPoint(0);
-        return JSON.stringify({success:true,rangeCount:ranges.length,exported:exported});
+        // clearInPoint/clearOutPoint do NOT exist on Sequence (26.3.2); restore by setting.
+        var restored = false;
+        if (priorIn !== null && priorOut !== null) {
+          try { seq.setInPoint(priorIn); seq.setOutPoint(priorOut); restored = true; } catch(eRestore) {}
+        }
+        return JSON.stringify({
+          success: ranges.length > 0 && missing.length === 0,
+          verified: true,
+          rangeCount: ranges.length,
+          exportedCount: exported.length,
+          exported: exported,
+          missing: missing,
+          inOutPointsRestored: restored,
+          error: ranges.length === 0
+            ? 'No marker pairs matched, so nothing was exported.'
+            : (missing.length ? missing.length + ' of ' + ranges.length + ' ranges produced no file on disk.' : undefined),
+          note: restored ? undefined : 'The sequence in/out points were changed for export and could not be restored; they now sit on the last range.'
+        });
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }

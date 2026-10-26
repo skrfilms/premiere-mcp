@@ -7,12 +7,12 @@
 import { MotionLayoutTools } from './motion-layout.js';
 
 export class MulticamTools extends MotionLayoutTools {
-  protected async enableMulticam(_seqId: string|undefined, trackIndex: number, clipIndex: number, enabled: boolean): Promise<any> {
+  protected async enableMulticam(seqId: string|undefined, trackIndex: number, clipIndex: number, enabled: boolean): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = qe.project.getActiveSequence();
-        var clip = seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        var seq = ${this.buildQSeqResolver(seqId)};
+        var clip = __qeClipByIndex(seq, 'video', ${trackIndex}, ${clipIndex});
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         var canDo = clip.canDoMulticam();
         if (!canDo && ${enabled}) return JSON.stringify({success:false,verified:true,error:'canDoMulticam() returned false for this clip, so multicam cannot be enabled on it. Only a clip whose source is a multicam source sequence can be switched to multicam.'});
@@ -34,10 +34,10 @@ export class MulticamTools extends MotionLayoutTools {
     `);
   }
 
-  protected async getMulticamAngleCount(_seqId?: string): Promise<any> {
+  protected async getMulticamAngleCount(seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(seqId)};
         var item = seq.projectItem;
         var isMulticam = item ? item.isMulticamClip() : false;
         return JSON.stringify({success:true,isMulticamSequence:isMulticam,videoTrackCount:seq.videoTracks.numTracks,audioTrackCount:seq.audioTracks.numTracks,sequenceName:String(seq.name)});
@@ -45,12 +45,12 @@ export class MulticamTools extends MotionLayoutTools {
     `);
   }
 
-  protected async flattenMulticam(_seqId: string|undefined, trackIndex: number, clipIndex: number): Promise<any> {
+  protected async flattenMulticam(seqId: string|undefined, trackIndex: number, clipIndex: number): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = qe.project.getActiveSequence();
-        var clip = seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        var seq = ${this.buildQSeqResolver(seqId)};
+        var clip = __qeClipByIndex(seq, 'video', ${trackIndex}, ${clipIndex});
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         clip.setMulticam(false);
         return JSON.stringify({success:true,message:'Multicam disabled on clip. Clip now plays as single-stream at the active angle.'});
@@ -58,25 +58,25 @@ export class MulticamTools extends MotionLayoutTools {
     `);
   }
 
-  protected async multicamInfo(_seqId: string|undefined, trackIndex: number, clipIndex: number): Promise<any> {
+  protected async multicamInfo(seqId: string|undefined, trackIndex: number, clipIndex: number): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = qe.project.getActiveSequence();
-        var qeClip = seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        var seq = ${this.buildQSeqResolver(seqId)};
+        var qeClip = __qeClipByIndex(seq, 'video', ${trackIndex}, ${clipIndex});
         if (!qeClip) return JSON.stringify({success:false,error:'Clip not found'});
-        var domClip = app.project.activeSequence.videoTracks[${trackIndex}].clips[${clipIndex}];
+        var domClip = ${this.buildSeqRes(seqId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
         return JSON.stringify({success:true,multicamEnabled:qeClip.multicamEnabled,canDoMulticam:qeClip.canDoMulticam(),isMulticamClip:domClip.projectItem.isMulticamClip(),name:String(domClip.name)});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
 
-  protected async setMulticamAngle(_seqId: string|undefined, trackIndex: number, clipIndex: number, angleIndex: number): Promise<any> {
+  protected async setMulticamAngle(seqId: string|undefined, trackIndex: number, clipIndex: number, angleIndex: number): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = qe.project.getActiveSequence();
-        var clip = seq.getVideoTrackAt(${trackIndex}).getItemAt(${clipIndex});
+        var seq = ${this.buildQSeqResolver(seqId)};
+        var clip = __qeClipByIndex(seq, 'video', ${trackIndex}, ${clipIndex});
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         clip.setSwitchSources(${angleIndex});
         return JSON.stringify({success:true,angleIndex:${angleIndex}});
@@ -84,21 +84,25 @@ export class MulticamTools extends MotionLayoutTools {
     `);
   }
 
-  protected async createMulticamSourceSequence(binName: string, newSeqName: string, presetPath?: string): Promise<any> {
+  /**
+   * The bin lookup scanned rootItem.children one level deep and never checked that the match
+   * was a bin, so a nested bin was unreachable and a CLIP named "Angles" would win the match
+   * and then report "Bin is empty". Uses the shared __resolveBin prelude helper. Sub-bins are
+   * also skipped when collecting angles -- they were previously pushed in as camera angles.
+   */
+  protected async createMulticamSourceSequence(binName: string, newSeqName: string, presetPath?: string, binId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var bin = null;
-        var root = app.project.rootItem;
-        for (var i = 0; i < root.children.numItems; i++) {
-          if (String(root.children[i].name) === ${JSON.stringify(binName)}) { bin = root.children[i]; break; }
-        }
-        if (!bin) return JSON.stringify({success:false,error:'Bin not found: ' + ${JSON.stringify(binName)}});
+        var req = __resolveBin(${JSON.stringify(binId??null)}, ${JSON.stringify(binName)});
+        if (req.error) return JSON.stringify({success:false,error:req.error+' No sequence was created.',binName:${JSON.stringify(binName)},binId:${JSON.stringify(binId??null)},matchCount:req.matchCount});
+        var bin = req.bin;
         var clips = [];
-        for (var j = 0; j < bin.children.numItems; j++) clips.push(bin.children[j]);
-        if (clips.length === 0) return JSON.stringify({success:false,error:'Bin is empty'});
+        for (var j = 0; j < bin.children.numItems; j++) { if (!__isBin(bin.children[j])) clips.push(bin.children[j]); }
+        if (clips.length === 0) return JSON.stringify({success:false,error:'Bin "'+String(bin.name)+'" ('+String(bin.treePath)+') holds no clips, so there are no camera angles to build from. No sequence was created.',binId:String(bin.nodeId)});
         var seq = app.project.createNewSequenceFromClips(${JSON.stringify(newSeqName)}, clips, ${JSON.stringify(presetPath ?? '')});
         if (!seq) return JSON.stringify({success:false,error:'Could not create sequence'});
-        return JSON.stringify({success:true,sequenceId:String(seq.sequenceID),name:String(seq.name),clipCount:clips.length});
+        return JSON.stringify({success:true,sequenceId:String(seq.sequenceID),name:String(seq.name),clipCount:clips.length,
+          binId:String(bin.nodeId),binName:String(bin.name),binResolvedBy:req.resolvedBy});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }

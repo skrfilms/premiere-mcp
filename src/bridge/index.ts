@@ -377,6 +377,20 @@ function __qeSequenceFor(seq) {
   } catch (eActive) {}
   return null;
 }
+/*
+ * QE addresses only the sequences in its own list plus whichever sequence is ACTIVE (measured on
+ * 26.5.2: a sequence never opened in a timeline is absent from qe.project.getSequenceAt(), and
+ * becomes reachable the moment app.project.openSequence(id) makes it active). Sequence
+ * .openInTimeline() does not exist on this build, so callers that guarded on it silently did
+ * nothing. This opens the named sequence when QE cannot see it. Side effect, by design: the named
+ * sequence is left active, the same contract the transactions module declares.
+ */
+function __qeSequenceOpening(seq) {
+  var q = __qeSequenceFor(seq);
+  if (q || !seq) return q;
+  try { app.project.openSequence(seq.sequenceID); } catch (eOpen) {}
+  return __qeSequenceFor(seq);
+}
 function __findQeClipByDomClip(qeTrack, domClip) {
   // QE track items are not the DOM clip list: they include gaps and
   // transitions, so the DOM clip index addresses a different item as soon as
@@ -404,6 +418,98 @@ function __findQeClipByDomClip(qeTrack, domClip) {
     }
   }
   return best;
+}
+/*
+ * The QE item for DOM clip index ci on track ti. qeTrack.getItemAt(ci) is NOT that clip: QE track
+ * items include gaps and transitions, so the DOM index lands on a different item as soon as
+ * anything precedes the clip (see __findQeClipByDomClip). Resolves the DOM clip through the
+ * sequence whose id is the QE sequence's guid, then matches by start time. Null when either side
+ * cannot be resolved -- never a guess.
+ */
+function __qeClipByIndex(qeSeq, kind, ti, ci) {
+  if (!qeSeq) return null;
+  var dom = null;
+  try {
+    var g = String(qeSeq.guid);
+    for (var i = 0; i < app.project.sequences.numSequences; i++) { if (String(app.project.sequences[i].sequenceID) === g) { dom = app.project.sequences[i]; break; } }
+  } catch (eG) {}
+  var qt = null;
+  try { qt = kind === 'audio' ? qeSeq.getAudioTrackAt(ti) : qeSeq.getVideoTrackAt(ti); } catch (eT) {}
+  if (!qt || !dom) return null;
+  var tracks = kind === 'audio' ? dom.audioTracks : dom.videoTracks;
+  var dc = tracks[ti] ? tracks[ti].clips[ci] : null;
+  if (!dc) return null;
+  return __findQeClipByDomClip(qt, dc);
+}
+/*
+ * Named transitions on a QE track that touch time t (seconds). QE track transition lists also
+ * carry unnamed placeholder spans, which are skipped. Used to prove a transition landed AT A CUT:
+ * QE addTransition's second argument means "at the clip's START" (true) or its end (false) --
+ * measured on 26.5.2 -- so a call can succeed while putting the transition somewhere else.
+ */
+function __qeTransitionsAt(qeTrack, t, tol) {
+  var out = [];
+  if (!qeTrack) return out;
+  if (tol === undefined) tol = 0.05;
+  var n = 0;
+  try { n = qeTrack.numTransitions; } catch (eN) { return out; }
+  for (var i = 0; i < n; i++) {
+    var tr = null;
+    try { tr = qeTrack.getTransitionAt(i); } catch (eT) {}
+    if (!tr) continue;
+    var name = '';
+    try { name = String(tr.name); } catch (eName) {}
+    if (!name) continue;
+    var a = Number(tr.start.secs), b = Number(tr.end.secs);
+    if (a <= t + tol && b >= t - tol) out.push({ name: name, startSecs: a, endSecs: b });
+  }
+  return out;
+}
+/*
+ * linkAudio=false clean-up and overwrite reporting for placements.
+ *
+ * The old clean-up removed every audio clip from the same source that started at the placement
+ * time, so the user's OWN clip of that media starting there was deleted too (measured: a dual-mono
+ * sequence lost its A1 clip at 10-20s when a video-only piece was placed on V2 at 10s). Only the
+ * placed clip's linked audio is removed now. Overwrite placement of an A/V item also overwrites the
+ * audio tracks under it -- that is Premiere's overwrite edit -- so the audio there is snapshotted
+ * and anything it replaced is reported instead of passing silently.
+ */
+function __removeLinkedAudio(placed) {
+  var removed = 0;
+  try {
+    var l = placed.getLinkedItems();
+    var victims = [];
+    for (var i = 0; i < l.numItems; i++) { if (String(l[i].mediaType) === 'Audio') victims.push(l[i]); }
+    for (var k = 0; k < victims.length; k++) { try { victims[k].remove(false, false); removed++; } catch (eR) {} }
+  } catch (eL) {}
+  return removed;
+}
+function __audioUnder(seq, a, b) {
+  var out = [];
+  for (var t = 0; t < seq.audioTracks.numTracks; t++) {
+    var tr = seq.audioTracks[t];
+    for (var i = 0; i < tr.clips.numItems; i++) {
+      var c = tr.clips[i], cs = Number(c.start.seconds), ce = Number(c.end.seconds);
+      if (cs < b - 0.001 && ce > a + 0.001) out.push({ track: 'A' + (t + 1), nodeId: String(c.nodeId), name: String(c.name), start: cs, end: ce });
+    }
+  }
+  return out;
+}
+function __audioReplaced(seq, snapshot) {
+  var hit = [];
+  for (var s = 0; s < snapshot.length; s++) {
+    var w = snapshot[s], intact = false;
+    for (var t = 0; t < seq.audioTracks.numTracks && !intact; t++) {
+      var tr = seq.audioTracks[t];
+      for (var i = 0; i < tr.clips.numItems; i++) {
+        var c = tr.clips[i];
+        if (String(c.nodeId) === w.nodeId && Math.abs(Number(c.start.seconds) - w.start) < 0.001 && Math.abs(Number(c.end.seconds) - w.end) < 0.001) { intact = true; break; }
+      }
+    }
+    if (!intact) hit.push(w.track + ' "' + w.name + '" ' + w.start + '-' + w.end + 's');
+  }
+  return hit;
 }
 function __findClipInSequence(seq, nodeId) {
   if (!seq) return null;
@@ -458,12 +564,251 @@ function __findProjectItem(nodeId) {
   return walk(app.project.rootItem);
 }
 /*
+ * Bin addressing, shared by every tool that takes a destination bin.
+ *
+ * These lived only inside create_bin's generated script, so import_folder and
+ * import_media each carried a weaker copy that scanned rootItem.children one
+ * level deep. A bin created inside another bin -- which is what create_bin
+ * returns most of the time -- was therefore unreachable as an import
+ * destination, and the only diagnosis on offer was "Destination bin not found"
+ * for a bin that plainly existed. One resolver, three callers.
+ */
+function __isBin(it) {
+  // A bin has createBin(); clips do not. type===2 is Premiere's BIN constant,
+  // but the duck-type is what survives across builds.
+  if (!it) return false;
+  if (it.type === 2) return true;
+  return (typeof it.createBin === 'function');
+}
+function __binByPath(root, segments) {
+  var node = root;
+  for (var s = 0; s < segments.length; s++) {
+    if (!node || !node.children) return null;
+    var next = null;
+    for (var i = 0; i < node.children.numItems; i++) {
+      var ch = node.children[i];
+      if (ch && __isBin(ch) && String(ch.name) === String(segments[s])) { next = ch; break; }
+    }
+    if (!next) return null;
+    node = next;
+  }
+  return node;
+}
+function __binsByNameDeep(root, wanted, acc) {
+  if (!root || !root.children) return acc;
+  for (var i = 0; i < root.children.numItems; i++) {
+    var ch = root.children[i];
+    if (ch && __isBin(ch)) {
+      if (String(ch.name) === String(wanted)) acc.push(ch);
+      __binsByNameDeep(ch, wanted, acc);
+    }
+  }
+  return acc;
+}
+/*
+ * Resolve a destination bin from an id, a "/"-separated path, or a single name.
+ * Returns { bin: <ProjectItem> } on success or { error: "..." } on failure --
+ * never a silent fall back to the project root, because an import that lands
+ * somewhere other than where it was asked to land is the failure this replaces.
+ * A bare name is deep-searched and REFUSED when two bins share it: guessing
+ * between them is how media ends up in the wrong scene.
+ */
+function __resolveBin(binId, binName) {
+  var root = (app.project && app.project.rootItem) ? app.project.rootItem : null;
+  if (!root) return { error: 'No project is open.' };
+  if (binId !== undefined && binId !== null && String(binId) !== '') {
+    var byId = __findProjectItem(String(binId));
+    if (!byId) return { error: 'Bin not found by id: ' + binId + '.' };
+    if (!__isBin(byId)) return { error: 'binId ' + binId + ' refers to "' + String(byId.name) + '", which is not a bin.' };
+    return { bin: byId, resolvedBy: 'id' };
+  }
+  if (binName === undefined || binName === null || String(binName) === '') {
+    return { bin: root, resolvedBy: 'root' };
+  }
+  if (String(binName).indexOf('/') !== -1) {
+    var segs = String(binName).split('/');
+    var trimmed = [];
+    for (var si = 0; si < segs.length; si++) { if (segs[si] !== '') trimmed.push(segs[si]); }
+    var byPath = __binByPath(root, trimmed);
+    if (!byPath) return { error: 'Bin path not found: ' + binName + '.' };
+    return { bin: byPath, resolvedBy: 'path' };
+  }
+  var matches = __binsByNameDeep(root, binName, []);
+  if (matches.length === 0) return { error: 'Bin not found: ' + binName + '.' };
+  if (matches.length > 1) {
+    return { error: 'Bin name "' + binName + '" is ambiguous (' + matches.length + ' bins share it). Pass binId, or a "/"-separated path, to disambiguate.', matchCount: matches.length };
+  }
+  return { bin: matches[0], resolvedBy: 'name' };
+}
+/*
  * String.prototype.padStart does not exist in this engine (measured on 26.3.2: typeof is
  * undefined), so frames_to_timecode threw "String().padStart is not a function" on every call.
  * Neither do padEnd, repeat, find, findIndex, some, every, reduce, lastIndexOf, bind, or
  * Object.assign — while map, filter, indexOf and Array.isArray DO exist. No single rule predicts
  * that set, so it is probed rather than assumed; see es3-absent-methods.test.ts.
  */
+/*
+ * map, filter, indexOf and Array.isArray are NOT reliably present. Premiere 26.5.2 (ExtendScript
+ * 4.5.6), probed with typeof on a freshly launched host on 2026-10-25, has none of them, and
+ * ~20 tools threw "x.indexOf is not a function" / "x.map is not a function" on every call. The
+ * 26.3.2 probe that recorded them as present was most likely reading a shared engine another
+ * extension had already polyfilled, so a measurement on a warm host says nothing about a cold one.
+ * Installed only where missing, so a host that has its own keeps it. The serialiser walks arrays
+ * by index and every for-in over an object here is own-property guarded, so these enumerable
+ * prototype members cannot leak into a response.
+ */
+if (typeof Array.isArray !== 'function') {
+  Array.isArray = function (value) { return Object.prototype.toString.call(value) === '[object Array]'; };
+}
+if (typeof Array.prototype.indexOf !== 'function') {
+  Array.prototype.indexOf = function (needle, fromIndex) {
+    var len = this.length >>> 0;
+    var i = fromIndex ? Number(fromIndex) : 0;
+    if (i < 0) i = Math.max(0, len + i);
+    for (; i < len; i++) { if (i in this && this[i] === needle) return i; }
+    return -1;
+  };
+}
+if (typeof Array.prototype.map !== 'function') {
+  Array.prototype.map = function (fn, thisArg) {
+    var len = this.length >>> 0, out = new Array(len);
+    for (var i = 0; i < len; i++) { if (i in this) out[i] = fn.call(thisArg, this[i], i, this); }
+    return out;
+  };
+}
+if (typeof Array.prototype.filter !== 'function') {
+  Array.prototype.filter = function (fn, thisArg) {
+    var len = this.length >>> 0, out = [];
+    for (var i = 0; i < len; i++) { if (i in this && fn.call(thisArg, this[i], i, this)) out.push(this[i]); }
+    return out;
+  };
+}
+/*
+ * Sequence.getTimelineGaps() does not exist (typeof undefined on 26.5.2), and every caller that
+ * reached for it behind a typeof guard silently reported zero gaps. Gaps are computed from clip
+ * ranges instead. __trackGaps returns the empty ranges on one track, from 0 to its last clip, in
+ * ticks. __videoGaps returns ranges where NO video track has a clip, i.e. black in the program.
+ */
+function __rangesGaps(ranges) {
+  ranges.sort(function (a, b) { return a.start - b.start; });
+  var gaps = [], cursor = 0;
+  for (var i = 0; i < ranges.length; i++) {
+    if (ranges[i].start > cursor) gaps.push({ start: cursor, end: ranges[i].start });
+    if (ranges[i].end > cursor) cursor = ranges[i].end;
+  }
+  return gaps;
+}
+function __trackGaps(track) {
+  var ranges = [];
+  for (var i = 0; i < track.clips.numItems; i++) {
+    ranges.push({ start: Number(track.clips[i].start.ticks), end: Number(track.clips[i].end.ticks) });
+  }
+  return __rangesGaps(ranges);
+}
+function __videoGaps(seq) {
+  var ranges = [];
+  for (var t = 0; t < seq.videoTracks.numTracks; t++) {
+    var tr = seq.videoTracks[t];
+    for (var i = 0; i < tr.clips.numItems; i++) {
+      ranges.push({ start: Number(tr.clips[i].start.ticks), end: Number(tr.clips[i].end.ticks) });
+    }
+  }
+  return __rangesGaps(ranges);
+}
+/*
+ * Colour spaces are ColorSpace host objects, not names. Measured on 26.5.2: ColorSpace has no
+ * constructor, its fields are read-only, ProjectItem.getOverrideColorSpaceList() does not exist,
+ * String(colorSpace) is "[object Object]", and setOverrideColorSpace("Rec. 709") throws "Illegal
+ * Parameter type". The only source of ColorSpace objects a script can pass back is a sequence's
+ * settings.workingColorSpaceList (plus items' own original colour spaces), so names are resolved
+ * against those.
+ */
+function __csInfo(cs) {
+  if (!cs) return null;
+  var o = {};
+  try { o.name = String(cs.name); } catch (e1) {}
+  try { o.empty = Boolean(cs.empty); } catch (e2) {}
+  try { o.primaries = Number(cs.primaries); } catch (e3) {}
+  try { o.transferCharacteristic = Number(cs.transferCharacteristic); } catch (e4) {}
+  try { o.matrixEquation = Number(cs.matrixEquation); } catch (e5) {}
+  try { o.isSceneReferred = Boolean(cs.isSceneReferred); } catch (e6) {}
+  return o;
+}
+function __colorSpaceCatalog(item) {
+  var out = [], seen = {};
+  var add = function (cs) {
+    if (!cs) return;
+    var n = '';
+    try { if (cs.empty) return; n = String(cs.name); } catch (e) { return; }
+    if (!n || seen[n]) return;
+    seen[n] = true; out.push(cs);
+  };
+  try {
+    var seqs = app.project.sequences;
+    for (var i = 0; i < seqs.numSequences; i++) {
+      var list = null;
+      try { list = seqs[i].getSettings().workingColorSpaceList; } catch (eL) {}
+      if (list) for (var j = 0; j < list.length; j++) add(list[j]);
+    }
+  } catch (eS) {}
+  if (item) { try { add(item.getOriginalColorSpace()); } catch (eO) {} }
+  return out;
+}
+function __findColorSpace(name, item) {
+  var want = String(name).toLowerCase().replace(/[^a-z0-9]/g, '');
+  var cat = __colorSpaceCatalog(item);
+  for (var i = 0; i < cat.length; i++) {
+    if (String(cat[i].name).toLowerCase().replace(/[^a-z0-9]/g, '') === want) return cat[i];
+  }
+  return null;
+}
+function __colorSpaceNames(item) {
+  var cat = __colorSpaceCatalog(item), names = [];
+  for (var i = 0; i < cat.length; i++) names.push(String(cat[i].name));
+  return names;
+}
+/*
+ * The QE exportFrame* methods take the time as a TIMECODE STRING. Measured on 26.5.2 against a
+ * frame-counter clip: "00;00;02;00" and "00:00:02:00" export frame 48 at 24 fps, while "2" and a
+ * ticks string are accepted without error and export frame 0, and a bare number throws. The old
+ * callers tried seconds and ticks first and took the first call that wrote a file, so every
+ * captured frame was frame 0 regardless of the time asked for. Built from the sequence's own
+ * frame rate, as whole frames at the nominal rate (non-drop).
+ */
+function __qeTimecode(seq, seconds) {
+  var fps = 24;
+  try { fps = 254016000000 / Number(seq.timebase); } catch (eFps) {}
+  if (!(fps > 0)) fps = 24;
+  var nominal = Math.round(fps);
+  var frames = Math.round(Number(seconds) * fps);
+  if (frames < 0) frames = 0;
+  var ff = frames % nominal, totalSecs = Math.floor(frames / nominal);
+  var ss = totalSecs % 60, mm = Math.floor(totalSecs / 60) % 60, hh = Math.floor(totalSecs / 3600);
+  // ':' on purpose. QE reads either separator as a NON-drop frame count (measured on a 29.97
+  // sequence: 00;10;00;00 and 00:10:00:00 both export frame 18000), so the frames are laid out at the
+  // nominal rate whatever the sequence's display format; ';' only invited a drop-frame misreading.
+  return __padLeft(hh, 2) + ':' + __padLeft(mm, 2) + ':' + __padLeft(ss, 2) + ':' + __padLeft(ff, 2);
+}
+/*
+ * Timecode -> tick string for a sequence. Accepts HH:MM:SS:FF (non-drop), HH;MM;SS;FF (drop-frame
+ * at 29.97/59.94) or a plain number of seconds. Sequence.setZeroPoint() takes TICKS as a string, so
+ * a tool that passed the timecode straight through was inert. Null when it cannot be parsed.
+ */
+function __timecodeToTicks(seq, tc) {
+  var tb = 10584000000;
+  try { tb = Number(seq.timebase) || tb; } catch (eTb) {}
+  var fps = 254016000000 / tb, nominal = Math.round(fps);
+  var text = String(tc);
+  if (/^\\s*-?[0-9.]+\\s*$/.test(text)) return String(Math.round(Number(text) * 254016000000));
+  var m = text.match(/^\\s*(\\d+)[:;](\\d+)[:;](\\d+)([:;])(\\d+)\\s*$/);
+  if (!m) return null;
+  var h = Number(m[1]), mi = Number(m[2]), se = Number(m[3]), fr = Number(m[5]);
+  if (fr >= nominal || mi > 59 || se > 59) return null;
+  var frames = ((h * 3600 + mi * 60 + se) * nominal) + fr;
+  var drop = m[4] === ';' && (nominal === 30 || nominal === 60) && Math.abs(fps - nominal) > 0.001;
+  if (drop) { var d = nominal === 30 ? 2 : 4, totalMinutes = 60 * h + mi; frames -= d * (totalMinutes - Math.floor(totalMinutes / 10)); }
+  return String(Math.round(frames * tb));
+}
 function __padLeft(value, width, padChar) {
   var out = String(value);
   var ch = (padChar === undefined || padChar === null) ? '0' : String(padChar);
@@ -1718,7 +2063,17 @@ export class PremiereProBridge implements PremiereProTransport {
     await this.executeScript(script);
   }
 
-  async importMedia(filePath: string): Promise<PremiereProProjectItem> {
+  /**
+   * Import one media file, optionally INTO a named bin.
+   *
+   * The destination used to be hardcoded to app.project.rootItem while the
+   * caller's binName was echoed back in the response, so every bin-targeted
+   * import reported a bin it had not used. The bin is now resolved (by id, path
+   * or deep name) via the __resolveBin prelude helper, an unresolvable bin
+   * fails before anything is imported, and the parent bin is read back off the
+   * imported item rather than restated from the request.
+   */
+  async importMedia(filePath: string, binName?: string, binId?: string): Promise<PremiereProProjectItem> {
     // Validate file path for security
     const pathValidation = validateFilePath(filePath);
     if (!pathValidation.valid) {
@@ -1757,29 +2112,64 @@ export class PremiereProBridge implements PremiereProTransport {
           });
         }
 
+        var __binRequest = __resolveBin(${binId !== undefined ? JSON.stringify(binId) : 'null'}, ${binName !== undefined ? JSON.stringify(binName) : 'null'});
+        if (__binRequest.error) {
+          return JSON.stringify({
+            success: false,
+            error: __binRequest.error + " Nothing was imported. Omit binName/binId to import to the project root.",
+            binName: ${binName !== undefined ? JSON.stringify(binName) : 'null'},
+            binId: ${binId !== undefined ? JSON.stringify(binId) : 'null'},
+            matchCount: __binRequest.matchCount
+          });
+        }
+        var __destBin = __binRequest.bin;
+
         var existingItems = [];
         __walkItems(app.project.rootItem, existingItems);
 
         // Premiere returns true when asked to import media already in the
         // project, but it does not add another project item. Reuse that item
-        // instead of reporting a fabricated import failure.
+        // instead of reporting a fabricated import failure. It is reported at
+        // whatever bin it actually sits in -- a re-import does not move it, so
+        // claiming the requested bin here would be the same lie the hardcoded
+        // root destination used to tell.
         for (var existingIndex = 0; existingIndex < existingItems.length; existingIndex++) {
           var existingItem = existingItems[existingIndex];
           try {
             if (existingItem.getMediaPath && existingItem.getMediaPath() === file.fsName) {
+              var __existingPath = null;
+              try { __existingPath = String(existingItem.treePath); } catch (eTp) {}
+              // A caller who named a bin is relying on the media being there. The re-import does not
+              // move it, so success here would claim a bin the item is not in.
+              var __binWasRequested = ${binName !== undefined || binId !== undefined ? 'true' : 'false'};
+              var __inDest = false;
+              try { for (var xi = 0; xi < __destBin.children.numItems; xi++) { if (__destBin.children[xi].nodeId === existingItem.nodeId) { __inDest = true; break; } } } catch (eIn) {}
+              if (__binWasRequested && !__inDest) {
+                return JSON.stringify({
+                  success: false,
+                  alreadyImported: true,
+                  id: existingItem.nodeId,
+                  name: existingItem.name,
+                  treePath: __existingPath,
+                  movedToRequestedBin: false,
+                  error: "This file is already in the project at " + __existingPath + ", not in the requested bin '" + String(__destBin.name) + "'. Nothing was imported or moved; use move_item_to_bin to put it there."
+                });
+              }
               return JSON.stringify({
                 success: true,
                 id: existingItem.nodeId,
                 name: existingItem.name,
                 type: existingItem.type.toString(),
                 mediaPath: file.fsName,
-                alreadyImported: true
+                alreadyImported: true,
+                treePath: __existingPath,
+                movedToRequestedBin: false
               });
             }
           } catch (e) {}
         }
 
-        var importResult = app.project.importFiles([file.fsName], true, app.project.rootItem, false);
+        var importResult = app.project.importFiles([file.fsName], true, __destBin, false);
         if (!importResult) {
           return JSON.stringify({
             success: false,
@@ -1821,13 +2211,38 @@ export class PremiereProBridge implements PremiereProTransport {
           });
         }
 
-        return JSON.stringify({
+        // The destination is read back off the imported item, not restated from
+        // the request: treePath is what Premiere actually did with it.
+        var __landedPath = null;
+        try { __landedPath = String(importedItem.treePath); } catch (eLanded) {}
+        var __landedInRequestedBin = null;
+        try {
+          var __found = false;
+          for (var di = 0; di < __destBin.children.numItems; di++) {
+            if (__destBin.children[di] && __destBin.children[di].nodeId === importedItem.nodeId) { __found = true; break; }
+          }
+          __landedInRequestedBin = __found;
+        } catch (eCheck) {}
+
+        var __payload = {
           success: true,
           id: importedItem.nodeId,
           name: importedItem.name,
           type: importedItem.type.toString(),
-          mediaPath: importedItem.getMediaPath ? importedItem.getMediaPath() : file.fsName
-        });
+          mediaPath: importedItem.getMediaPath ? importedItem.getMediaPath() : file.fsName,
+          binId: __destBin.nodeId,
+          binName: String(__destBin.name),
+          binResolvedBy: __binRequest.resolvedBy,
+          treePath: __landedPath
+        };
+        // Only claim verified when the readback actually answered. An
+        // unreadable children collection is "unknown", not "confirmed".
+        if (__landedInRequestedBin !== null) __payload.verified = __landedInRequestedBin;
+        if (__landedInRequestedBin === false) {
+          __payload.success = false;
+          __payload.error = "The file was imported but did not land in the requested bin '" + String(__destBin.name) + "'; it is at " + __landedPath + ". Move it with move_item_to_bin.";
+        }
+        return JSON.stringify(__payload);
       } catch (e) {
         return JSON.stringify({
           success: false,
@@ -1978,6 +2393,11 @@ export class PremiereProBridge implements PremiereProTransport {
         var srcOut = ${sourceOutPoint === undefined ? 'null' : sourceOutPoint};
         var appliedSourceInOut = false;
         var sourceInOutError = "";
+        // The marks are the PROJECT ITEM's, shared with the bin and every later placement. They
+        // were left set to the requested range, so the item stayed marked (2-4s, say) and the next
+        // add_to_timeline / createNewSequenceFromClips silently used that range. Save and restore.
+        var priorMarks = null;
+        try { priorMarks = { inSecs: projectItem.getInPoint(4).seconds, outSecs: projectItem.getOutPoint(4).seconds }; } catch (ePM) {}
         if (srcIn !== null && srcOut !== null) {
           try {
             // mediaType 4 = all streams (video + audio) in one call
@@ -2011,6 +2431,10 @@ export class PremiereProBridge implements PremiereProTransport {
         // exist on video and audio tracks in 26.0.2, so honour the request — and refuse
         // rather than silently overwriting if this build lacks insertClip, since falling
         // back would be the destructive direction.
+        // Audio already under the placement, so anything an overwrite replaces can be reported.
+        var __placeDur = 0;
+        try { __placeDur = (srcIn !== null && srcOut !== null) ? (srcOut - srcIn) : Number(projectItem.getOutPoint(4).seconds) - Number(projectItem.getInPoint(4).seconds); } catch (eDur) {}
+        var __audioSnapshotBefore = (${useInsert ? 'false' : 'true'} && __placeDur > 0) ? __audioUnder(sequence, ${time}, ${time} + __placeDur) : null;
         var requestedInsert = ${useInsert ? 'true' : 'false'};
         if (requestedInsert) {
           if (typeof track.insertClip !== "function") {
@@ -2022,6 +2446,10 @@ export class PremiereProBridge implements PremiereProTransport {
           track.insertClip(projectItem, ${time});
         } else {
           track.overwriteClip(projectItem, ${time});
+        }
+        var marksRestored = null;
+        if (appliedSourceInOut && priorMarks) {
+          try { projectItem.setInPoint(priorMarks.inSecs, 4); projectItem.setOutPoint(priorMarks.outSecs, 4); marksRestored = Math.abs(projectItem.getInPoint(4).seconds - priorMarks.inSecs) < 0.001 && Math.abs(projectItem.getOutPoint(4).seconds - priorMarks.outSecs) < 0.001; } catch (eRM) { marksRestored = false; }
         }
 
         var placedClip = null;
@@ -2056,27 +2484,8 @@ export class PremiereProBridge implements PremiereProTransport {
         // to scan audio tracks for the linked counterpart at the same start time and
         // remove it. The video on the target track is untouched.
         var unlinkedAudioRemoved = 0;
-        if (!isAudioOnly && ${linkAudio} === false) {
-          var videoStart = placedClip.start.seconds;
-          var tolerance = 0.1;
-          for (var at = 0; at < sequence.audioTracks.numTracks; at++) {
-            var audioTrack = sequence.audioTracks[at];
-            // iterate backwards because remove() may shift indices
-            for (var ai = audioTrack.clips.numItems - 1; ai >= 0; ai--) {
-              var audioClip = audioTrack.clips[ai];
-              if (audioClip && audioClip.projectItem &&
-                  audioClip.projectItem.nodeId === projectItem.nodeId &&
-                  Math.abs(audioClip.start.seconds - videoStart) < tolerance) {
-                try {
-                  audioClip.remove(false, false); // ripple=false, alignToVideo=false
-                  unlinkedAudioRemoved++;
-                } catch (rmErr) {
-                  // best effort — log but don't fail the whole add_to_timeline
-                }
-              }
-            }
-          }
-        }
+        if (!isAudioOnly && ${linkAudio} === false) unlinkedAudioRemoved = __removeLinkedAudio(placedClip);
+        var audioReplaced = __audioSnapshotBefore ? __audioReplaced(sequence, __audioSnapshotBefore) : [];
 
         return JSON.stringify({
           success: true,
@@ -2090,6 +2499,8 @@ export class PremiereProBridge implements PremiereProTransport {
           insertMode: ${JSON.stringify(useInsert ? 'insert' : 'overwrite')},
           linkAudio: ${linkAudio},
           unlinkedAudioRemoved: unlinkedAudioRemoved,
+          audioOverwritten: audioReplaced.length ? audioReplaced : undefined,
+          note: audioReplaced.length ? "Overwrite placement replaced existing audio under it (Premiere's overwrite edit lays the item's audio onto the audio tracks); see audioOverwritten. Undo if that was not intended." : undefined,
           appliedSourceInOut: appliedSourceInOut,
           sourceInOutError: sourceInOutError
         });
@@ -2165,6 +2576,10 @@ export class PremiereProBridge implements PremiereProTransport {
             }
             r.time = placeAt;
 
+            // Restore the project item's own marks after placing (see addToTimeline).
+            var batchPriorMarks = null;
+            try { batchPriorMarks = { inSecs: projectItem.getInPoint(4).seconds, outSecs: projectItem.getOutPoint(4).seconds }; } catch (eBPM) {}
+            var batchMarked = spec.sourceInPoint !== null && spec.sourceOutPoint !== null;
             if (spec.sourceInPoint !== null && spec.sourceOutPoint !== null) {
               try {
                 projectItem.setInPoint(spec.sourceInPoint, 4);
@@ -2185,6 +2600,9 @@ export class PremiereProBridge implements PremiereProTransport {
             }
 
             track.overwriteClip(projectItem, placeAt);
+            if (batchMarked && batchPriorMarks) {
+              try { projectItem.setInPoint(batchPriorMarks.inSecs, 4); projectItem.setOutPoint(batchPriorMarks.outSecs, 4); } catch (eBRM) {}
+            }
 
             var placedClip = null;
             for (var i = 0; i < track.clips.numItems; i++) {
@@ -2221,27 +2639,8 @@ export class PremiereProBridge implements PremiereProTransport {
             // start time. The video on the target track is untouched.
             r.linkAudio = spec.linkAudio;
             r.unlinkedAudioRemoved = 0;
-            if (!isAudioOnly && spec.linkAudio === false) {
-              var videoStart = placedClip.start.seconds;
-              var tolerance = 0.1;
-              for (var at = 0; at < sequence.audioTracks.numTracks; at++) {
-                var audioTrack = sequence.audioTracks[at];
-                // iterate backwards because remove() may shift indices
-                for (var ai = audioTrack.clips.numItems - 1; ai >= 0; ai--) {
-                  var audioClip = audioTrack.clips[ai];
-                  if (audioClip && audioClip.projectItem &&
-                      audioClip.projectItem.nodeId === projectItem.nodeId &&
-                      Math.abs(audioClip.start.seconds - videoStart) < tolerance) {
-                    try {
-                      audioClip.remove(false, false); // ripple=false, alignToVideo=false
-                      r.unlinkedAudioRemoved++;
-                    } catch (rmErr) {
-                      // best effort — don't fail this clip over cleanup
-                    }
-                  }
-                }
-              }
-            }
+            // Only the placed clip's own linked audio (see __removeLinkedAudio).
+            if (!isAudioOnly && spec.linkAudio === false) r.unlinkedAudioRemoved = __removeLinkedAudio(placedClip);
           } catch (e) {
             r.error = e.toString();
           }
