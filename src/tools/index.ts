@@ -52,6 +52,7 @@ import { TrimmingTools } from './domains/trimming.js';
 export type { MCPTool } from './tool-types.js';
 import type { MCPTool } from './tool-types.js';
 import { runFf } from './ff-exec.js';
+import { withReportDialogGuard } from '../bridge/report-dialog-guard.js';
 
 // The header declarations and pure helpers moved to ./domains/shared.ts when this file was
 // split into one class per tool domain. Re-exported here: they were part of this module's
@@ -466,6 +467,28 @@ export class PremiereProTools extends TrimmingTools {
   }
 
   async executeTool(name: string, args: Record<string, any>, options?: { allowUnexposed?: boolean }): Promise<any> {
+    // Calls can raise an informational export-report dialog that blocks the engine until OK is
+    // clicked (see report-dialog-guard.ts). Nested executeTool calls are not guarded twice.
+    if (this.dialogGuardDepth > 0) return await this.executeToolUnguarded(name, args, options);
+    this.dialogGuardDepth++;
+    try {
+      const { result, guard } = await withReportDialogGuard(() => this.executeToolUnguarded(name, args, options));
+      if (guard.dismissed.length && result && typeof result === 'object' && !Array.isArray(result)) {
+        return {
+          ...result,
+          reportDialogsDismissed: guard.dismissed,
+          reportDialogNote: 'Premiere showed an informational report while this ran (for example, effects an AAF or FCP XML cannot carry) and blocked until OK was clicked. It was dismissed by name; the export itself had already completed.',
+        };
+      }
+      return result;
+    } finally {
+      this.dialogGuardDepth--;
+    }
+  }
+
+  private dialogGuardDepth = 0;
+
+  private async executeToolUnguarded(name: string, args: Record<string, any>, options?: { allowUnexposed?: boolean }): Promise<any> {
     // Premiere truncates a string at the first NUL when it is assigned — a
     // marker named "p\0q" is created as "p" — and reports success for the
     // truncated result. JSON.stringify escapes the NUL on the way into the

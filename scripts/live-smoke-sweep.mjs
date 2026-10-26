@@ -58,11 +58,11 @@ const ALLOW_RECOVER = process.argv.includes('--recover');
 /** How long one tool gets before the harness gives up on it and records a failure. */
 const TOOL_TIMEOUT_MS = 25_000;
 /**
- * Tools that do real work for longer than TOOL_TIMEOUT_MS on a healthy host. export_aaf wrote a
- * correct 356 KB AAF on 2026-10-25 but took ~30s, so the default budget recorded it as a failure
- * and the panel looked wedged while it finished.
+ * Per-tool budgets for calls that legitimately outlive TOOL_TIMEOUT_MS. Empty for now: export_aaf
+ * looked slow on 2026-10-25, but it was blocked on its "AAF Export Log" modal, which the server's
+ * report-dialog guard now dismisses (it finishes in ~3.5s).
  */
-const SLOW_TOOL_TIMEOUT_MS = { export_aaf: 180_000, export_omf: 180_000 };
+const SLOW_TOOL_TIMEOUT_MS = {};
 
 /**
  * The panel's own words when it rejects a call because a PREVIOUS script is still outstanding.
