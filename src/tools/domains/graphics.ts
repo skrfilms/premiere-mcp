@@ -7,10 +7,11 @@
 import { SpeedTimeTools } from './speed-time.js';
 import { createMotionDemoAssets } from '../../utils/demoAssets.js';
 import { evaluateTextInjectionResult } from './shared.js';
+import { bridgeDir } from '../../utils/scratch-paths.js';
 
 export class GraphicsTools extends SpeedTimeTools {
   protected async buildMotionGraphicsDemo(sequenceName = 'Apple Like Motion Demo'): Promise<any> {
-    const assetBase = process.env.PREMIERE_TEMP_DIR || '/tmp';
+    const assetBase = bridgeDir();
     const assetDir = `${assetBase.replace(/\/$/, '')}/motion-demo-${Date.now()}`;
     const assets = await createMotionDemoAssets(assetDir);
 

@@ -15,6 +15,7 @@ import { constants as fsConstants, promises as fs } from 'node:fs';
 import { basename, dirname, extname, join } from 'node:path';
 import type { ClipPlanColor } from './shared.js';
 import { runFf } from '../ff-exec.js';
+import { generatedAssetsDir } from '../../utils/scratch-paths.js';
 
 export class ColorTools extends ProjectMediaTools {
   protected hasColorAdjustments(color?: ClipPlanColor): boolean {
@@ -887,7 +888,7 @@ export class ColorTools extends ProjectMediaTools {
 
   protected async verifyColorGrade(
     _seqId: string | undefined, trackIndex: number, clipIndex: number,
-    gradeParams: Record<string, number>, outputDir = '/tmp/premiere-mcp-bridge/generated-assets'
+    gradeParams: Record<string, number>, outputDir = generatedAssetsDir()
   ): Promise<any> {
     const pathMod = pathSync;
     const fs = fsSync;

@@ -14,7 +14,7 @@
  * hardcoding the expected reply — that way a change to the probe script cannot silently pass.
  */
 import { spawn, spawnSync } from 'child_process';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync, unlinkSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, resolve } from 'path';
 import type { ChildProcess } from 'child_process';
@@ -106,7 +106,14 @@ setInterval(() => {
 function startPanel(mode: 'accept' | 'reject' | 'hung' | 'peer-deletes' | 'busy', busyId?: string): void {
   const stubPath = join(dir, 'panel-stub.mjs');
   writeFileSync(stubPath, PANEL_STUB);
+  const heartbeat = join(dir, 'bridge-heartbeat.json');
+  try { unlinkSync(heartbeat); } catch { /* none yet */ }
   panel = spawn(process.execPath, [stubPath, dir, mode, busyId ?? ''], { stdio: 'ignore' });
+  // Wait for the stub's first heartbeat. spawn() returns before the child is running, and on a
+  // slow Windows CI runner the sentinel probed first and (correctly) called the panel dead.
+  const deadline = Date.now() + 15_000;
+  const nap = new Int32Array(new SharedArrayBuffer(4));
+  while (!existsSync(heartbeat) && Date.now() < deadline) Atomics.wait(nap, 0, 0, 50);
 }
 
 interface Verdict { state: string; code: number; detail: string; status: number; contendedBy?: number[]; busyWith?: string }

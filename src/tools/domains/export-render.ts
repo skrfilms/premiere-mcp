@@ -17,6 +17,7 @@ import { basename, dirname, extname, isAbsolute, join, parse } from 'node:path';
 import { summarizeBatch } from './shared.js';
 import type { AddToRenderQueueArgs, CaptureTapReport, EncoderPresetDiscovery, EncoderPresetEntry, ExportSequenceArgs } from './shared.js';
 import { runFf } from '../ff-exec.js';
+import { generatedAssetsDir } from '../../utils/scratch-paths.js';
 
 export class ExportRenderTools extends PlaybackTools {
   protected async validateProjectForExport(sequenceId?: string, outputPath?: string, presetPath?: string, requireNonEmptyTimeline = true, checkGaps = true): Promise<any> {
@@ -397,7 +398,7 @@ export class ExportRenderTools extends PlaybackTools {
         var presets = h264.getPresets();
         var preset = presets[0];
         ${paramStr}
-        var tmpPath = '/tmp/premiere-mcp-bridge/generated-assets/social_preset.epr';
+        var tmpPath = ${JSON.stringify(join(generatedAssetsDir(), 'social_preset.epr'))};
         preset.writeToFile(tmpPath);
         var seq = ${this.buildSeqRes(sequenceId)};
         var r = app.encoder.exportWithPresetObject(${JSON.stringify(outputPath)}, preset, seq, false);
