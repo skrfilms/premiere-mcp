@@ -369,9 +369,11 @@ describe("generated ExtendScript is syntactically valid", () => {
       expect(rmKf).toContain("keyExistsAtTime");
     });
 
-    it("reverse_clip / refresh_media honestly report verified:false", async () => {
+    it("reverse_clip verifies by isSpeedReversed(); refresh_media honestly reports verified:false", async () => {
+      // 26.5.2 exposes TrackItem.isSpeedReversed(), so reversal is now read back, not assumed.
       const rev = await captureLocal("reverse_clip");
-      expect(rev).toContain("verified: false");
+      expect(rev).toContain("isSpeedReversed()");
+      expect(rev).toContain("__setReversed(");
       const refresh = await captureLocal("refresh_media");
       expect(refresh).toContain("verified: false");
     });

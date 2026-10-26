@@ -2258,6 +2258,11 @@ export class PremiereProBridge implements PremiereProTransport {
         var srcOut = ${sourceOutPoint === undefined ? 'null' : sourceOutPoint};
         var appliedSourceInOut = false;
         var sourceInOutError = "";
+        // The marks are the PROJECT ITEM's, shared with the bin and every later placement. They
+        // were left set to the requested range, so the item stayed marked (2-4s, say) and the next
+        // add_to_timeline / createNewSequenceFromClips silently used that range. Save and restore.
+        var priorMarks = null;
+        try { priorMarks = { inSecs: projectItem.getInPoint(4).seconds, outSecs: projectItem.getOutPoint(4).seconds }; } catch (ePM) {}
         if (srcIn !== null && srcOut !== null) {
           try {
             // mediaType 4 = all streams (video + audio) in one call
@@ -2302,6 +2307,10 @@ export class PremiereProBridge implements PremiereProTransport {
           track.insertClip(projectItem, ${time});
         } else {
           track.overwriteClip(projectItem, ${time});
+        }
+        var marksRestored = null;
+        if (appliedSourceInOut && priorMarks) {
+          try { projectItem.setInPoint(priorMarks.inSecs, 4); projectItem.setOutPoint(priorMarks.outSecs, 4); marksRestored = Math.abs(projectItem.getInPoint(4).seconds - priorMarks.inSecs) < 0.001 && Math.abs(projectItem.getOutPoint(4).seconds - priorMarks.outSecs) < 0.001; } catch (eRM) { marksRestored = false; }
         }
 
         var placedClip = null;
@@ -2445,6 +2454,10 @@ export class PremiereProBridge implements PremiereProTransport {
             }
             r.time = placeAt;
 
+            // Restore the project item's own marks after placing (see addToTimeline).
+            var batchPriorMarks = null;
+            try { batchPriorMarks = { inSecs: projectItem.getInPoint(4).seconds, outSecs: projectItem.getOutPoint(4).seconds }; } catch (eBPM) {}
+            var batchMarked = spec.sourceInPoint !== null && spec.sourceOutPoint !== null;
             if (spec.sourceInPoint !== null && spec.sourceOutPoint !== null) {
               try {
                 projectItem.setInPoint(spec.sourceInPoint, 4);
@@ -2465,6 +2478,9 @@ export class PremiereProBridge implements PremiereProTransport {
             }
 
             track.overwriteClip(projectItem, placeAt);
+            if (batchMarked && batchPriorMarks) {
+              try { projectItem.setInPoint(batchPriorMarks.inSecs, 4); projectItem.setOutPoint(batchPriorMarks.outSecs, 4); } catch (eBRM) {}
+            }
 
             var placedClip = null;
             for (var i = 0; i < track.clips.numItems; i++) {

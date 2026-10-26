@@ -8,26 +8,25 @@ import { SourceMonitorTools } from './source-monitor.js';
 import { spawn } from 'child_process';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import { basename, dirname, extname, join } from 'node:path';
+import { TRIM_LIB } from '../trim-lib.js';
 
 export class SpeedTimeTools extends SourceMonitorTools {
-  protected async setClipReverse(trackIndex: number, clipIndex: number, _reverse: boolean, sequenceId?: string): Promise<any> {
+  protected async setClipReverse(trackIndex: number, clipIndex: number, reverse: boolean, sequenceId?: string): Promise<any> {
+    // qeClip.setReverse() killed the engine on 26.3.2 and throws on 26.5.2. setSpeed() with the
+    // reverse flag works, with an in-point correction (see __setReversed in trim-lib.ts).
     return await this.bridge.executeScript(`
-      app.enableQE(); ${this.qeClipScript(trackIndex, clipIndex, sequenceId)}
-      if (!__clip) return JSON.stringify({success:false,error:'Clip not found'});
-      // qeClip.setReverse TERMINATES the entire evalScript on 26.3.2 — not a catchable exception,
-      // so this tool could only ever return the generic "ExtendScript execution failed". Measured
-      // one-call-per-script. Reading clip.reverse is fatal in the same way, though clip.reversed
-      // (one letter different) is safe to read.
-      //
-      // There IS a working alternative, so route the caller to it instead of failing blankly:
-      // qeClip.setSpeed takes reverse as its third argument and is verified working.
-      var currentlyReversed = null;
-      try { currentlyReversed = !!__clip.reversed; } catch (eRev) {}
-      return JSON.stringify({
-        success:false, verified:true, available:false,
-        currentlyReversed: currentlyReversed,
-        error:'qeClip.setReverse terminates the ExtendScript engine on this build (26.3.2), so this tool cannot run. Use set_clip_speed_qe with reverse: true instead (it takes clipId, not trackIndex/clipIndex — get_qe_clip_info returns the nodeId). Verified working on this build. The clip is currently reversed=' + currentlyReversed + '.'
-      });
+      ${TRIM_LIB}
+      try {
+        var seq = ${this.buildSeqRes(sequenceId)};
+        var track = seq.videoTracks[${Number(trackIndex)}];
+        var clip = track && track.clips[${Number(clipIndex)}];
+        if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
+        app.enableQE();
+        var r = __setReversed(seq, clip, ${reverse === false ? 'false' : 'true'}, false);
+        if (r.error) return JSON.stringify({ success: false, error: r.error });
+        return JSON.stringify({ success: r.problems.length === 0, verified: true, verifiedBy: 'isSpeedReversed() and start/end readback',
+          reversed: ${reverse === false ? 'false' : 'true'}, items: r.report, error: r.problems.length ? r.problems.join('; ') : undefined });
+      } catch (e) { return JSON.stringify({ success: false, error: e.toString() }); }
     `);
   }
 
@@ -178,35 +177,25 @@ export class SpeedTimeTools extends SourceMonitorTools {
   }
 
   protected async reverseClip(clipId: string, maintainAudioPitch?: boolean): Promise<any> {
-    const script = `
+    return await this.bridge.executeScript(`
+      ${TRIM_LIB}
       try {
         var info = __findClip(${JSON.stringify(clipId)});
         if (!info) return JSON.stringify({ success: false, error: "Clip not found" });
         var mediaPath = "";
         try { mediaPath = info.clip.projectItem && info.clip.projectItem.getMediaPath ? String(info.clip.projectItem.getMediaPath()) : ""; } catch (pathError) {}
         if (/\\.(png|jpg|jpeg|gif|tif|tiff)$/i.test(mediaPath)) {
-          return JSON.stringify({ success: true, clipId: ${JSON.stringify(clipId)}, reversed: true, changed: false, method: "still image already visually reversible" });
+          return JSON.stringify({ success: true, clipId: ${JSON.stringify(clipId)}, reversed: true, changed: false, method: "still image: reversing changes nothing" });
         }
         app.enableQE();
-        // Addressed by id, not by whatever is on screen. __findClip() searches every
-        // sequence in the project, so a clip can be resolved out of one sequence and
-        // then, through getActiveSequence(), have the effect applied to whichever
-        // clip sits at the same track and index in a different one.
-        var qeSeq = __qeSequenceOpening(info.sequence);
-        if (!qeSeq) return JSON.stringify({ success: false, error: "Could not address sequence '" + info.sequenceName + "' through the QE API." });
-        var qeTrack = info.trackType === 'video' ? qeSeq.getVideoTrackAt(info.trackIndex) : qeSeq.getAudioTrackAt(info.trackIndex);
-        var qeClip = __findQeClipByDomClip(qeTrack, info.clip);
-        if (!qeClip || !qeClip.setReverse) return JSON.stringify({ success: false, error: "QE setReverse API unavailable" });
-        try { qeClip.setReverse(true); } catch (reverseError) { return JSON.stringify({ success: false, error: "Reverse via QE DOM not available: " + reverseError.toString() }); }
-        // No QE/DOM property reliably reports playback reversal on 26.x, so success
-        // here means setReverse() was accepted without throwing -- not an independent
-        // confirmation. Reported honestly as verified:false rather than overstated.
-        return JSON.stringify({ success: true, verified: false, clipId: ${JSON.stringify(clipId)}, reversed: true, changed: true, maintainAudioPitch: ${maintainAudioPitch !== false}, note: "setReverse() accepted; no readback API to confirm the clip now plays reversed." });
+        var r = __setReversed(info.sequence, info.clip, true, ${maintainAudioPitch ? 'true' : 'false'});
+        if (r.error) return JSON.stringify({ success: false, error: r.error });
+        return JSON.stringify({ success: r.problems.length === 0, verified: true, verifiedBy: 'isSpeedReversed() and start/end readback; source range restored after QE mirrors it',
+          clipId: ${JSON.stringify(clipId)}, reversed: true, items: r.report, error: r.problems.length ? r.problems.join('; ') : undefined });
       } catch (e) {
         return JSON.stringify({ success: false, error: e.toString() });
       }
-    `;
-    return await this.bridge.executeScript(script);
+    `);
   }
 
   protected async rateStretchToFill(trackIndex: number, clipIndex: number, targetDurationSecs?: number, seqId?: string): Promise<any> {

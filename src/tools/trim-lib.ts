@@ -173,4 +173,41 @@ function __opsReport(ops) {
   for (var i = 0; i < ops.length; i++) { var a = __st(ops[i].item); r.push({ clip: String(ops[i].item.name), mediaType: String(ops[i].item.mediaType), edit: ops[i].kind, deltaSecs: ops[i].d === undefined ? undefined : ops[i].d / __TPS, startSecs: a.start / __TPS, endSecs: a.end / __TPS, sourceInSecs: a.inp / __TPS }); }
   return r;
 }
+/*
+ * Reverse (or un-reverse) a clip and its linked partners, keeping the SAME source frames.
+ * QE setSpeed(speed, '00:00:00:00', reverse, maintainPitch, false) flips the direction, but on
+ * 26.5.2 it mirrors the source range around the media: a clip using source 0-5s of a 10s file,
+ * reversed, played 9.96s down to 5s. Writing inPoint = mediaEnd - in - span afterwards restores
+ * the clip's own frames (verified frame-exact: 4.96s down to 0). The same mirror undoes it.
+ */
+function __trackIndexOf(seq, c) {
+  var tracks = __tracksOf(seq, c), k = __key(c);
+  for (var t = 0; t < tracks.numTracks; t++) for (var i = 0; i < tracks[t].clips.numItems; i++) if (__key(tracks[t].clips[i]) === k) return t;
+  return -1;
+}
+function __setReversed(seq, clip, reversed, maintainPitch) {
+  var q = __qeSequenceOpening(seq);
+  if (!q) return { error: 'QE could not address this sequence.' };
+  var group = __withLinked(clip), report = [], problems = [];
+  for (var g = 0; g < group.length; g++) {
+    var it = group[g], isAudio = String(it.mediaType) === 'Audio';
+    var was = null; try { was = Boolean(it.isSpeedReversed()); } catch (eR) {}
+    if (was === Boolean(reversed)) { report.push({ clip: String(it.name), mediaType: String(it.mediaType), changed: false }); continue; }
+    var s = __st(it), media = __mediaEnd(it), speed = 1;
+    try { speed = Number(it.getSpeed()) || 1; } catch (eS) {}
+    var ti = __trackIndexOf(seq, it);
+    if (ti < 0) { problems.push('could not find the track of ' + __label(seq, it)); continue; }
+    var qt = isAudio ? q.getAudioTrackAt(ti) : q.getVideoTrackAt(ti);
+    var qc = __findQeClipByDomClip(qt, it);
+    if (!qc) { problems.push('could not match ' + __label(seq, it) + ' in QE'); continue; }
+    try { qc.setSpeed(speed, '00:00:00:00', Boolean(reversed), Boolean(maintainPitch), false); } catch (eSet) { problems.push(__label(seq, it) + ': ' + eSet); continue; }
+    var span = Math.round((s.end - s.start) * speed);
+    if (media !== null) it.inPoint = __TT(media - s.inp - span);
+    var now = __st(it), is = null; try { is = Boolean(it.isSpeedReversed()); } catch (eN) {}
+    if (is !== Boolean(reversed)) problems.push(__label(seq, it) + ' still reads reversed=' + is);
+    if (Math.abs(now.start - s.start) > 1 || Math.abs(now.end - s.end) > 1) problems.push(__label(seq, it) + ' moved on the timeline');
+    report.push({ clip: String(it.name), mediaType: String(it.mediaType), changed: true, reversed: is, sourceRangeSecs: [s.inp / __TPS, (s.inp + span) / __TPS] });
+  }
+  return { report: report, problems: problems };
+}
 `;
