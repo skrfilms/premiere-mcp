@@ -5,6 +5,7 @@
  * had grown to 19k lines; the method bodies are unchanged.
  */
 import { ToolsBase } from './base.js';
+import { TRIM_LIB } from '../trim-lib.js';
 
 export class AssemblyTools extends ToolsBase {
   protected async threePointEdit(projectItemId: string, sourceIn?: string, sourceOut?: string, sequenceTimecode?: string, mode = 'overwrite', videoTrack = 0, _audioTrack = 0): Promise<any> {
@@ -121,27 +122,31 @@ export class AssemblyTools extends ToolsBase {
 
   protected async removeFromTimeline(clipId: string, sequenceId?: string, deleteMode = 'ripple'): Promise<any> {
     const script = `
+      ${TRIM_LIB}
       try {
         var info = __findClip(${JSON.stringify(clipId)}, ${sequenceId ? JSON.stringify(sequenceId) : 'null'});
         if (!info) return JSON.stringify({ success: false, error: ${sequenceId ? JSON.stringify(`Clip not found in sequence: ${sequenceId}`) : '"Clip not found"'} });
         var clip = info.clip;
-        var clipName = clip.name;
+        var clipName = String(clip.name);
         var isRipple = ${JSON.stringify(deleteMode)} === "ripple";
-        var beforeCount = info.track.clips.numItems;
-        clip.remove(isRipple, true);
-        var afterCount = info.track.clips.numItems;
-        if (afterCount >= beforeCount) return JSON.stringify({ success: false, verified: false, error: "Premiere did not remove '" + clipName + "' (track clip count unchanged).", beforeCount: beforeCount, afterCount: afterCount });
+        // TrackItem.remove() removes only that item and never ripples on 26.5.2, so a "ripple"
+        // left a gap and both modes orphaned the linked audio. __removeGroup does both properly.
+        var r = __removeGroup(info.sequence, clip, isRipple);
+        if (r.error) return JSON.stringify({ success: false, error: r.error, deleteMode: ${JSON.stringify(deleteMode)} });
         return JSON.stringify({
-          success: true,
+          success: r.problems.length === 0,
           verified: true,
-          message: "Clip removed from timeline",
+          verifiedBy: "every linked item looked up after removal; rippled clips' starts read back",
+          message: r.problems.length ? undefined : "Clip removed from timeline",
           clipId: ${JSON.stringify(clipId)},
           clipName: clipName,
           sequenceId: info.sequenceId,
           sequenceName: info.sequenceName,
           deleteMode: ${JSON.stringify(deleteMode)},
-          beforeCount: beforeCount,
-          afterCount: afterCount
+          removed: r.removed,
+          rippledSecs: r.rippledSecs,
+          clipsRippled: r.clipsRippled,
+          error: r.problems.length ? "PARTIALLY APPLIED: " + r.problems.join("; ") + ". Undo to restore." : undefined
         });
       } catch (e) {
         return JSON.stringify({

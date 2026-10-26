@@ -210,4 +210,79 @@ function __setReversed(seq, clip, reversed, maintainPitch) {
   }
   return { report: report, problems: problems };
 }
+
+/*
+ * Remove a clip and its linked partners; with ripple, close the space on every track.
+ * TrackItem.remove(ripple, alignToVideo) on 26.5.2 removes ONLY that item and never ripples,
+ * whatever the arguments (measured: remove(true,true) on V1 left its audio and the gap). A ripple
+ * that would pull clips on another track into material inside the removed range breaks sync, so
+ * it is refused; lift (no ripple) always works.
+ */
+function __removeGroup(seq, clip, ripple) {
+  var half = (Number(seq.timebase) || 10584000000) / 2;
+  var group = __withLinked(clip), skip = {}, s0 = __st(clip), lo = s0.start, hi = s0.end;
+  for (var i = 0; i < group.length; i++) { skip[__key(group[i])] = true; var gs = __st(group[i]); if (gs.start < lo) lo = gs.start; if (gs.end > hi) hi = gs.end; }
+  var rip = null;
+  if (ripple) {
+    var tracks = [seq.videoTracks, seq.audioTracks], inside = [];
+    for (var g = 0; g < 2; g++) for (var t = 0; t < tracks[g].numTracks; t++) {
+      var tr = tracks[g][t];
+      for (var c = 0; c < tr.clips.numItems; c++) { var o = tr.clips[c]; if (skip[__key(o)]) continue; var os = __st(o); if (os.start < hi - half && os.end > lo + half) inside.push(__label(seq, o)); }
+    }
+    if (inside.length) return { error: 'A ripple delete would pull later clips under material that sits inside the removed range on another track: ' + inside.join(', ') + '. Nothing was changed; use lift (no ripple), or clear those first.' };
+    rip = __planRipple(seq, hi, skip);
+    if (rip.blockers.length) return { error: 'A ripple at ' + (hi / __TPS) + 's would break sync: ' + rip.blockers.join(', ') + ' span that point. Nothing was changed.' };
+  }
+  var removed = [], problems = [];
+  for (var k = 0; k < group.length; k++) {
+    var it = group[k], label = __label(seq, it), tr2 = __trackOf(seq, it), key = __key(it), before = tr2 ? tr2.clips.numItems : null;
+    try { it.remove(false, false); } catch (eR) { problems.push(label + ': ' + eR); continue; }
+    var still = false;
+    if (tr2) for (var q = 0; q < tr2.clips.numItems; q++) if (__key(tr2.clips[q]) === key) still = true;
+    if (still) problems.push(label + ' is still on the timeline'); else removed.push(label);
+  }
+  var bad = [];
+  if (ripple && !problems.length) bad = __applyRipple(rip.movers, -(hi - lo));
+  return { removed: removed, problems: problems.concat(bad), rippledSecs: ripple ? (hi - lo) / __TPS : 0, clipsRippled: rip ? rip.movers.length : 0 };
+}
+/* Slip a clip and its linked partners by d ticks of source: timeline range fixed, content moves. */
+function __slipGroup(seq, clip, d) {
+  var group = __withLinked(clip), ops = [];
+  for (var i = 0; i < group.length; i++) {
+    var it = group[i], s = __st(it), media = __mediaEnd(it), span = s.end - s.start;
+    if (s.inp + d < 0) return { error: __label(seq, it) + ' has only ' + (s.inp / __TPS) + 's of media before its in-point; slipping ' + (d / __TPS) + 's would run off the head.' };
+    if (media !== null && s.inp + d + span > media + 1) return { error: __label(seq, it) + ' has only ' + ((media - s.inp - span) / __TPS) + 's of media after its out-point; slipping ' + (d / __TPS) + 's would play black.' };
+    ops.push({ item: it, before: s });
+  }
+  var bad = [];
+  for (var k = 0; k < ops.length; k++) {
+    ops[k].item.inPoint = __TT(ops[k].before.inp + d);
+    var a = __st(ops[k].item);
+    if (Math.abs(a.inp - (ops[k].before.inp + d)) > 1 || a.start !== ops[k].before.start || a.end !== ops[k].before.end) bad.push(__label(seq, ops[k].item) + ' did not slip cleanly');
+  }
+  return { ops: ops, problems: bad };
+}
+/*
+ * Slide: the clip moves by d with its content; the clip before it extends (or shrinks) its tail by d
+ * and the clip after it trims (or extends) its head by d, so the program duration is unchanged.
+ */
+function __planSlide(seq, clip, d) {
+  var tpf = Number(seq.timebase) || 10584000000, half = tpf / 2;
+  var group = __withLinked(clip), ops = [], movers = [];
+  for (var i = 0; i < group.length; i++) {
+    var it = group[i], s = __st(it), tr = __trackOf(seq, it), prev = null, next = null;
+    if (!tr) return { error: 'Could not find the track holding ' + __label(seq, it) + '.' };
+    for (var c = 0; c < tr.clips.numItems; c++) { var o = tr.clips[c], os = __st(o); if (Math.abs(os.end - s.start) < half) prev = o; if (Math.abs(os.start - s.end) < half) next = o; }
+    if (!prev || !next) return { error: 'A slide needs clips directly before and after ' + __label(seq, it) + ' on the same track.' };
+    var ps = __st(prev), ns = __st(next), pm = __mediaEnd(prev);
+    if (d > 0 && pm !== null && ps.inp + (ps.end - ps.start) + d > pm + half) return { error: __label(seq, prev) + ' has no media left to extend ' + (d / __TPS) + 's.' };
+    if (d < 0 && (ps.end - ps.start) + d < tpf) return { error: __label(seq, prev) + ' would be shorter than one frame.' };
+    if (d > 0 && (ns.end - ns.start) - d < tpf) return { error: __label(seq, next) + ' would be shorter than one frame.' };
+    if (d < 0 && ns.inp + d < -half) return { error: __label(seq, next) + ' has no media before its in-point to extend ' + (-d / __TPS) + 's earlier.' };
+    ops.push({ item: prev, kind: 'tail', d: d, before: ps });
+    ops.push({ item: next, kind: 'headInPlace', d: d, before: ns });
+    movers.push({ item: it, start: s.start });
+  }
+  return { ops: ops, movers: movers };
+}
 `;

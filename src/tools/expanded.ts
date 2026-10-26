@@ -5,6 +5,7 @@ import { deflateSync } from 'node:zlib';
 import type { PremiereProTransport } from '../bridge/types.js';
 import type { MCPTool } from './index.js';
 import { buildExpandedInputSchema, expandedToolSpec } from './expanded-schemas.js';
+import { TRIM_LIB } from './trim-lib.js';
 
 export const expandedToolNames = [
   'find_items_by_media_path',
@@ -613,8 +614,12 @@ async function deletePreviewFilesOnDisk(bridge: PremiereProTransport, args: Reco
   };
 }
 
+/** Expanded tools whose scripts need the measured trim primitives. */
+const TRIM_LIB_TOOLS = new Set(['ripple_delete', 'roll_edit', 'slide_edit', 'slip_edit']);
+
 function buildExpandedToolScript(name: string, args: Record<string, any>): string {
   return `
+    ${TRIM_LIB_TOOLS.has(name) ? TRIM_LIB : ''}
     var toolName = ${JSON.stringify(name)};
     var args = ${JSON.stringify(args ?? {})};
 
@@ -2383,11 +2388,11 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           if (!args.clipId && !args.node_id && !args.nodeId) return fail("ripple_delete requires clipId.");
           var rippleClip = findClip(args.clipId || args.node_id || args.nodeId);
           if (!rippleClip) return fail(pendingSequenceError || "Clip not found");
-          var rippleBeforeCount = rippleClip.track.clips.numItems;
-          rippleClip.clip.remove(true, true);
-          var rippleAfterCount = rippleClip.track.clips.numItems;
-          if (rippleAfterCount >= rippleBeforeCount) return fail("Premiere did not remove the clip (track clip count unchanged).", { beforeCount: rippleBeforeCount, afterCount: rippleAfterCount });
-          return ok({ removed: true, ripple: true, verified: true, clipId: args.clipId || args.node_id || args.nodeId, beforeCount: rippleBeforeCount, afterCount: rippleAfterCount });
+          // remove(true, true) removes only this item and never ripples on 26.5.2 (see trim-lib).
+          var rippleResult = __removeGroup(rippleClip.sequence, rippleClip.clip, true);
+          if (rippleResult.error) return fail(rippleResult.error);
+          if (rippleResult.problems.length) return fail("PARTIALLY APPLIED: " + rippleResult.problems.join("; ") + ". Undo to restore.", rippleResult);
+          return ok({ removed: rippleResult.removed, ripple: true, verified: true, rippledSecs: rippleResult.rippledSecs, clipsRippled: rippleResult.clipsRippled, clipId: args.clipId || args.node_id || args.nodeId });
 
         case "roll_edit":
         case "slide_edit":
@@ -2396,30 +2401,48 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           var trimClipInfo = findClip(args.clipId || args.node_id || args.nodeId);
           if (!trimClipInfo) return fail(pendingSequenceError || "Clip not found");
           var editDelta = Number(args.delta || args.deltaSeconds || args.amount || 0);
+          var editTicks = Math.round(editDelta * 254016000000);
+          var editSeq = trimClipInfo.sequence;
+          var editHalf = (Number(editSeq.timebase) || 10584000000) / 2;
+          if (Math.abs(editTicks) < editHalf) return ok({ edited: false, mode: toolName, deltaSeconds: editDelta, note: "A delta under half a frame changes nothing." });
+          // Built on the measured trim primitives (trim-lib): an inPoint write slips, a start write
+          // moves the head with its content, an end write trims the tail, move() is relative.
+          // Linked audio/video moves with the clip, media handles are checked, and every edit is
+          // read back. The old slide called move() with a bare number and never adjusted the
+          // neighbours; the old roll and slip ignored linked audio and handles.
           if (toolName === "slip_edit") {
-            trimClipInfo.clip.inPoint = secondsToTime(valueOfTime(trimClipInfo.clip.inPoint) + editDelta);
-            trimClipInfo.clip.outPoint = secondsToTime(valueOfTime(trimClipInfo.clip.outPoint) + editDelta);
-            return ok({ edited: true, mode: toolName, deltaSeconds: editDelta, clip: clipInfo(trimClipInfo.clip, trimClipInfo.trackType, trimClipInfo.trackIndex, trimClipInfo.clipIndex) });
+            var slip = __slipGroup(editSeq, trimClipInfo.clip, editTicks);
+            if (slip.error) return fail(slip.error + " Nothing was changed.");
+            if (slip.problems.length) return fail("PARTIALLY APPLIED: " + slip.problems.join("; ") + ". Undo to restore.");
+            return ok({ edited: true, mode: toolName, deltaSeconds: editDelta, verified: true, linkedItems: slip.ops.length - 1, clip: clipInfo(trimClipInfo.clip, trimClipInfo.trackType, trimClipInfo.trackIndex, trimClipInfo.clipIndex) });
           }
           if (toolName === "slide_edit") {
-            trimClipInfo.clip.move(editDelta);
-            return ok({ edited: true, mode: toolName, deltaSeconds: editDelta, clip: clipInfo(trimClipInfo.clip, trimClipInfo.trackType, trimClipInfo.trackIndex, trimClipInfo.clipIndex) });
+            var slide = __planSlide(editSeq, trimClipInfo.clip, editTicks);
+            if (slide.error) return fail(slide.error + " Nothing was changed.");
+            var heads = [], tails = [];
+            for (var so = 0; so < slide.ops.length; so++) (slide.ops[so].kind === "tail" ? tails : heads).push(slide.ops[so]);
+            // Free space before filling it: sliding later trims the next clip first and extends the
+            // previous one last; sliding earlier does the reverse.
+            var slideBad = [];
+            if (editTicks > 0) { slideBad = slideBad.concat(__applyOps(heads, editHalf)); slideBad = slideBad.concat(__applyRipple(slide.movers, editTicks)); slideBad = slideBad.concat(__applyOps(tails, editHalf)); }
+            else { slideBad = slideBad.concat(__applyOps(tails, editHalf)); slideBad = slideBad.concat(__applyRipple(slide.movers, editTicks)); slideBad = slideBad.concat(__applyOps(heads, editHalf)); }
+            if (slideBad.length) return fail("PARTIALLY APPLIED: " + slideBad.join("; ") + ". Undo to restore.");
+            return ok({ edited: true, mode: toolName, deltaSeconds: editDelta, verified: true, edits: __opsReport(slide.ops), clip: clipInfo(trimClipInfo.clip, trimClipInfo.trackType, trimClipInfo.trackIndex, trimClipInfo.clipIndex) });
           }
-          var adjacentIndex = trimClipInfo.clipIndex > 0 ? trimClipInfo.clipIndex - 1 : trimClipInfo.clipIndex + 1;
-          if (adjacentIndex < 0 || adjacentIndex >= trimClipInfo.track.clips.numItems) return fail("roll_edit requires an adjacent clip on the same track");
-          var adjacentClip = trimClipInfo.track.clips[adjacentIndex];
-          var beforeRoll = { clipStart: valueOfTime(trimClipInfo.clip.start), clipInPoint: valueOfTime(trimClipInfo.clip.inPoint), adjacentEnd: valueOfTime(adjacentClip.end) };
-          if (adjacentIndex < trimClipInfo.clipIndex) {
-            adjacentClip.end = secondsToTime(valueOfTime(adjacentClip.end) + editDelta);
-            trimClipInfo.clip.start = secondsToTime(valueOfTime(trimClipInfo.clip.start) + editDelta);
-            trimClipInfo.clip.inPoint = secondsToTime(valueOfTime(trimClipInfo.clip.inPoint) + editDelta);
-          } else {
-            trimClipInfo.clip.end = secondsToTime(valueOfTime(trimClipInfo.clip.end) + editDelta);
-            adjacentClip.start = secondsToTime(valueOfTime(adjacentClip.start) + editDelta);
-            adjacentClip.inPoint = secondsToTime(valueOfTime(adjacentClip.inPoint) + editDelta);
+          // roll_edit: move the cut this clip shares with its previous clip (or, for the first clip,
+          // its next one) by delta, rolling the neighbour.
+          var rollEdge = trimClipInfo.clipIndex > 0 ? "head" : "tail";
+          var rollOps = [], rollErrors = [], rollGroup = __withLinked(trimClipInfo.clip), rollRef = __st(trimClipInfo.clip);
+          for (var rg = 0; rg < rollGroup.length; rg++) {
+            var rgs = __st(rollGroup[rg]);
+            if ((rollEdge === "head" ? rgs.start : rgs.end) !== (rollEdge === "head" ? rollRef.start : rollRef.end)) continue;
+            var rollPlan = __planRoll(editSeq, rollGroup[rg], rollEdge, editTicks);
+            if (rollPlan.error) rollErrors.push(rollPlan.error); else rollOps = rollOps.concat(rollPlan.ops);
           }
-          var afterRoll = { clipStart: valueOfTime(trimClipInfo.clip.start), clipInPoint: valueOfTime(trimClipInfo.clip.inPoint), adjacentEnd: valueOfTime(adjacentClip.end) };
-          return ok({ edited: true, mode: toolName, deltaSeconds: editDelta, before: beforeRoll, after: afterRoll, clip: clipInfo(trimClipInfo.clip, trimClipInfo.trackType, trimClipInfo.trackIndex, trimClipInfo.clipIndex) });
+          if (rollErrors.length) return fail(rollErrors.join(" ") + " Nothing was changed.");
+          var rollBad = __applyOps(rollOps, editHalf);
+          if (rollBad.length) return fail("PARTIALLY APPLIED: " + rollBad.join("; ") + ". Undo to restore.");
+          return ok({ edited: true, mode: toolName, deltaSeconds: editDelta, verified: true, edge: rollEdge, edits: __opsReport(rollOps), clip: clipInfo(trimClipInfo.clip, trimClipInfo.trackType, trimClipInfo.trackIndex, trimClipInfo.clipIndex) });
 
         case "move_clip_to_track":
           if (!args.clipId && !args.node_id && !args.nodeId) return fail("move_clip_to_track requires clipId.");

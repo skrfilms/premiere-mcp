@@ -35,12 +35,15 @@ class Item {
   set outPoint(_t: FakeTime) { /* no visible effect */ }
   get projectItem() { const m = this.media; return { getOutPoint: () => T(m) }; }
   move(t: FakeTime) { const d = Number(t.ticks); this.s += d; this.e += d; }
+  owner: any = null;
+  /** Measured: removes only this item, never ripples. */
+  remove(_ripple?: boolean, _align?: boolean) { const c = this.owner.clips; c.splice(c.indexOf(this), 1); c.numItems = c.length; return true; }
   getLinkedItems() { const l = this.linked; return Object.assign([...l], { numItems: l.length }); }
   /** Source time shown at timeline time t, or null when this item is not under t. */
   shows(t: number): number | null { return t >= this.s && t < this.e ? this.src + (t - this.s) : null; }
 }
 
-function track(items: Item[]) { return { name: 'T', clips: Object.assign(items, { numItems: items.length }) }; }
+function track(items: Item[]) { const t = { name: 'T', clips: Object.assign(items, { numItems: items.length }) }; items.forEach((i) => { i.owner = t; }); return t; }
 
 function fixture(playheadSecs: number) {
   const vA = new Item('A', 'Video', 0, 5 * TPS, 0), vB = new Item('B', 'Video', 5 * TPS, 10 * TPS, 5 * TPS);
@@ -134,5 +137,14 @@ describe('trim tools against measured Premiere semantics', () => {
     expect(r.success).toBe(true);
     expect([secs(f.vB.s), secs(f.vB.e), secs(f.vB.shows(6 * TPS))]).toEqual([6, 10, 6]);
     expect(secs(f.aB.s)).toBe(6);
+  });
+
+  it('remove_from_timeline ripple takes linked audio and closes the space on every track', async () => {
+    const f = fixture(0);
+    const r = await run('remove_from_timeline', { clipId: 'B', deleteMode: 'ripple' }, { ...f, vB: f.vA } as any);
+    expect(r.success).toBe(true);
+    expect(f.seq.videoTracks[0].clips.map((c: Item) => [secs(c.s), secs(c.e)])).toEqual([[0, 5]]);
+    expect(f.seq.audioTracks[0].clips.map((c: Item) => [secs(c.s), secs(c.e)])).toEqual([[0, 5]]);
+    expect(secs(f.vB.shows(0))).toBe(5); // B now opens the sequence
   });
 });
