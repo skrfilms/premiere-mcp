@@ -614,12 +614,9 @@ async function deletePreviewFilesOnDisk(bridge: PremiereProTransport, args: Reco
   };
 }
 
-/** Expanded tools whose scripts need the measured trim primitives. */
-const TRIM_LIB_TOOLS = new Set(['ripple_delete', 'roll_edit', 'slide_edit', 'slip_edit', 'remove_selected_clips', 'lift_selection', 'extract_selection']);
-
 function buildExpandedToolScript(name: string, args: Record<string, any>): string {
   return `
-    ${TRIM_LIB_TOOLS.has(name) ? TRIM_LIB : ''}
+    ${TRIM_LIB}
     var toolName = ${JSON.stringify(name)};
     var args = ${JSON.stringify(args ?? {})};
 
