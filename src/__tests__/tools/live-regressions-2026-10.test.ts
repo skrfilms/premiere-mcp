@@ -166,3 +166,19 @@ describe('QE clip addressing by DOM index', () => {
     expect(script).toContain('wantDur');
   });
 });
+
+describe('timecode to ticks', () => {
+  const ticks = (timebase: string, tc: string): string | null => {
+    const ctx = vm.createContext({});
+    vm.runInContext(EXTENDSCRIPT_HELPERS, ctx);
+    return vm.runInContext(`__timecodeToTicks({timebase:${JSON.stringify(timebase)}}, ${JSON.stringify(tc)})`, ctx);
+  };
+  it('converts non-drop, drop-frame and seconds', () => {
+    expect(ticks('10584000000', '01:00:00:00')).toBe('914457600000000'); // 24 fps
+    expect(ticks('10584000000', '00:00:10:12')).toBe(String(252 * 10584000000));
+    expect(ticks('8475667200', '00;01;00;02')).toBe(String(1800 * 8475667200)); // 29.97 DF
+    expect(ticks('8475667200', '00:01:00:02')).toBe(String(1802 * 8475667200)); // 29.97 NDF
+    expect(ticks('10584000000', '2.5')).toBe('635040000000');
+    expect(ticks('10584000000', '00:00:00:24')).toBeNull(); // frame field out of range
+  });
+});

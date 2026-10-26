@@ -1262,13 +1262,9 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   protected async setSequenceZeroPoint(timecode: string, seqId?: string): Promise<any> {
-    return await this.bridge.executeScript(`
-      try {
-        var seq=${this.buildSeqRes(seqId)};
-        seq.setZeroPoint(${JSON.stringify(timecode)});
-        return JSON.stringify({success:true,timecode:${JSON.stringify(timecode)},sequenceName:String(seq.name)});
-      }catch(e){return JSON.stringify({success:false,error:e.toString()});}
-    `);
+    // Same operation as set_sequence_start_timecode; this one passed the timecode straight to
+    // setZeroPoint (which takes ticks) and reported success with no readback.
+    return await this.setSequenceStartTimecode(timecode, seqId);
   }
 
   protected async sequenceFromMarkers(seqId?: string, markerType = 'Chapter'): Promise<any> {
@@ -1583,18 +1579,20 @@ ${this.buildSequenceResolver(sequenceId)}
         // Reported success with no readback of any kind. setZeroPoint takes TICKS as a string;
         // a timecode string is not a tick count, so this call was very likely inert.
         var before = null; try { before = String(seq.zeroPoint); } catch(eB) {}
+        var wantTicks = __timecodeToTicks(seq, ${JSON.stringify(String(timecode))});
+        if (wantTicks === null) return JSON.stringify({success:false,error:'Could not read timecode "' + ${JSON.stringify(String(timecode))} + '". Pass HH:MM:SS:FF, HH;MM;SS;FF (drop-frame) or seconds.'});
         var setError = null;
-        try { seq.setZeroPoint(${JSON.stringify(timecode)}); } catch(eS) { setError = eS.toString(); }
+        try { seq.setZeroPoint(wantTicks); } catch(eS) { setError = eS.toString(); }
         var after = null; try { after = String(seq.zeroPoint); } catch(eA) {}
         if (after === null) {
           return JSON.stringify({success:true,verified:false,timecode:${JSON.stringify(timecode)},sequenceName:String(seq.name),before:before,setError:setError,
             unverifiedReason:'Sequence.zeroPoint is not readable on this build, so the start timecode cannot be confirmed.'});
         }
-        if (after === before) {
-          return JSON.stringify({success:false,verified:true,verifiedBy:'Sequence.zeroPoint readback',changed:false,timecode:${JSON.stringify(timecode)},sequenceName:String(seq.name),before:before,after:after,setError:setError,
-            error:'The sequence zero point did not move: it still reads ' + after + ' ticks. setZeroPoint() expects a TICK COUNT as a string, not a timecode. Convert with timecode_to_frames and pass ticks, or set the start timecode in the Sequence Settings dialog.'});
+        if (after !== wantTicks) {
+          return JSON.stringify({success:false,verified:true,verifiedBy:'Sequence.zeroPoint readback',changed:after!==before,timecode:${JSON.stringify(timecode)},sequenceName:String(seq.name),before:before,after:after,wantTicks:wantTicks,setError:setError,
+            error:'The sequence zero point reads ' + after + ' ticks, not the ' + wantTicks + ' that ' + ${JSON.stringify(String(timecode))} + ' converts to.'});
         }
-        return JSON.stringify({success:true,verified:true,verifiedBy:'Sequence.zeroPoint readback',changed:true,timecode:${JSON.stringify(timecode)},sequenceName:String(seq.name),before:before,after:after});
+        return JSON.stringify({success:true,verified:true,verifiedBy:'Sequence.zeroPoint readback',changed:after!==before,timecode:${JSON.stringify(timecode)},sequenceName:String(seq.name),before:before,after:after});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }

@@ -716,6 +716,26 @@ function __qeTimecode(seq, seconds) {
   var ss = totalSecs % 60, mm = Math.floor(totalSecs / 60) % 60, hh = Math.floor(totalSecs / 3600);
   return __padLeft(hh, 2) + ';' + __padLeft(mm, 2) + ';' + __padLeft(ss, 2) + ';' + __padLeft(ff, 2);
 }
+/*
+ * Timecode -> tick string for a sequence. Accepts HH:MM:SS:FF (non-drop), HH;MM;SS;FF (drop-frame
+ * at 29.97/59.94) or a plain number of seconds. Sequence.setZeroPoint() takes TICKS as a string, so
+ * a tool that passed the timecode straight through was inert. Null when it cannot be parsed.
+ */
+function __timecodeToTicks(seq, tc) {
+  var tb = 10584000000;
+  try { tb = Number(seq.timebase) || tb; } catch (eTb) {}
+  var fps = 254016000000 / tb, nominal = Math.round(fps);
+  var text = String(tc);
+  if (/^\\s*-?[0-9.]+\\s*$/.test(text)) return String(Math.round(Number(text) * 254016000000));
+  var m = text.match(/^\\s*(\\d+)[:;](\\d+)[:;](\\d+)([:;])(\\d+)\\s*$/);
+  if (!m) return null;
+  var h = Number(m[1]), mi = Number(m[2]), se = Number(m[3]), fr = Number(m[5]);
+  if (fr >= nominal || mi > 59 || se > 59) return null;
+  var frames = ((h * 3600 + mi * 60 + se) * nominal) + fr;
+  var drop = m[4] === ';' && (nominal === 30 || nominal === 60) && Math.abs(fps - nominal) > 0.001;
+  if (drop) { var d = nominal === 30 ? 2 : 4, totalMinutes = 60 * h + mi; frames -= d * (totalMinutes - Math.floor(totalMinutes / 10)); }
+  return String(Math.round(frames * tb));
+}
 function __padLeft(value, width, padChar) {
   var out = String(value);
   var ch = (padChar === undefined || padChar === null) ? '0' : String(padChar);
