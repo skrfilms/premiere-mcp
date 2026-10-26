@@ -9,6 +9,7 @@ import { spawn } from 'child_process';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import { basename, dirname, extname, join } from 'node:path';
 import { TRIM_LIB } from '../trim-lib.js';
+import { runFf } from '../ff-exec.js';
 
 export class SpeedTimeTools extends SourceMonitorTools {
   protected async setClipReverse(trackIndex: number, clipIndex: number, reverse: boolean, sequenceId?: string): Promise<any> {
@@ -79,13 +80,26 @@ export class SpeedTimeTools extends SourceMonitorTools {
     const outFile = (outputPath && outputPath.trim())
       || join(dirname(resolvedPath), `${basename(resolvedPath, extname(resolvedPath))}_${speedLabel}x${ext}`);
 
-    // Video: setpts scales presentation timestamps by 1/speed.
-    const argv: string[] = ['-y', '-i', resolvedPath as string, '-vf', `setpts=${(1 / speed).toFixed(6)}*PTS`];
+    // The source's own frame rate and sample rate, so the retime is exact rather than assumed.
+    let srcFps: string | null = null, srcRate = 48000;
+    try {
+      const probe = JSON.parse(runFf('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_type,r_frame_rate,sample_rate', '-of', 'json', resolvedPath as string], { timeoutMs: 15000 }));
+      for (const st of probe.streams ?? []) {
+        if (st.codec_type === 'video' && st.r_frame_rate && st.r_frame_rate !== '0/0') srcFps = String(st.r_frame_rate);
+        if (st.codec_type === 'audio' && Number(st.sample_rate) > 0) srcRate = Number(st.sample_rate);
+      }
+    } catch { /* fall back to ffmpeg's own choice below */ }
+    // Video: setpts scales presentation timestamps by 1/speed, then fps= resamples back onto the
+    // source frame grid. setpts alone leaves the muxer to pick frames, and it got the head wrong:
+    // measured on a frame-counter clip at 2x, the output began 0,1,2,3,5,7 instead of 0,2,4,6 and
+    // ran three frames behind for the rest of the clip.
+    const vf = `setpts=${(1 / speed).toFixed(6)}*PTS` + (srcFps ? `,fps=${srcFps}` : '');
+    const argv: string[] = ['-y', '-i', resolvedPath as string, '-vf', vf];
     if (includeAudio) {
       const audioFilter = preservePitch
         ? this.buildAtempoChain(speed)
-        // Pitch shifts with speed: resample the sample clock then reset to 48k.
-        : `asetrate=48000*${speed},aresample=48000`;
+        // Pitch shifts with speed: run the sample clock faster, then resample back to the source rate.
+        : `asetrate=${srcRate}*${speed},aresample=${srcRate}`;
       argv.push('-af', audioFilter);
     } else {
       argv.push('-an');
