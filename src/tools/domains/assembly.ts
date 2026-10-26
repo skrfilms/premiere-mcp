@@ -357,45 +357,58 @@ export class AssemblyTools extends ToolsBase {
 
   // Additional Clip Operations
   protected async duplicateClip(clipId: string, offset?: number): Promise<any> {
+    // overwriteClip() places a project item's MARKED range, so the old version dropped the whole
+    // source media (a 5s clip came back 10s long, from source 0) and overwrote whatever was at the
+    // destination, while reporting success. The clip's own source range is now marked on the item
+    // for the placement and the item's marks are restored afterwards; an occupied destination is
+    // refused. Effects, keyframes and speed are not carried over by overwriteClip().
     const script = `
       try {
         var info = __findClip(${JSON.stringify(clipId)});
         if (!info) return JSON.stringify({ success: false, error: "Clip not found" });
-        var clip = info.clip;
-        var projItem = clip.projectItem;
-        var insertTime = clip.end.seconds + ${offset !== undefined ? offset : 0};
-        var beforeCount = info.track.clips.numItems;
-        info.track.overwriteClip(projItem, insertTime);
-        var afterCount = info.track.clips.numItems;
-        // Verify by LOOKING FOR THE CLIP, not by counting.
-        //
-        // overwriteClip OVERWRITES: dropped onto occupied time it replaces what is there, so the
-        // track count legitimately stays the same and the old check reported a false negative for
-        // a duplicate that had in fact landed. Counting only works when the destination is empty,
-        // which is exactly the case a caller cannot guarantee.
-        var landed = null, tolerance = 0.04;
+        var clip = info.clip, projItem = clip.projectItem, seq = info.sequence;
+        if (!projItem) return JSON.stringify({ success: false, error: "This clip has no project item to duplicate." });
+        var srcIn = Number(clip.inPoint.seconds), dur = Number(clip.end.seconds) - Number(clip.start.seconds);
+        var insertTime = Number(clip.end.seconds) + ${offset !== undefined ? Number(offset) : 0};
+        var tracksToCheck = [info.track];
+        try { if (info.trackType === 'video' && seq.audioTracks[info.trackIndex]) tracksToCheck.push(seq.audioTracks[info.trackIndex]); } catch (eA) {}
+        for (var t = 0; t < tracksToCheck.length; t++) {
+          var tr = tracksToCheck[t];
+          for (var i = 0; i < tr.clips.numItems; i++) {
+            var o = tr.clips[i];
+            if (o.start.seconds < insertTime + dur - 0.001 && o.end.seconds > insertTime + 0.001) {
+              return JSON.stringify({ success: false, error: "The destination " + insertTime + "s-" + (insertTime + dur) + "s is occupied on " + tr.name + " by '" + o.name + "' (" + o.start.seconds + "s-" + o.end.seconds + "s). overwriteClip() would replace it, so nothing was placed. Pass an offset that lands on empty space." });
+            }
+          }
+        }
+        var oldIn = null, oldOut = null;
+        try { oldIn = projItem.getInPoint(4).seconds; oldOut = projItem.getOutPoint(4).seconds; } catch (eM) {}
+        var placeError = null;
+        try {
+          projItem.setInPoint(srcIn, 4);
+          projItem.setOutPoint(srcIn + dur, 4);
+          info.track.overwriteClip(projItem, insertTime);
+        } catch (eP) { placeError = eP.toString(); }
+        var marksRestored = false;
+        try { if (oldIn !== null) { projItem.setInPoint(oldIn, 4); projItem.setOutPoint(oldOut, 4); marksRestored = Math.abs(projItem.getInPoint(4).seconds - oldIn) < 0.001 && Math.abs(projItem.getOutPoint(4).seconds - oldOut) < 0.001; } } catch (eR) {}
+        var landed = null, tol = 0.04;
         for (var di = 0; di < info.track.clips.numItems; di++) {
           var cand = info.track.clips[di];
-          if (Math.abs(cand.start.seconds - insertTime) > tolerance) continue;
+          if (Math.abs(cand.start.seconds - insertTime) > tol) continue;
           var sameSource = false;
           try { sameSource = String(cand.projectItem.nodeId) === String(projItem.nodeId); } catch (eSrc) {}
           if (sameSource) { landed = cand; break; }
         }
-        if (!landed) return JSON.stringify({
-          success: false, verified: true,
-          error: "overwriteClip() ran but no clip referencing this source is present at " + insertTime + "s, so the duplicate did not land.",
-          beforeCount: beforeCount, afterCount: afterCount, insertSeconds: insertTime
-        });
+        if (!landed) return JSON.stringify({ success: false, verified: true, error: "overwriteClip() ran but no clip referencing this source is present at " + insertTime + "s, so the duplicate did not land." + (placeError ? " " + placeError : ""), marksRestored: marksRestored });
+        var gotDur = landed.end.seconds - landed.start.seconds, gotIn = landed.inPoint.seconds;
+        var exact = Math.abs(gotDur - dur) < tol && Math.abs(gotIn - srcIn) < tol;
         return JSON.stringify({
-          success: true, verified: true,
-          message: "Clip duplicated at " + insertTime + "s",
-          beforeCount: beforeCount, afterCount: afterCount,
-          // Same count with a clip present means an existing clip was overwritten rather than a
-          // new one appended. The caller should know which happened.
-          replacedExisting: afterCount === beforeCount,
-          insertSeconds: insertTime,
-          duplicateStartSeconds: landed.start.seconds,
-          duplicateEndSeconds: landed.end.seconds
+          success: exact, verified: true, verifiedBy: 'start/end/in readback of the placed clip',
+          message: exact ? "Clip duplicated at " + insertTime + "s" : undefined,
+          duplicateStartSeconds: landed.start.seconds, duplicateEndSeconds: landed.end.seconds, duplicateSourceInSeconds: gotIn,
+          originalSourceInSeconds: srcIn, originalDurationSeconds: dur, insertSeconds: insertTime, marksRestored: marksRestored,
+          note: "Effects, keyframes and speed changes are not carried over; use copy_effects_between_clips for effects.",
+          error: exact ? undefined : "The duplicate landed but its range differs from the original (" + gotIn + "s/" + gotDur + "s vs " + srcIn + "s/" + dur + "s)."
         });
       } catch (e) {
         return JSON.stringify({ success: false, error: e.toString() });

@@ -345,7 +345,7 @@ describe("generated ExtendScript is syntactically valid", () => {
       const enable = await captureLocal("enable_disable_clip");
       expect(enable).toContain("nowEnabled");
       const dup = await captureLocal("duplicate_clip");
-      expect(dup).toContain("afterCount");
+      expect(dup).toContain("duplicateSourceInSeconds");
       const replace = await captureLocal("replace_clip");
       expect(replace).toContain("nodeId");
     });
