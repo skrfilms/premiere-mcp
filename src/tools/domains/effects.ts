@@ -994,8 +994,17 @@ export class EffectsTools extends AssemblyTools {
         ${this.transitionVerificationScript()}
         var before=__readQeTransitionState(clip);
         var beforeXml=__transitionXmlCount(domSeq);
+        var outSecs=domClip?Number(domClip.end.seconds):null;
+        var atOutBefore=outSecs===null?0:__qeTransitionsAt(qeTrack, outSecs).length;
         var addError=null;
-        try { clip.addTransition(mc, true, String(frames), "0", 0.5, true, true); } catch(eAdd) { addError=eAdd.toString(); }
+        // At the clip's OUT-point: the second argument false = the clip's end (true = its start,
+        // measured on 26.5.2), which is where this tool always said it applied the Morph Cut.
+        try { clip.addTransition(mc, false, String(frames), "0", 0.5, true, true); } catch(eAdd) { addError=eAdd.toString(); }
+        var atOut=outSecs===null?[]:__qeTransitionsAt(qeTrack, outSecs);
+        if(atOut.length>atOutBefore){
+          return JSON.stringify({success:true,verified:true,verifiedBy:'QE track transition list at the out-point',durationFrames:frames,outPointSecs:outSecs,transitions:atOut,
+            note:'Morph Cut analysis runs in the background; the transition is in place but may show Analyzing in Background until it finishes.'});
+        }
         var afterClip=domClip?__findQeClipByDomClip(qeTrack, domClip):clip;
         var after=__readQeTransitionState(afterClip||clip);
         var afterXml=__transitionXmlCount(domSeq);
