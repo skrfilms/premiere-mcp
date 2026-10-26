@@ -53,6 +53,7 @@ export type { MCPTool } from './tool-types.js';
 import type { MCPTool } from './tool-types.js';
 import { runFf } from './ff-exec.js';
 import { withReportDialogGuard } from '../bridge/report-dialog-guard.js';
+import { generatedAssetsDir } from '../utils/scratch-paths.js';
 
 // The header declarations and pure helpers moved to ./domains/shared.ts when this file was
 // split into one class per tool domain. Re-exported here: they were part of this module's
@@ -1317,9 +1318,9 @@ export class PremiereProTools extends TrimmingTools {
         case 'set_multicam_angle': return await this.setMulticamAngle(args.sequenceId, args.trackIndex, args.clipIndex, args.angleIndex);
         case 'create_multicam_source_sequence': return await this.createMulticamSourceSequence(args.binName, args.newSequenceName, args.presetPath, args.binId);
         case 'create_multicam_from_clips': return await this.createMulticamFromClips(args.projectItemIds, args.sequenceName, args.presetPath);
-        case 'frame_diff': return await this.frameDiff(args.time1Secs, args.time2Secs, args.outputDir ?? '/tmp', args.sequenceId);
-        case 'verify_effect_rendered': return await this.verifyEffectRendered(args.sequenceId, args.trackIndex, args.clipIndex, args.effectName, args.effectParam, args.effectParamValue, args.outputDir ?? '/tmp/premiere-mcp-bridge/generated-assets');
-        case 'verify_color_grade': return await this.verifyColorGrade(args.sequenceId, args.trackIndex, args.clipIndex, args.gradeParams, args.outputDir ?? '/tmp/premiere-mcp-bridge/generated-assets');
+        case 'frame_diff': return await this.frameDiff(args.time1Secs, args.time2Secs, args.outputDir ?? generatedAssetsDir(), args.sequenceId);
+        case 'verify_effect_rendered': return await this.verifyEffectRendered(args.sequenceId, args.trackIndex, args.clipIndex, args.effectName, args.effectParam, args.effectParamValue, args.outputDir ?? generatedAssetsDir());
+        case 'verify_color_grade': return await this.verifyColorGrade(args.sequenceId, args.trackIndex, args.clipIndex, args.gradeParams, args.outputDir ?? generatedAssetsDir());
         case 'batch_execute': return await this.batchExecute(args.operations, args.enableQE ?? false);
         case 'send_to_after_effects': return await this.sendToAfterEffects(args.outputPath, args.sequenceId);
         case 'frame_io_notes_to_markers': return await this.frameIoNotesToMarkers(args.jsonPath, args.sequenceId, args.markerColor ?? 1);

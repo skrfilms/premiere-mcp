@@ -8,6 +8,7 @@
 import type { PremiereProTransport } from '../bridge/types.js';
 import { Logger } from '../utils/logger.js';
 import { BUNDLE_BUDGETS, TASK_BUNDLES } from '../tools/profiles.js';
+import { defaultBridgeDir } from '../utils/scratch-paths.js';
 
 /**
  * The temp directory this text tells the reader to type into the CEP panel.
@@ -38,8 +39,7 @@ export function bridgeTempDirForDocs(
   platform: string,
   env: Record<string, string | undefined>,
 ): string {
-  if (platform !== 'win32') return '/tmp/premiere-mcp-bridge';
-  return `${env.TEMP || env.TMP || 'C:\\Temp'}\\premiere-mcp-bridge`;
+  return defaultBridgeDir(platform, env);
 }
 
 const DEFAULT_BRIDGE_TEMP_DIR = bridgeTempDirForDocs(process.platform, process.env);

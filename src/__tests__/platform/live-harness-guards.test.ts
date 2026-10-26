@@ -154,7 +154,9 @@ describe('requireScratchProject (run for real against a fake bridge)', () => {
   });
 
   it('refuses a scratch-NAMED project whose file lives outside the repo', () => {
-    const r = runGuard(scratch({ name: 'colour_test.prproj', path: '/etc/hosts' }));
+    // A file that exists outside the repo on every OS: the node binary running the test.
+    // /etc/hosts does not exist on Windows, so the guard refused there for a different reason.
+    const r = runGuard(scratch({ name: 'colour_test.prproj', path: process.execPath }));
     expect(r.status).toBe(2);
     expect(r.stderr).toMatch(/outside this repo/);
   });

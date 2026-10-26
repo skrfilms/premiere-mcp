@@ -6,6 +6,7 @@ import type { PremiereProTransport } from '../bridge/types.js';
 import type { MCPTool } from './index.js';
 import { buildExpandedInputSchema, expandedToolSpec } from './expanded-schemas.js';
 import { TRIM_LIB } from './trim-lib.js';
+import { bridgeDir, generatedAssetsDir } from '../utils/scratch-paths.js';
 
 export const expandedToolNames = [
   'find_items_by_media_path',
@@ -311,7 +312,7 @@ function encodeRgbaPng(width: number, height: number, pixelAt: (x: number, y: nu
 }
 
 async function writeGeneratedPng(fileName: string, width: number, height: number, pixelAt: (x: number, y: number) => [number, number, number, number]): Promise<string> {
-  const outputDir = join(process.env.PREMIERE_TEMP_DIR || '/tmp/premiere-mcp-bridge', 'generated-assets');
+  const outputDir = generatedAssetsDir();
   await fs.mkdir(outputDir, { recursive: true });
   const filePath = join(outputDir, fileName);
   await fs.writeFile(filePath, encodeRgbaPng(width, height, pixelAt));
@@ -550,7 +551,7 @@ async function deletePreviewFilesOnDisk(bridge: PremiereProTransport, args: Reco
     };
   }
 
-  const projectDir = info.projectPath ? dirname(String(info.projectPath)) : (process.env.PREMIERE_TEMP_DIR || '/tmp/premiere-mcp-bridge');
+  const projectDir = info.projectPath ? dirname(String(info.projectPath)) : bridgeDir();
   const explicitDir = args.previewDir || args.previewPath || args.path;
   const candidates = [
     explicitDir ? String(explicitDir) : '',
