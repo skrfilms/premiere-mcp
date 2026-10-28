@@ -58,9 +58,20 @@ function entryName(e) {
   return String(n).split('/').pop();
 }
 
-function setStatus(text) {
-  const el = document.getElementById('status');
-  if (el) el.textContent = text;
+/** The panel is optional: these no-op when it is closed, since polling runs regardless. */
+function setStatus(text, state) {
+  try {
+    const el = document.getElementById('status');
+    if (el) el.textContent = text;
+    const dot = document.getElementById('dot');
+    if (dot) dot.className = 'dot ' + (state || '');
+  } catch (e) { /* no document */ }
+}
+function setLast(text, bad) {
+  try {
+    const el = document.getElementById('last');
+    if (el) { el.textContent = text; el.className = 'last' + (bad ? ' bad' : ''); }
+  } catch (e) { /* no document */ }
 }
 
 function serialise(value, depth = 0) {
@@ -100,10 +111,10 @@ async function poll() {
   busy = true;
   try {
     let names = [];
-    try { names = Array.from(fs.readdirSync(DIR)).map(entryName); } catch (e) { lastError = `readdir: ${e.message}`; setStatus(`waiting for ${DIR}`); return; }
+    try { names = Array.from(fs.readdirSync(DIR)).map(entryName); } catch (e) { lastError = `readdir: ${e.message}`; setStatus('Waiting for the MCP server', 'off'); return; }
     lastSeen = names.slice(0, 6);
     const cmd = names.find((n) => n.startsWith('command-') && n.endsWith('.json'));
-    if (!cmd) { setStatus(`idle — ${handled} handled`); return; }
+    if (!cmd) { setStatus('Ready', 'ready'); return; }
     const path = `${DIR}/${cmd}`;
     let req;
     try {
@@ -113,7 +124,7 @@ async function poll() {
     // Claim the command by renaming it, so a second poller (or a retry) cannot run it twice.
     try { await move(path, `${path}.taken`); } catch (e) { lastError = `claim ${cmd}: ${e.message}`; return; }
     try { await remove(`${path}.taken`); } catch (e) { /* leftover is harmless */ }
-    setStatus(`running ${req.id}`);
+    setStatus('Working…', 'busy');
     let res;
     try {
       const result = await new AsyncFunction('ppro', 'uxp', req.code)(ppro, uxp);
@@ -131,25 +142,27 @@ async function poll() {
       fs.writeFileSync(final, JSON.stringify(res));
     }
     handled++;
-    const last = document.getElementById('last');
-    if (last) last.textContent = `${req.id}: ${res.ok ? 'ok' : res.error}`;
+    const what = req.label ? String(req.label) : 'Last request';
+    setLast(res.ok ? `${what} — done` : `${what} — failed: ${res.error}`, !res.ok);
   } finally {
     busy = false;
     heartbeat();
   }
 }
 
+// Poll from load, not from show(): the panel is a status view, and closing it must not stop
+// the channel. (It used to start in show() and stop in destroy(), so a closed panel meant a
+// dead channel.)
+function start() { if (!timer) timer = setInterval(poll, POLL_MS); }
+start();
+
 uxp.entrypoints.setup({
+  plugin: {
+    create() { start(); },
+  },
   panels: {
     uxpProbePanel: {
-      show() {
-        if (!timer) timer = setInterval(poll, POLL_MS);
-        setStatus(`polling ${DIR}`);
-      },
-      destroy() {
-        if (timer) clearInterval(timer);
-        timer = null;
-      },
+      show() { start(); setStatus('Ready', 'ready'); },
     },
   },
 });

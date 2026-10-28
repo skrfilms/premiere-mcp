@@ -41,6 +41,17 @@ against a render, not only an API readback.
 - `add_transition` and `batch_add_transitions` fall back to UXP's `TransitionFactory`
   when the QE route cannot prove the edit, verified by QE's transition list at the cut.
 
+### Runs with no panel open
+
+- The CEP bridge now also ships as an invisible extension that Premiere starts at launch
+  (`cep-plugin/background.html`). With **Run in background** on, the default, nothing has to
+  be open. A lease file (`bridge-owner.json`) makes the panel and the background copy take
+  turns, so a command can never run twice. A copy standing down mid-command keeps a busy
+  heartbeat until it finishes. If the background copy dies, the panel takes over within
+  about 3 s. The toggle lives in the panel and takes effect immediately.
+- The UXP helper polls from the moment Premiere loads it, so its panel can stay closed. The
+  panel is now a styled status card that names the last action in plain words.
+
 ### CEP panel
 
 - The panel now shows only the status card and the shared folder. "In Premiere now",
