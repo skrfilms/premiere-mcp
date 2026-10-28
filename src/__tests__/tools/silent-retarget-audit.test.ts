@@ -192,7 +192,7 @@ describe('bins are resolved by one shared resolver, never by a local scan', () =
     expect(binTools.length).toBeGreaterThanOrEqual(4);
 
     const offenders = binTools
-      .filter((m) => !m.body.includes('__resolveBin('))
+      .filter((m) => !m.body.includes('__resolveBin(') && !m.body.includes('__resolveImportBin('))
       .map((m) => `${m.file}:${m.line} ${m.name}`);
 
     expect(offenders).toEqual([]);

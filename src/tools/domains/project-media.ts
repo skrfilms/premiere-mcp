@@ -523,7 +523,8 @@ export class ProjectMediaTools extends CaptionTools {
         // matched any child by name, so a bin nested under another bin -- which
         // is what create_bin usually hands back -- was unreachable, and a clip
         // sharing the bin's name could be selected as the destination.
-        var __binRequest = __resolveBin(${binId !== undefined ? JSON.stringify(binId) : 'null'}, ${binName !== undefined ? JSON.stringify(binName) : 'null'});
+        // A named destination that does not exist yet is created (see __resolveImportBin).
+        var __binRequest = __resolveImportBin(${binId !== undefined ? JSON.stringify(binId) : 'null'}, ${binName !== undefined ? JSON.stringify(binName) : 'null'});
         if (__binRequest.error) {
           return JSON.stringify({
             success: false,
