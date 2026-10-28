@@ -8,9 +8,11 @@ import { join } from 'node:path';
 import { runUxp, uxpAvailable } from '../../bridge/uxp-channel.js';
 
 const posix = process.platform !== 'win32';
-const maybe = posix ? describe : describe.skip;
+// The queue path is POSIX-only for now, so the queue tests skip on Windows; the suite itself
+// still runs there (CI requires every suite to execute), and asserts the Windows behaviour.
+const posixIt = posix ? it : it.skip;
 
-maybe('uxp channel', () => {
+describe('uxp channel', () => {
   let dir: string;
   const saved = process.env.PREMIERE_MCP_UXP_DIR;
   beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'uxp-test-')); process.env.PREMIERE_MCP_UXP_DIR = dir; });
@@ -20,22 +22,27 @@ maybe('uxp channel', () => {
   });
   const beat = (ageMs: number) => writeFileSync(join(dir, 'uxp-heartbeat.json'), JSON.stringify({ ts: Date.now() - ageMs }));
 
+  it('is never available on Windows, and otherwise needs a heartbeat', () => {
+    beat(0);
+    expect(uxpAvailable()).toBe(posix);
+  });
+
   it('is unavailable with no heartbeat', () => {
     expect(uxpAvailable()).toBe(false);
   });
 
-  it('is unavailable when the heartbeat is stale', () => {
+  posixIt('is unavailable when the heartbeat is stale', () => {
     beat(60_000);
     expect(uxpAvailable()).toBe(false);
   });
 
-  it('refuses to queue anything when the panel is not running', async () => {
+  posixIt('refuses to queue anything when the panel is not running', async () => {
     const r = await runUxp('return 1;', 500);
     expect(r.ok).toBe(false);
     expect(readdirSync(dir).filter((n) => n.startsWith('command-'))).toEqual([]);
   });
 
-  it('round-trips a command through the queue and keeps the directory private', async () => {
+  posixIt('round-trips a command through the queue and keeps the directory private', async () => {
     beat(0);
     // A stand-in panel: take the command, answer it.
     const panel = setInterval(() => {
@@ -56,7 +63,7 @@ maybe('uxp channel', () => {
     }
   });
 
-  it('surfaces a panel-side error', async () => {
+  posixIt('surfaces a panel-side error', async () => {
     beat(0);
     const panel = setInterval(() => {
       const cmd = readdirSync(dir).find((n) => n.startsWith('command-'));
