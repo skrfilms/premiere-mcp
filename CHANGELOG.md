@@ -29,6 +29,24 @@ against a render, not only an API readback.
   that runs `premierepro` UXP calls over a private file queue. Groundwork for the calls
   only UXP has (work area, sequence in/out, transitions); not yet wired into tools.
 
+### Installing for a teammate
+
+- `npm run release:installer` builds `Premiere-MCP-Installer-v<version>.zip`: the CEP bridge
+  **signed** (so it loads without the CEP debug switch), the UXP helper, and a double-click
+  `Install Premiere MCP.command`. The installer uses Adobe's own plugin installer and moves
+  any older hand-copied bridge aside first, since two copies with one id would clash. The
+  signed package holds only the five runtime files, not the design mockups.
+- The self-signed certificate is created under `~/Library/Application Support/premiere-mcp-signing`
+  with its password in the macOS Keychain, and names this project as the publisher.
+
+### Finding tools by how an editor asks
+
+- `find_tool` knows editor vocabulary ("black and white", "subtitles", "slow mo", "swap in
+  the new render", "dead air"), plain-English aliases on commonly used tools, and ranks a tool
+  that does the thing above one that inspects it when the ask is an action. A 42-phrase test
+  set (`search-eval.test.ts`) pins it: 16 of the first 31 passed before; all 42 pass now,
+  including a second batch written after the first fix.
+
 ### Engine stalls are detected, not waited out
 
 - When a script outlives the panel's watchdog, Premiere's scripting engine is still running

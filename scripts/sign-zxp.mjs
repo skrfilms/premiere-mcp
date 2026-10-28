@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
-import { chmod, mkdir, readFile, rm } from 'node:fs/promises';
+import { chmod, cp, mkdir, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
@@ -23,13 +24,21 @@ if (!certificatePassword) {
 
 await mkdir(dirname(outputPath), { recursive: true });
 await rm(outputPath, { force: true });
+// Sign only what the panel runs. cep-plugin/ also holds design mockups (_design/), which have no
+// business in an installed extension.
+const RUNTIME = ['CSXS', 'index.html', 'background.html', 'bridge-cep.js', 'CSInterface.js'];
+const stage = join(tmpdir(), `premiere-mcp-zxp-${process.pid}`);
+await rm(stage, { recursive: true, force: true });
+await mkdir(stage, { recursive: true });
+for (const entry of RUNTIME) await cp(join(root, 'cep-plugin', entry), join(stage, entry), { recursive: true });
 execFileSync(zxpSignCommand, [
   '-sign',
-  join(root, 'cep-plugin'),
+  stage,
   outputPath,
   certificatePath,
   certificatePassword,
 ], { stdio: 'inherit' });
+await rm(stage, { recursive: true, force: true });
 await chmod(outputPath, 0o644);
 execFileSync(zxpSignCommand, ['-verify', outputPath], { stdio: 'inherit' });
 console.log(`Signed ZXP created: ${outputPath}`);
