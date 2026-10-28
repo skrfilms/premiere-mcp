@@ -539,33 +539,169 @@ export class AssemblyTools extends ToolsBase {
     return await this.bridge.executeScript(script);
   }
 
-  protected async replaceClip(clipId: string, newProjectItemId: string, _preserveEffects?: boolean): Promise<any> {
-    const script = `
+  /**
+   * Swap the media under one timeline clip and keep everything an editor set on it.
+   *
+   * This used to remove the clip and overwriteClip() the new item at full length, and it took
+   * preserveEffects and ignored it: in a live version-up the trim, the Lumetri grade and the Motion
+   * scale were all lost, and the full-length v002 ran over the next shot. Now (preserveEffects,
+   * the default): a temporary copy past the end of the edit takes the old clip's effects, the old
+   * clip and its linked audio are removed, the new media is laid into the old slot with the old
+   * source range, the effects are copied onto it from the temporary copy, and the copy is deleted.
+   * Nothing is slid across other clips (that scrambled Premiere's track order; see below).
+   * Verified by readback: same start, end and in point, every effect present.
+   *
+   * To relink every use of a project item at once instead (the usual VFX version-up), use
+   * replace_clip_media, which keeps the timeline clips themselves untouched.
+   */
+  protected async replaceClip(clipId: string, newProjectItemId: string, preserveEffects?: boolean): Promise<any> {
+    const keep = preserveEffects !== false;
+    const prep: any = await this.bridge.executeScript(`
       try {
         var info = __findClip(${JSON.stringify(clipId)});
         if (!info) return JSON.stringify({ success: false, error: "Clip not found" });
         var newItem = __findProjectItem(${JSON.stringify(newProjectItemId)});
         if (!newItem) return JSON.stringify({ success: false, error: "New project item not found" });
-        var startTime = info.clip.start.seconds;
-        info.clip.remove(false, true);
-        info.track.overwriteClip(newItem, startTime);
-        // Confirm the clip now covering startTime is backed by the requested item,
-        // rather than trusting overwriteClip() (which returns void and can no-op).
-        var replaced = false;
-        for (var rci = 0; rci < info.track.clips.numItems; rci++) {
-          var rc = info.track.clips[rci];
-          if (rc.start.seconds <= startTime + 0.001 && rc.end.seconds > startTime - 0.001) {
-            if (rc.projectItem && String(rc.projectItem.nodeId) === String(newItem.nodeId)) replaced = true;
-            break;
+        var c = info.clip, seq = info.sequence, track = info.track;
+        var speed = 1, rev = false;
+        try { speed = Number(c.getSpeed()); } catch (eS) {}
+        try { rev = !!c.isSpeedReversed(); } catch (eR) {}
+        if (${keep} && (Math.abs(speed - 1) > 0.0001 || rev)) return JSON.stringify({ success: false, error: "The clip is speed-changed or reversed, so its source range cannot be reproduced on the new media. Nothing was changed. Pass preserveEffects:false to drop in the new media at its own length." });
+        var o = { success: true, seq: String(seq.sequenceID), video: info.trackType === 'video', track: info.trackIndex,
+          start: c.start.seconds, end: c.end.seconds, inPoint: c.inPoint.seconds, outPoint: c.outPoint.seconds,
+          effects: [], linked: [] };
+        for (var k = 0; k < c.components.numItems; k++) o.effects.push(String(c.components[k].displayName));
+        try { var li = c.getLinkedItems(); for (var l = 0; l < li.numItems; l++) if (String(li[l].nodeId) !== String(c.nodeId)) o.linked.push(String(li[l].nodeId)); } catch (eL) {}
+        if (!${keep}) return JSON.stringify(o);
+        // Empty space past everything on every track, so the staging copy overlaps nothing.
+        var far = 0;
+        for (var vt = 0; vt < seq.videoTracks.numTracks; vt++) { var tv = seq.videoTracks[vt]; if (tv.clips.numItems) far = Math.max(far, tv.clips[tv.clips.numItems - 1].end.seconds); }
+        for (var at = 0; at < seq.audioTracks.numTracks; at++) { var ta = seq.audioTracks[at]; if (ta.clips.numItems) far = Math.max(far, ta.clips[ta.clips.numItems - 1].end.seconds); }
+        far = Math.ceil(far) + 10;
+        var prevIn = null, prevOut = null;
+        try { prevIn = newItem.getInPoint().seconds; prevOut = newItem.getOutPoint().seconds; } catch (eP) {}
+        newItem.setInPoint(o.inPoint, 4);
+        newItem.setOutPoint(o.inPoint + (o.end - o.start), 4);
+        var when = new Time(); when.seconds = far;
+        track.overwriteClip(newItem, when);
+        // Put the bin item's own marks back: they are the item's, not this edit's.
+        try { if (prevIn !== null) { newItem.setInPoint(prevIn, 4); newItem.setOutPoint(prevOut, 4); } } catch (eB) {}
+        var staged = null, stagedIndex = -1;
+        for (var s2 = 0; s2 < track.clips.numItems; s2++) { var tc = track.clips[s2]; if (Math.abs(tc.start.seconds - far) < 0.02) { staged = tc; stagedIndex = s2; break; } }
+        if (!staged) return JSON.stringify({ success: false, error: "Could not place the new media to stage the swap (locked or untargeted track?). Nothing was changed." });
+        // Effects the old clip has and the staged copy lacks, added by name so their values can be copied.
+        var have = {}; for (var h = 0; h < staged.components.numItems; h++) have[String(staged.components[h].displayName)] = (have[String(staged.components[h].displayName)] || 0) + 1;
+        var need = {}; for (var e = 0; e < o.effects.length; e++) need[o.effects[e]] = (need[o.effects[e]] || 0) + 1;
+        var added = [], missing = [];
+        app.enableQE();
+        var q = __qeSequenceOpening(seq);
+        var qc = q ? __qeClipByIndex(q, o.video ? 'video' : 'audio', o.track, stagedIndex) : null;
+        for (var name in need) {
+          var lacking = need[name] - (have[name] || 0);
+          for (var n = 0; n < lacking; n++) {
+            var fx = o.video ? qe.project.getVideoEffectByName(name) : qe.project.getAudioEffectByName(name);
+            try { if (qc && fx) { if (o.video) qc.addVideoEffect(fx); else qc.addAudioEffect(fx); added.push(name); } else missing.push(name); } catch (eA) { missing.push(name); }
           }
         }
-        if (!replaced) return JSON.stringify({ success: false, verified: false, error: "Premiere reported the replace but '" + newItem.name + "' is not the clip at " + startTime + "s." });
-        return JSON.stringify({ success: true, verified: true, message: "Clip replaced" });
+        o.staged = String(staged.nodeId);
+        o.stagedStart = far;
+        o.added = added;
+        o.missing = missing;
+        return JSON.stringify(o);
       } catch (e) {
         return JSON.stringify({ success: false, error: e.toString() });
       }
-    `;
-    return await this.bridge.executeScript(script);
+    `);
+    if (!prep?.success) return prep;
+
+    if (!keep) {
+      // The old behaviour, on request: drop the new media in at its own length.
+      return await this.bridge.executeScript(`
+        try {
+          var info = __findClip(${JSON.stringify(clipId)});
+          var newItem = __findProjectItem(${JSON.stringify(newProjectItemId)});
+          var t = new Time(); t.seconds = info.clip.start.seconds;
+          info.clip.remove(false, true);
+          info.track.overwriteClip(newItem, t);
+          return JSON.stringify({ success: true, verified: false, preserveEffects: false, note: "Placed at its own length; trims and effects were not carried over." });
+        } catch (e) { return JSON.stringify({ success: false, error: e.toString() }); }
+      `);
+    }
+
+    // Effects: old clip -> temporary copy (it holds them while the old clip goes away).
+    await (this as any).executeTool('copy_effects_between_clips', { sourceClipId: clipId, targetClipId: prep.staged, sourceSequenceId: prep.seq, targetSequenceId: prep.seq });
+
+    // No TrackItem.move(): sliding the staged copy back across other clips left Premiere's
+    // internal track order scrambled (QE listed SH020 6-12s before SH010 1-4s, then "Empty from
+    // 4s"), and everything after the moved clip rendered black — measured on 26.5.2. Instead the
+    // new clip is laid straight into the old slot and the temporary copy is deleted afterwards.
+    const placed: any = await this.bridge.executeScript(`
+      try {
+        var seq = __findSequence(${JSON.stringify(prep.seq)});
+        var old = __findClip(${JSON.stringify(clipId)}, ${JSON.stringify(prep.seq)});
+        var newItem = __findProjectItem(${JSON.stringify(newProjectItemId)});
+        if (!old || !newItem) return JSON.stringify({ success: false, error: "Lost the old clip or the new item mid-swap." });
+        var track = old.track;
+        var oldLinked = ${JSON.stringify(prep.linked)};
+        for (var l = 0; l < oldLinked.length; l++) { var lo = __findClip(oldLinked[l], ${JSON.stringify(prep.seq)}); if (lo) lo.clip.remove(false, false); }
+        old.clip.remove(false, false);
+        var prevIn = null, prevOut = null;
+        try { prevIn = newItem.getInPoint().seconds; prevOut = newItem.getOutPoint().seconds; } catch (eP) {}
+        newItem.setInPoint(${prep.inPoint}, 4);
+        newItem.setOutPoint(${prep.inPoint} + (${prep.end} - ${prep.start}), 4);
+        var when = new Time(); when.seconds = ${prep.start};
+        track.overwriteClip(newItem, when);
+        try { if (prevIn !== null) { newItem.setInPoint(prevIn, 4); newItem.setOutPoint(prevOut, 4); } } catch (eB) {}
+        var fin = null, finIndex = -1;
+        for (var k = 0; k < track.clips.numItems; k++) { var tc = track.clips[k]; if (Math.abs(tc.start.seconds - ${prep.start}) < 0.02) { fin = tc; finIndex = k; break; } }
+        if (!fin) return JSON.stringify({ success: false, error: "The new media did not land in the old slot. The temporary copy past the end of the edit still holds the effects." });
+        var have = {}; for (var h = 0; h < fin.components.numItems; h++) have[String(fin.components[h].displayName)] = (have[String(fin.components[h].displayName)] || 0) + 1;
+        var need = {}; var want = ${JSON.stringify(prep.effects)}; for (var e = 0; e < want.length; e++) need[want[e]] = (need[want[e]] || 0) + 1;
+        app.enableQE();
+        var q = __qeSequenceOpening(seq);
+        var qc = q ? __qeClipByIndex(q, ${prep.video ? "'video'" : "'audio'"}, ${prep.track}, finIndex) : null;
+        for (var name in need) {
+          var lacking = need[name] - (have[name] || 0);
+          for (var n = 0; n < lacking; n++) {
+            var fx = ${prep.video ? 'qe.project.getVideoEffectByName(name)' : 'qe.project.getAudioEffectByName(name)'};
+            try { if (qc && fx) { ${prep.video ? 'qc.addVideoEffect(fx)' : 'qc.addAudioEffect(fx)'}; } } catch (eA) {}
+          }
+        }
+        return JSON.stringify({ success: true, finalId: String(fin.nodeId) });
+      } catch (e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+    if (!placed?.success) return placed;
+
+    // Effects: temporary copy -> the clip now in the old slot.
+    const copied: any = await (this as any).executeTool('copy_effects_between_clips', { sourceClipId: prep.staged, targetClipId: placed.finalId, sourceSequenceId: prep.seq, targetSequenceId: prep.seq });
+
+    return await this.bridge.executeScript(`
+      try {
+        var tmp = __findClip(${JSON.stringify(prep.staged)}, ${JSON.stringify(prep.seq)});
+        if (tmp) {
+          var tl = [];
+          try { var li = tmp.clip.getLinkedItems(); for (var i = 0; i < li.numItems; i++) if (String(li[i].nodeId) !== String(tmp.clip.nodeId)) tl.push(li[i]); } catch (eL) {}
+          for (var t = 0; t < tl.length; t++) { try { tl[t].remove(false, false); } catch (eT) {} }
+          tmp.clip.remove(false, false);
+        }
+        var now = __findClip(${JSON.stringify(placed.finalId)}, ${JSON.stringify(prep.seq)});
+        var c = now ? now.clip : null;
+        var effects = [];
+        if (c) for (var e = 0; e < c.components.numItems; e++) effects.push(String(c.components[e].displayName));
+        var want = ${JSON.stringify(prep.effects)};
+        var lost = [];
+        for (var w = 0; w < want.length; w++) { var found = false; for (var f = 0; f < effects.length; f++) if (effects[f] === want[w]) { found = true; effects.splice(f, 1); break; } if (!found) lost.push(want[w]); }
+        var placedOk = c && Math.abs(c.start.seconds - ${prep.start}) < 0.02 && Math.abs(c.end.seconds - ${prep.end}) < 0.02 && Math.abs(c.inPoint.seconds - ${prep.inPoint}) < 0.02;
+        return JSON.stringify({
+          success: !!placedOk && lost.length === 0 && !__findClip(${JSON.stringify(prep.staged)}, ${JSON.stringify(prep.seq)}), verified: true,
+          verifiedBy: 'timeline readback of start, end, in point and effect list; temporary copy removed',
+          clipId: c ? String(c.nodeId) : null, start: c ? c.start.seconds : null, end: c ? c.end.seconds : null, inPoint: c ? c.inPoint.seconds : null,
+          effectsAdded: ${JSON.stringify(prep.added)}, effectValuesCopied: ${JSON.stringify(copied?.data?.copied ?? copied?.copied ?? null)},
+          note: 'The swapped clip has a new clip id; use clipId from this result.',
+          error: !placedOk ? 'The new clip did not land at the old clip\\'s exact position and source range.' : (lost.length ? 'These effects could not be carried over: ' + lost.join(', ') : undefined)
+        });
+      } catch (e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
   }
 
   protected async nestAllV1Clips(newSeqName: string, seqId?: string): Promise<any> {
