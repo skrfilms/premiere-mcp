@@ -333,7 +333,7 @@ if (Test-Path -LiteralPath $cepTargetDir) {
 # then shows no panel and reports nothing anywhere.
 New-Item -ItemType Directory -Path $cepTargetDir -Force | Out-Null
 Copy-Item -Path (Join-Path $cepSourceDir '*') -Destination $cepTargetDir -Recurse -Force
-foreach ($required in @('CSXS\manifest.xml', 'index.html', 'bridge-cep.js')) {
+foreach ($required in @('CSXS\manifest.xml', 'index.html', 'background.html', 'bridge-cep.js')) {
     $probe = Join-Path $cepTargetDir $required
     if (-not (Test-Path -LiteralPath $probe -PathType Leaf)) {
         throw "CEP extension copy is incomplete: $probe is missing after the copy."

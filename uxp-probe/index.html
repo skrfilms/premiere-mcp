@@ -1,10 +1,30 @@
 <!DOCTYPE html>
 <html>
   <head>
+    <style>
+      body { margin: 0; padding: 10px; background: transparent; font-family: -apple-system, "Segoe UI", sans-serif; }
+      .card {
+        border-radius: 14px; padding: 12px 14px;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.09);
+      }
+      .row { display: flex; align-items: center; }
+      .dot { width: 9px; height: 9px; border-radius: 5px; margin-right: 9px; background: #8a8a8a; }
+      .dot.ready { background: #5fd3a0; }
+      .dot.busy { background: #f0b45a; }
+      .dot.off { background: #e0675f; }
+      .title { font-size: 15px; font-weight: 600; color: #f2f2f2; }
+      .sub { font-size: 11px; color: #a8a8a8; margin-top: 4px; margin-left: 18px; }
+      .last { font-size: 11px; color: #c8c8c8; margin-top: 10px; padding-top: 9px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+      .last.bad { color: #f09a92; }
+    </style>
     <script src="main.js"></script>
   </head>
   <body>
-    <sp-body size="S" id="status">MCP UXP Probe: starting…</sp-body>
-    <sp-detail id="last"></sp-detail>
+    <div class="card">
+      <div class="row"><div class="dot" id="dot"></div><div class="title" id="status">Starting…</div></div>
+      <div class="sub">UXP helper for the MCP bridge</div>
+      <div class="last" id="last">Nothing run yet</div>
+    </div>
   </body>
 </html>

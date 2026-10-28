@@ -10,6 +10,7 @@
     "dist",
     "cep-plugin",
     "uxp-plugin",
+    "uxp-probe",
     "plugins",
     ".agents",
     ".claude-plugin",

@@ -57,17 +57,18 @@ function sweepTaken(): void {
 
 /**
  * Run `code` in the UXP panel as the body of an async function called with (ppro, uxp).
+ * `label` is the plain-language name the panel shows for it ("Set work area").
  * Objects from `premierepro` go stale across an await, so code that edits should do its reads
  * and its executeTransaction inside one project.lockedAccess callback.
  */
-export async function runUxp(code: string, timeoutMs = 20000): Promise<UxpResult> {
+export async function runUxp(code: string, timeoutMs = 20000, label?: string): Promise<UxpResult> {
   if (!uxpAvailable()) return { ok: false, error: 'The MCP UXP Probe panel is not running (npm run uxp:install, then restart Premiere).' };
   ensureDir();
   sweepTaken();
   const d = dir();
   const id = randomUUID();
   const staging = `${d}/.c-${id}`;
-  writeFileSync(staging, JSON.stringify({ id, code }), { mode: 0o600 });
+  writeFileSync(staging, JSON.stringify({ id, code, label }), { mode: 0o600 });
   renameSync(staging, `${d}/command-${id}.json`);
   const responsePath = `${d}/response-${id}.json`;
   const deadline = Date.now() + timeoutMs;

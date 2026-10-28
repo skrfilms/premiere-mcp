@@ -808,7 +808,7 @@ export class EffectsTools extends AssemblyTools {
         executed = p.executeTransaction((c) => { c.addAction(action); }, 'MCP add transition');
       });
       return { executed, matchName: match };
-    `);
+    `, 20000, 'Add transition');
     if (!u.ok || u.result?.error) return { success: false, error: `UXP could not add the transition: ${u.error ?? u.result?.error}` };
     const after: any = await countAt();
     const landed = after?.success && Number(after.at) > Number(before.at);

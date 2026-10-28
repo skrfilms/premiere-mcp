@@ -124,6 +124,13 @@ export function loadPanel(options: LoadPanelOptions = {}): LoadedPanel {
 
   // Prototype only: running the constructor would start timers and touch disk.
   const bridge = Object.create((Bridge as unknown as { prototype: object }).prototype) as Record<string, any>;
+  // No constructor runs, so give the instance what the constructor would: a panel-role identity,
+  // already holding the run lease. Tests about the lease itself reset these explicitly.
+  bridge.role = 'panel';
+  bridge.headless = false;
+  bridge.instanceId = 'panel-test';
+  bridge.active = true;
+  bridge.leaseTakenAt = 0;
   bridge.csInterface = new (sandbox.CSInterface as new () => unknown)();
   bridge.normalizeHostEnvironment = (value: unknown) => value;
   bridge.log = () => {};
