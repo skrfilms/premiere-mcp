@@ -1692,7 +1692,8 @@ export class ExportRenderTools extends PlaybackTools {
       try {
         var seq = app.project.activeSequence;
         if (!seq) return JSON.stringify({called:false,error:'No active sequence'});
-        app.project.exportAAF(seq, ${JSON.stringify(outputPath)}, 1, 0, 48000, 16, 0, 0, 1, 0);
+        // mixDownVideo 0: a mixdown renders the sequence first and holds the host for minutes.
+        app.project.exportAAF(seq, ${JSON.stringify(outputPath)}, 0, 0, 48000, 16, 0, 0, 1, 0);
         return JSON.stringify({called:true,fallbackUsed:false});
       } catch(e) { return JSON.stringify({called:false,error:e.toString()}); }
     `);

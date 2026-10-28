@@ -586,6 +586,9 @@ export class PremiereProTools extends TrimmingTools {
         ? { ...result, recoveryCheckpoint }
         : result;
 
+    // Rebuilt in TypeScript (it needs ffmpeg plus several host steps); the expanded switch only
+    // knew setFrameHold/freezeFrame, which do not exist on 26.5.2.
+    if (name === 'freeze_frame') return withCheckpoint(await this.freezeFrame(args));
     const localToolNames = new Set(this.getLocalTools().map((localTool) => localTool.name));
     if (!localToolNames.has(name) && isExpandedTool(name)) {
       return withCheckpoint(await executeExpandedTool(this.bridge, name, args));
@@ -836,7 +839,7 @@ export class PremiereProTools extends TrimmingTools {
         case 'sharpen_clip': return await this.sharpenClip(args.trackIndex, args.clipIndex, args.amount ?? 50, args.sequenceId);
         case 'enable_disable_all_effects': return await this.enableDisableAllEffects(args.trackIndex, args.clipIndex, args.enabled, args.sequenceId);
         case 'remove_all_effects_qe': return await this.removeAllEffectsQe(args.trackIndex, args.clipIndex, args.sequenceId);
-        case 'apply_lut_to_clip': return await this.applyLutToClip(args.trackIndex, args.clipIndex, args.lutPath, args.sequenceId);
+        case 'apply_lut_to_clip': return await this.applyLutToClip(args.trackIndex, args.clipIndex, args.lutPath, args.sequenceId, args.installIfMissing);
         case 'list_effects_on_clip_qe': return await this.listEffectsOnClipQe(args.trackIndex, args.clipIndex, args.sequenceId);
         case 'timecode_to_frames': return await this.timecodeToFrames(args.timecode, args.frameRate);
         case 'frames_to_timecode': return await this.framesToTimecode(args.frames, args.frameRate);
@@ -947,7 +950,7 @@ export class PremiereProTools extends TrimmingTools {
         case 'color_correct':
           return await this.colorCorrect(args.clipId, args);
         case 'apply_lut':
-          return await this.applyLut(args.clipId, args.lutPath, args.intensity);
+          return await this.applyLut(args.clipId, args.lutPath, args.intensity, args.installIfMissing);
 
         // Export and Rendering
         case 'export_sequence':
@@ -1318,6 +1321,7 @@ export class PremiereProTools extends TrimmingTools {
         case 'set_multicam_angle': return await this.setMulticamAngle(args.sequenceId, args.trackIndex, args.clipIndex, args.angleIndex);
         case 'create_multicam_source_sequence': return await this.createMulticamSourceSequence(args.binName, args.newSequenceName, args.presetPath, args.binId);
         case 'create_multicam_from_clips': return await this.createMulticamFromClips(args.projectItemIds, args.sequenceName, args.presetPath);
+        case 'create_multicam_cut': return await this.createMulticamCut(args.angleItemIds, args.cuts, args.sequenceName);
         case 'frame_diff': return await this.frameDiff(args.time1Secs, args.time2Secs, args.outputDir ?? generatedAssetsDir(), args.sequenceId);
         case 'verify_effect_rendered': return await this.verifyEffectRendered(args.sequenceId, args.trackIndex, args.clipIndex, args.effectName, args.effectParam, args.effectParamValue, args.outputDir ?? generatedAssetsDir());
         case 'verify_color_grade': return await this.verifyColorGrade(args.sequenceId, args.trackIndex, args.clipIndex, args.gradeParams, args.outputDir ?? generatedAssetsDir());
@@ -1352,14 +1356,14 @@ export class PremiereProTools extends TrimmingTools {
         case 'export_omf_with_settings': return await this.exportOmfWithSettings(args.outputPath);
         case 'export_aaf_with_settings': return await this.exportAafWithSettings(args.outputPath);
         case 'verify_export_file': return this.verifyExportFile(args.filePath, args.expectedDurationSecs, args.expectedFps, args.expectedWidth, args.expectedHeight);
-        case 'lower_third_preset': return await this.lowerThirdPreset(args.name, args.title, args.startTimeSecs, args.durationSecs ?? 5, args.trackIndex ?? 1, args.sequenceId);
-        case 'title_card': return await this.titleCard(args.text, args.startTimeSecs, args.durationSecs ?? 3, args.trackIndex ?? 1, args.sequenceId);
+        case 'lower_third_preset': return await this.lowerThirdPreset(args.name, args.title, args.startTimeSecs, args.durationSecs ?? 5, args.trackIndex ?? 1, args.sequenceId, args.mogrtPath);
+        case 'title_card': return await this.titleCard(args.text, args.startTimeSecs, args.durationSecs ?? 3, args.trackIndex ?? 1, args.sequenceId, args.mogrtPath);
         case 'watermark_apply': return await this.watermarkApply(args.logoPath, args.opacity ?? 50, args.corner ?? 'top-right', args.sequenceId);
         case 'set_mogrt_color': return await this.setMogrtColor(args.sequenceId, args.trackIndex, args.clipIndex, args.paramName, args.r, args.g, args.b);
         case 'get_mogrt_text_all': return await this.getMogrtTextAll(args.sequenceId);
         case 'remove_mogrt_clip': return await this.removeMogrtClip(args.sequenceId, args.trackIndex, args.clipIndex);
         case 'batch_mogrt_from_data': return await this.batchMogrtFromData(args.items, args.durationSecs ?? 5, args.trackIndex ?? 1, args.mogrtPath, args.sequenceId);
-        case 'countdown_leader': return await this.countdownLeader(args.startTimeSecs, args.count ?? 5, args.trackIndex ?? 1, args.sequenceId);
+        case 'countdown_leader': return await this.countdownLeader(args.startTimeSecs, args.count ?? 5, args.trackIndex ?? 1, args.sequenceId, args.mogrtPath);
         case 'create_adjustment_layer_at': return await this.createAdjustmentLayerAt(args.startTimeSecs, args.durationSecs, args.trackIndex, args.sequenceId);
         case 'nest_all_v1_clips': return await this.nestAllV1Clips(args.newSequenceName, args.sequenceId);
         case 'create_sequence_from_bin': return await this.createSequenceFromBin(args.binName, args.sequenceName, args.presetPath, args.binId);
@@ -1966,8 +1970,9 @@ export class PremiereProTools extends TrimmingTools {
   private async createRecoveryCheckpoint(sequenceId?: string, label?: string): Promise<any> {
     let sourceId = sequenceId;
     let sourceName: string | undefined;
+    const activeBefore = await this.getActiveSequence();
     if (!sourceId) {
-      const active = await this.getActiveSequence();
+      const active = activeBefore;
       if (!active || active.success === false || !active.id) {
         return {
           success: false,
@@ -1989,8 +1994,26 @@ export class PremiereProTools extends TrimmingTools {
       };
     }
 
+    // Premiere activates a fresh clone, so without this every later call that defaults to the
+    // active sequence lands on the SNAPSHOT — the same drift transactions.ts already undoes for
+    // checkpoints taken inside a plan. A checkpoint is a backup, not a change of target.
+    let activeRestored: boolean | null = null;
+    if (activeBefore && activeBefore.success !== false && activeBefore.id) {
+      const restore = await this.bridge.executeScript(`
+        try {
+          var want = ${JSON.stringify(String(activeBefore.id))};
+          var cur = app.project.activeSequence;
+          if (!cur || String(cur.sequenceID) !== want) app.project.openSequence(want);
+          cur = app.project.activeSequence;
+          return JSON.stringify({ success: true, restored: !!cur && String(cur.sequenceID) === want });
+        } catch (e) { return JSON.stringify({ success: false, error: e.toString() }); }
+      `);
+      activeRestored = Boolean(restore && restore.restored);
+    }
+
     return {
       success: true,
+      activeSequenceRestored: activeRestored,
       checkpointSequenceId: dup.newSequenceId ?? null,
       checkpointProjectItemId: dup.newProjectItemId ?? null,
       checkpointName: dup.newName || checkpointName,
@@ -3234,28 +3257,31 @@ export class PremiereProTools extends TrimmingTools {
     `);
   }
 
-  private async lowerThirdPreset(name: string, title: string|undefined, startTimeSecs: number, durationSecs: number, trackIndex: number, _seqId?: string): Promise<any> {
-    // Use existing add_text_overlay pattern
+  /**
+   * These wrappers used to call add_text_overlay with no template at all, which can only refuse
+   * ("requires a MOGRT file path"), so all four failed on every call. They now forward the
+   * caller's mogrtPath; add_text_overlay falls back to PREMIERE_MCP_DEFAULT_MOGRT when it is unset.
+   */
+  private async lowerThirdPreset(name: string, title: string|undefined, startTimeSecs: number, durationSecs: number, trackIndex: number, seqId?: string, mogrtPath?: string): Promise<any> {
+    // One graphic, not two: a lower-third template carries the title in its second text field,
+    // which add_text_overlay fills from text2. Stacking two graphics on adjacent tracks drew the
+    // template's own placeholder subtitle under each line.
     const results = [];
-    const r1: any = await this.executeTool('add_text_overlay', { text: name, startTime: startTimeSecs, duration: durationSecs, position: 'bottom-left', trackIndex });
+    const r1: any = await this.executeTool('add_text_overlay', { text: name, text2: title, startTime: startTimeSecs, duration: durationSecs, position: 'bottom-left', trackIndex, sequenceId: seqId, mogrtPath });
     results.push({ layer: 'name', result: r1 });
-    if (title) {
-      const r2: any = await this.executeTool('add_text_overlay', { text: title, startTime: startTimeSecs, duration: durationSecs, position: 'bottom-left', trackIndex: trackIndex + 1 });
-      results.push({ layer: 'title', result: r2 });
-    }
     const verdict = summarizeBatch(results, (entry: any) => entry?.result?.success !== false, 'text layer(s)');
     return { ...verdict, name, title, startTimeSecs, durationSecs, layers: results };
   }
 
-  private async titleCard(text: string, startTimeSecs: number, durationSecs: number, trackIndex: number, _seqId?: string): Promise<any> {
-    const r: any = await this.executeTool('add_text_overlay', { text, startTime: startTimeSecs, duration: durationSecs, position: 'center', trackIndex });
+  private async titleCard(text: string, startTimeSecs: number, durationSecs: number, trackIndex: number, seqId?: string, mogrtPath?: string): Promise<any> {
+    const r: any = await this.executeTool('add_text_overlay', { text, startTime: startTimeSecs, duration: durationSecs, position: 'center', trackIndex, sequenceId: seqId, mogrtPath });
     return { success: r?.success !== false, text, startTimeSecs, durationSecs, result: r };
   }
 
-  private async batchMogrtFromData(items: Array<{timeSecs: number, name: string, title?: string}>, durationSecs: number, trackIndex: number, _mogrtPath?: string, seqId?: string): Promise<any> {
+  private async batchMogrtFromData(items: Array<{timeSecs: number, name: string, title?: string}>, durationSecs: number, trackIndex: number, mogrtPath?: string, seqId?: string): Promise<any> {
     const results = [];
     for (const item of items) {
-      const r = await this.lowerThirdPreset(item.name, item.title, item.timeSecs, durationSecs, trackIndex, seqId);
+      const r = await this.lowerThirdPreset(item.name, item.title, item.timeSecs, durationSecs, trackIndex, seqId, mogrtPath);
       results.push({ ...item, result: r });
     }
     // Nested: each item is a lower_third_preset, which is itself a batch of text layers. Its
@@ -3265,11 +3291,11 @@ export class PremiereProTools extends TrimmingTools {
     return { ...verdict, count: results.length, results };
   }
 
-  private async countdownLeader(startTimeSecs: number, count: number, trackIndex: number, _seqId?: string): Promise<any> {
+  private async countdownLeader(startTimeSecs: number, count: number, trackIndex: number, seqId?: string, mogrtPath?: string): Promise<any> {
     const results = [];
     for (let i = count; i >= 1; i--) {
       const t = startTimeSecs + (count - i);
-      const r: any = await this.executeTool('add_text_overlay', { text: String(i), startTime: t, duration: 1, position: 'center', trackIndex });
+      const r: any = await this.executeTool('add_text_overlay', { text: String(i), startTime: t, duration: 1, position: 'center', trackIndex, sequenceId: seqId, mogrtPath });
       results.push({ count: i, timeSecs: t, result: r?.success !== false ? 'OK' : 'FAIL' });
     }
     // This one already recorded 'FAIL' per layer, which made the flat true worse rather than
