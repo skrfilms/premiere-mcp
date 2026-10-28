@@ -29,7 +29,7 @@
  * Only REQUIRED keys are filled. An optional key left out is the caller exercising the tool's
  * own defaults, which is the more interesting test anyway.
  */
-import { writeFileSync, mkdirSync, existsSync, readdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync, existsSync, readdirSync, copyFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -139,6 +139,17 @@ export function ensureSideFixtures() {
     '0.0 0.0 1.0', '1.0 0.0 1.0', '0.0 1.0 1.0', '1.0 1.0 1.0',
   ].join('\n') + '\n');
 
+  // A Frame.io comment export and a ShotGrid status CSV in the shapes those tools parse. Handing
+  // them the Whisper JSON and the marker CSV made both refuse ("No comments found", "CSV must
+  // have shot_name and status columns") on every sweep.
+  const frameioJson = join(SYNTH_DIR, 'fixture-frameio.json');
+  writeFileSync(frameioJson, JSON.stringify({ comments: [
+    { timestamp: 0.5, text: 'Tighten this head', author: { name: 'Reviewer' } },
+    { timestamp: 1.5, text: 'Check the grade here', author: { name: 'Reviewer' } },
+  ] }, null, 2));
+  const shotgridCsv = join(SYNTH_DIR, 'fixture-shotgrid.csv');
+  writeFileSync(shotgridCsv, 'shot_name,status,assignee\nfixture_a.mp4,ip,artist\nfixture_b.mp4,fin,artist\n');
+
   const txt = join(SYNTH_DIR, 'fixture-plain.txt');
   writeFileSync(txt, 'synthesised plain text fixture\n');
 
@@ -188,7 +199,7 @@ export function ensureSideFixtures() {
     || '/Applications/Adobe Premiere Pro 2026/Adobe Premiere Pro 2026.app/Contents/Essential Graphics/[AE] Video Gaming Package/Gaming Lower Third Left.mogrt';
 
   return {
-    srtA, srtB, csv, notes, whisperJson, lut, txt, footageIndex,
+    srtA, srtB, csv, notes, whisperJson, lut, txt, footageIndex, frameioJson, shotgridCsv,
     outDir: OUT_DIR, epr: presets.epr, sqpreset: presets.sqpreset,
     mogrt: existsSync(mogrt) ? mogrt : null,
     premiereLut: existsSync(PREMIERE_LUT) ? PREMIERE_LUT : null,
@@ -402,6 +413,7 @@ function outputExtension(key, toolName) {
   if (/audio|wav|stem/.test(t)) return '.wav';
   // A re-render of the source keeps its container; a .txt output made ffmpeg refuse the muxer.
   if (/loudness|normalize/.test(t)) return '.mp4';
+  if (/^snapshot_state$/.test(t)) return '.json';
   if (/thumbnail|still|frame|scope|palette|snapshot|false_color/.test(t)) return '.png';
   if (/export|render|encode|reel|spot/.test(t)) return '.mp4';
   return '.txt';
@@ -434,7 +446,14 @@ function forcedOptionalKeys(toolName) {
   const keys = [];
   if ((/mogrt/.test(t) && !/^import_mogrt/.test(t)) || TEXT_PLACING.test(t)) keys.push('trackindex', 'clipindex', 'mogrtpath');
   if (/multicam/.test(t) && !/^create_multicam/.test(t)) keys.push('sequenceid');
-  if (SACRIFICIAL_SEQUENCE.test(t)) keys.push('sequenceid');
+  if (SACRIFICIAL_SEQUENCE.test(t)) keys.push('sequenceid', 'projectitemid');
+  if (t === 'color_correct') keys.push('exposure');
+  if (t === 'index_footage') keys.push('indexpath');
+  if (t === 'apply_video_effect' || t === 'apply_lumetri_preset') keys.push('clipname');
+  // Not expected_match_name: which effect a display name resolves to depends on installed
+  // plugins (here "Gaussian Blur" resolved to a third-party blur), and the tool rightly refuses.
+  if (/^apply_(video|audio)_effect|apply_audio_effect_qe$/.test(t)) keys.push('effectname');
+  if (t === 'update_srt_cue') keys.push('text');
   if (t === 'three_point_edit') keys.push('sequencetimecode');
   if (t === 'set_track_lock_qe') keys.push('audio');
   return keys;
@@ -455,13 +474,26 @@ function resolveLeaf({ key, def, toolName, ctx, path }) {
   // used to be handed the first V1 clip and then honestly reported that it was the wrong kind:
   // "Clip is not a MOGRT", "Volume component not found", "canDoMulticam() returned false".
   const isMogrtTool = /mogrt/.test(tool) && !/^import_mogrt/.test(tool);
-  const isAudioClipTool = /audio_level|audio_keyframe|ducking|clip_pan|clip_gain|clip_peaks|limiter|clip_volume/.test(tool);
+  const isAudioClipTool = /audio_level|audio_keyframe|ducking|clip_pan|clip_gain|clip_peaks|limiter|clip_volume|^apply_audio_effect$/.test(tool);
   const isMulticamTool = /multicam/.test(tool) && !/^create_multicam/.test(tool);
   const isTextPlacingTool = TEXT_PLACING.test(tool);
 
   // Text-placing tools import a new graphic. Left at their defaults (V2 at 1s) they overwrote the
   // fixture's V2 clip; at V3 from 40s they land on empty timeline past the fixture MOGRT (V3 at
   // 20s), which the MOGRT tools later in the run still need.
+  // Effects to ADD must be real, addable effects; the generic rule below hands out the clip's own
+  // first component (Opacity), which is fine for tools that FIND an effect and wrong for adding one.
+  if (type === 'string' && /^apply_(video_)?effect$/.test(tool) && k === 'effectname') return 'Gaussian Blur';
+  if (type === 'string' && /audio_effect/.test(tool) && k === 'effectname') return 'Amplify';
+  // Transform setters read x/y; a "value" alongside them overrides both.
+  if (/^set_clip_(position|anchor_point|scale|rotation)$|^set_(uniform_scale|scale_width_height)$/.test(tool) && k === 'value') return undefined;
+  if (k === 'channeltype') return undefined;
+  // SRT cues are numbered from 1, as read_srt shows them.
+  if ((type === 'number' || type === 'int') && /_srt_cue$/.test(tool) && k === 'index') return 1;
+  // A real clip by name for the tools that address clips by name.
+  if (type === 'string' && k === 'clipname' && ctx.clipName) return ctx.clipName;
+  // Keep the footage index in the scratch output, not the tool's default in the home directory.
+  if (type === 'string' && tool === 'index_footage' && k === 'indexpath') return join(files.outDir, 'synth-footage-index.json');
   if (isTextPlacingTool && (type === 'number' || type === 'int')) {
     if (/trackindex/.test(k)) return 2;
     if (/^(starttime|starttimesecs|timesecs)$/.test(k)) return 40;
@@ -561,6 +593,16 @@ function resolveLeaf({ key, def, toolName, ctx, path }) {
     if (/^(value|text|contents|comment|comments|description|summary|note)$/.test(k)) return 'synthesised by the live sweep';
     if (/^(columnid)$/.test(k)) return 'Sweep.Synth.Field';
     if (/^binname$/.test(k)) return ctx.binName ?? undefined;
+    // Names that must exist, not placeholders: a tool to call, effects to add, a LUT preset.
+    if (tool === 'call_tool' && k === 'name') return 'ping';
+    if (/^(activate|deactivate)_tools$/.test(tool) && /^names?$/.test(k)) return 'ping';
+    if (/^(jsonpath)$/.test(k) && /frame_io/.test(tool)) return files.frameioJson;
+    if (/^(csvpath)$/.test(k) && /shotgrid/.test(tool)) return files.shotgridCsv;
+    // The snapshot snapshot_state wrote earlier in the run (it sorts before assert_clips_unchanged).
+    if (/^snapshotpath$/.test(k)) return join(files.outDir, 'synth-snapshot_state.json');
+    // A folder, for tools that walk one.
+    if (/^(rootpath|folderpath|rootdir)$/.test(k)) return dirname(ctx.mediaPath ?? files.txt);
+    if (tool === 'set_blend_mode' && k === 'mode') return '0';
     if (/(displayname|reelname|sequencename|name)$/.test(k) || /^(label|title)$/.test(k)) {
       return /sequencename$/.test(k) ? 'synth_seq' : 'synth_name';
     }
@@ -573,6 +615,13 @@ function resolveLeaf({ key, def, toolName, ctx, path }) {
     // A LUT Premiere actually lists: the Input LUT slot is a dropdown, so apply_lut can only select
     // an installed LUT, and the identity fixture renders like "no LUT" and is (correctly) refused.
     if (/^lutpath$/.test(k) || /lutpath/.test(k)) return files.premiereLut ?? files.lut;
+    // Tools that EDIT the SRT get their own copy: they shared the fixture file, so remove/insert
+    // runs earlier in the sweep left update_srt_cue looking for a cue that was gone.
+    if (/srtpath/.test(k) && /^(write|update|insert|shift|remove|retime)_srt|caption_qc_fix/.test(tool)) {
+      const own = join(files.outDir, `synth-${toolName}-input.srt`);
+      copyFileSync(files.srtA, own);
+      return own;
+    }
     if (/^(srtpath|srtpatha|captionpath|captionspath)$/.test(k)) return files.srtA;
     if (/^srtpathb$/.test(k)) return files.srtB;
     if (/srtpath|captionfile/.test(k)) return files.srtA;
@@ -622,6 +671,10 @@ function resolveLeaf({ key, def, toolName, ctx, path }) {
     if (/(fps|framerate)$/.test(k) || /^sourcefps$/.test(k)) return 24;
     if (/percent/.test(k)) return 50;
     if (/lufs$/.test(k)) return -14;
+    if (/^samplerate$/.test(k)) return 48000;
+    if (/^(endtime|endseconds|endsecs)$/.test(k)) return 2;
+    if (/^(starttime|startseconds)$/.test(k) && /ease|keyframe/.test(tool)) return 0;
+    if (tool === 'color_correct' && /^exposure$/.test(k)) return 0.5;
     if (/^truepeakdb$/.test(k)) return -1;
     if (/^loudnessrange$/.test(k)) return 11;
     if (/^(gaindb|volumedb|db|leveldb)$/.test(k) || /db$/.test(k)) return 0;
@@ -653,6 +706,10 @@ function resolveLeaf({ key, def, toolName, ctx, path }) {
     if (/^neworder$/.test(k) && ctx.componentNames?.length > 1) {
       return [...ctx.componentNames].reverse();
     }
+    if (/^angleitemids$/.test(k)) return ctx.camItemIds?.length >= 2 ? [...ctx.camItemIds] : undefined;
+    if (tool === 'create_multicam_cut' && k === 'cuts') {
+      return [{ startSecs: 0, endSecs: 2, angle: 2 }, { startSecs: 2, endSecs: 4, angle: 3 }];
+    }
     if (/^projectitemids$/.test(k)) {
       const pool = /multicam/.test(toolName) && ctx.camItemIds?.length ? ctx.camItemIds : ctx.itemIds;
       return pool?.length ? [...pool] : undefined;
@@ -682,6 +739,9 @@ function resolveLeaf({ key, def, toolName, ctx, path }) {
     }
     return undefined;
   }
+  // An untyped "value" is almost always a parameter value; the string 'synth' made every
+  // setter that received it raise "Illegal Parameter type".
+  if ((type === 'any' || type === 'unknown') && /^value$/.test(key.toLowerCase())) return 50;
   if (type === 'any' || type === 'unknown') return 'synth';
 
   return undefined;

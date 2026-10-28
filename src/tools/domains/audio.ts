@@ -1389,28 +1389,51 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
+  /**
+   * One audio file per track: solo each target track, export the mix, restore the mutes.
+   *
+   * This used to mute and immediately unmute without exporting anything, and its setMute(true)
+   * raised "Illegal Parameter type" anyway: AudioTrack.setMute takes 1/0, not a boolean
+   * (measured on 26.5.2). The original mute state of every track is put back, even on failure.
+   */
   protected async stemExport(seqId: string|undefined, trackIndices: number[], outputDir: string, format: string): Promise<any> {
-    // Mute all except target, export audio only, repeat
-    return await this.bridge.executeScript(`
+    if (!Array.isArray(trackIndices) || trackIndices.length === 0) return { success: false, error: 'trackIndices needs at least one audio track index.' };
+    const ext = format === 'aac' ? 'aac' : 'wav';
+    await fs.mkdir(outputDir, { recursive: true });
+    const state: any = await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(seqId)};
-        var results = [];
-        var allTracks = seq.audioTracks;
-        for (var ti = 0; ti < ${JSON.stringify(trackIndices)}.length; ti++) {
-          var targetIdx = ${JSON.stringify(trackIndices)}[ti];
-          // Mute all except target
-          for (var t = 0; t < allTracks.numTracks; t++) {
-            if (t !== targetIdx) allTracks[t].setMute(true);
-            else allTracks[t].setMute(false);
-          }
-          var outPath = ${JSON.stringify(outputDir)} + '/stem_track_' + targetIdx + '.' + ${JSON.stringify(format)};
-          results.push({track:targetIdx, output:outPath, status:'queued'});
-        }
-        // Restore mutes
-        for (var t2 = 0; t2 < allTracks.numTracks; t2++) allTracks[t2].setMute(false);
-        return JSON.stringify({success:true,note:'Track muting applied. Use batch_export_sequences or export_audio_only to complete the export for each stem.',stems:results});
+        var muted = [];
+        for (var t = 0; t < seq.audioTracks.numTracks; t++) muted.push(seq.audioTracks[t].isMuted() ? 1 : 0);
+        return JSON.stringify({success:true, sequenceId:String(seq.sequenceID), muted:muted});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
+    if (!state?.success) return state;
+    const setMutes = (values: number[]) => this.bridge.executeScript(`
+      try {
+        var seq = __findSequence(${JSON.stringify(state.sequenceId)});
+        var v = ${JSON.stringify(values)};
+        for (var t = 0; t < seq.audioTracks.numTracks && t < v.length; t++) seq.audioTracks[t].setMute(v[t]);
+        return JSON.stringify({success:true});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+    const stems: any[] = [];
+    try {
+      for (const target of trackIndices) {
+        if (!(target >= 0 && target < state.muted.length)) { stems.push({ track: target, success: false, error: 'no such audio track' }); continue; }
+        await setMutes(state.muted.map((_: number, t: number) => (t === target ? 0 : 1)));
+        const outputPath = join(outputDir, `stem_A${target + 1}.${ext}`);
+        const r: any = await (this as any).executeTool('export_audio_only', { outputPath, format: ext, sequenceId: state.sequenceId });
+        let size = 0;
+        try { size = (await fs.stat(outputPath)).size; } catch { /* not written */ }
+        stems.push({ track: target, outputPath, success: r?.success !== false && size > 0, bytes: size, error: r?.success === false ? r.error : (size > 0 ? undefined : 'no file was written') });
+      }
+    } finally {
+      await setMutes(state.muted);
+    }
+    const ok = stems.filter((x) => x.success).length;
+    return { success: ok === stems.length, verified: true, verifiedBy: 'each stem file exists and is non-empty', stems, exported: ok,
+      mutesRestored: true, error: ok === stems.length ? undefined : `${stems.length - ok} of ${stems.length} stems failed.` };
   }
 
   protected async channelRemapReport(seqId?: string): Promise<any> {

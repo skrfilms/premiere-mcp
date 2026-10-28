@@ -214,9 +214,11 @@ export class MulticamTools extends MotionLayoutTools {
         var clips = [];
         for (var j = 0; j < bin.children.numItems; j++) { if (!__isBin(bin.children[j])) clips.push(bin.children[j]); }
         if (clips.length === 0) return JSON.stringify({success:false,error:'Bin "'+String(bin.name)+'" ('+String(bin.treePath)+') holds no clips, so there are no camera angles to build from. No sequence was created.',binId:String(bin.nodeId)});
-        var seq = app.project.createNewSequenceFromClips(${JSON.stringify(newSeqName)}, clips, ${JSON.stringify(presetPath ?? '')});
+        // The third argument is the DESTINATION BIN, not a preset: a path string here raised
+        // "Illegal Parameter type" on every call. The sequence takes its settings from the clips.
+        var seq = app.project.createNewSequenceFromClips(${JSON.stringify(newSeqName)}, clips, app.project.rootItem);
         if (!seq) return JSON.stringify({success:false,error:'Could not create sequence'});
-        return JSON.stringify({success:true,sequenceId:String(seq.sequenceID),name:String(seq.name),clipCount:clips.length,
+        return JSON.stringify({success:true,presetPathIgnored:${JSON.stringify(Boolean(presetPath))},sequenceId:String(seq.sequenceID),name:String(seq.name),clipCount:clips.length,
           binId:String(bin.nodeId),binName:String(bin.name),binResolvedBy:req.resolvedBy});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
@@ -233,9 +235,11 @@ export class MulticamTools extends MotionLayoutTools {
           if (item) items.push(item);
         }
         if (items.length === 0) return JSON.stringify({success:false,error:'No project items found'});
-        var seq = app.project.createNewSequenceFromClips(${JSON.stringify(seqName)}, items, ${JSON.stringify(presetPath ?? '')});
+        // The third argument is the DESTINATION BIN, not a preset: a path string here raised
+        // "Illegal Parameter type" on every call. The sequence takes its settings from the clips.
+        var seq = app.project.createNewSequenceFromClips(${JSON.stringify(seqName)}, items, app.project.rootItem);
         if (!seq) return JSON.stringify({success:false,error:'Could not create sequence'});
-        return JSON.stringify({success:true,sequenceId:String(seq.sequenceID),name:String(seq.name),angleCount:items.length});
+        return JSON.stringify({success:true,presetPathIgnored:${JSON.stringify(Boolean(presetPath))},sequenceId:String(seq.sequenceID),name:String(seq.name),angleCount:items.length});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
