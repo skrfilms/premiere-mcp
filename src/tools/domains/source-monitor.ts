@@ -90,8 +90,37 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
     } catch (e: any) { return { success: false, error: e.message }; }
   }
 
-  protected compareTakes(_itemId1: string, _itemId2: string, _outputDir: string): any {
-    return { success: false, note: 'compareTakes requires media paths. Use get_project_item_info on each item first to get mediaPath, then call hover_scrub_frames on each.' };
+  /**
+   * The frame at 50% of each take, side by side on disk. This was a stub that told the caller to
+   * resolve the media paths itself; it now does that and extracts both frames with ffmpeg.
+   */
+  protected async compareTakes(itemId1: string, itemId2: string, outputDir: string): Promise<any> {
+    const info: any = await this.bridge.executeScript(`
+      try {
+        var ids = [${JSON.stringify(String(itemId1))}, ${JSON.stringify(String(itemId2))}], out = [];
+        for (var i = 0; i < 2; i++) {
+          var it = __findProjectItem(ids[i]);
+          if (!it) return JSON.stringify({ success: false, error: 'Project item not found: ' + ids[i] });
+          var p = ''; try { p = String(it.getMediaPath()); } catch (e) {}
+          out.push({ id: ids[i], name: String(it.name), path: p });
+        }
+        return JSON.stringify({ success: true, takes: out });
+      } catch (e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+    if (!info?.success) return info;
+    fsSync.mkdirSync(outputDir, { recursive: true });
+    const frames: any[] = [];
+    for (const [n, take] of (info.takes as any[]).entries()) {
+      if (!take.path || !fsSync.existsSync(take.path)) return { success: false, error: `"${take.name}" has no media file on disk to take a frame from.` };
+      let dur = NaN;
+      try { dur = Number(runFf('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', take.path], { timeoutMs: 30000 }).trim()); } catch { /* reported below */ }
+      if (!(dur > 0)) return { success: false, error: `Could not read the duration of "${take.name}".` };
+      const out = pathSync.join(outputDir, `take${n + 1}_${String(take.name).replace(/[^A-Za-z0-9_-]+/g, '_')}_mid.png`);
+      runFf('ffmpeg', ['-v', 'error', '-y', '-ss', String(dur / 2), '-i', take.path, '-frames:v', '1', out], { timeoutMs: 60000 });
+      if (!fsSync.existsSync(out)) return { success: false, error: `ffmpeg wrote no frame for "${take.name}".` };
+      frames.push({ take: take.name, atSecs: dur / 2, path: out });
+    }
+    return { success: true, verified: true, verifiedBy: 'both frame files written', frames };
   }
 
   protected async getSourceClipInfo(): Promise<any> {

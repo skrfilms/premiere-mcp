@@ -8,9 +8,8 @@ import { join } from 'node:path';
 import { runUxp, uxpAvailable } from '../../bridge/uxp-channel.js';
 
 const posix = process.platform !== 'win32';
-// The queue path is POSIX-only for now, so the queue tests skip on Windows; the suite itself
-// still runs there (CI requires every suite to execute), and asserts the Windows behaviour.
-const posixIt = posix ? it : it.skip;
+// The mode-bit assertion is POSIX-only; everything else runs on Windows too.
+const posixIt = it;
 
 describe('uxp channel', () => {
   let dir: string;
@@ -22,9 +21,9 @@ describe('uxp channel', () => {
   });
   const beat = (ageMs: number) => writeFileSync(join(dir, 'uxp-heartbeat.json'), JSON.stringify({ ts: Date.now() - ageMs }));
 
-  it('is never available on Windows, and otherwise needs a heartbeat', () => {
+  it('is available with a fresh heartbeat, on every platform', () => {
     beat(0);
-    expect(uxpAvailable()).toBe(posix);
+    expect(uxpAvailable()).toBe(true);
   });
 
   it('is unavailable with no heartbeat', () => {
@@ -56,7 +55,7 @@ describe('uxp channel', () => {
     try {
       const r = await runUxp('return 42;', 3000);
       expect(r).toEqual({ ok: true, result: { echoed: 'return 42;' } });
-      expect(statSync(dir).mode & 0o777).toBe(0o700);
+      if (posix) expect(statSync(dir).mode & 0o777).toBe(0o700);
       expect(readdirSync(dir).filter((n) => n.startsWith('response-'))).toEqual([]);
     } finally {
       clearInterval(panel);

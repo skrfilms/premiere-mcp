@@ -286,7 +286,8 @@ export class InterchangeTools extends ColorTools {
       try {
         var seq = __findSequence(${JSON.stringify(sequenceId)});
         if (!seq) return JSON.stringify({ success: false, error: "Sequence not found" });
-        seq.exportAsFinalCutProXML(${JSON.stringify(outputPath)});
+        // suppressUI = true: the Translation Report is still written next to the XML, but no dialog.
+        seq.exportAsFinalCutProXML(${JSON.stringify(outputPath)}, true);
         var xmlFile = new File(${JSON.stringify(outputPath)});
         if (!xmlFile.exists) return JSON.stringify({ success: false, verified: false, error: "exportAsFinalCutProXML() ran but no file exists at " + ${JSON.stringify(outputPath)} + ".", outputPath: ${JSON.stringify(outputPath)} });
         return JSON.stringify({

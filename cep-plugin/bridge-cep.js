@@ -319,8 +319,70 @@
         this.instanceId = this.role + '-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
         this.active = false;
         this.leaseTakenAt = 0;
+        // ExtendScript engine health, separate from panel health. 'ok' | 'stalled' | 'dead'.
+        this.engineState = 'ok';
+        this.engineStalledAt = null;
+        this.sentinelInFlight = false;
         this.init();
     }
+
+    // A script that outlives its watchdog cannot be cancelled: the engine is still running it, and
+    // everything sent after it queues behind it. The panel used to mark itself free and hand the
+    // next command straight into that queue, so every following call also burned the full 45s and
+    // failed with the same vague message. Now: after a timeout the engine is 'stalled'; a trivial
+    // sentinel script is kept in flight, and only when it answers is the engine known to have
+    // drained. Commands that arrive meanwhile are answered at once as NOT RUN. If the sentinel has
+    // not answered within ENGINE_DEAD_MS the engine is reported 'dead' (measured once: a degraded
+    // engine never recovered short of restarting Premiere).
+    var ENGINE_SENTINEL = '1+1';
+    var ENGINE_DEAD_MS = 90000;
+
+    MCPPremiereBridge.prototype.markEngineStalled = function() {
+        if (this.engineState === 'ok') {
+            this.engineState = 'stalled';
+            this.engineStalledAt = Date.now();
+            this.log('Premiere\'s scripting engine did not finish a script in time; holding new commands until it drains.', 'warning');
+        }
+        this.sendEngineSentinel();
+    };
+
+    MCPPremiereBridge.prototype.sendEngineSentinel = function() {
+        if (this.sentinelInFlight || this.engineState === 'ok' || !this.csInterface) return;
+        var self = this;
+        this.sentinelInFlight = true;
+        try {
+            this.csInterface.evalScript(ENGINE_SENTINEL, function() {
+                self.sentinelInFlight = false;
+                var was = self.engineState;
+                self.engineState = 'ok';
+                self.engineStalledAt = null;
+                if (was !== 'ok') self.log('Premiere\'s scripting engine is responding again.', 'info');
+            });
+        } catch (e) {
+            this.sentinelInFlight = false;
+        }
+    };
+
+    /** Called every poll tick: escalate a long stall to 'dead'. */
+    MCPPremiereBridge.prototype.checkEngine = function() {
+        if (this.engineState === 'stalled' && this.engineStalledAt && Date.now() - this.engineStalledAt > ENGINE_DEAD_MS) {
+            this.engineState = 'dead';
+            this.log('Premiere\'s scripting engine has stopped responding. Restart Premiere Pro to recover.', 'error');
+        }
+        if (this.engineState !== 'ok') this.sendEngineSentinel();
+    };
+
+    MCPPremiereBridge.prototype.engineRefusal = function() {
+        var secs = this.engineStalledAt ? Math.round((Date.now() - this.engineStalledAt) / 1000) : 0;
+        if (this.engineState === 'dead') {
+            return { success: false, code: 'ENGINE_DEAD', notRun: true,
+                error: 'Premiere\'s scripting engine has stopped responding: nothing, not even a trivial test script, has come back for ' +
+                       secs + 's. It does not recover on its own. Save your work if Premiere lets you, then restart Premiere Pro. This command was not run.' };
+        }
+        return { success: false, code: 'ENGINE_STALLED', notRun: true,
+            error: 'Premiere\'s scripting engine is still busy with a script that ran past its time limit ' + secs + 's ago, and a running ' +
+                   'script cannot be cancelled. If Premiere is showing a dialog, close it. This command was not run; try again once it clears.' };
+    };
 
     var LEASE_FILE = 'bridge-owner.json';
     var LEASE_STALE_MS = 3000;
@@ -752,6 +814,10 @@
             done({ success: false, error: 'Script validation failed' });
             return;
         }
+        if (this.engineState !== 'ok') {
+            done(this.engineRefusal());
+            return;
+        }
         this.executeExtendScript(command.script, function(err, result) {
             if (err) {
                 done({ success: false, error: err.message });
@@ -787,6 +853,7 @@
             var timeoutId = setTimeout(function() {
                 if (settled) return;
                 settled = true;
+                self.markEngineStalled();
                 callback(new Error(
                     'ExtendScript execution timed out after ' + timeoutMs + 'ms. ' +
                     'Premiere Pro or the CEP scripting host did not return a result.'
@@ -858,7 +925,9 @@
                 currentCommandStartedAt: this.currentCommandStartedAt || null,
                 queueLength: this.commandQueue ? this.commandQueue.length : 0,
                 owner: this.instanceId,
-                role: this.role
+                role: this.role,
+                engine: this.engineState,
+                engineStalledAt: this.engineStalledAt
             };
             var hbFile = path.join(tempPath, 'bridge-heartbeat.json');
             var staging = hbFile + '.part';
@@ -1158,6 +1227,7 @@
             this.updateStandbyUI();
             return;
         }
+        this.checkEngine();
         this.writeHeartbeat();
         // Refresh the live status pane on the same 250ms cadence: the meter's elapsed
         // time and the heartbeat-age fact are both wall-clock and must keep ticking.

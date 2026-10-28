@@ -61,6 +61,8 @@ interface BridgeHeartbeat {
   currentCommandId: string | null;
   currentCommandStartedAt: number | null;
   queueLength: number;
+  /** ExtendScript engine health as the panel sees it; absent from older panels. */
+  engine: 'ok' | 'stalled' | 'dead' | null;
 }
 
 export const EXTENDSCRIPT_HELPERS = `
@@ -574,10 +576,13 @@ function __findProjectItem(nodeId) {
  * for a bin that plainly existed. One resolver, three callers.
  */
 function __isBin(it) {
-  // A bin has createBin(); clips do not. type===2 is Premiere's BIN constant,
-  // but the duck-type is what survives across builds.
+  // type is authoritative: 2 = BIN, 3 = ROOT (both hold children). The createBin duck-type is
+  // only a fallback for an item that reports no type, because on 26.5.2 CLIPS have createBin()
+  // too (measured): the duck-type alone made every clip a "bin", so a bin of camera angles read
+  // as empty and a clip sharing a bin's name made the bin name "ambiguous".
   if (!it) return false;
-  if (it.type === 2) return true;
+  if (it.type === 2 || it.type === 3) return true;
+  if (typeof it.type === 'number') return false;
   return (typeof it.createBin === 'function');
 }
 function __binByPath(root, segments) {
@@ -1805,6 +1810,7 @@ export class PremiereProBridge implements PremiereProTransport {
         currentCommandStartedAt:
           typeof hb.currentCommandStartedAt === 'number' ? hb.currentCommandStartedAt : null,
         queueLength: typeof hb.queueLength === 'number' ? hb.queueLength : 0,
+        engine: hb.engine === 'ok' || hb.engine === 'stalled' || hb.engine === 'dead' ? hb.engine : null,
       };
     } catch {
       return null;
@@ -1829,6 +1835,22 @@ export class PremiereProBridge implements PremiereProTransport {
         ' No panel heartbeat was seen. Ensure Premiere Pro is open, the MCP Bridge (CEP) ' +
         'panel is open, Temp Directory is set to ' + this.tempDir + ', and Start Bridge is ' +
         'clicked. (An older panel build without heartbeat support also produces no heartbeat.)'
+      );
+    }
+
+    if (hb.engine === 'dead') {
+      return (
+        base +
+        " Premiere's scripting engine has stopped responding, even to a trivial test script. It " +
+        'does not recover on its own: save your work if Premiere lets you, then restart Premiere Pro.'
+      );
+    }
+
+    if (hb.engine === 'stalled') {
+      return (
+        base +
+        " Premiere's scripting engine is still running an earlier script that ran past its time " +
+        'limit (it cannot be cancelled). If Premiere is showing a dialog, close it; otherwise wait and retry.'
       );
     }
 

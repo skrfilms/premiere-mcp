@@ -479,7 +479,7 @@ export class CaptionTools extends AudioTools {
     if (!loaded.ok) return { success: false, error: loaded.error };
     const cues = loaded.cues;
     if (!Number.isInteger(index) || index < 1 || index > cues.length) {
-      return { success: false, error: `cue index ${index} is out of range (file has ${cues.length} cue${cues.length === 1 ? '' : 's'}).` };
+      return { success: false, error: `cue index ${index} is out of range (file has ${cues.length} cue${cues.length === 1 ? '' : 's'}; indices are 1-based, valid range is 1..${cues.length}).` };
     }
     if (patch.start === undefined && patch.end === undefined && patch.text === undefined) {
       return { success: false, error: 'Provide at least one of start, end, or text to change.' };
@@ -562,7 +562,7 @@ export class CaptionTools extends AudioTools {
     if (!loaded.ok) return { success: false, error: loaded.error };
     const cues = loaded.cues;
     if (!Number.isInteger(index) || index < 1 || index > cues.length) {
-      return { success: false, error: `cue index ${index} is out of range (file has ${cues.length} cue${cues.length === 1 ? '' : 's'}).` };
+      return { success: false, error: `cue index ${index} is out of range (file has ${cues.length} cue${cues.length === 1 ? '' : 's'}; indices are 1-based, valid range is 1..${cues.length}).` };
     }
     const removed = this.srtCueOut(cues[index - 1] as SrtCue, index - 1);
     let next: SrtCue[];

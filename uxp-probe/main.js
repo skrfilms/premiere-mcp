@@ -17,7 +17,17 @@
  * of an async function called with (ppro, uxp). DIR is fixed because a UXP panel cannot read the
  * environment; the client creates it mode 0700, the same trust boundary as the CEP file queue.
  */
-const DIR = '/tmp/premiere-mcp-uxp';
+// POSIX: /tmp. Windows: %LOCALAPPDATA%\Temp, which is where Node's os.tmpdir() points the server
+// (src/bridge/uxp-channel.ts). A UXP panel cannot read the environment, so it is derived from the
+// home directory. Untested on Windows so far.
+const DIR = (() => {
+  try {
+    const os = require('os');
+    const plat = typeof os.platform === 'function' ? os.platform() : '';
+    if (/^win/.test(plat) && typeof os.homedir === 'function') return `${os.homedir()}\\AppData\\Local\\Temp\\premiere-mcp-uxp`;
+  } catch (e) { /* no os module: POSIX default */ }
+  return '/tmp/premiere-mcp-uxp';
+})();
 const POLL_MS = 300;
 
 const fs = require('fs');
