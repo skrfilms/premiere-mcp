@@ -320,13 +320,11 @@ h1,h2,p,dl,dd,dt{margin:0}
   .cmd{font-size:15px}
 }
 @media (min-width:600px){
-  .shell{display:grid;grid-template-columns:minmax(276px,.92fr) minmax(300px,1.08fr);
-    align-content:start;gap:12px;padding:14px 14px 18px}
-  .colA,.colB{display:flex;flex-direction:column;gap:12px;min-width:0;align-self:start}
-  .colA{grid-column:1;grid-row:1}
-  .colB{grid-column:2;grid-row:1}
+  /* One column: with the live-command and activity panes hidden there is nothing for a second. */
+  .shell{max-width:520px;margin:0 auto;gap:12px;padding:14px 14px 18px}
   .stat-copy h1{font-size:22px}
 }
+.pane[hidden]{display:none}
 
 button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
@@ -389,7 +387,9 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline
   <div class="colB">
 
   <!-- ============ IN PREMIERE NOW ============ -->
-  <section class="pane now" id="nowCard">
+  <!-- Hidden: nobody watched the live command or the queue, and the log was mostly socket
+       retries. The elements stay in the DOM because bridge-cep.js writes into them. -->
+  <section class="pane now" id="nowCard" hidden>
     <div class="hd"><span class="label" id="nowKick">In Premiere now</span><span class="when" id="nowWhen"></span></div>
     <div class="cmdline" id="cmdLine" hidden>
       <span class="cmd" id="cmdName">—</span><span class="cid" id="cmdId"></span>
@@ -405,7 +405,7 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline
   </section>
 
   <!-- ============ ACTIVITY ============ -->
-  <section class="pane logs">
+  <section class="pane logs" hidden>
     <div class="hd"><span class="label">Activity</span>
       <button class="link" style="color:var(--ink-3)" type="button" onclick="clearLog()">Clear</button></div>
     <div class="log-container" id="logContainer" role="log" aria-label="Recent activity"></div>

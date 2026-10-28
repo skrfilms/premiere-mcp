@@ -629,6 +629,10 @@ function resolveLeaf({ key, def, toolName, ctx, path }) {
     if (/^(r|g|b|red|green|blue)$/.test(k)) return 128;
     if (/^(width|height)$/.test(k)) return 4;
     if (/^(amount|blur|sharpen|strength)$/.test(k)) return 5;
+    // A range needs out after in: in = out = 1 made Premiere store a collapsed range that reads
+    // back as about -400000 s, which the sweep recorded as a broken set_sequence_in_out_points.
+    if (/^(outpoint|outpointsecs|outseconds)$/.test(k)) return 3;
+    if (/^(inpoint|inpointsecs|inseconds)$/.test(k)) return 1;
     if (/(secs|seconds|time|start|end|at|duration|targetseconds)/.test(k)) {
       // A time inside the fixture's first clip, so the value addresses real material.
       if (/^(end|endsecs|outsecs|targetseconds|durationsecs|duration|durationseconds)$/.test(k)) return 2;

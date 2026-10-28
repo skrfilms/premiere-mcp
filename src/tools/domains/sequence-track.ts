@@ -1446,6 +1446,12 @@ ${this.buildSequenceResolver(sequenceId)}
   protected async setSequenceInOutPoints(sequenceId: string | undefined, inPoint?: number, outPoint?: number): Promise<any> {
     const setIn = inPoint !== undefined;
     const setOut = outPoint !== undefined;
+    // Premiere does not reject in >= out: it stores a collapsed range that reads back as about
+    // -400000 s, which looked like a broken API in the sweep. Every argument form works when the
+    // range is real (measured on 26.5.2), so refuse the degenerate request instead.
+    if (setIn && setOut && !(Number(outPoint) > Number(inPoint))) {
+      return { success: false, error: `outPoint (${outPoint}s) must be after inPoint (${inPoint}s). Nothing was changed.` };
+    }
     const script = `
       try {
         var seq = __findSequence(${JSON.stringify(sequenceId)});

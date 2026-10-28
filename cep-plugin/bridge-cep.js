@@ -750,6 +750,10 @@
     // Reconnect on close only, never on error — an error is followed by a close, and reconnecting on
     // both produces a storm against a listener that is refusing connections.
     var SOCKET_RECONNECT_MS = 2000;
+    // A stale bridge-endpoint.json (left by a server that has exited) points at a port nobody
+    // listens on, and a flat 2s retry logged two lines every two seconds forever. Back off to a
+    // minute, and say so once per endpoint rather than on every attempt.
+    var SOCKET_RECONNECT_MAX_MS = 60000;
 
     MCPPremiereBridge.prototype.readBridgeEndpoint = function() {
         try {
@@ -776,7 +780,7 @@
             return;
         }
         if (this.socketNextAttemptAt && Date.now() < this.socketNextAttemptAt) return;
-        this.socketNextAttemptAt = Date.now() + SOCKET_RECONNECT_MS;
+        this.socketNextAttemptAt = Date.now() + (this.socketBackoffMs || SOCKET_RECONNECT_MS);
         this.connectSocket();
     };
 
@@ -828,17 +832,24 @@
         };
 
         socket.onerror = function() {
-            // Logged only. The close handler below owns cleanup and reconnect scheduling; doing it
-            // here as well produced two reconnects per failure.
-            self.log('Bridge socket error (a close will follow).', 'warning');
+            // Not logged: an error is always followed by a close, which owns both the cleanup and
+            // the one message. Logging here doubled every failure line.
         };
 
         socket.onclose = function(event) {
             var code = event && event.code ? event.code : 0;
             var reason = event && event.reason ? event.reason : '';
+            var wasReady = self.socketReady;
             self.socket = null;
             self.socketReady = false;
-            self.socketNextAttemptAt = Date.now() + SOCKET_RECONNECT_MS;
+            // Reset after a session that actually ran; otherwise double the wait, up to a minute.
+            self.socketBackoffMs = wasReady ? SOCKET_RECONNECT_MS
+                : Math.min(SOCKET_RECONNECT_MAX_MS, (self.socketBackoffMs || SOCKET_RECONNECT_MS) * 2);
+            self.socketNextAttemptAt = Date.now() + self.socketBackoffMs;
+            var endpointKey = self.socketEndpoint ? String(self.socketEndpoint.port) : '';
+            var repeat = !wasReady && self.socketLastFailedEndpoint === endpointKey;
+            self.socketLastFailedEndpoint = wasReady ? null : endpointKey;
+            if (repeat && code !== 4002 && code !== 4003) return; // already said, for this endpoint
             // 4002/4003 are configuration faults, not transient ones: reconnecting on a 2s loop
             // would spam the log with the same refusal forever, so say it once and plainly.
             if (code === 4002) {
@@ -853,8 +864,8 @@
                 self.log('Bridge socket closed: the server saw no hello in time. Falling back to ' +
                     'the file transport and retrying.', 'warning');
             } else {
-                self.log('Bridge socket closed (' + code + '). Falling back to the file transport ' +
-                    'and retrying.', 'info');
+                self.log('Bridge socket closed (' + code + '). Using the file transport; retrying ' +
+                    'quietly with backoff.', 'info');
             }
         };
     };

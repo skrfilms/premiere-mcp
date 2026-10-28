@@ -29,8 +29,30 @@ against a render, not only an API readback.
   that runs `premierepro` UXP calls over a private file queue. Groundwork for the calls
   only UXP has (work area, sequence in/out, transitions); not yet wired into tools.
 
+### UXP channel
+
+- The MCP UXP Probe panel is now a second channel next to CEP (`src/bridge/uxp-channel.ts`,
+  a private 0700 file queue, no socket). Tools use it only where UXP reaches what
+  ExtendScript cannot, always confirm the result through ExtendScript or QE, and behave as
+  before when the panel is not installed. Install once with `npm run uxp:install` or by
+  double-clicking the `.ccx`; no UXP Developer Tools or developer mode needed.
+- `set_work_area` works: it sets through UXP `WorkAreaUtils` and reads back through
+  ExtendScript. The ExtendScript setters stay inert on most sequences.
+- `add_transition` and `batch_add_transitions` fall back to UXP's `TransitionFactory`
+  when the QE route cannot prove the edit, verified by QE's transition list at the cut.
+
+### CEP panel
+
+- The panel now shows only the status card and the shared folder. "In Premiere now",
+  the command queue and the activity log are hidden; nobody used them.
+- A stale `bridge-endpoint.json` made the panel retry a dead socket every 2 s and log two
+  lines each time. It now backs off to a minute and logs once per endpoint.
+
 ### Fixed
 
+- `set_sequence_in_out_points` refuses in >= out. Premiere stores that as a collapsed range
+  reading about -400000 s, which the sweep had recorded as a broken API. With a real range,
+  every argument form works.
 - `fill_room_tone` overwrote the whole source at the gap: an A/V item dropped its video
   onto V1, the gap length was ignored, and an occupied span was overwritten. It now
   refuses an occupied span and lays audio-only subclips cut to fit, looping as needed.

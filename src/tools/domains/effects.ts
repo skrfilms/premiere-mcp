@@ -11,6 +11,7 @@ import * as fsSync from 'node:fs';
 import * as pathSync from 'node:path';
 import { runFf } from '../ff-exec.js';
 import { generatedAssetsDir } from '../../utils/scratch-paths.js';
+import { runUxp, uxpAvailable } from '../../bridge/uxp-channel.js';
 
 export class EffectsTools extends AssemblyTools {
   protected async removeEffectAtIndex(trackIndex: number, clipIndex: number, componentIndex: number, sequenceId?: string): Promise<any> {
@@ -758,6 +759,62 @@ export class EffectsTools extends AssemblyTools {
     `;
 
     return await this.bridge.executeScript(script);
+  }
+
+  /**
+   * Put a video transition on the cut that ends at `cutSecs` on one track, through UXP, and prove
+   * it with QE's transition list (the other API). The fallback for the QE transition tools, which
+   * Premiere sometimes accepts without placing anything. UXP's own executeTransaction can report
+   * true and place nothing too (seen once on 2026-10-27), so its word is never taken alone.
+   */
+  protected async uxpTransitionAtCut(sequenceId: string | null, trackIndex: number, cutSecs: number, transitionName: string, durationSecs: number): Promise<any> {
+    if (!uxpAvailable()) return { success: false, error: 'UXP probe panel not running' };
+    const countAt = async () => this.bridge.executeScript(`
+      try {
+        app.enableQE();
+        var seq = __findSequence(${JSON.stringify(sequenceId)});
+        var q = __qeSequenceOpening(seq);
+        var tr = q ? q.getVideoTrackAt(${trackIndex}) : null;
+        return JSON.stringify({ success: true, guid: String(seq.sequenceID), at: __qeTransitionsAt(tr, ${cutSecs}).length });
+      } catch (e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+    const before: any = await countAt();
+    if (!before?.success) return before;
+    const u = await runUxp(`
+      const p = await ppro.Project.getActiveProject();
+      const s = (await p.getSequences()).find((q) => String(q.guid) === ${JSON.stringify(String(before.guid))});
+      if (!s) return { error: 'sequence not found in UXP' };
+      const names = await ppro.TransitionFactory.getVideoTransitionMatchNames();
+      const want = ${JSON.stringify(String(transitionName || 'Cross Dissolve'))}.toLowerCase().replace(/[^a-z]/g, '');
+      const match = names.find((n) => n.toLowerCase().replace(/[^a-z]/g, '').endsWith(want + 'new'))
+        || names.find((n) => n.toLowerCase().replace(/[^a-z]/g, '').endsWith(want))
+        || names.find((n) => n.toLowerCase().replace(/[^a-z]/g, '').includes(want));
+      if (!match) return { error: 'no installed transition matches ' + ${JSON.stringify(String(transitionName))} };
+      const track = await s.getVideoTrack(${trackIndex});
+      const items = track.getTrackItems(ppro.Constants.TrackItemType.CLIP, false);
+      let idx = -1;
+      for (let i = 0; i < items.length; i++) {
+        const end = await items[i].getEndTime();
+        if (Math.abs(end.seconds - ${cutSecs}) < 0.05) { idx = i; break; }
+      }
+      if (idx < 0) return { error: 'no clip ends at ${cutSecs}s on that track' };
+      let executed = null;
+      p.lockedAccess(() => {
+        const it = track.getTrackItems(ppro.Constants.TrackItemType.CLIP, false)[idx];
+        const opts = new ppro.AddTransitionOptions();
+        opts.setApplyToStart(false);
+        opts.setDuration(ppro.TickTime.createWithSeconds(${Number(durationSecs) || 1}));
+        const action = it.createAddVideoTransitionAction(ppro.TransitionFactory.createVideoTransition(match), opts);
+        executed = p.executeTransaction((c) => { c.addAction(action); }, 'MCP add transition');
+      });
+      return { executed, matchName: match };
+    `);
+    if (!u.ok || u.result?.error) return { success: false, error: `UXP could not add the transition: ${u.error ?? u.result?.error}` };
+    const after: any = await countAt();
+    const landed = after?.success && Number(after.at) > Number(before.at);
+    return landed
+      ? { success: true, verified: true, verifiedBy: 'QE transition list at the cut (placed through UXP)', via: 'uxp', cutSecs, transition: u.result.matchName, durationSecs }
+      : { success: false, verified: true, via: 'uxp', error: `UXP accepted the transition but QE shows nothing new at ${cutSecs}s.`, cutSecs };
   }
 
   protected async addTransition(clipId1: string, clipId2: string, transitionName: string, duration: number): Promise<any> {
