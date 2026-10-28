@@ -86,7 +86,8 @@ describe('findTools ranking', () => {
     const result = findTools(FIXTURE, ALL, { query: 'zzzznothing' });
     expect(result.matches).toEqual([]);
     expect(result.totalMatches).toBe(0);
-    expect(result.note).toContain('lexical, not');
+    expect(result.note).toContain('lexical');
+    expect(result.note).toContain('may still not match');
   });
 
   it('produces a stable order for equal scores', () => {
