@@ -29,6 +29,48 @@ against a render, not only an API readback.
   that runs `premierepro` UXP calls over a private file queue. Groundwork for the calls
   only UXP has (work area, sequence in/out, transitions); not yet wired into tools.
 
+### Engine stalls are detected, not waited out
+
+- When a script outlives the panel's watchdog, Premiere's scripting engine is still running
+  it, and it cannot be cancelled. The panel used to hand the next command straight into that
+  queue, so every following call also waited 45 s and failed with the same vague message. Now
+  the engine is marked **stalled**, a trivial sentinel script stays in flight, and commands
+  that arrive meanwhile are answered at once as **not run** (`code: ENGINE_STALLED`). When
+  the sentinel answers, the engine is healthy again. After 90 s with no answer it is reported
+  **dead**, with a plain instruction to restart Premiere. The heartbeat carries the state, so
+  the server's timeout messages name it too. Measured live: the call after a stall was
+  refused in 1 s instead of 45, and the engine recovered on its own when the script finished.
+
+### Fixed (from sorting the remaining live failures)
+
+- **Translation Report pop-ups.** Every transition check exported the sequence as FCP XML to
+  count transitions, without `suppressUI`, so each transition or crossfade added left a
+  Translation Report dialog on screen. That check and `export_as_fcp_xml` now pass
+  `suppressUI`; the report is still written next to the XML file. The dialog guard also keeps
+  watching for 8 s after XML, AAF and OMF tools return, because Premiere can raise its
+  report just after the call finishes.
+- The shared bin check treated every clip as a bin: on 26.5.2 clips also have `createBin()`.
+  A bin of camera angles read as empty, and a clip that shared a bin's name made the bin
+  name "ambiguous". `get_bin_contents_recursive` crashed on it. The item type now decides.
+- `create_sequence_from_bin`, `create_multicam_source_sequence` and
+  `create_multicam_from_clips` passed a preset path where `createNewSequenceFromClips` takes
+  a destination bin, so all three always failed with "Illegal Parameter type". They report
+  `presetPathIgnored` when a preset was given.
+- `stem_export` muted and unmuted tracks without exporting anything, and its
+  `setMute(true)` threw (`setMute` takes 1/0). It now writes one file per track and puts
+  every track's mute state back.
+- `compare_takes` was a stub. It now extracts the mid-point frame of each take.
+- `set_keyframe_interpolation` is verified when the UXP helper runs: UXP reads the
+  keyframe's interpolation back, which ExtendScript cannot. Hold, Bezier and Linear read back
+  correctly.
+- SRT cue tools say indices are 1-based when one is out of range.
+- The UXP helper's queue folder has a Windows path (`%LOCALAPPDATA%\Temp`). It is untested on
+  Windows.
+- The sweep gives real values where it had placeholders: real tool, effect and LUT names, an
+  end time after the start time, a folder where a folder is wanted, Frame.io and ShotGrid
+  fixtures, a per-tool copy of the SRT for tools that edit it, and the snapshot
+  `snapshot_state` wrote. It no longer writes a footage index into the home directory.
+
 ### UXP channel
 
 - The MCP UXP Probe panel is now a second channel next to CEP (`src/bridge/uxp-channel.ts`,

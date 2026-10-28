@@ -263,8 +263,7 @@ describe('hardcoded /tmp in src — ratchet, not a clean bill of health', () => 
     "utils/security.ts '/tmp'",
     // defaultBridgeDir: returns the %TEMP%/%TMP% path for win32 before reaching this.
     "utils/scratch-paths.ts '/tmp/premiere-mcp-bridge'",
-    // UXP probe queue: fixed in the panel, and uxpAvailable() returns false on win32 before any
-    // path is touched, so Windows never reaches it.
+    // UXP probe queue: the win32 branch (os.tmpdir()) is on the same line.
     "bridge/uxp-channel.ts '/tmp/premiere-mcp-uxp'",
   ]);
 

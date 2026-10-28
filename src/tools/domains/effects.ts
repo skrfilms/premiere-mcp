@@ -381,7 +381,9 @@ export class EffectsTools extends AssemblyTools {
               return state;
             }
             var file = new File(Folder.temp.fsName + "/premiere-mcp-transition-" + new Date().getTime() + "-" + Math.floor(Math.random() * 1000000) + ".xml");
-            seq.exportAsFinalCutProXML(file.fsName);
+            // suppressUI = true: without it every transition check raised a Translation Report
+            // dialog, which piled up on screen one per transition added.
+            seq.exportAsFinalCutProXML(file.fsName, true);
             state.path = file.fsName;
             if (!file.exists) {
               state.error = "XML export file was not created";

@@ -52,9 +52,9 @@ import { TrimmingTools } from './domains/trimming.js';
 export type { MCPTool } from './tool-types.js';
 import type { MCPTool } from './tool-types.js';
 import { runFf } from './ff-exec.js';
-import { withReportDialogGuard } from '../bridge/report-dialog-guard.js';
+import { REPORT_DIALOG_TOOLS, REPORT_LINGER_MS, withReportDialogGuard } from '../bridge/report-dialog-guard.js';
 import { generatedAssetsDir } from '../utils/scratch-paths.js';
-import { uxpAvailable } from '../bridge/uxp-channel.js';
+import { runUxp, uxpAvailable } from '../bridge/uxp-channel.js';
 
 // The header declarations and pure helpers moved to ./domains/shared.ts when this file was
 // split into one class per tool domain. Re-exported here: they were part of this module's
@@ -472,7 +472,10 @@ export class PremiereProTools extends TrimmingTools {
     // Calls can raise an informational export-report dialog that blocks the engine until OK is
     // clicked (see report-dialog-guard.ts). The guard polls once for every call in flight, so
     // nested and concurrent calls are both covered.
-    const { result, guard } = await withReportDialogGuard(() => this.executeToolUnguarded(name, args, options));
+    const { result, guard } = await withReportDialogGuard(
+      () => this.executeToolUnguarded(name, args, options),
+      { lingerMs: REPORT_DIALOG_TOOLS.test(name) ? REPORT_LINGER_MS : 0 },
+    );
     if (guard.dismissed.length && result && typeof result === 'object' && !Array.isArray(result)) {
       return {
         ...result,
@@ -590,6 +593,14 @@ export class PremiereProTools extends TrimmingTools {
     // Rebuilt in TypeScript (it needs ffmpeg plus several host steps); the expanded switch only
     // knew setFrameHold/freezeFrame, which do not exist on 26.5.2.
     if (name === 'freeze_frame') return withCheckpoint(await this.freezeFrame(args));
+    // ExtendScript can set a keyframe's interpolation but has no getter, so the expanded tool
+    // could only report "interpolated: true". UXP's Keyframe.getTemporalInterpolationMode reads it
+    // back (same enum: LINEAR 0, HOLD 4, BEZIER 5, TIME 6), so verify through UXP when it is there.
+    if (name === 'set_keyframe_interpolation') {
+      const set: any = await executeExpandedTool(this.bridge, name, args);
+      if (!set?.success || !uxpAvailable()) return set;
+      return await this.verifyKeyframeInterpolation(set, args);
+    }
     const localToolNames = new Set(this.getLocalTools().map((localTool) => localTool.name));
     if (!localToolNames.has(name) && isExpandedTool(name)) {
       return withCheckpoint(await executeExpandedTool(this.bridge, name, args));
@@ -1135,7 +1146,7 @@ export class PremiereProTools extends TrimmingTools {
         case 'log_clip': return await this.logClip(args.projectItemId, args.inPoint, args.outPoint, args.name, args.labelColor);
         case 'create_subclips_from_markers': return await this.createSubclipsFromMarkers(args.projectItemId);
         case 'hover_scrub_frames': return this.hoverScrubFrames(args.mediaPath, args.count, args.outputDir);
-        case 'compare_takes': return this.compareTakes(args.projectItemId1, args.projectItemId2, args.outputDir);
+        case 'compare_takes': return await this.compareTakes(args.projectItemId1, args.projectItemId2, args.outputDir);
         case 'get_source_clip_info': return await this.getSourceClipInfo();
         case 'batch_log_from_csv': return await this.batchLogFromCsv(args.csvPath);
         case 'storyboard_bin_to_sequence': return await this.storyboardBinToSequence(args.binName, args.sequenceId, args.startAtSecs, args.binId);
@@ -2001,6 +2012,51 @@ export class PremiereProTools extends TrimmingTools {
    * cannot be reported as created unless it actually exists. Resolves the active
    * sequence when no id is given.
    */
+  private async verifyKeyframeInterpolation(set: any, args: any): Promise<any> {
+    const data = set.data ?? set;
+    const loc: any = await this.bridge.executeScript(`
+      try {
+        var f = __findClip(${JSON.stringify(String(args.clipId ?? args.node_id ?? args.nodeId ?? ''))}, ${JSON.stringify(args.sequenceId ?? null)});
+        if (!f) return JSON.stringify({ success: false });
+        return JSON.stringify({ success: true, seq: String(f.sequenceId), video: f.trackType === 'video', track: f.trackIndex, clip: f.clipIndex });
+      } catch (e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+    if (!loc?.success) return set;
+    const want = Number(data.interpolationType);
+    const u = await runUxp(`
+      const p = await ppro.Project.getActiveProject();
+      const s = (await p.getSequences()).find((q) => String(q.guid) === ${JSON.stringify(String(loc.seq))});
+      if (!s) return { found: false, reason: 'sequence not found in UXP' };
+      const tr = ${loc.video ? 'await s.getVideoTrack' : 'await s.getAudioTrack'}(${Number(loc.track)});
+      if (!tr) return { found: false, reason: 'track not found in UXP' };
+      const it = tr.getTrackItems(ppro.Constants.TrackItemType.CLIP, false)[${Number(loc.clip)}];
+      if (!it) return { found: false, reason: 'clip not found in UXP' };
+      const chain = await it.getComponentChain();
+      const n = await chain.getComponentCount();
+      for (let i = 0; i < n; i++) {
+        const c = await chain.getComponentAtIndex(i);
+        if ((await c.getDisplayName()) !== ${JSON.stringify(String(data.component))}) continue;
+        for (let j = 0; j < 40; j++) {
+          let prm; try { prm = await c.getParam(j); } catch (e) { break; }
+          if (!prm) break;
+          if (String(prm.displayName) !== ${JSON.stringify(String(data.property))}) continue;
+          const times = await prm.getKeyframeListAsTickTimes();
+          let best = null, gap = Infinity;
+          for (const t of times) { const d = Math.abs(t.seconds - ${Number(data.time)}); if (d < gap) { gap = d; best = t; } }
+          if (!best || gap > 0.05) return { found: false };
+          const k = await prm.getKeyframePtr(best);
+          return { found: true, mode: await k.getTemporalInterpolationMode(), at: best.seconds };
+        }
+      }
+      return { found: false };
+    `, 20000, 'Check keyframe interpolation');
+    if (!u.ok || !u.result?.found) return { ...set, verified: false, unverifiedReason: `UXP could not locate the keyframe to read it back (${u.ok ? u.result?.reason ?? 'no keyframe at that time' : u.error}).` };
+    const ok = Number(u.result.mode) === want;
+    return ok
+      ? { ...set, verified: true, verifiedBy: 'UXP Keyframe.getTemporalInterpolationMode readback', readBackMode: u.result.mode }
+      : { success: false, verified: true, error: `Interpolation reads back as mode ${u.result.mode}, not the requested ${want}.`, readBackMode: u.result.mode };
+  }
+
   private async createRecoveryCheckpoint(sequenceId?: string, label?: string): Promise<any> {
     let sourceId = sequenceId;
     let sourceName: string | undefined;

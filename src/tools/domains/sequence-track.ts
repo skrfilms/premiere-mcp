@@ -1538,9 +1538,11 @@ ${this.buildSequenceResolver(sequenceId)}
           if (bin.children[j].type === 1) items.push(bin.children[j]);
         }
         if (items.length === 0) return JSON.stringify({success:false,error:'No footage items in bin "'+String(bin.name)+'" ('+String(bin.treePath)+'). No sequence was created.',binId:String(bin.nodeId)});
-        var seq = app.project.createNewSequenceFromClips(${JSON.stringify(seqName)}, items, ${JSON.stringify(presetPath ?? '')});
+        // The third argument is the DESTINATION BIN, not a preset: a path string here raised
+        // "Illegal Parameter type" on every call. The sequence takes its settings from the clips.
+        var seq = app.project.createNewSequenceFromClips(${JSON.stringify(seqName)}, items, app.project.rootItem);
         if (!seq) return JSON.stringify({success:false,error:'createNewSequenceFromClips returned null'});
-        return JSON.stringify({success:true,sequenceId:String(seq.sequenceID),name:String(seq.name),clipCount:items.length,
+        return JSON.stringify({success:true,presetPathIgnored:${JSON.stringify(Boolean(presetPath))},sequenceId:String(seq.sequenceID),name:String(seq.name),clipCount:items.length,
           binId:String(bin.nodeId),binName:String(bin.name),binResolvedBy:req.resolvedBy});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);

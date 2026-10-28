@@ -13,9 +13,14 @@
  */
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-/** Fixed in the panel (uxp-probe/main.js). The override exists for tests only. */
-export const UXP_DIR_DEFAULT = '/tmp/premiere-mcp-uxp';
+/**
+ * Must match uxp-probe/main.js: /tmp on POSIX, %LOCALAPPDATA%\\Temp on Windows (os.tmpdir()). The
+ * override exists for tests only.
+ */
+export const UXP_DIR_DEFAULT = process.platform === 'win32' ? join(tmpdir(), 'premiere-mcp-uxp') : '/tmp/premiere-mcp-uxp';
 const dir = (): string => process.env.PREMIERE_MCP_UXP_DIR || UXP_DIR_DEFAULT;
 /** The panel writes a heartbeat every poll (300 ms); older than this means it is not running. */
 const STALE_MS = 5000;
@@ -28,7 +33,6 @@ export interface UxpResult {
 
 /** True when the UXP probe panel is running in Premiere and answering. */
 export function uxpAvailable(): boolean {
-  if (process.platform === 'win32') return false; // the panel's queue path is POSIX-only for now
   try {
     const hb = JSON.parse(readFileSync(`${dir()}/uxp-heartbeat.json`, 'utf8'));
     return Date.now() - Number(hb.ts) < STALE_MS;
@@ -40,7 +44,8 @@ export function uxpAvailable(): boolean {
 function ensureDir(): void {
   mkdirSync(dir(), { recursive: true, mode: 0o700 });
   // A pre-existing directory keeps its mode; tighten it so another local user cannot queue code.
-  chmodSync(dir(), 0o700);
+  // (No-op on Windows, where %LOCALAPPDATA% is already per-user.)
+  if (process.platform !== 'win32') chmodSync(dir(), 0o700);
 }
 
 /** The panel claims a command by renaming it to *.taken but cannot delete it (UXP's fs has no

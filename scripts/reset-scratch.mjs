@@ -411,7 +411,9 @@ record('srt', SRT_PATH);
 // 10c. A real multicam: import the multiclip XML into its own bin. This also creates
 //      fixture_mc_edit, a sequence whose V1 clip is the multicam, for the clip-level multicam tools.
 {
-  const r = await host('multicam', `(function(){
+  // The XML import raises a Translation Report just after it returns; the guard lingers for it.
+  const { withReportDialogGuard } = await import('../dist/bridge/report-dialog-guard.js');
+  const { result: r } = await withReportDialogGuard(() => host('multicam', `(function(){
     ${HELPERS}
     var bin = findRootItemByName('fixture_multicam_bin');
     if (!bin) {
@@ -427,7 +429,7 @@ record('srt', SRT_PATH);
       if (String(app.project.sequences[s].name) === 'fixture_mc_edit') edit = app.project.sequences[s];
     }
     return JSON.stringify({ multicam: mc ? String(mc.name) : null, edit: edit ? String(edit.name) : null });
-  })();`);
+  })();`), { lingerMs: 8000 });
   record('multicam', r.multicam ? `multicam item "${r.multicam}", edit sequence ${r.edit}` : 'NOT CREATED — the XML import yielded no multicam item');
 }
 

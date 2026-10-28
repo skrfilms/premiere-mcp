@@ -113,8 +113,14 @@ function stopPollingIfIdle(): void {
   if (interval) { clearInterval(interval); interval = undefined; }
 }
 
-/** Run `fn`, dismissing listed report dialogs that appear while it (or any other call) runs. */
-export async function withReportDialogGuard<T>(fn: () => Promise<T>): Promise<{ result: T; guard: GuardOutcome }> {
+/**
+ * Run `fn`, dismissing listed report dialogs that appear while it (or any other call) runs.
+ *
+ * `lingerMs` keeps watching after `fn` returns. An FCP XML import returns in well under the
+ * 2.5 s start delay and Premiere raises its Translation Report a moment AFTER, so a guard that
+ * stopped with the call never saw it, and the reports piled up on screen one per import.
+ */
+export async function withReportDialogGuard<T>(fn: () => Promise<T>, opts: { lingerMs?: number } = {}): Promise<{ result: T; guard: GuardOutcome }> {
   const guard: GuardOutcome = { dismissed: [] };
   if (!dialogGuardEnabled()) return { result: await fn(), guard };
   if (unavailable) guard.unavailable = unavailable;
@@ -124,6 +130,22 @@ export async function withReportDialogGuard<T>(fn: () => Promise<T>): Promise<{ 
     return { result: await fn(), guard };
   } finally {
     inFlight.delete(guard);
-    stopPollingIfIdle();
+    if (opts.lingerMs && opts.lingerMs > 0) {
+      const tail: GuardOutcome = { dismissed: [] };
+      inFlight.add(tail);
+      // Poll now rather than after the start delay: the report is due any moment.
+      if (!interval) {
+        if (starter) { clearTimeout(starter); starter = undefined; }
+        void tick();
+        interval = setInterval(() => { void tick(); }, POLL_MS);
+      }
+      setTimeout(() => { inFlight.delete(tail); stopPollingIfIdle(); }, opts.lingerMs).unref?.();
+    } else {
+      stopPollingIfIdle();
+    }
   }
 }
+
+/** Tools whose Premiere call can raise a report dialog shortly after it returns. */
+export const REPORT_DIALOG_TOOLS = /fcp_?xml|_xml|aaf|omf|multicam_cut|create_multicam|open_fcp|import_sequences/;
+export const REPORT_LINGER_MS = 8000;
