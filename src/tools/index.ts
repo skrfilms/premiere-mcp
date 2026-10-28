@@ -57,6 +57,10 @@ import { generatedAssetsDir } from '../utils/scratch-paths.js';
 import { runUxp, uxpAvailable } from '../bridge/uxp-channel.js';
 import { recent as recentCalls } from './journal.js';
 import { getJob, listJobs, startJob } from './jobs.js';
+import { planSilenceCuts, toTimecode } from './silence.js';
+import { findQuote, planStringout, wordsFromSrt, wordsFromWhisperJson } from './stringout.js';
+import { decodeAudio, findOffset, SYNC_RATE } from './audio-sync.js';
+import { folderOf, listCandidateFiles, parseVersioned, planVersionUp, type ProjectMedia } from './version-up.js';
 
 // The header declarations and pure helpers moved to ./domains/shared.ts when this file was
 // split into one class per tool domain. Re-exported here: they were part of this module's
@@ -623,6 +627,35 @@ export class PremiereProTools extends TrimmingTools {
           return await this.verifyPremiereConnection();
         case 'get_capabilities':
           return await this.getCapabilities(args.checkConnection, args.probeLocalTools);
+        case 'remove_silence': return await this.removeSilence(args);
+        case 'sync_by_audio': return await this.syncByAudio(args);
+        case 'stringout_from_transcript': return await this.stringoutFromTranscript(args);
+        case 'look_at_cut': return await this.lookAtCut(args);
+        case 'version_up_shots': {
+          const media: any = await this.bridge.executeScript(`
+            try {
+              var out = [];
+              (function walk(it){ for (var i = 0; i < it.children.numItems; i++) { var c = it.children[i]; if (c.type === 2) { walk(c); continue; } var p = ''; try { p = String(c.getMediaPath()); } catch (e) {} if (p) out.push({ id: String(c.nodeId), name: String(c.name), path: p }); } })(app.project.rootItem);
+              return JSON.stringify({ success: true, items: out });
+            } catch (e) { return JSON.stringify({ success: false, error: e.toString() }); }
+          `);
+          if (!media?.success) return media;
+          const filter = args.shotFilter ? String(args.shotFilter).toLowerCase() : '';
+          const items = (media.items as ProjectMedia[]).filter((m) => !filter || m.name.toLowerCase().includes(filter) || m.path.toLowerCase().includes(filter));
+          const ownDirs = [...new Set(items.filter((m) => parseVersioned(m.path.split(/[\\/]/).pop() ?? '')).map((m) => folderOf(m.path)))];
+          const files = [...listCandidateFiles(ownDirs, false), ...listCandidateFiles((args.renderDirs ?? []).map(String), args.recursive !== false)];
+          const plan = planVersionUp(items, files);
+          if (args.dryRun === true) return { success: true, dryRun: true, toRelink: plan.relink, alreadyCurrent: plan.current.length, unversionedItems: plan.unversionedCount, foldersSearched: ownDirs.length + (args.renderDirs?.length ?? 0) };
+          const applied: any[] = [];
+          for (const p of plan.relink) {
+            const r: any = await this.executeTool('replace_clip_media', { projectItemId: p.id, newFilePath: p.to });
+            const ok = r?.success !== false;
+            applied.push({ shot: p.shot, from: `v${p.fromVersion}`, to: `v${p.toVersion}`, item: r?.data?.item ?? p.name, ok, error: ok ? undefined : (r?.error ?? 'relink failed') });
+          }
+          const failed = applied.filter((a) => !a.ok).length;
+          return { success: failed === 0, relinked: applied.length - failed, failed, alreadyCurrent: plan.current.length, results: applied,
+            note: applied.length === 0 ? 'Every versioned shot is already on its newest version in the folders searched.' : 'Timeline clips keep their trims and effects; relinked media can render black for a moment while Premiere loads it.' };
+        }
         case 'where_used':
           return await this.bridge.executeScript(`
             try {
@@ -2038,6 +2071,243 @@ export class PremiereProTools extends TrimmingTools {
    * cannot be reported as created unless it actually exists. Resolves the active
    * sequence when no id is given.
    */
+  private async lookAtCut(args: any): Promise<any> {
+    const max = Math.max(1, Math.min(Number(args.maxFrames) || 8, 16));
+    const shots: any = await this.bridge.executeScript(`
+      try {
+        var seq = __findSequence(${JSON.stringify(args.sequenceId ?? null)});
+        if (!seq) return JSON.stringify({ success: false, error: 'Sequence not found' });
+        // The shot on screen at a time is the top-most clip there; collect each clip's midpoint
+        // on every video track, then keep only the ones nothing above covers.
+        var mids = [];
+        for (var t = 0; t < seq.videoTracks.numTracks; t++) { var tr = seq.videoTracks[t]; for (var c = 0; c < tr.clips.numItems; c++) { var cl = tr.clips[c]; if (cl.disabled) continue; mids.push({ t: (cl.start.seconds + cl.end.seconds) / 2, track: t, name: String(cl.name) }); } }
+        var visible = [];
+        for (var i = 0; i < mids.length; i++) {
+          var covered = false;
+          for (var u = mids[i].track + 1; u < seq.videoTracks.numTracks && !covered; u++) { var up = seq.videoTracks[u]; for (var k = 0; k < up.clips.numItems; k++) { var x = up.clips[k]; if (!x.disabled && x.start.seconds <= mids[i].t && x.end.seconds > mids[i].t) { covered = true; break; } } }
+          if (!covered) visible.push(mids[i]);
+        }
+        visible.sort(function (a, b) { return a.t - b.t; });
+        return JSON.stringify({ success: true, sequenceId: String(seq.sequenceID), name: String(seq.name), shots: visible });
+      } catch (e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+    if (!shots?.success) return shots;
+    let picks: Array<{ t: number; name: string }> = Array.isArray(args.times) && args.times.length
+      ? (args.times as number[]).map((t) => ({ t: Number(t), name: '' }))
+      : shots.shots;
+    if (picks.length > max) { const step = picks.length / max; picks = Array.from({ length: max }, (_, i) => picks[Math.floor(i * step)]!); }
+    if (!picks.length) return { success: false, error: 'Nothing on the timeline to look at.' };
+    const fsSync = await import('node:fs'); const pathSync = await import('node:path'); const osSync = await import('node:os');
+    const work = fsSync.mkdtempSync(pathSync.join(osSync.tmpdir(), 'premiere-mcp-look-'));
+    const frames: string[] = [];
+    for (const [i, p] of picks.entries()) {
+      const out = pathSync.join(work, `f${String(i).padStart(2, '0')}.png`);
+      const r: any = await this.executeTool('capture_program_output', { sequenceId: shots.sequenceId, time: p.t, format: 'png', outputPath: out });
+      if (r?.success === false || !fsSync.existsSync(out)) return { success: false, error: `Could not render the frame at ${p.t}s: ${r?.error ?? 'no file'}` };
+      // Label each frame with its time and shot so the sheet reads on its own.
+      const labelled = pathSync.join(work, `l${String(i).padStart(2, '0')}.png`);
+      const label = `${p.t.toFixed(2)}s ${p.name}`.replace(/[^A-Za-z0-9_. :-]/g, '').slice(0, 40).replace(/:/g, '\\:');
+      runFf('ffmpeg', ['-v', 'error', '-y', '-i', out, '-vf', `scale=480:-2,drawbox=y=ih-30:w=iw:h=30:color=black@0.6:t=fill,drawtext=text='${label}':fontcolor=white:fontsize=18:x=8:y=h-24`, labelled], { timeoutMs: 30000 });
+      frames.push(fsSync.existsSync(labelled) ? labelled : out);
+    }
+    const cols = Math.min(4, frames.length), rows = Math.ceil(frames.length / cols);
+    const sheet = args.outputPath ? String(args.outputPath) : pathSync.join(work, 'look_at_cut.jpg');
+    const inputs = frames.flatMap((f) => ['-i', f]);
+    if (frames.length === 1) runFf('ffmpeg', ['-v', 'error', '-y', '-i', frames[0]!, '-q:v', '4', sheet], { timeoutMs: 30000 });
+    else runFf('ffmpeg', ['-v', 'error', '-y', ...inputs, '-filter_complex', `${frames.map((_, i) => `[${i}:v]`).join('')}xstack=inputs=${frames.length}:layout=${frames.map((_, i) => `${(i % cols) === 0 ? '0' : Array.from({ length: i % cols }, () => 'w0').join('+')}_${Math.floor(i / cols) === 0 ? '0' : Array.from({ length: Math.floor(i / cols) }, () => 'h0').join('+')}`).join('|')}:fill=black`, '-q:v', '4', sheet], { timeoutMs: 60000 });
+    if (!fsSync.existsSync(sheet)) return { success: false, error: 'ffmpeg did not write the contact sheet.' };
+    return { success: true, outputPath: sheet, sequence: shots.name, frames: picks.map((p) => ({ timeSecs: Math.round(p.t * 1000) / 1000, shot: p.name || undefined })), grid: `${cols}x${rows}` };
+  }
+
+  private async stringoutFromTranscript(args: any): Promise<any> {
+    const id = String(args.projectItemId ?? '');
+    const quotes: string[] = (args.quotes ?? []).map(String).filter((q: string) => q.trim());
+    const wanted: Array<{ label: string; start: number; end: number }> = [];
+    const missing: string[] = [];
+    const matches: any[] = [];
+    if (quotes.length) {
+      if (!args.transcriptPath) return { success: false, error: 'quotes need a transcriptPath (.json from Whisper or .srt).' };
+      let raw: string;
+      try { raw = fsSync.readFileSync(String(args.transcriptPath), 'utf8'); } catch (e: any) { return { success: false, error: `Could not read the transcript: ${e.message}` }; }
+      let words;
+      try { words = /\.json$/i.test(String(args.transcriptPath)) ? wordsFromWhisperJson(JSON.parse(raw)) : wordsFromSrt(raw); } catch (e: any) { return { success: false, error: `Could not parse the transcript: ${e.message}` }; }
+      if (!words.length) return { success: false, error: 'The transcript has no words in it.' };
+      for (const q of quotes) {
+        const m = findQuote(words, q, Number(args.minScore) > 0 ? Number(args.minScore) : 0.75);
+        if (!m) { missing.push(q); continue; }
+        matches.push({ ...m, approximate: m.score < 1 });
+        wanted.push({ label: q.slice(0, 60), start: m.start, end: m.end });
+      }
+    } else {
+      for (const r of args.ranges ?? []) if (Number(r.end) > Number(r.start)) wanted.push({ label: String(r.label ?? `${r.start}-${r.end}`), start: Number(r.start), end: Number(r.end) });
+    }
+    if (!wanted.length) return { success: false, error: quotes.length ? 'None of the quotes were found in the transcript.' : 'Give quotes (with a transcriptPath) or ranges.', missing };
+    const info: any = await this.bridge.executeScript(`
+      try {
+        var it = __findProjectItem(${JSON.stringify(id)});
+        if (!it) return JSON.stringify({ success: false, error: 'Project item not found' });
+        var dur = 0, fr = 0;
+        try { fr = Number(it.getFootageInterpretation().frameRate); } catch (e) {}
+        var oi = null, oo = null; try { oi = it.getInPoint(4).seconds; oo = it.getOutPoint(4).seconds; } catch (e) {}
+        try { it.clearInPoint(4); it.clearOutPoint(4); dur = Number(it.getOutPoint(4).seconds); } catch (e) {}
+        try { if (oi !== null) { it.setInPoint(oi, 4); it.setOutPoint(oo, 4); } } catch (e) {}
+        return JSON.stringify({ success: true, name: String(it.name), duration: dur, fps: fr > 0 ? fr : 24 });
+      } catch (e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+    if (!info?.success) return info;
+    const plan = planStringout(wanted, args.handleSeconds !== undefined ? Number(args.handleSeconds) : 0.15, info.fps, info.duration, Number(args.gapSeconds) > 0 ? Number(args.gapSeconds) : 0);
+    const total = plan.length ? Math.round((plan[plan.length - 1]!.recordIn + plan[plan.length - 1]!.sourceOut - plan[plan.length - 1]!.sourceIn) * 1000) / 1000 : 0;
+    if (args.dryRun) return { success: true, dryRun: true, plan, matches, missing, totalSeconds: total };
+    const name = String(args.sequenceName ?? `${info.name} stringout`);
+    const built: any = await this.bridge.executeScript(`
+      try {
+        var plan = ${JSON.stringify(plan)};
+        var it = __findProjectItem(${JSON.stringify(id)});
+        var seq = app.project.createNewSequenceFromClips(${JSON.stringify(name)}, [it], app.project.rootItem);
+        if (!seq) return JSON.stringify({ success: false, error: 'Could not create the sequence' });
+        app.project.openSequence(seq.sequenceID);
+        // createNewSequenceFromClips matches the source's settings but drops the whole clip in; clear it.
+        for (var v = 0; v < seq.videoTracks.numTracks; v++) while (seq.videoTracks[v].clips.numItems) seq.videoTracks[v].clips[0].remove(false, false);
+        for (var a = 0; a < seq.audioTracks.numTracks; a++) while (seq.audioTracks[a].clips.numItems) seq.audioTracks[a].clips[0].remove(false, false);
+        var oi = null, oo = null; try { oi = it.getInPoint(4).seconds; oo = it.getOutPoint(4).seconds; } catch (e) {}
+        var placed = [], err = null;
+        try {
+          for (var i = 0; i < plan.length; i++) {
+            it.setInPoint(plan[i].sourceIn, 4); it.setOutPoint(plan[i].sourceOut, 4);
+            var t = new Time(); t.seconds = plan[i].recordIn;
+            seq.videoTracks[0].overwriteClip(it, t);
+          }
+        } catch (eP) { err = eP.toString(); }
+        try { if (oi !== null) { it.setInPoint(oi, 4); it.setOutPoint(oo, 4); } } catch (e) {}
+        var tr = seq.videoTracks[0];
+        for (var c = 0; c < tr.clips.numItems; c++) placed.push({ start: tr.clips[c].start.seconds, end: tr.clips[c].end.seconds, inPoint: tr.clips[c].inPoint.seconds });
+        var audio = 0; try { audio = seq.audioTracks[0].clips.numItems; } catch (e) {}
+        return JSON.stringify({ success: !err, error: err, sequenceId: String(seq.sequenceID), placed: placed, audioClips: audio });
+      } catch (e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+    if (!built?.success) return { success: false, error: built?.error ?? 'Building the sequence failed.', plan };
+    const tol = 0.05;
+    const ok = built.placed.length === plan.length && plan.every((p, i) => Math.abs(built.placed[i].start - p.recordIn) < tol && Math.abs(built.placed[i].inPoint - p.sourceIn) < tol && Math.abs((built.placed[i].end - built.placed[i].start) - (p.sourceOut - p.sourceIn)) < tol);
+    return { success: ok, verified: ok, verifiedBy: 'start/in/duration readback of every placed clip', sequenceId: built.sequenceId, sequenceName: name, lines: plan.length, totalSeconds: total,
+      audioClips: built.audioClips, matches, missing, plan, error: ok ? undefined : 'The placed clips do not match the plan; see plan and placed.', placed: ok ? undefined : built.placed };
+  }
+
+  private async syncByAudio(args: any): Promise<any> {
+    const ids: string[] = [String(args.referenceItemId ?? ''), ...((args.itemIds ?? []) as unknown[]).map(String)];
+    if (ids.length < 2 || !ids[0]) return { success: false, error: 'referenceItemId and at least one itemId are required.' };
+    const info: any = await this.bridge.executeScript(`
+      try {
+        var ids = ${JSON.stringify(ids)}, out = [];
+        for (var i = 0; i < ids.length; i++) { var it = __findProjectItem(ids[i]); if (!it) return JSON.stringify({ success: false, error: 'Project item not found: ' + ids[i] }); var p = ''; try { p = String(it.getMediaPath()); } catch (e) {} out.push({ id: ids[i], name: String(it.name), path: p }); }
+        return JSON.stringify({ success: true, items: out });
+      } catch (e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+    if (!info?.success) return info;
+    const seconds = Number(args.analyzeSeconds) > 0 ? Number(args.analyzeSeconds) : 90;
+    let ref: Float32Array;
+    try { ref = decodeAudio(info.items[0].path, seconds); } catch (e: any) { return { success: false, error: e.message }; }
+    const results: any[] = [{ id: info.items[0].id, name: info.items[0].name, offsetSeconds: 0, score: 1, reference: true }];
+    for (const it of info.items.slice(1)) {
+      try {
+        const r = findOffset(ref, decodeAudio(it.path, seconds), SYNC_RATE, Number(args.maxOffsetSeconds) > 0 ? Number(args.maxOffsetSeconds) : 30);
+        results.push({ id: it.id, name: it.name, offsetSeconds: Math.round(r.offsetSeconds * 10000) / 10000, score: r.score, weak: r.score < 0.3 });
+      } catch (e: any) { results.push({ id: it.id, name: it.name, error: e.message }); }
+    }
+    const usable = results.filter((r) => r.offsetSeconds !== undefined && !r.weak);
+    if (!args.sequenceName) return { success: results.every((r) => !r.error), offsets: results, note: 'Place each clip at (reference position + offsetSeconds) to line them up.' };
+    // Build the synced sequence: shift everything so the earliest clip starts at 0.
+    const shift = -Math.min(0, ...usable.map((r) => r.offsetSeconds));
+    const built: any = await this.bridge.executeScript(`
+      try {
+        var plan = ${JSON.stringify(usable.map((r) => ({ id: r.id, at: r.offsetSeconds + shift })))};
+        var refItem = __findProjectItem(plan[0].id);
+        var seq = app.project.createNewSequenceFromClips(${JSON.stringify(String(args.sequenceName))}, [refItem], app.project.rootItem);
+        if (!seq) return JSON.stringify({ success: false, error: 'Could not create the sequence' });
+        app.project.openSequence(seq.sequenceID);
+        app.enableQE();
+        var q = qe.project.getActiveSequence();
+        var need = plan.length;
+        var g = 0; while (seq.videoTracks.numTracks < need && g++ < 20) q.addTracks(1, seq.videoTracks.numTracks, 0, 0, 0, 0, 0, 0);
+        g = 0; while (seq.audioTracks.numTracks < need && g++ < 20) q.addTracks(0, 0, 0, 1, seq.audioTracks.numTracks, 0, 0, 0);
+        // The reference landed at 0; move it only by placing fresh when it needs a shift.
+        var placed = [];
+        for (var i = 0; i < plan.length; i++) {
+          var t = new Time(); t.seconds = plan[i].at;
+          if (i === 0) {
+            if (plan[0].at > 0.0005) { seq.videoTracks[0].clips[0].remove(false, false); try { seq.audioTracks[0].clips[0].remove(false, false); } catch (eA) {} seq.videoTracks[0].overwriteClip(refItem, t); }
+          } else {
+            seq.videoTracks[i].overwriteClip(__findProjectItem(plan[i].id), t);
+          }
+          var tr = seq.videoTracks[i];
+          placed.push({ track: 'V' + (i + 1), start: tr.clips.numItems ? tr.clips[0].start.seconds : null });
+        }
+        return JSON.stringify({ success: true, sequenceId: String(seq.sequenceID), placed: placed });
+      } catch (e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+    const placedOk = built?.success && (built.placed as any[]).every((p: any, i: number) => p.start !== null && Math.abs(p.start - (usable[i].offsetSeconds + shift)) < 0.05);
+    return { success: !!placedOk, verified: !!placedOk, verifiedBy: 'clip start readback per track', offsets: results, sequenceId: built?.sequenceId, placed: built?.placed,
+      skippedWeak: results.filter((r) => r.weak).map((r) => r.name), error: placedOk ? undefined : (built?.error ?? 'A clip did not land at its synced position.') };
+  }
+
+  private async removeSilence(args: any): Promise<any> {
+    const clipId = String(args.clipId ?? '');
+    const info: any = await this.bridge.executeScript(`
+      try {
+        var f = __findClip(${JSON.stringify(clipId)});
+        if (!f) return JSON.stringify({ success: false, error: 'Clip not found' });
+        var c = f.clip, sp = 1; try { sp = Number(c.getSpeed()); } catch (e) {}
+        var rev = false; try { rev = !!c.isSpeedReversed(); } catch (e) {}
+        return JSON.stringify({ success: true, seq: String(f.sequenceId), start: c.start.seconds, end: c.end.seconds, inPoint: c.inPoint.seconds, speed: sp, reversed: rev,
+          path: String(c.projectItem.getMediaPath()), fps: 254016000000 / Number(f.sequence.timebase), seqEnd: f.sequence.end ? Number(f.sequence.end) / 254016000000 : null });
+      } catch (e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+    if (!info?.success) return info;
+    if (info.reversed) return { success: false, error: 'The clip is reversed, so its source silences cannot be mapped onto the timeline. Nothing was changed.' };
+    const det: any = await this.executeTool('detect_silence', { mediaPath: info.path, noiseThresholdDb: args.noiseThresholdDb ?? -35, minDurationSeconds: args.minSilenceSeconds ?? 0.5 });
+    if (!det?.success) return { success: false, error: `Could not analyse the clip's audio: ${det?.error ?? 'unknown'}` };
+    const cuts = planSilenceCuts(det.silenceIntervals ?? [], { start: info.start, end: info.end, inPoint: info.inPoint, speed: info.speed }, args.paddingSeconds ?? 0.1, args.minSilenceSeconds ?? 0.5, info.fps);
+    const total = Math.round(cuts.reduce((n, c) => n + c.duration, 0) * 1000) / 1000;
+    if (cuts.length === 0) return { success: true, cuts: [], removedSeconds: 0, note: 'No pause long enough to cut in this clip.' };
+    if (args.confirm !== true) {
+      return { success: false, needsConfirmation: true, cuts, removedSeconds: total,
+        confirmPrompt: `Cut ${cuts.length} silent pause(s), ${total}s in all, from this clip? Every track is cut and closed up at those times so sync holds.`,
+        error: `Plan only: ${cuts.length} pause(s), ${total}s. Nothing was cut; call again with confirm:true to apply.` };
+    }
+    const cp: any = await this.executeTool('create_recovery_checkpoint', { sequenceId: info.seq, label: 'before remove_silence' });
+    const done: any[] = [];
+    for (const c of [...cuts].reverse()) {
+      const lifted: any = await this.bridge.executeScript(`
+        try {
+          app.enableQE();
+          var seq = __findSequence(${JSON.stringify(info.seq)});
+          app.project.openSequence(seq.sequenceID);
+          var q = __qeSequenceOpening(seq);
+          q.razor(${JSON.stringify(toTimecode(c.start, info.fps))});
+          q.razor(${JSON.stringify(toTimecode(c.end, info.fps))});
+          var a = ${c.start}, b = ${c.end}, lifted = 0;
+          var kinds = [seq.videoTracks, seq.audioTracks];
+          for (var k = 0; k < 2; k++) for (var t = 0; t < kinds[k].numTracks; t++) {
+            var tr = kinds[k][t];
+            for (var i = tr.clips.numItems - 1; i >= 0; i--) {
+              var cl = tr.clips[i];
+              if (cl.start.seconds >= a - 0.01 && cl.end.seconds <= b + 0.01) { cl.remove(false, false); lifted++; }
+            }
+          }
+          return JSON.stringify({ success: true, lifted: lifted });
+        } catch (e) { return JSON.stringify({ success: false, error: e.toString() }); }
+      `);
+      if (!lifted?.success) { done.push({ ...c, ok: false, error: lifted?.error }); break; }
+      const closed: any = await this.executeTool('close_gap_at', { timecode: String((c.start + c.end) / 2), sequenceId: info.seq });
+      done.push({ ...c, ok: closed?.success !== false, lifted: lifted.lifted, error: closed?.success === false ? closed.error : undefined });
+      if (closed?.success === false) break;
+    }
+    const failed = done.filter((d) => !d.ok);
+    return { success: failed.length === 0, verified: failed.length === 0, verifiedBy: 'each gap closed with close_gap_at (clip start readback on every track)',
+      cutsApplied: done.filter((d) => d.ok).length, cutsPlanned: cuts.length, removedSeconds: Math.round(done.filter((d) => d.ok).reduce((n, d) => n + d.duration, 0) * 1000) / 1000,
+      cuts: done, recoveryCheckpoint: cp?.checkpointName ?? null,
+      error: failed.length ? `Stopped at the cut at ${failed[0].start}s: ${failed[0].error}. Earlier (later-in-time) cuts were applied; restore from the recovery checkpoint to undo.` : undefined };
+  }
+
   private async verifyKeyframeInterpolation(set: any, args: any): Promise<any> {
     const data = set.data ?? set;
     const loc: any = await this.bridge.executeScript(`

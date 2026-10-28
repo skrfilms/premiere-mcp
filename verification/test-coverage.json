@@ -1,6 +1,24 @@
 {
   "tools": [
     {
+      "name": "12\" Cuts",
+      "testFiles": [
+        "src/__tests__/tools/injection-guard.test.ts"
+      ]
+    },
+    {
+      "name": "Bob's Takes",
+      "testFiles": [
+        "src/__tests__/tools/injection-guard.test.ts"
+      ]
+    },
+    {
+      "name": "C:\\Footage\\take \"1\"",
+      "testFiles": [
+        "src/__tests__/tools/injection-guard.test.ts"
+      ]
+    },
+    {
       "name": "activate_tools",
       "testFiles": [
         "src/__tests__/tools/es3-absent-methods.test.ts",
@@ -904,6 +922,7 @@
       "name": "copy_effects_between_clips",
       "testFiles": [
         "src/__tests__/tools/es3-absent-methods.test.ts",
+        "src/__tests__/tools/generated-script-syntax.test.ts",
         "src/__tests__/tools/injection-guard.test.ts",
         "src/__tests__/tools/schema-args.test.ts",
         "src/__tests__/tools/undefined-identifiers.test.ts"
@@ -1862,10 +1881,12 @@
       "testFiles": [
         "src/__tests__/http/http-listener.test.ts",
         "src/__tests__/http/http-transport.test.ts",
+        "src/__tests__/tools/call-journal.test.ts",
         "src/__tests__/tools/es3-absent-methods.test.ts",
         "src/__tests__/tools/generated-script-syntax.test.ts",
         "src/__tests__/tools/injection-guard.test.ts",
         "src/__tests__/tools/schema-args.test.ts",
+        "src/__tests__/tools/search-eval.test.ts",
         "src/__tests__/tools/search.test.ts",
         "src/__tests__/tools/undefined-identifiers.test.ts"
       ]
@@ -2482,6 +2503,17 @@
       ]
     },
     {
+      "name": "get_job",
+      "testFiles": [
+        "src/__tests__/tools/call-journal.test.ts",
+        "src/__tests__/tools/es3-absent-methods.test.ts",
+        "src/__tests__/tools/generated-script-syntax.test.ts",
+        "src/__tests__/tools/injection-guard.test.ts",
+        "src/__tests__/tools/schema-args.test.ts",
+        "src/__tests__/tools/undefined-identifiers.test.ts"
+      ]
+    },
+    {
       "name": "get_keyframes",
       "testFiles": [
         "src/__tests__/tools/es3-absent-methods.test.ts",
@@ -2818,6 +2850,17 @@
     {
       "name": "get_qe_sequence_settings",
       "testFiles": [
+        "src/__tests__/tools/es3-absent-methods.test.ts",
+        "src/__tests__/tools/generated-script-syntax.test.ts",
+        "src/__tests__/tools/injection-guard.test.ts",
+        "src/__tests__/tools/schema-args.test.ts",
+        "src/__tests__/tools/undefined-identifiers.test.ts"
+      ]
+    },
+    {
+      "name": "get_recent_calls",
+      "testFiles": [
+        "src/__tests__/tools/call-journal.test.ts",
         "src/__tests__/tools/es3-absent-methods.test.ts",
         "src/__tests__/tools/generated-script-syntax.test.ts",
         "src/__tests__/tools/injection-guard.test.ts",
@@ -3633,6 +3676,16 @@
       ]
     },
     {
+      "name": "list_jobs",
+      "testFiles": [
+        "src/__tests__/tools/es3-absent-methods.test.ts",
+        "src/__tests__/tools/generated-script-syntax.test.ts",
+        "src/__tests__/tools/injection-guard.test.ts",
+        "src/__tests__/tools/schema-args.test.ts",
+        "src/__tests__/tools/undefined-identifiers.test.ts"
+      ]
+    },
+    {
       "name": "list_lumetri_presets",
       "testFiles": [
         "src/__tests__/tools/es3-absent-methods.test.ts",
@@ -3751,6 +3804,16 @@
     },
     {
       "name": "log_clip",
+      "testFiles": [
+        "src/__tests__/tools/es3-absent-methods.test.ts",
+        "src/__tests__/tools/generated-script-syntax.test.ts",
+        "src/__tests__/tools/injection-guard.test.ts",
+        "src/__tests__/tools/schema-args.test.ts",
+        "src/__tests__/tools/undefined-identifiers.test.ts"
+      ]
+    },
+    {
+      "name": "look_at_cut",
       "testFiles": [
         "src/__tests__/tools/es3-absent-methods.test.ts",
         "src/__tests__/tools/generated-script-syntax.test.ts",
@@ -4502,6 +4565,16 @@
       "name": "remove_selected_clips",
       "testFiles": [
         "src/__tests__/tools/es3-absent-methods.test.ts",
+        "src/__tests__/tools/injection-guard.test.ts",
+        "src/__tests__/tools/schema-args.test.ts",
+        "src/__tests__/tools/undefined-identifiers.test.ts"
+      ]
+    },
+    {
+      "name": "remove_silence",
+      "testFiles": [
+        "src/__tests__/tools/es3-absent-methods.test.ts",
+        "src/__tests__/tools/generated-script-syntax.test.ts",
         "src/__tests__/tools/injection-guard.test.ts",
         "src/__tests__/tools/schema-args.test.ts",
         "src/__tests__/tools/undefined-identifiers.test.ts"
@@ -6045,6 +6118,17 @@
       ]
     },
     {
+      "name": "start_job",
+      "testFiles": [
+        "src/__tests__/tools/call-journal.test.ts",
+        "src/__tests__/tools/es3-absent-methods.test.ts",
+        "src/__tests__/tools/generated-script-syntax.test.ts",
+        "src/__tests__/tools/injection-guard.test.ts",
+        "src/__tests__/tools/schema-args.test.ts",
+        "src/__tests__/tools/undefined-identifiers.test.ts"
+      ]
+    },
+    {
       "name": "stem_export",
       "testFiles": [
         "src/__tests__/tools/es3-absent-methods.test.ts",
@@ -6095,6 +6179,26 @@
     },
     {
       "name": "storyboard_bin_to_sequence",
+      "testFiles": [
+        "src/__tests__/tools/es3-absent-methods.test.ts",
+        "src/__tests__/tools/generated-script-syntax.test.ts",
+        "src/__tests__/tools/injection-guard.test.ts",
+        "src/__tests__/tools/schema-args.test.ts",
+        "src/__tests__/tools/undefined-identifiers.test.ts"
+      ]
+    },
+    {
+      "name": "stringout_from_transcript",
+      "testFiles": [
+        "src/__tests__/tools/es3-absent-methods.test.ts",
+        "src/__tests__/tools/generated-script-syntax.test.ts",
+        "src/__tests__/tools/injection-guard.test.ts",
+        "src/__tests__/tools/schema-args.test.ts",
+        "src/__tests__/tools/undefined-identifiers.test.ts"
+      ]
+    },
+    {
+      "name": "sync_by_audio",
       "testFiles": [
         "src/__tests__/tools/es3-absent-methods.test.ts",
         "src/__tests__/tools/generated-script-syntax.test.ts",
@@ -6408,6 +6512,16 @@
       ]
     },
     {
+      "name": "version_up_shots",
+      "testFiles": [
+        "src/__tests__/tools/es3-absent-methods.test.ts",
+        "src/__tests__/tools/generated-script-syntax.test.ts",
+        "src/__tests__/tools/injection-guard.test.ts",
+        "src/__tests__/tools/schema-args.test.ts",
+        "src/__tests__/tools/undefined-identifiers.test.ts"
+      ]
+    },
+    {
       "name": "vfx_pull_list",
       "testFiles": [
         "src/__tests__/tools/es3-absent-methods.test.ts",
@@ -6419,6 +6533,16 @@
     },
     {
       "name": "watermark_apply",
+      "testFiles": [
+        "src/__tests__/tools/es3-absent-methods.test.ts",
+        "src/__tests__/tools/generated-script-syntax.test.ts",
+        "src/__tests__/tools/injection-guard.test.ts",
+        "src/__tests__/tools/schema-args.test.ts",
+        "src/__tests__/tools/undefined-identifiers.test.ts"
+      ]
+    },
+    {
+      "name": "where_used",
       "testFiles": [
         "src/__tests__/tools/es3-absent-methods.test.ts",
         "src/__tests__/tools/generated-script-syntax.test.ts",
@@ -6456,10 +6580,55 @@
         "src/__tests__/tools/schema-args.test.ts",
         "src/__tests__/tools/undefined-identifiers.test.ts"
       ]
+    },
+    {
+      "name": "x",
+      "testFiles": [
+        "src/__tests__/tools/generated-script-syntax.test.ts",
+        "src/__tests__/tools/injection-guard.test.ts",
+        "src/__tests__/tools/schema-args.test.ts",
+        "src/__tests__/tools/undefined-identifiers.test.ts"
+      ]
+    },
+    {
+      "name": "zz\n__OWNED = true;\n",
+      "testFiles": [
+        "src/__tests__/tools/injection-guard.test.ts"
+      ]
+    },
+    {
+      "name": "zz\"); __OWNED = true; (\"",
+      "testFiles": [
+        "src/__tests__/tools/injection-guard.test.ts"
+      ]
+    },
+    {
+      "name": "zz\", INJECTED: \"yes",
+      "testFiles": [
+        "src/__tests__/tools/injection-guard.test.ts"
+      ]
+    },
+    {
+      "name": "zz'; __OWNED = true; var __x = '",
+      "testFiles": [
+        "src/__tests__/tools/injection-guard.test.ts"
+      ]
+    },
+    {
+      "name": "zz\\\"); __OWNED = true; (\"",
+      "testFiles": [
+        "src/__tests__/tools/injection-guard.test.ts"
+      ]
+    },
+    {
+      "name": "zz __OWNED = true; ",
+      "testFiles": [
+        "src/__tests__/tools/injection-guard.test.ts"
+      ]
     }
   ],
-  "catalogueSize": 649,
-  "gitSha": "7352a3003458cd5713c5323b67dce31790c8521e",
+  "catalogueSize": 659,
+  "gitSha": "6c4a6b6cb9652f69d4eec5df6890d5379c3f0cde",
   "gitDirty": true,
-  "testFileCount": 35
+  "testFileCount": 37
 }

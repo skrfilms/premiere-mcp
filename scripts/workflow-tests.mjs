@@ -9,8 +9,8 @@
  * what Premiere actually holds and renders — ExtendScript readbacks, captured program frames
  * (each version is a different colour), measured audio levels — never on a tool's own report.
  *
- * Runs only against the scratch project. Media: .scratch/media/workflow/ (see the ffmpeg recipe
- * in docs or regenerate with scripts/workflow-media.sh).
+ * Runs only against the scratch project. Media: .scratch/media/workflow/ (generated
+ * with ffmpeg, not in git).
  *
  * Usage: PREMIERE_TEMP_DIR=/tmp/premiere-mcp-bridge node scripts/workflow-tests.mjs [W1 W2 ...]
  */
@@ -55,6 +55,8 @@ async function tool(name, args) {
 }
 async function host(body) { return bridge.executeScript(body); }
 const q = (v) => JSON.stringify(v);
+/** Imported now, or already in the project from an earlier run (the tool refuses to duplicate). */
+const imported = (r) => r?.success !== false || /already in the project/.test(r?.error ?? '');
 
 async function itemByName(name) {
   const r = await host(`(function(){ var hit=null; function w(it){ for(var i=0;i<it.children.numItems && !hit;i++){ var c=it.children[i]; if(String(c.name)===${q(name)}) hit=c; else if(c.type===2) w(c);} } w(app.project.rootItem); return JSON.stringify({ id: hit ? String(hit.nodeId) : null }); })();`);
@@ -116,7 +118,7 @@ if (run('W1')) try {
   workflow('W1  v002 of SH010 landed: swap it in, keep the cut, the grade and the reframe');
   for (const f of ['SH010_comp_v001.mp4', 'SH020_comp_v001.mp4']) {
     const r = await tool('import_media', { filePath: join(MEDIA, f), binName: 'wf_renders' });
-    must(`import ${f}`, r?.success !== false, r?.error);
+    must(`import ${f}`, imported(r), r?.error);
   }
   const sh010v1 = await itemByName('SH010_comp_v001.mp4');
   const sh020v1 = await itemByName('SH020_comp_v001.mp4');
@@ -258,7 +260,7 @@ if (run('W4')) try {
   const seq = await seqByName('wf_edit');
   for (const f of ['music_bed.m4a', 'dialogue.m4a']) {
     const r = await tool('import_media', { filePath: join(MEDIA, f), binName: 'wf_renders' });
-    check(`import ${f}`, r?.success !== false, r?.error);
+    check(`import ${f}`, imported(r), r?.error);
   }
   const musicId = await itemByName('music_bed.m4a');
   const dlgId = await itemByName('dialogue.m4a');
@@ -286,6 +288,107 @@ if (run('W4')) try {
     const r = spawnSync(FF, ['-hide_banner', '-i', join(OUT, 'dialogue_-16LUFS.m4a'), '-af', 'ebur128', '-f', 'null', '-'], { encoding: 'utf8' });
     const m = /I:\s+([-0-9.]+) LUFS/.exec((r.stderr || '').split('Summary:').pop() || '');
     check('the file measures -16 LUFS (±1)', m && Math.abs(Number(m[1]) + 16) <= 1, m && m[1]);
+  }
+} catch (e) { stopped(e); }
+
+// ------------------------------------------------------------------- W5: version up everything
+if (run('W5')) try {
+  workflow('W5  new renders landed for every shot: one call brings the whole cut up to date');
+  for (const f of ['SH010_comp_v001.mp4', 'SH020_comp_v001.mp4']) {
+    const r = await tool('import_media', { filePath: join(MEDIA, f), binName: 'wf_w5' });
+    must(`import ${f}`, imported(r), r?.error);
+  }
+  const ids = [];
+  for (const f of ['SH010_comp_v001.mp4', 'SH020_comp_v001.mp4']) ids.push(await itemByName(f));
+  const sr = await tool('create_sequence_from_clips', { projectItemIds: ids, name: 'wf_w5' });
+  const seq = sr?.sequenceId || await seqByName('wf_w5');
+  must('build a v001 edit', !!seq, sr?.error);
+  const plan = await tool('version_up_shots', { dryRun: true, shotFilter: 'SH0' });
+  check('the plan finds both shots behind', plan?.toRelink?.length >= 2, plan?.toRelink?.map((p) => `${p.shot} v${p.fromVersion}->v${p.toVersion}`));
+  const r = await tool('version_up_shots', { shotFilter: 'SH0' });
+  check('version up runs without failures', r?.success !== false && r?.failed === 0, r?.results);
+  const st = await v1(seq);
+  check('SH010 now plays its newest (v002)', st.clips.some((c) => c.media === 'SH010_comp_v002.mp4'), st.clips.map((c) => c.media));
+  check('SH020 now plays its newest (v004)', st.clips.some((c) => c.media === 'SH020_comp_v004.mp4'), st.clips.map((c) => c.media));
+  const again = await tool('version_up_shots', { dryRun: true, shotFilter: 'SH0' });
+  check('a second pass finds nothing to do', again?.toRelink?.length === 0, again?.toRelink);
+} catch (e) { stopped(e); }
+
+// ------------------------------------------------------------------- W6: remove silence
+if (run('W6')) try {
+  workflow('W6  cut the pauses out of a talking clip, with the music under it kept in sync');
+  for (const f of ['talk_with_pauses.mp4', 'music_bed.m4a']) {
+    const r = await tool('import_media', { filePath: join(MEDIA, f), binName: 'wf_w6' });
+    must(`import ${f}`, imported(r), r?.error);
+  }
+  const talk = await itemByName('talk_with_pauses.mp4');
+  const sr = await tool('create_sequence_from_clips', { projectItemIds: [talk], name: 'wf_w6' });
+  const seq = sr?.sequenceId || await seqByName('wf_w6');
+  must('build the edit', !!seq, sr?.error);
+  const music = await itemByName('music_bed.m4a');
+  const placed = await host(`(function(){ var s=__findSequence(${q(seq)}); while(s.audioTracks.numTracks<2){ app.enableQE(); qe.project.getActiveSequence().addTracks(0,0,0,1,s.audioTracks.numTracks,0,0,0); } var t=new Time(); t.seconds=0; s.audioTracks[1].overwriteClip(__findProjectItem(${q(music)}), t); var tr=s.audioTracks[1]; return JSON.stringify({ end: tr.clips[tr.clips.numItems-1].end.seconds }); })();`);
+  check('music bed under it on A2', placed?.end > 5, placed);
+  let st = await v1(seq);
+  const clip = st.clips[0];
+  const span = async () => host(`(function(){ var s=__findSequence(${q(seq)}); var o={ v1: [], a2: [] }; var v=s.videoTracks[0], a=s.audioTracks[1]; for(var i=0;i<v.clips.numItems;i++) o.v1.push([v.clips[i].start.seconds, v.clips[i].end.seconds]); for(var j=0;j<a.clips.numItems;j++) o.a2.push([a.clips[j].start.seconds, a.clips[j].end.seconds]); return JSON.stringify(o); })();`);
+  const before = await span();
+  const plan = await tool('remove_silence', { clipId: clip.id });
+  check('the plan finds the two pauses and asks first', plan?.needsConfirmation === true && plan?.cuts?.length === 2, plan?.cuts);
+  const after0 = await span();
+  check('asking changed nothing', JSON.stringify(after0) === JSON.stringify(before));
+  const r = await tool('remove_silence', { clipId: clip.id, confirm: true });
+  check('both pauses cut', r?.success !== false && r?.cutsApplied === 2, r?.error || r?.cuts);
+  const after = await span();
+  const len = (rs) => rs.length ? rs[rs.length - 1][1] : 0;
+  check('the talk got shorter by exactly what was planned', Math.abs((len(before.v1) - len(after.v1)) - plan.removedSeconds) < 0.05, { before: len(before.v1), after: len(after.v1), planned: plan.removedSeconds });
+  check('the music was cut at the same places (sync kept)', after.a2.length === after.v1.length && after.a2.every((p, i) => Math.abs(p[0] - after.v1[i][0]) < 0.05), after);
+  check('a recovery checkpoint was taken first', !!r?.recoveryCheckpoint, r?.recoveryCheckpoint);
+} catch (e) { stopped(e); }
+
+// ------------------------------------------------------------------- W7: sync by audio
+if (run('W7')) try {
+  workflow('W7  two cameras recorded the same moment: sync them by audio and build the synced sequence');
+  for (const f of ['sync_camA.mp4', 'sync_camB.mp4']) {
+    const r = await tool('import_media', { filePath: join(MEDIA, f), binName: 'wf_w7' });
+    must(`import ${f}`, imported(r), r?.error);
+  }
+  const a = await itemByName('sync_camA.mp4'), b = await itemByName('sync_camB.mp4');
+  const r = await tool('sync_by_audio', { referenceItemId: a, itemIds: [b], sequenceName: 'wf_w7' });
+  const off = r?.offsets?.find((o) => o.name === 'sync_camB.mp4');
+  check('camB is found 1.5s into camA (to the frame)', off && Math.abs(off.offsetSeconds - 1.5) < 1 / 24, off);
+  check('the match is confident', off && off.score > 0.5, off?.score);
+  check('the synced sequence was built and verified', r?.success !== false && !!r?.sequenceId, r?.error || r?.placed);
+  if (r?.sequenceId) {
+    // CamB is on V2, above camA: at 3s it should show its own frame 36 ((3 - 1.5) * 24).
+    const f = await frameAt(r.sequenceId, 3, 'w7-synced');
+    check('at 3s the program shows camB (teal, on top)', ['blue', 'green'].includes(hue(meanRgb(f))), meanRgb(f));
+  }
+} catch (e) { stopped(e); }
+
+// ------------------------------------------------------------------- W8: rough cut from transcript
+if (run('W8')) try {
+  workflow('W8  paper edit: pick lines from the transcript and get a stringout in that order');
+  const r0 = await tool('import_media', { filePath: join(MEDIA, 'talk_with_pauses.mp4'), binName: 'wf_w8' });
+  must('the interview is in the project', imported(r0), r0?.error);
+  const talk = await itemByName('talk_with_pauses.mp4');
+  // The clip speaks at 0-1 s, 2-3.5 s and 4.3-6 s; this is its transcript.
+  const srt = join(OUT, 'talk_with_pauses.srt');
+  writeFileSync(srt, '1\n00:00:00,000 --> 00:00:01,000\nWe never planned to go back.\n\n2\n00:00:02,000 --> 00:00:03,500\nNobody wanted to say it out loud.\n\n3\n00:00:04,300 --> 00:00:06,000\nThe engine was already dead.\n');
+  const args = { projectItemId: talk, transcriptPath: srt, quotes: ['the engine was already dead', 'We never planned to go back!', 'a line nobody said at all'], sequenceName: 'wf_w8' };
+  const dry = await tool('stringout_from_transcript', { ...args, dryRun: true });
+  check('both real lines are found, the invented one is listed as missing', dry?.plan?.length === 2 && dry?.missing?.length === 1, dry);
+  check('lines keep the order asked for (last line first)', dry?.plan?.[0]?.sourceIn > 4 && dry?.plan?.[1]?.sourceIn === 0, dry?.plan);
+  const r = await tool('stringout_from_transcript', args);
+  check('the stringout was built and verified', r?.success === true && r?.verified === true, r?.error || r?.placed);
+  if (r?.sequenceId) {
+    const st = await v1(r.sequenceId);
+    check('two clips, back to back from 0', st.clips.length === 2 && st.clips[0].start === 0 && Math.abs(st.clips[1].start - st.clips[0].end) < 0.05, st.clips.map((c) => [c.start, c.end, c.inPoint]));
+    check('the audio came with the picture', r.audioClips === 2, r.audioClips);
+    const m = await itemByName('talk_with_pauses.mp4');
+    const marks = await host(`(function(){ var it=__findProjectItem(${q(m)}); return JSON.stringify({ i: it.getInPoint(4).seconds, o: it.getOutPoint(4).seconds }); })();`);
+    check("the source clip's own in/out were left as they were", marks?.i === 0 && marks?.o > 5.9, marks);
+    const look = await tool('look_at_cut', { sequenceId: r.sequenceId, outputPath: join(OUT, 'w8-look.jpg') });
+    check('look_at_cut shows one frame per line', look?.success !== false && look?.frames?.length === 2 && existsSync(join(OUT, 'w8-look.jpg')), look?.error || look?.frames);
   }
 } catch (e) { stopped(e); }
 

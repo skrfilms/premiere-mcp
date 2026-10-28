@@ -89,7 +89,7 @@ reports selection accuracy degrading, and far under Copilot's hard 128 ceiling.
 | `task-motion` | animate clips and dial in effects | 50 | 10768 |
 | `task-conform-deliver` | conform, QC, export, verify the file | 50 | 9983 |
 | `task-review-notes` | notes ⇄ markers round trip, review reel | 38 | 7664 |
-| `core` | the everyday editorial default (size-shaped) | 104 | 21645 |
+| `core` | the everyday editorial default (size-shaped) | 108 | 21645 |
 
 Select one with `PREMIERE_MCP_PROFILE=<bundle>`. Every bundle is a **cost** curation, so
 `call_tool` still reaches the whole catalogue and `activate_tools` promotes a tool into the

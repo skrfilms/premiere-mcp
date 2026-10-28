@@ -76,12 +76,9 @@ export const ALWAYS_KEPT = [
   'call_tool',
   'activate_tools',
   'deactivate_tools',
-  // Safety under timeouts: "did my last call run?" and background jobs for slow tools. Cheap
-  // to advertise, and the failure they prevent (a retried edit applied twice) is the worst kind.
-  'get_recent_calls',
-  'start_job',
-  'get_job',
-  'list_jobs',
+  // get_recent_calls / start_job / get_job / list_jobs are NOT here: four more always-on tools
+  // would push every task bundle past the ~50-tool selection guidance. They are in `core`, and
+  // the server instructions name them, so under a task bundle they are one call_tool away.
 ] as const;
 
 /**
@@ -431,7 +428,7 @@ export const BUNDLE_REQUIREMENTS: Array<{ needs: string; alsoNeeds: string[]; wh
 export const BUNDLE_BUDGETS: Record<string, { tools: number; approxTokens: number }> = {
   // the everyday editorial default: broad, and the only curated selection past the
   // ~50-tool mark where Anthropic reports selection accuracy starting to slip
-  core: { tools: 104, approxTokens: 21645 },
+  core: { tools: 108, approxTokens: 21645 },
   // every task bundle stays under 50 advertised tools and under ~5.5% of a 200k window,
   // which puts all of them inside published guidance and far under Copilot's 128 ceiling
   'task-orient': { tools: 26, approxTokens: 4757 },
@@ -474,6 +471,8 @@ export const PROFILES: Record<string, string[]> = {
   // plus the read tools you need to drive them. Curated by name so it stays a
   // tight, high-signal menu rather than "most of the catalogue".
   core: [
+    // safety under timeouts: "did my last call run?" and background jobs for slow tools
+    'get_recent_calls', 'start_job', 'get_job', 'list_jobs',
     // discovery / state
     'get_capabilities', 'get_project_info', 'get_active_sequence', 'set_active_sequence',
     'list_sequences', 'list_sequence_tracks', 'list_project_items', 'get_sequence_settings',
