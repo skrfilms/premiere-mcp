@@ -131,6 +131,9 @@ export function loadPanel(options: LoadPanelOptions = {}): LoadedPanel {
   bridge.instanceId = 'panel-test';
   bridge.active = true;
   bridge.leaseTakenAt = 0;
+  bridge.engineState = 'ok';
+  bridge.engineStalledAt = null;
+  bridge.sentinelInFlight = false;
   bridge.csInterface = new (sandbox.CSInterface as new () => unknown)();
   bridge.normalizeHostEnvironment = (value: unknown) => value;
   bridge.log = () => {};

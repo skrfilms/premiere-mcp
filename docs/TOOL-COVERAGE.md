@@ -18,8 +18,8 @@ Catalogue: **649** tools.
 | standing | tools | share of catalogue |
 | --- | --- | --- |
 | **nothing has ever run it** | **0** | **0.0%** |
-| run by the suite and live | 557 | 85.8% |
-| run by the suite only (mock host) | 92 | 14.2% |
+| run by the suite and live | 556 | 85.7% |
+| run by the suite only (mock host) | 93 | 14.3% |
 | run live only | 0 | 0.0% |
 
 A tool in the first row is shipped on the strength of a code review and a schema. It may
@@ -27,7 +27,7 @@ well work; nothing here is evidence that it does.
 
 ## The measured run
 
-- commit: `94a2637831d4db1c6ae89cab04011f79a749fb7c` **with uncommitted changes in the tree**
+- commit: `7352a3003458cd5713c5323b67dce31790c8521e` **with uncommitted changes in the tree**
 - catalogue at measurement: 649
 - test files that dispatched at least one tool: 35
 
@@ -78,7 +78,7 @@ that was removed after the run, and the run is stale.
 | `apply_audio_effect_to_all_clips` | yes (6) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/index.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `apply_dynamics` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `apply_effect` | yes (6) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/index.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
-| `apply_lumetri_preset` | yes (4) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
+| `apply_lumetri_preset` | yes (4) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `apply_lut` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `apply_lut_to_clip` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `apply_morph_cut` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
