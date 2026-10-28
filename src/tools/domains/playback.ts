@@ -5,6 +5,7 @@
  * had grown to 19k lines; the method bodies are unchanged.
  */
 import { SequenceTrackTools } from './sequence-track.js';
+import { runUxp, uxpAvailable } from '../../bridge/uxp-channel.js';
 
 export class PlaybackTools extends SequenceTrackTools {
   protected async goToSequenceStart(sequenceId?: string): Promise<any> {
@@ -348,6 +349,39 @@ export class PlaybackTools extends SequenceTrackTools {
 
   // Work Area Implementation
   protected async setWorkArea(sequenceId: string, inPoint: number, outPoint: number): Promise<any> {
+    if (!(Number(outPoint) > Number(inPoint))) {
+      return { success: false, error: `outPoint (${outPoint}s) must be after inPoint (${inPoint}s). Nothing was changed.` };
+    }
+    // UXP first: WorkAreaUtils.setWorkAreaInOutPoints moves the work area on every sequence,
+    // while the ExtendScript setters below are inert on most (measured on 26.5.2: they took
+    // only on a sequence UXP had already set). The readback is ExtendScript's, so the UXP
+    // claim is checked by the other API rather than by itself.
+    if (uxpAvailable()) {
+      const u = await runUxp(`
+        const p = await ppro.Project.getActiveProject();
+        const seqs = await p.getSequences();
+        const want = ${JSON.stringify(String(sequenceId ?? ''))};
+        const s = want ? seqs.find((q) => String(q.guid) === want) : await p.getActiveSequence();
+        if (!s) return { found: false };
+        const r = ppro.WorkAreaUtils.setWorkAreaInOutPoints(s, ppro.TickTime.createWithSeconds(${Number(inPoint)}), ppro.TickTime.createWithSeconds(${Number(outPoint)}));
+        return { found: true, set: r && r.then ? await r : r, guid: String(s.guid) };
+      `);
+      if (u.ok && u.result?.found) {
+        const rb: any = await this.bridge.executeScript(`
+          try {
+            var sequence = __findSequence(${JSON.stringify(String(u.result.guid))});
+            return JSON.stringify({ success: true, inPoint: sequence.getWorkAreaInPointAsTime().seconds, outPoint: sequence.getWorkAreaOutPointAsTime().seconds });
+          } catch (e) { return JSON.stringify({ success: false, error: e.toString() }); }
+        `);
+        const okIn = rb?.success && Math.abs(Number(rb.inPoint) - Number(inPoint)) <= 0.04;
+        const okOut = rb?.success && Math.abs(Number(rb.outPoint) - Number(outPoint)) <= 0.04;
+        if (okIn && okOut) {
+          return { success: true, verified: true, verifiedBy: 'set through UXP WorkAreaUtils, read back through ExtendScript', via: 'uxp',
+            message: 'Work area set', inPoint, outPoint, actual: { inPoint: rb.inPoint, outPoint: rb.outPoint } };
+        }
+        return { success: false, verified: true, via: 'uxp', error: `UXP set the work area but ExtendScript reads it back as ${rb?.inPoint}s-${rb?.outPoint}s.`, requested: { inPoint, outPoint } };
+      }
+    }
     const script = `
       try {
         var sequence = __findSequence(${JSON.stringify(sequenceId)});
@@ -368,7 +402,7 @@ export class PlaybackTools extends SequenceTrackTools {
           // so the caller knows to stop retrying and what to use instead.
           return JSON.stringify({
             success: false, verified: false,
-            error: "The work area did not move (reads back in " + inNow + "s / out " + outNow + "s). setWorkAreaInPoint/setWorkAreaOutPoint are accepted but inert (measured on 26.3.2 and again on 26.5.2, with the work area enabled and every argument form: seconds, ticks, Time, and QE setWorkInOutPoints with a timecode), so the work area cannot be set by script here. Retrying will not help. Use set_sequence_in_out_points instead — it is verified working — and export with workAreaType set to the in/out range.",
+            error: "The work area did not move (reads back in " + inNow + "s / out " + outNow + "s). setWorkAreaInPoint/setWorkAreaOutPoint are accepted but inert (measured on 26.3.2 and again on 26.5.2, with the work area enabled and every argument form: seconds, ticks, Time, and QE setWorkInOutPoints with a timecode), so the work area cannot be set by script here. Retrying will not help. The MCP UXP Probe panel can set it (npm run uxp:install, then restart Premiere); otherwise use set_sequence_in_out_points and export with workAreaType set to the in/out range.",
             workAreaEnabled: __workAreaEnabled(sequence),
             requested: { inPoint: ${inPoint}, outPoint: ${outPoint} }, actual: { inPoint: inNow, outPoint: outNow }
           });
