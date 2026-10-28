@@ -125,7 +125,7 @@ export class AssemblyTools extends ToolsBase {
         ${sequenceTimecode ? `
         var tcRaw = ${JSON.stringify(String(sequenceTimecode))};
         var tcSecs = NaN;
-        if (/^[0-9]+(\.[0-9]+)?$/.test(tcRaw)) {
+        if (/^[0-9]+(\\.[0-9]+)?$/.test(tcRaw)) {
           tcSecs = Number(tcRaw);
         } else {
           var tcParts = tcRaw.split(/[:;]/);
