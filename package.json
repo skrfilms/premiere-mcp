@@ -42,6 +42,7 @@
     "lint": "eslint src --ext .ts",
     "canary": "node scripts/api-canary.mjs",
     "uxp:install": "node scripts/install-uxp-probe.mjs",
+    "release:installer": "node scripts/build-installer.mjs",
     "verify:report": "node scripts/build-verification-report.mjs",
     "coverage:tools": "node scripts/build-tool-coverage.mjs --aggregate",
     "coverage:tools:check": "node scripts/build-tool-coverage.mjs --check",
