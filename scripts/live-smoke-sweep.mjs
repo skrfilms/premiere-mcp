@@ -92,6 +92,11 @@ const SKIP = {
   delete_preview_files: 'destructive (throws away renders)',
   remove_from_timeline: 'destructive',
   remove_selected_clips: 'destructive',
+  // lift/extract delete whatever is selected, and the selection tools that run before them select
+  // the fixture's own clips: on 2026-10-27 lift_selection removed V1 clip 0 and ~25 later tools
+  // reported "Clip not found" for a clip the sweep itself had deleted.
+  lift_selection: 'destructive (removes the selected clips, which are the fixture\'s)',
+  extract_selection: 'destructive (ripple-removes the selected clips, which are the fixture\'s)',
   remove_all_effects: 'destructive',
   remove_all_effects_qe: 'destructive',
   remove_effect: 'destructive',
@@ -134,6 +139,8 @@ const SKIP = {
 
   // (a) USER STATE OUTSIDE THE PROJECT — survives the scratch fixture being thrown away
   set_autosave_settings: 'rewrites the user\'s global Auto Save preferences',
+  consolidate_duplicates: 'long-running: outlived the 25s budget and held the panel past the drain window (2026-10-27)',
+  set_transcode_on_ingest: 'turns on copy-on-import for the project, so every later import duplicates media on disk',
   write_clipboard: 'overwrites the user\'s system clipboard',
 
   // (c) EXTERNAL SERVICE / CLOUD — reaches Creative Cloud or a team production
@@ -376,9 +383,12 @@ async function main() {
       // tool's turn — the 16:46:15Z run took exactly one such rejection (diff_sequences) and
       // recovered without help, so treating the first rejection as fatal would throw away a
       // perfectly good run.
+      // 45s, not 10s: export_aaf raises its AAF Export Log modal, and the report-dialog guard
+      // clears it, but on 2026-10-27 that took longer than 25s + 10s and the run was abandoned
+      // halfway with the panel draining normally moments later.
       let drained = false;
-      for (let i = 0; i < 5 && !drained; i++) {
-        await sleep(2000);
+      for (let i = 0; i < 15 && !drained; i++) {
+        await sleep(3000);
         const now = heartbeat();
         drained = Boolean(now && now.ageMs < 10_000 && !now.isProcessing);
       }
@@ -411,6 +421,22 @@ async function main() {
         process.stdout.write(`[WEDGED-BY:${name}]`);
         hostDisturbed = Boolean(health.clearedModal || health.recovery);
       }
+    }
+
+    // RE-ACTIVATE THE FIXTURE SEQUENCE. create_sequence, duplicate_sequence and friends make their
+    // new sequence active — correctly — but the context's clip ids live in the fixture sequence, so
+    // every later tool that defaults to the active sequence answered "Clip not found". The
+    // 2026-10-27 run lost ~30 tools that way after create_recovery_checkpoint. Cheap: one host call,
+    // and only after a mutating tool.
+    if (!readOnly && ctx.sequenceId) {
+      try {
+        await bridge.executeScript(`(function(){
+          var want = ${JSON.stringify(String(ctx.sequenceId))};
+          var cur = app.project.activeSequence;
+          if (!cur || String(cur.sequenceID) !== want) app.project.openSequence(want);
+          return JSON.stringify({ ok: true });
+        })();`);
+      } catch { /* a wedge is detected and handled above; nothing to add here */ }
     }
 
     // RE-PIN THE TARGET. requireScratchProject only speaks for the moment it ran; tools that omit a

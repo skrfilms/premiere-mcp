@@ -223,7 +223,10 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
         if (!item) return JSON.stringify({ success: false, error: "Project item not found" });
         var startTicks = __secondsToTicks(${startTime});
         var endTicks = __secondsToTicks(${endTime});
-        var sub = item.createSubClip(${JSON.stringify(name)}, startTicks, endTicks, ${hardBounds}, ${audio}, ${video});
+        // (name, start, end, hardBoundaries, takeVideo, takeAudio): video BEFORE audio. Measured on
+        // 26.5.2 by placing each variant on an audio track; this passed them swapped, so
+        // takeAudio:false produced a subclip with no VIDEO and vice versa.
+        var sub = item.createSubClip(${JSON.stringify(name)}, startTicks, endTicks, ${hardBounds}, ${video}, ${audio});
         if (!sub) return JSON.stringify({ success: false, verified: false, error: "createSubClip() returned no project item; the subclip was not created." });
         return JSON.stringify({
           success: true,

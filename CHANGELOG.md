@@ -4,7 +4,70 @@ All notable changes are documented here. Releases use semantic versioning.
 
 ## [Unreleased]
 
-Nothing yet.
+Live sweep against Premiere Pro 26.5.2: 496 tools pass and 61 fail, up from 449 and 111.
+New fixtures (a real multicam, a caption track, an AE-authored MOGRT) made 54 more tools
+genuinely testable, and running them found the bugs below. Every effect below was checked
+against a render, not only an API readback.
+
+### Added
+
+- `create_multicam_cut` builds a finished multicam cut: a new sequence of real multicam
+  clips, each on the angle you choose, still switchable in Premiere. ExtendScript can
+  neither create a multicam source nor switch angles; an FCP7 XML `<multiclip>` import can.
+- `freeze_frame` now works (26.5.2 has no frame-hold call). It extracts the source frame
+  with ffmpeg and overwrites it as a still for `durationSecs` (new, default 2) on the
+  clip's own track. The held frame is pixel-identical to the source frame.
+- `set_clip_pan` sets pan through the QE clip pan component (value passed as a string).
+  Hard left measured -91 dB on the right channel.
+- `set_clip_gain` and `normalize_clip_peaks` apply gain through an Amplify effect, since
+  clip gain itself is read-only from script. +6 dB measured as +6.0 dB.
+- `apply_lut` / `apply_lut_to_clip` select the Lumetri Input LUT dropdown entry whose
+  render matches ffmpeg's `lut3d` of the ungraded frame (the slot takes an index; a path
+  raised "Illegal Parameter type"). An unlisted LUT is refused; `installIfMissing` copies
+  it into the user LUT folder.
+- `uxp-probe/` and `npm run uxp:install`: a minimal UXP panel, installed as a `.ccx`,
+  that runs `premierepro` UXP calls over a private file queue. Groundwork for the calls
+  only UXP has (work area, sequence in/out, transitions); not yet wired into tools.
+
+### Fixed
+
+- `fill_room_tone` overwrote the whole source at the gap: an A/V item dropped its video
+  onto V1, the gap length was ignored, and an occupied span was overwritten. It now
+  refuses an occupied span and lays audio-only subclips cut to fit, looping as needed.
+- `create_subclip` passed take-audio and take-video swapped (`createSubClip` takes video
+  first), so `takeAudio:false` dropped the video instead.
+- `three_point_edit` assigned a timecode string to `Time.seconds`, so any
+  `sequenceTimecode` threw "Illegal Parameter type".
+- `lower_third_preset`, `title_card`, `batch_mogrt_from_data` and `countdown_leader` called
+  `add_text_overlay` without a template and could never succeed. They forward `mogrtPath`,
+  which falls back to `PREMIERE_MCP_DEFAULT_MOGRT`; `lower_third_preset` uses one graphic
+  with the title in its second text field.
+- `create_recovery_checkpoint` left its snapshot as the active sequence, so later calls
+  edited the backup. The previously active sequence is restored.
+- `enable_multicam` refused a clip that was already multicam; `set_multicam_angle` now
+  explains that switching is not scriptable and points to `create_multicam_cut`.
+
+### Changed
+
+- `export_aaf` and `export_aaf_with_settings` no longer render a video mixdown by default
+  (`mixDownVideo` now defaults to false). The mixdown rendered the whole sequence first and
+  held Premiere for over five minutes on a 40-second sequence with one MOGRT; without it
+  the same export takes about three seconds.
+
+### Test harness
+
+- `reset-scratch` builds three synced camera angles, a multicam (via XML), a caption track
+  from the fixture SRT, and an AE-authored MOGRT on V3, and turns off the project's
+  copy-on-import ingest setting, which had piled ~650 duplicate media files into
+  `.scratch/media`. The wipe no longer stops at the first item it cannot delete.
+- The sweep re-activates the fixture sequence after any tool that switches it, points
+  timeline-overwriting, lock, mute and AAF tools at the second fixture sequence, skips
+  `lift_selection`, `extract_selection`, `consolidate_duplicates` and
+  `set_transcode_on_ingest`, and waits up to 45s for a busy panel before giving up.
+- Argument synthesis aims MOGRT, audio, multicam and caption tools at matching fixtures,
+  gives source/target tools two distinct clips or sequences, and picks fixture items by
+  name instead of "the first project item".
+- Sweep ledgers are written with the repo path as `<repo>` and the home directory as `~`.
 
 ## [1.4.0] - 2026-10-25
 
