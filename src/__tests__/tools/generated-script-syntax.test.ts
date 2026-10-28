@@ -289,7 +289,7 @@ describe("generated ExtendScript is syntactically valid", () => {
      * File.exists) and fails closed on a silent no-op. Driven through the local
      * schema-seeded capture path, since these tools each carry their own zod schema.
      */
-    const captureLocal = async (name: string): Promise<string> => {
+    const captureLocal = async (name: string, args?: Record<string, unknown>): Promise<string> => {
       const probe = new PremiereProTools({
         executeScript: async () => ({ success: true }),
       } as never);
@@ -300,7 +300,7 @@ describe("generated ExtendScript is syntactically valid", () => {
         executeScript: async (s: string) => { script = s; return { success: true }; },
       } as never);
       try {
-        await tools.executeTool(name, seedArgs(tool as never));
+        await tools.executeTool(name, args ?? seedArgs(tool as never));
       } catch {
         // schema rejection / early return before emit -> empty capture, asserted below
       }
@@ -341,9 +341,15 @@ describe("generated ExtendScript is syntactically valid", () => {
     });
 
     it("set_sequence_in_out_points verifies via getInPointAsTime/getOutPointAsTime", async () => {
-      const script = await captureLocal("set_sequence_in_out_points");
+      // A real range: the seeded in = out is now refused before any script is emitted.
+      const script = await captureLocal("set_sequence_in_out_points", { inPoint: 1, outPoint: 3 });
       expect(script).toContain("getInPointAsTime");
       expect(script).toContain("getOutPointAsTime");
+    });
+
+    it("set_sequence_in_out_points refuses a collapsed range without touching the host", async () => {
+      // in >= out is stored by Premiere as a range reading back about -400000 s (measured 26.5.2).
+      expect(await captureLocal("set_sequence_in_out_points", { inPoint: 1, outPoint: 1 })).toBe("");
     });
 
     it("enable_disable_clip / duplicate_clip / replace_clip verify or fail closed", async () => {

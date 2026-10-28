@@ -88,7 +88,11 @@ DOM clip and skipping anything whose `type` is not `"Clip"`.
 
 ### The UXP panel does not load
 
-Status: confirmed non-functional
+Status: confirmed non-functional; superseded by `uxp-probe/`
+
+`uxp-probe/` is a working replacement with a different design: it runs UXP JavaScript, not
+ExtendScript, and is used only for the few calls UXP has that ExtendScript lacks. It is installed
+with `npm run uxp:install`. The notes below describe the original `uxp-plugin/`.
 
 `uxp-plugin/` is shipped and registers cleanly, but the panel body renders empty in
 Premiere Pro 26.0.2. Three independent faults, any one of which is sufficient:
