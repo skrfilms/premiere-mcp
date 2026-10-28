@@ -27,6 +27,7 @@ import {
 import { z, type ZodTypeAny } from 'zod';
 import type { PremiereProTools } from './tools/index.js';
 import { annotationsFor } from './tools/annotations.js';
+import * as journal from './tools/journal.js';
 import { cursorFromParams, paginate, resolvePageSize } from './tools/router.js';
 import { attachImageForResult } from './tools/image-content.js';
 import type { PremiereProResources } from './resources/index.js';
@@ -135,11 +136,61 @@ export function buildPremiereMcpServer(
       : { tools: paged.page };
   });
 
-  server.setRequestHandler('tools/call', async (request) => {
+  server.setRequestHandler('tools/call', async (request, ctx) => {
     const { name, arguments: args } = request.params;
+    const callArgs = (args || {}) as Record<string, unknown>;
+
+    // A retry carrying a requestId that already finished gets the first answer, not a second
+    // edit; one still in flight gets its status. See tools/journal.ts.
+    const requestId = typeof callArgs.requestId === 'string' && callArgs.requestId ? callArgs.requestId : null;
+    if (requestId) {
+      const seen = journal.byRequestId(requestId);
+      if (seen && seen.status !== 'running' && seen.result !== undefined) {
+        const replay = { ...(seen.result as Record<string, unknown>), replayed: true, replayNote: `requestId ${requestId} already ran (${seen.status}) at ${seen.finishedAt}; this is that result, and nothing was run again.` };
+        return server.projectCallToolResult({ content: [{ type: 'text', text: JSON.stringify(replay, null, 2) }], structuredContent: replay, isError: false }, undefined);
+      }
+      if (seen && seen.status === 'running') {
+        const busy = { success: false, inProgress: true, requestId, startedAt: seen.startedAt, error: `requestId ${requestId} is still running (started ${seen.startedAt}). It was not started again; check get_recent_calls.` };
+        return server.projectCallToolResult({ content: [{ type: 'text', text: JSON.stringify(busy, null, 2) }], structuredContent: busy, isError: true }, undefined);
+      }
+    }
+
+    // Progress while a call runs, for clients that asked for it: a heartbeat every few seconds
+    // keeps a long export or transcription from looking dead, and resets timeouts on clients
+    // that honour resetTimeoutOnProgress.
+    const progressToken = (request.params as { _meta?: { progressToken?: string | number } })._meta?.progressToken;
+    const started = Date.now();
+    const ticker = progressToken !== undefined && ctx?.mcpReq?.notify
+      ? setInterval(() => {
+          const secs = Math.round((Date.now() - started) / 1000);
+          void ctx.mcpReq.notify({ method: 'notifications/progress', params: { progressToken, progress: secs, message: `${name} still running (${secs}s)` } }).catch(() => {});
+        }, 5000)
+      : undefined;
+    const entry = journal.begin(name, callArgs, annotationsFor(name).readOnlyHint === true || /^get_(recent_calls|job)$|^list_jobs$/.test(name));
 
     try {
-      const result = await tools.executeTool(name, args || {});
+      let result = await tools.executeTool(name, callArgs);
+      // A tool that needs a yes (a delete of media still on a timeline, a raw script that deletes
+      // or closes things) returns needsConfirmation. When the client can ask the user mid-call
+      // (MCP elicitation), ask, and on yes run it once more with confirm:true. Otherwise the result
+      // goes back as-is and tells the assistant to confirm with the user first.
+      // Expanded tools put extra fields under `details`; look in both places.
+      const raw = result as { needsConfirmation?: boolean; confirmPrompt?: string; details?: { needsConfirmation?: boolean; confirmPrompt?: string } } | null;
+      const r0 = raw ? (raw.needsConfirmation ? raw : raw.details?.needsConfirmation ? raw.details : null) : null;
+      if (r0 && r0.needsConfirmation && callArgs.confirm !== true && server.getClientCapabilities()?.elicitation && ctx?.mcpReq?.elicitInput) {
+        try {
+          const answer = await ctx.mcpReq.elicitInput({
+            message: r0.confirmPrompt || `Go ahead with ${name}?`,
+            requestedSchema: { type: 'object', properties: { confirm: { type: 'boolean', title: 'Go ahead', description: r0.confirmPrompt || '' } }, required: ['confirm'] },
+          } as never);
+          const yes = answer?.action === 'accept' && (answer.content as { confirm?: unknown } | undefined)?.confirm === true;
+          result = yes
+            ? await tools.executeTool(name, { ...callArgs, confirm: true })
+            : { ...(result as Record<string, unknown>), userDeclined: answer?.action !== 'accept' || !yes, note: 'The user was asked and did not confirm. Nothing was changed.' };
+        } catch { /* elicitation unavailable on this connection: fall through with the needsConfirmation result */ }
+      }
+      if (ticker) clearInterval(ticker);
+      journal.finish(entry, result);
 
       const image = attachImageForResult(result);
       const enriched = image.reason
@@ -171,7 +222,9 @@ export function buildPremiereMcpServer(
       };
       return server.projectCallToolResult(toolResult, undefined);
     } catch (error) {
+      if (ticker) clearInterval(ticker);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      journal.failThrown(entry, errorMessage);
       logger.error(`Tool execution failed: ${errorMessage}`);
 
       throw new ProtocolError(

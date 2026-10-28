@@ -55,6 +55,8 @@ import { runFf } from './ff-exec.js';
 import { REPORT_DIALOG_TOOLS, REPORT_LINGER_MS, withReportDialogGuard } from '../bridge/report-dialog-guard.js';
 import { generatedAssetsDir } from '../utils/scratch-paths.js';
 import { runUxp, uxpAvailable } from '../bridge/uxp-channel.js';
+import { recent as recentCalls } from './journal.js';
+import { getJob, listJobs, startJob } from './jobs.js';
 
 // The header declarations and pure helpers moved to ./domains/shared.ts when this file was
 // split into one class per tool domain. Re-exported here: they were part of this module's
@@ -621,6 +623,30 @@ export class PremiereProTools extends TrimmingTools {
           return await this.verifyPremiereConnection();
         case 'get_capabilities':
           return await this.getCapabilities(args.checkConnection, args.probeLocalTools);
+        case 'where_used':
+          return await this.bridge.executeScript(`
+            try {
+              var it = __findProjectItem(${JSON.stringify(String(args.projectItemId ?? ''))});
+              if (!it) return JSON.stringify({ success: false, error: 'Project item not found' });
+              var u = __usesOf(it, ${Math.max(1, Math.min(Number(args.limit) || 50, 500))});
+              return JSON.stringify({ success: true, item: String(it.name), isBin: it.type === 2, usedCount: u.total, sequences: u.sequences, uses: u.uses, unused: u.total === 0 });
+            } catch (e) { return JSON.stringify({ success: false, error: e.toString() }); }
+          `);
+        case 'get_recent_calls':
+          return { success: true, calls: recentCalls({ limit: args.limit, mutatingOnly: args.mutatingOnly, sinceSeconds: args.sinceSeconds }),
+            note: 'status "running" with no finishedAt means the call was still in Premiere when this was read, or the server stopped mid-call.' };
+        case 'start_job': {
+          const target = String(args.tool ?? '');
+          if (!target || target === 'start_job') return { success: false, error: 'tool is required and cannot be start_job.' };
+          const job = startJob(target, () => this.executeTool(target, args.args ?? {}, options));
+          return { success: true, jobId: job.jobId, tool: target, status: job.status, note: 'Poll get_job with this jobId.' };
+        }
+        case 'get_job': {
+          const job = getJob(String(args.jobId ?? ''));
+          return job ? { success: true, ...job } : { success: false, error: 'No such job in this server process (jobs do not survive a server restart; get_recent_calls still shows whether the call finished).' };
+        }
+        case 'list_jobs':
+          return { success: true, jobs: listJobs() };
         case 'find_tool':
           return this.findTool(args);
         case 'get_tool_typings':

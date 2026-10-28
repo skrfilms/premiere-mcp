@@ -76,6 +76,12 @@ export const ALWAYS_KEPT = [
   'call_tool',
   'activate_tools',
   'deactivate_tools',
+  // Safety under timeouts: "did my last call run?" and background jobs for slow tools. Cheap
+  // to advertise, and the failure they prevent (a retried edit applied twice) is the worst kind.
+  'get_recent_calls',
+  'start_job',
+  'get_job',
+  'list_jobs',
 ] as const;
 
 /**
