@@ -75,6 +75,64 @@ export function tokenizeQuery(query: string): string[] {
   return kept.length ? kept : raw;
 }
 
+/**
+ * Editor vocabulary -> catalogue vocabulary. The search is lexical, so a word the catalogue never
+ * uses ("black and white", "subtitles", "slow mo") matched nothing useful: on 2026-10-28 "make it
+ * black and white" returned black_frame_scan. Matched against the raw query, so multi-word phrases
+ * work; the added terms score a little below the caller's own words.
+ */
+const PHRASES: Array<[RegExp, string[]]> = [
+  [/black and white|b ?& ?w\b|\bb\/w\b|monochrome|gr[ae]yscale|desaturat/, ['saturation', 'color', 'correct']],
+  [/subtitle/, ['caption']],
+  [/\bswap\b|new render|new version|\bv\d{2,4}\b|replace (this|the) (shot|clip)/, ['replace', 'media']],
+  [/speed up|slow ?(mo|motion|down)|faster|slower|retime|time ?remap/, ['speed', 'bake']],
+  [/freeze|hold (this|the|that)? ?frame/, ['freeze', 'frame']],
+  [/dissolve/, ['transition']],
+  [/\bstems?\b/, ['stem', 'export']],
+  [/\bzoom|punch in|scale up|bigger/, ['scale']],
+  [/backwards|in reverse/, ['reverse']],
+  [/\bstill\b|screenshot|grab .*frame/, ['export', 'frame']],
+  [/silent|silence|quiet (parts|bits|sections)/, ['silence', 'detect']],
+  [/like the reference|match .*(look|grade|colou?r)|same (look|grade)/, ['match', 'shot', 'color']],
+  [/latest (comp|render|version)|update the (shot|clip)|new comp/, ['replace', 'media']],
+  [/captions?\b/, ['caption', 'create', 'track']],
+  [/dead air|pauses|silences?\b/, ['silence', 'detect']],
+  [/\bmark (this|here|that|the)|\bflag (this|here)/, ['marker', 'add']],
+];
+
+/**
+ * Plain-English words a person uses for a tool that its name and description do not contain.
+ * Kept short and limited to tools people reach for; a hit here counts like a name token.
+ */
+const ALIASES: Record<string, string[]> = {
+  color_correct: ['black', 'white', 'desaturate', 'saturation', 'monochrome', 'grayscale', 'greyscale'],
+  replace_clip_media: ['swap', 'render', 'version', 'update', 'replace', 'media'],
+  create_caption_track: ['subtitles', 'subtitle', 'caption', 'captions', 'srt'],
+  bake_speed_change: ['speed', 'slow', 'faster', 'slower', 'retime', 'bake'],
+  freeze_frame: ['hold', 'freeze', 'still'],
+  match_shot_color: ['match', 'look', 'grade', 'reference'],
+  stem_export: ['stems', 'stem', 'tracks', 'separate'],
+  set_clip_scale: ['zoom', 'punch', 'bigger', 'scale'],
+  reverse_clip: ['backwards', 'reverse'],
+  export_frame: ['still', 'screenshot', 'grab', 'png'],
+  detect_silence: ['silent', 'silence', 'quiet'],
+  add_transition: ['dissolve', 'crossfade', 'between'],
+  set_clip_volume: ['quieter', 'louder', 'dialogue', 'level'],
+};
+
+/** Words that make a query an action ("make it...", "add a..."), not a question. */
+const ACTION_VERB = /^(make|add|apply|set|swap|replace|speed|slow|freeze|hold|export|cut|split|zoom|play|drop|grab|lower|raise|fade|duck|close|ripple|remove|delete|create|build|put|turn|trim|crop|insert|place|move|desaturate|reverse|match|normalize)$/;
+const ASK_VERB = /^(get|list|show|what|which|check|is|are|how|count|read|inspect)$/;
+/** Tools that observe rather than change. Pushed down when the ask is an action. */
+const OBSERVER = /^(get|list|is|has|read|inspect|reflect|verify)_|_(scan|report|info)$/;
+
+export function expandQuery(query: string): string[] {
+  const q = String(query || '').toLowerCase();
+  const out: string[] = [];
+  for (const [re, terms] of PHRASES) if (re.test(q)) for (const t of terms) if (out.indexOf(t) === -1) out.push(t);
+  return out;
+}
+
 /** Tokens of a tool name: "add_to_timeline" -> ["add","to","timeline"]. */
 function nameTokens(name: string): string[] {
   return name.toLowerCase().split('_').filter(Boolean);
@@ -89,6 +147,8 @@ function scoreTerm(tool: SearchableTool, term: string, tokens: string[], haystac
   let score = 0;
   if (tokens.indexOf(term) !== -1) {
     score = 30; // exact name token, e.g. "marker" in add_marker
+  } else if ((ALIASES[tool.name] ?? []).indexOf(term) !== -1) {
+    score = 26; // a plain-English word for this tool, e.g. "subtitles" for create_caption_track
   } else if (tool.name.toLowerCase().indexOf(term) !== -1) {
     score = 18; // substring of the name, e.g. "seq" in list_sequences
   } else {
@@ -131,6 +191,9 @@ export function findTools(
 ): FindToolResult {
   const limit = Math.max(1, Math.min(options.limit ?? 15, 100));
   const terms = tokenizeQuery(options.query);
+  const expansion = expandQuery(options.query).filter((t) => terms.indexOf(t) === -1);
+  const rawWords = String(options.query || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  const actionIntent = rawWords.some((w) => ACTION_VERB.test(w)) && !rawWords.some((w) => ASK_VERB.test(w));
   const includeHidden = options.includeHidden !== false;
 
   const scored: FindToolMatch[] = [];
@@ -154,7 +217,17 @@ export function findTools(
         reasons.push(term);
       }
     }
+    // Editor-vocabulary terms add evidence but never count toward coverage of the caller's words.
+    for (const term of expansion) {
+      const termScore = scoreTerm(tool, term, tokens, haystack);
+      if (termScore > 0) {
+        score += termScore * 0.8;
+        reasons.push(`${term} (from your wording)`);
+      }
+    }
     if (score === 0) continue;
+    // An action ask wants the tool that does it, not the one that inspects or reports on it.
+    if (actionIntent && OBSERVER.test(tool.name)) score -= 12;
 
     // Reward covering more of the query: a tool matching every term is far more
     // likely to be what was asked for than one matching a single common word.
@@ -209,8 +282,8 @@ function buildNote(
     return terms.length
       ? `No tool name or description matched ${terms.map((t) => `"${t}"`).join(' / ')}. ` +
         'Try a single domain noun (marker, transition, caption, proxy, lumetri, keyframe, ' +
-        'export, bin, track) rather than a whole sentence. This search is lexical, not ' +
-        'semantic, so a synonym the catalogue does not use will not match.'
+        'export, bin, track) rather than a whole sentence. This search is lexical with a small ' +
+        'editor-vocabulary map, so an unusual synonym may still not match.'
       : 'Empty query — pass a keyword such as "marker" or "audio fade".';
   }
   const parts = [`${total} match${total === 1 ? '' : 'es'}`];
