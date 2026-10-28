@@ -54,6 +54,7 @@ import type { MCPTool } from './tool-types.js';
 import { runFf } from './ff-exec.js';
 import { withReportDialogGuard } from '../bridge/report-dialog-guard.js';
 import { generatedAssetsDir } from '../utils/scratch-paths.js';
+import { uxpAvailable } from '../bridge/uxp-channel.js';
 
 // The header declarations and pure helpers moved to ./domains/shared.ts when this file was
 // split into one class per tool domain. Re-exported here: they were part of this module's
@@ -916,8 +917,21 @@ export class PremiereProTools extends TrimmingTools {
             zoom: args.zoom,
             edgeFeather: args.edgeFeather
           });
-        case 'add_transition':
-          return await this.addTransition(args.clipId1, args.clipId2, args.transitionName, args.duration);
+        case 'add_transition': {
+          const qeResult: any = await this.addTransition(args.clipId1, args.clipId2, args.transitionName, args.duration);
+          if (qeResult?.success !== false || !uxpAvailable()) return qeResult;
+          // The QE route failed or could not prove the edit; try UXP at the same cut.
+          const cut: any = await this.bridge.executeScript(`
+            try {
+              var a = __findClip(${JSON.stringify(String(args.clipId1))});
+              if (!a || a.trackType !== 'video') return JSON.stringify({ success: false });
+              return JSON.stringify({ success: true, seq: String(a.sequenceId), track: a.trackIndex, cut: a.clip.end.seconds });
+            } catch (e) { return JSON.stringify({ success: false, error: e.toString() }); }
+          `);
+          if (!cut?.success) return qeResult;
+          const viaUxp: any = await this.uxpTransitionAtCut(cut.seq, cut.track, cut.cut, args.transitionName, args.duration);
+          return viaUxp.success ? { ...viaUxp, qeAttempt: qeResult?.error ?? null } : { ...qeResult, uxpAttempt: viaUxp.error };
+        }
         case 'add_transition_to_clip':
           return await this.addTransitionToClip(args.clipId, args.transitionName, args.position, args.duration);
 
@@ -1199,8 +1213,28 @@ export class PremiereProTools extends TrimmingTools {
         case 'open_fcp_xml_project': return await this.openFcpXmlProject(args.xmlPath, args.sequenceName);
 
         // Batch Operations
-        case 'batch_add_transitions':
-          return await this.batchAddTransitions(args.sequenceId, args.trackIndex, args.transitionName, args.duration);
+        case 'batch_add_transitions': {
+          const qeBatch: any = await this.batchAddTransitions(args.sequenceId, args.trackIndex, args.transitionName, args.duration);
+          if (qeBatch?.success !== false || !uxpAvailable()) return qeBatch;
+          // QE placed nothing it could verify; do every touching cut through UXP instead.
+          const cuts: any = await this.bridge.executeScript(`
+            try {
+              var seq = __findSequence(${JSON.stringify(args.sequenceId ?? null)});
+              var tr = seq.videoTracks[${Number(args.trackIndex)}];
+              var out = [];
+              for (var i = 0; i + 1 < tr.clips.numItems; i++) {
+                if (Math.abs(tr.clips[i].end.seconds - tr.clips[i + 1].start.seconds) < 0.01) out.push(tr.clips[i].end.seconds);
+              }
+              return JSON.stringify({ success: true, seq: String(seq.sequenceID), cuts: out });
+            } catch (e) { return JSON.stringify({ success: false, error: e.toString() }); }
+          `);
+          if (!cuts?.success || !cuts.cuts.length) return qeBatch;
+          const placed: any[] = [];
+          for (const c of cuts.cuts) placed.push(await this.uxpTransitionAtCut(cuts.seq, Number(args.trackIndex), c, args.transitionName, args.duration));
+          const okCount = placed.filter((p) => p.success).length;
+          return { success: okCount > 0, verified: true, via: 'uxp', added: okCount, cuts: cuts.cuts.length, results: placed,
+            error: okCount === cuts.cuts.length ? undefined : `${cuts.cuts.length - okCount} of ${cuts.cuts.length} cuts did not take a transition.`, qeAttempt: qeBatch?.error ?? null };
+        }
 
         // Project Item Discovery & Management
         case 'find_project_item_by_name':
