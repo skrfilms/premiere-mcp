@@ -1359,7 +1359,7 @@ export class AudioTools extends ExportRenderTools {
         var mediaSecs = NaN;
         try {
           var md = String(item.getProjectMetadata());
-          var m = /<premierePrivateProjectMetaData:Column\.Intrinsic\.MediaDuration>([^<]*)</.exec(md);
+          var m = /<premierePrivateProjectMetaData:Column\\.Intrinsic\\.MediaDuration>([^<]*)</.exec(md);
           if (m) { var tc = m[1].split(/[:;]/); if (tc.length === 4) mediaSecs = Number(tc[0])*3600 + Number(tc[1])*60 + Number(tc[2]) + Number(tc[3]) / Math.round(254016000000 / Number(seq.timebase)); }
         } catch (eMd) {}
         if (!(mediaSecs > 0)) { try { mediaSecs = item.getOutPoint().seconds - item.getInPoint().seconds; } catch (eIo) {} }
