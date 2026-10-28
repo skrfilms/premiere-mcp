@@ -618,6 +618,36 @@ function __binsByNameDeep(root, wanted, acc) {
  * A bare name is deep-searched and REFUSED when two bins share it: guessing
  * between them is how media ends up in the wrong scene.
  */
+/*
+ * For IMPORT destinations only: create the bin (or each missing segment of an "a/b/c" path) at
+ * the project root. "Import these into a renders bin" used to fail with "Bin not found" when the
+ * bin did not exist yet, which is the normal case the first time. Ambiguous names and bad ids
+ * still refuse: creating there would hide a mistake.
+ */
+function __createBinPath(binName) {
+  var root = app.project.rootItem, node = root;
+  var segs = String(binName).split('/');
+  for (var s = 0; s < segs.length; s++) {
+    if (segs[s] === '') continue;
+    var next = null;
+    for (var i = 0; i < node.children.numItems; i++) {
+      var ch = node.children[i];
+      if (__isBin(ch) && String(ch.name) === segs[s]) { next = ch; break; }
+    }
+    if (!next) next = node.createBin(segs[s]);
+    if (!next) return null;
+    node = next;
+  }
+  return node === root ? null : node;
+}
+function __resolveImportBin(binId, binName) {
+  var r = __resolveBin(binId, binName);
+  if (r.error && (binId === undefined || binId === null || String(binId) === '') && binName && /not found/.test(r.error)) {
+    var made = __createBinPath(binName);
+    if (made) return { bin: made, resolvedBy: 'created', created: true };
+  }
+  return r;
+}
 function __resolveBin(binId, binName) {
   var root = (app.project && app.project.rootItem) ? app.project.rootItem : null;
   if (!root) return { error: 'No project is open.' };
@@ -2134,7 +2164,7 @@ export class PremiereProBridge implements PremiereProTransport {
           });
         }
 
-        var __binRequest = __resolveBin(${binId !== undefined ? JSON.stringify(binId) : 'null'}, ${binName !== undefined ? JSON.stringify(binName) : 'null'});
+        var __binRequest = __resolveImportBin(${binId !== undefined ? JSON.stringify(binId) : 'null'}, ${binName !== undefined ? JSON.stringify(binName) : 'null'});
         if (__binRequest.error) {
           return JSON.stringify({
             success: false,
@@ -2179,6 +2209,7 @@ export class PremiereProBridge implements PremiereProTransport {
               }
               return JSON.stringify({
                 success: true,
+                binCreated: __binRequest.created === true,
                 id: existingItem.nodeId,
                 name: existingItem.name,
                 type: existingItem.type.toString(),
@@ -2248,6 +2279,7 @@ export class PremiereProBridge implements PremiereProTransport {
 
         var __payload = {
           success: true,
+          binCreated: __binRequest.created === true,
           id: importedItem.nodeId,
           name: importedItem.name,
           type: importedItem.type.toString(),

@@ -29,6 +29,28 @@ against a render, not only an API readback.
   that runs `premierepro` UXP calls over a private file queue. Groundwork for the calls
   only UXP has (work area, sequence in/out, transitions); not yet wired into tools.
 
+### Workflow tests, and what they found
+
+- `npm run test:workflows` (`scripts/workflow-tests.mjs`) drives five real jobs as chains of
+  tools against the scratch project and checks them by what Premiere renders and holds, not
+  by tool reports: per-clip version swap, version-up by relink, a review reel of latest
+  versions with burn-ins, captions from an SRT, and an audio pass (ducking, stems, loudness).
+  All five pass, 45 of 45 steps.
+- **`replace_clip` kept nothing.** It took `preserveEffects` and ignored it: the trim, grade
+  and reframe were lost and the full-length new version ran over the next shot. It now lays
+  the new media into the old slot with the old source range and carries every effect across.
+  It never slides a clip past other clips: an intermediate version that did left Premiere's
+  track order scrambled, and everything after the moved clip rendered black.
+- **`replace_clip_media`** (relink, the usual version-up) verifies the new path and renames the
+  bin item and the timeline clips that still carried the old file name, so the timeline no
+  longer reads "v001" while playing v002.
+- **`import_media` / `import_folder`** create a named destination bin (or `a/b/c` path) that
+  does not exist yet, instead of refusing. Ambiguous names and bad ids still refuse.
+- **ExtendScript-only syntax errors are now caught in tests.** An unescaped `/` inside a regex
+  character class, and an ES3 reserved word (`short`) as a variable name, each broke a whole
+  generated script in Premiere while the acorn-based syntax test stayed green. The test now
+  rejects both, with self-tests proving it does.
+
 ### Installing for a teammate
 
 - `npm run release:installer` builds `Premiere-MCP-Installer-v<version>.zip`: the CEP bridge

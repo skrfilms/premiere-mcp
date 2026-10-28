@@ -1,4 +1,4 @@
-import { parse } from "acorn";
+import { parse, tokenizer } from "acorn";
 import { tmpdir } from "node:os";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -69,10 +69,38 @@ describe("generated ExtendScript is syntactically valid", () => {
    * names and trailing commas, both of which ES3 forbids. It is a strict
    * improvement, not a complete ES3 conformance check.
    */
+  // ES3 future-reserved words. ExtendScript refuses them as variable names; acorn's ES3 mode
+  // lets them through. `var short` in replace_clip broke the whole script on 2026-10-28.
+  const ES3_RESERVED = new Set(['abstract', 'boolean', 'byte', 'char', 'class', 'const', 'debugger', 'double', 'enum',
+    'export', 'extends', 'final', 'float', 'goto', 'implements', 'import', 'int', 'interface', 'long', 'native',
+    'package', 'private', 'protected', 'public', 'short', 'static', 'super', 'synchronized', 'throws', 'transient', 'volatile']);
+
   const parses = (source: string): void => {
     // allowReturnOutsideFunction mirrors the bridge, which wraps these bodies in
     // an IIFE before they reach the host.
     parse(source, { ecmaVersion: 3, allowReturnOutsideFunction: true });
+    let prev = '';
+    for (const tok of tokenizer(source, { ecmaVersion: 3, allowReturnOutsideFunction: true })) {
+      const label = tok.type.label;
+      // ES3 has no special case for '/' inside a character class: ExtendScript ends the regex
+      // there. /[\\/]/ in replace_clip_media broke every expanded tool on 2026-10-28 while this
+      // test, parsing with acorn, stayed green.
+      if (label === 'regexp') {
+        const pattern = String((tok.value as { pattern: string }).pattern);
+        let inClass = false;
+        for (let i = 0; i < pattern.length; i++) {
+          const ch = pattern[i];
+          if (ch === '\\') { i++; continue; }
+          if (ch === '[') inClass = true;
+          else if (ch === ']') inClass = false;
+          else if (ch === '/' && inClass) throw new SyntaxError(`unescaped "/" inside a regex character class: /${pattern}/ (ExtendScript ends the regex there)`);
+        }
+      }
+      if ((prev === 'var' || prev === 'function') && label === 'name' && ES3_RESERVED.has(String(tok.value))) {
+        throw new SyntaxError(`"${tok.value}" is an ES3 reserved word; ExtendScript will not accept it as a name`);
+      }
+      prev = label === 'var' || label === 'function' ? label : '';
+    }
   };
 
   it.each([...expandedToolNames])("%s", async (name) => {
@@ -502,6 +530,16 @@ describe("generated ExtendScript is syntactically valid", () => {
      * while missing the failures it exists to catch.
      */
     const LS = "\u2028";
+
+    it("rejects an unescaped slash inside a regex character class (ExtendScript ends the regex)", () => {
+      expect(() => parses('var f = p.replace(/^.*[\\\\/]/, "");')).toThrow(/character class/);
+      expect(() => parses('var f = p.replace(/^.*[\\\\\\/]/, "");')).not.toThrow();
+    });
+
+    it("rejects an ES3 reserved word as a variable name", () => {
+      expect(() => parses("var short = 1;")).toThrow(/reserved/);
+      expect(() => parses("var lacking = 1;")).not.toThrow();
+    });
 
     it("rejects a raw U+2028 inside a string literal", () => {
       // ExtendScript is ES3, where a line terminator inside a string literal is a
