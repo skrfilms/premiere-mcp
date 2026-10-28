@@ -306,7 +306,10 @@ export class InterchangeTools extends ColorTools {
 
   // Export AAF Implementation
   protected async exportAaf(sequenceId: string, outputPath: string, mixDownVideo?: boolean, explodeToMono?: boolean, sampleRate?: number, bitsPerSample?: number): Promise<any> {
-    const mixDown = mixDownVideo !== false ? 1 : 0;
+    // Off unless asked for. A video mixdown renders the whole sequence before the AAF is written:
+    // on a 40s fixture with one MOGRT it held the ExtendScript engine for over five minutes
+    // (2026-10-27), which every later call experiences as a dead host.
+    const mixDown = mixDownVideo === true ? 1 : 0;
     const explode = explodeToMono ? 1 : 0;
     const rate = sampleRate || 48000;
     const bits = bitsPerSample || 16;

@@ -328,29 +328,151 @@ export class ColorTools extends ProjectMediaTools {
     return await this.setColorSpaceOverride(projectItemId, colorSpaceName);
   }
 
-  protected async applyLutToClip(trackIndex: number, clipIndex: number, lutPath: string, sequenceId?: string): Promise<any> {
-    return await this.bridge.executeScript(`
+  protected async applyLutToClip(trackIndex: number, clipIndex: number, lutPath: string, sequenceId?: string, installIfMissing?: boolean): Promise<any> {
+    return await this.applyLutByRenderMatch({ trackIndex, clipIndex, sequenceId }, lutPath, installIfMissing === true);
+  }
+
+  /**
+   * Put a LUT in a clip's Lumetri Input LUT slot, and prove which one it is.
+   *
+   * Input LUT is a dropdown on 26.5.2, set by INDEX: a path string raises "Illegal Parameter type"
+   * (that was the old bug). The index order is the dropdown's, which depends on what is installed,
+   * so a fixed table would be wrong on the next machine. Instead: capture the clip's frame with no
+   * LUT, apply the .cube to that frame with ffmpeg as the reference, then try each dropdown index
+   * and keep the one whose render matches the reference. Measured on 2026-10-27: the right index
+   * matches at 34-38 dB PSNR, wrong ones sit at 13-28 dB.
+   *
+   * A LUT Premiere does not list cannot be selected at all; with installIfMissing it is copied
+   * into the user LUT folder Premiere scans at launch, and the caller is told a restart is needed.
+   * Upper-track clips covering the probe frame are disabled while probing and restored after.
+   */
+  protected async applyLutByRenderMatch(target: { clipId?: string | undefined; trackIndex?: number | undefined; clipIndex?: number | undefined; sequenceId?: string | undefined }, lutPath: string, installIfMissing: boolean): Promise<any> {
+    if (!lutPath || !fsSync.existsSync(lutPath)) return { success: false, error: `LUT file not found: ${lutPath}` };
+    if (!/\.cube$/i.test(lutPath)) return { success: false, error: 'Only .cube LUTs can be verified (ffmpeg renders the reference from the file).' };
+    const locate = target.clipId
+      ? `var f = __findClip(${JSON.stringify(target.clipId)}, ${JSON.stringify(target.sequenceId ?? null)});`
+      : `var sq0 = ${this.buildSeqRes(target.sequenceId)}; var tr0 = sq0.videoTracks[${Number(target.trackIndex ?? 0)}]; var cl0 = tr0 ? tr0.clips[${Number(target.clipIndex ?? 0)}] : null;
+         var f = cl0 ? { clip: cl0, trackIndex: ${Number(target.trackIndex ?? 0)}, trackType: 'video', sequence: sq0, sequenceId: sq0.sequenceID } : null;`;
+    const prep: any = await this.bridge.executeScript(`
       try {
-        var seq = ${this.buildSeqRes(sequenceId)};
-        var clip = seq.videoTracks[${trackIndex}].clips[${clipIndex}];
-        if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
-        var comps = clip.components;
-        for (var i=0; i<comps.numItems; i++) {
-          if (String(comps[i].displayName).indexOf('Lumetri') >= 0) {
-            // Input LUT is at param index 6 and 7 (path and mode)
-            var lutProp = null;
-            for (var pi=0; pi<comps[i].properties.numItems; pi++) {
-              if (String(comps[i].properties[pi].displayName) === 'Input LUT' && pi === 6) { lutProp = comps[i].properties[pi]; break; }
-            }
-            if (lutProp) {
-              lutProp.setValue(${JSON.stringify(lutPath)}, true);
-              return JSON.stringify({success:true,lutPath:${JSON.stringify(lutPath)},appliedToLumetriIndex:i});
-            }
+        ${locate}
+        if (!f || f.trackType !== 'video') return JSON.stringify({success:false,error:'Video clip not found'});
+        var clip = f.clip, seq = f.sequence;
+        function lumetri() { for (var i = 0; i < clip.components.numItems; i++) if (String(clip.components[i].displayName) === 'Lumetri Color') return clip.components[i]; return null; }
+        var lum = lumetri(), added = false;
+        if (!lum) {
+          app.enableQE();
+          var q = __qeSequenceOpening(seq);
+          var qc = q ? __qeClipByIndex(q, 'video', f.trackIndex, (function(){ for (var k = 0; k < f.sequence.videoTracks[f.trackIndex].clips.numItems; k++) if (f.sequence.videoTracks[f.trackIndex].clips[k].nodeId === clip.nodeId) return k; return 0; })()) : null;
+          if (qc) qc.addVideoEffect(qe.project.getVideoEffectByName('Lumetri Color'));
+          lum = lumetri(); added = true;
+          if (!lum) return JSON.stringify({success:false,error:'The clip has no Lumetri Color and one could not be added.'});
+        }
+        var slot = null;
+        for (var p = 0; p < lum.properties.numItems; p++) if (String(lum.properties[p].displayName) === 'Input LUT') { slot = p; break; }
+        if (slot === null) return JSON.stringify({success:false,error:'Lumetri Color has no Input LUT parameter on this build.'});
+        var before = Number(lum.properties[slot].getValue());
+        // Find the last valid index: the dropdown clamps, so step until the readback stops moving.
+        var maxIdx = 0;
+        for (var t = 1; t < 200; t++) { lum.properties[slot].setValue(t, true); var r = Number(lum.properties[slot].getValue()); if (r !== t) break; maxIdx = t; }
+        lum.properties[slot].setValue(0, true);
+        var at = (clip.start.seconds + clip.end.seconds) / 2;
+        var hidden = [];
+        for (var vt = f.trackIndex + 1; vt < seq.videoTracks.numTracks; vt++) {
+          var tr = seq.videoTracks[vt];
+          for (var c = 0; c < tr.clips.numItems; c++) {
+            var uc = tr.clips[c];
+            if (uc.start.seconds <= at && uc.end.seconds > at && !uc.disabled) { uc.disabled = true; hidden.push(String(uc.nodeId)); }
           }
         }
-        return JSON.stringify({success:false,error:'No Lumetri Color component found on clip. Apply lumetri first.'});
+        return JSON.stringify({success:true,clipId:String(clip.nodeId),sequenceId:String(seq.sequenceID),slot:slot,before:before,maxIdx:maxIdx,at:at,hidden:hidden,addedLumetri:added});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
+    if (!prep || prep.success === false) return prep;
+    const setIdx = (idx: number) => this.bridge.executeScript(`
+      try {
+        var f = __findClip(${JSON.stringify(prep.clipId)}, ${JSON.stringify(prep.sequenceId)});
+        var lum = null; for (var i = 0; i < f.clip.components.numItems; i++) if (String(f.clip.components[i].displayName) === 'Lumetri Color') lum = f.clip.components[i];
+        lum.properties[${prep.slot}].setValue(${'${idx}'}, true);
+        return JSON.stringify({success:true,now:Number(lum.properties[${prep.slot}].getValue())});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `.replace('${idx}', String(idx)));
+    const restoreHidden = () => this.bridge.executeScript(`
+      try {
+        var ids = ${JSON.stringify(prep.hidden)};
+        var seq = __findSequence(${JSON.stringify(prep.sequenceId)});
+        for (var t = 0; t < seq.videoTracks.numTracks; t++) for (var c = 0; c < seq.videoTracks[t].clips.numItems; c++) {
+          var cl = seq.videoTracks[t].clips[c];
+          for (var k = 0; k < ids.length; k++) if (String(cl.nodeId) === ids[k]) cl.disabled = false;
+        }
+        return JSON.stringify({success:true});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+    const work = fsSync.mkdtempSync(pathSync.join(osSync.tmpdir(), 'premiere-mcp-lut-'));
+    const capture = async (name: string) => {
+      const out = pathSync.join(work, `${name}.png`);
+      const r: any = await (this as any).executeTool('capture_program_output', { sequenceId: prep.sequenceId, time: prep.at, format: 'png', outputPath: out });
+      return r && r.success !== false && fsSync.existsSync(out) ? out : null;
+    };
+    const psnr = (a: string, b: string): number => {
+      const txt = runFf('ffmpeg', ['-hide_banner', '-i', a, '-i', b, '-lavfi', 'psnr', '-f', 'null', '-'], { timeoutMs: 30000, mergeStderr: true });
+      const m = /average:(inf|[\d.]+)/.exec(txt);
+      return m ? (m[1] === 'inf' ? 99 : Number(m[1])) : 0;
+    };
+    try {
+      const base = await capture('base');
+      if (!base) return { success: false, error: 'Could not capture the clip frame to verify against.' };
+      const ref = pathSync.join(work, 'ref.png');
+      // ffmpeg's lut3d parser is stricter than Premiere's about filter-graph escaping; copy to a plain path.
+      const lutCopy = pathSync.join(work, 'lut.cube');
+      fsSync.copyFileSync(lutPath, lutCopy);
+      runFf('ffmpeg', ['-v', 'error', '-y', '-i', base, '-vf', `lut3d=file=${lutCopy}`, ref], { timeoutMs: 60000 });
+      if (!fsSync.existsSync(ref)) return { success: false, error: 'ffmpeg could not apply the LUT to the reference frame (is the .cube valid?).' };
+      // A LUT that leaves this frame unchanged (an identity, or a no-op on this footage) has
+      // nothing to match against: every dropdown entry would be "closest" by accident.
+      if (psnr(ref, base) >= 45) {
+        await setIdx(prep.before);
+        return { success: false, verified: true, lutPath, restoredInputLutIndex: prep.before,
+          error: 'This LUT does not change this clip\'s frame (it is an identity or a no-op on this footage), so which dropdown entry it is cannot be verified. Nothing was changed.' };
+      }
+      const scores: Array<{ index: number; psnr: number }> = [];
+      for (let idx = 1; idx <= prep.maxIdx; idx++) {
+        await setIdx(idx);
+        const shot = await capture(`i${idx}`);
+        if (!shot) continue;
+        const toBase = psnr(shot, base);
+        if (toBase >= 60) continue; // a separator, "None" or "Browse...": nothing changed
+        scores.push({ index: idx, psnr: Math.round(psnr(shot, ref) * 10) / 10 });
+      }
+      scores.sort((a, b) => b.psnr - a.psnr);
+      const best = scores[0];
+      const runnerUp = scores[1];
+      // 32 dB, not 30: the wrong entry nearest an unlisted LUT reached 29.9 dB in testing, while
+      // right entries matched at 34-38 dB.
+      const confident = !!best && best.psnr >= 32 && (!runnerUp || best.psnr - runnerUp.psnr >= 3 || best.psnr >= 45);
+      if (confident) {
+        await setIdx(best!.index);
+        return { success: true, verified: true, verifiedBy: 'render of the chosen Input LUT index matched ffmpeg lut3d of the ungraded frame',
+          lutPath, inputLutIndex: best!.index, matchPsnrDb: best!.psnr, runnerUpPsnrDb: runnerUp?.psnr ?? null, addedLumetri: prep.addedLumetri,
+          note: best!.psnr < 34 ? 'Matched, but the clip carries other Lumetri corrections, which make the match looser.' : undefined };
+      }
+      await setIdx(prep.before);
+      let installed: string | null = null;
+      if (installIfMissing) {
+        const dir = pathSync.join(osSync.homedir(), 'Library', 'Application Support', 'Adobe', 'Common', 'LUTs', 'Input');
+        fsSync.mkdirSync(dir, { recursive: true });
+        installed = pathSync.join(dir, pathSync.basename(lutPath));
+        fsSync.copyFileSync(lutPath, installed);
+      }
+      return { success: false, verified: true, lutPath, candidates: scores.slice(0, 4), restoredInputLutIndex: prep.before,
+        installedTo: installed,
+        error: installed
+          ? `This LUT is not in Premiere's Input LUT list yet. It has been copied to ${installed}; restart Premiere, then run this again.`
+          : 'This LUT is not in Premiere\'s Input LUT list (no dropdown entry renders like it), so it cannot be selected from script. Pass installIfMissing:true to copy it into the user LUT folder (a Premiere restart is needed before it appears), or use the Browse... entry by hand.' };
+    } finally {
+      await restoreHidden();
+      try { fsSync.rmSync(work, { recursive: true, force: true }); } catch { /* temp */ }
+    }
   }
 
   /** Map a scope name to its (verified) ffmpeg video filter. */
@@ -619,8 +741,8 @@ export class ColorTools extends ProjectMediaTools {
     };
   }
 
-  protected async applyLut(clipId: string, lutPath: string, _intensity = 100): Promise<any> {
-    return await this.applyLumetriParams(clipId, { "Input LUT": lutPath }, "LUT", { lutPath });
+  protected async applyLut(clipId: string, lutPath: string, _intensity = 100, installIfMissing?: boolean): Promise<any> {
+    return await this.applyLutByRenderMatch({ clipId }, lutPath, installIfMissing === true);
   }
 
   protected async lumetriHslSecondarySet(trackIndex: number, clipIndex: number, params: any, seqId?: string): Promise<any> {

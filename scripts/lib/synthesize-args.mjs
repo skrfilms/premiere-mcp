@@ -66,6 +66,7 @@ function findAdobePresets() {
   return found;
 }
 
+const PREMIERE_LUT = '/Applications/Adobe Premiere Pro 2026/Adobe Premiere Pro 2026.app/Contents/Lumetri/LUTs/Technical/AMIRA_Default_LogC2Rec709.cube';
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const SCRATCH_DIR = resolve(HERE, '..', '..', '.scratch');
 export const SYNTH_DIR = join(SCRATCH_DIR, 'synth');
@@ -180,9 +181,17 @@ export function ensureSideFixtures() {
 
   const presets = findAdobePresets();
 
+  // A template whose text the DOM can actually write. Premiere-native titles (Basic Title and the
+  // whole Titles/Lower Thirds folders) carry no MGT component, so every text write on them fails;
+  // the bundled [AE] packages are After Effects-authored and expose their fields.
+  const mogrt = process.env.PREMIERE_MCP_FIXTURE_MOGRT
+    || '/Applications/Adobe Premiere Pro 2026/Adobe Premiere Pro 2026.app/Contents/Essential Graphics/[AE] Video Gaming Package/Gaming Lower Third Left.mogrt';
+
   return {
     srtA, srtB, csv, notes, whisperJson, lut, txt, footageIndex,
     outDir: OUT_DIR, epr: presets.epr, sqpreset: presets.sqpreset,
+    mogrt: existsSync(mogrt) ? mogrt : null,
+    premiereLut: existsSync(PREMIERE_LUT) ? PREMIERE_LUT : null,
   };
 }
 
@@ -228,6 +237,29 @@ export async function buildContext(bridge) {
             });
           }
         }
+        o.audioClips = [];
+        for (var at = 0; at < seq.audioTracks.numTracks; at++) {
+          var atr = seq.audioTracks[at];
+          for (var ac = 0; ac < atr.clips.numItems; ac++) {
+            o.audioClips.push({ id: String(atr.clips[ac].nodeId), name: String(atr.clips[ac].name), trackIndex: at, clipIndex: ac });
+          }
+        }
+        // The first MOGRT clip, plus a text and a colour parameter it really exposes.
+        for (var mt = 0; mt < seq.videoTracks.numTracks && !o.mogrt; mt++) {
+          for (var mc = 0; mc < seq.videoTracks[mt].clips.numItems; mc++) {
+            var mclip = seq.videoTracks[mt].clips[mc];
+            var mgt = null;
+            try { mgt = mclip.isMGT() ? mclip.getMGTComponent() : null; } catch (e) {}
+            if (!mgt) continue;
+            o.mogrt = { trackIndex: mt, clipIndex: mc, id: String(mclip.nodeId), params: [] };
+            for (var mp = 0; mp < mgt.properties.numItems; mp++) {
+              var pv = '';
+              try { pv = String(mgt.properties[mp].getValue()); } catch (e) {}
+              o.mogrt.params.push({ name: String(mgt.properties[mp].displayName), text: pv.indexOf('{') === 0, num: /^[0-9]{12,}$/.test(pv) });
+            }
+            break;
+          }
+        }
         if (o.clips.length > 0) {
           var first = seq.videoTracks[o.clips[0].trackIndex].clips[o.clips[0].clipIndex];
           for (var k = 0; k < first.components.numItems; k++) {
@@ -243,6 +275,18 @@ export async function buildContext(bridge) {
         while (mkr) {
           o.markers.push({ name: String(mkr.name), guid: String(mkr.guid), startSecs: mkr.start.seconds, type: String(mkr.type) });
           mkr = seq.markers.getNextMarker(mkr);
+        }
+      }
+      // Items one level down, for the multicam angles in fixture_bin and the multicam clip itself.
+      o.nested = [];
+      for (var ni = 0; ni < app.project.rootItem.children.numItems; ni++) {
+        var bin = app.project.rootItem.children[ni];
+        if (bin.type !== 2) continue;
+        for (var nj = 0; nj < bin.children.numItems; nj++) {
+          var ch = bin.children[nj];
+          var isMc = false;
+          try { isMc = ch.isMulticamClip(); } catch (e) {}
+          o.nested.push({ id: String(ch.nodeId), name: String(ch.name), bin: String(bin.name), type: ch.type, multicam: isMc });
         }
       }
       // The panel metadata blob, so the tool that writes it can be handed a blob Premiere itself
@@ -262,7 +306,18 @@ export async function buildContext(bridge) {
     return JSON.stringify(o);
   })();`);
 
-  const media = (host.items ?? []).filter((i) => i.mediaPath && /\.(mp4|mov|png|wav|mxf)$/i.test(i.mediaPath));
+  // Movies first: a still has no audio stream, so handing one to an ffmpeg audio tool (loudnorm,
+  // silencedetect) made a working tool report "could not measure" every sweep.
+  const media = (host.items ?? []).filter((i) => i.mediaPath && /\.(mp4|mov|png|wav|mxf)$/i.test(i.mediaPath))
+    .sort((a, b) => Number(/\.png$/i.test(a.mediaPath)) - Number(/\.png$/i.test(b.mediaPath)));
+  const byName = (n) => (host.items ?? []).find((i) => i.name === n);
+  const fixtureItems = [byName('fixture_a.mp4'), byName('fixture_b.mp4')].filter(Boolean)
+    .concat((host.items ?? []).filter((i) => i.type === 1 && !/^fixture_[ab]\.mp4$/.test(i.name)));
+  const nested = host.nested ?? [];
+  const camIds = nested.filter((n) => n.bin === 'fixture_bin' && n.type === 1).map((n) => n.id);
+  const multicamEdit = (host.sequences ?? []).find((s) => s.name === 'fixture_mc_edit');
+  const captionItem = (host.items ?? []).find((i) => /\.srt$/i.test(i.name));
+  const mogrtParams = host.mogrt?.params ?? [];
   const secondSequence = (host.sequences ?? []).find((s) => s.id !== host.activeSequenceId);
   // Effect names that the fixture is known to carry, so effect-by-name tools match something
   // real. `reset-scratch.mjs` puts Lumetri Color on the first V1 clip.
@@ -274,11 +329,26 @@ export async function buildContext(bridge) {
     sequenceName: host.activeSequenceName ?? null,
     secondSequenceId: secondSequence?.id ?? host.activeSequenceId ?? null,
     sequenceIds: (host.sequences ?? []).map((s) => s.id),
-    itemId: host.items?.[0]?.id ?? null,
-    itemIds: (host.items ?? []).slice(0, 2).map((i) => i.id),
-    itemName: host.items?.[0]?.name ?? null,
-    binName: (host.items ?? []).find((i) => i.type === 2)?.name ?? 'fixture_bin',
-    binId: (host.items ?? []).find((i) => i.type === 2)?.id ?? null,
+    // The fixture clips by name, then whatever is first. "First root item" alone picked up a
+    // leftover bin from an earlier sweep whenever the wipe missed one, and item tools then failed.
+    itemId: fixtureItems[0]?.id ?? null,
+    itemIds: fixtureItems.slice(0, 2).map((i) => i.id),
+    itemName: fixtureItems[0]?.name ?? null,
+    // fixture_bin by name when it exists: it is the bin reset-scratch fills with camera angles, and
+    // an earlier sweep's create_bin leaves several empty "synth_name" bins that would win otherwise.
+    binName: (host.items ?? []).find((i) => i.name === 'fixture_bin')?.name ?? (host.items ?? []).find((i) => i.type === 2)?.name ?? 'fixture_bin',
+    binId: (host.items ?? []).find((i) => i.name === 'fixture_bin')?.id ?? (host.items ?? []).find((i) => i.type === 2)?.id ?? null,
+    audioClipId: host.audioClips?.[0]?.id ?? null,
+    audioClip: host.audioClips?.[0] ?? null,
+    mogrt: host.mogrt ? {
+      trackIndex: host.mogrt.trackIndex,
+      clipIndex: host.mogrt.clipIndex,
+      textParam: mogrtParams.find((p) => p.text)?.name ?? null,
+      colorParam: mogrtParams.find((p) => p.num && /colou?r/i.test(p.name))?.name ?? null,
+    } : null,
+    camItemIds: camIds,
+    multicamSequenceId: multicamEdit?.id ?? null,
+    captionItemId: captionItem?.id ?? null,
     markerId: host.markers?.[0]?.guid ?? null,
     transitionName: host.transitions?.[0] ?? null,
     panelMetadata: host.panelMetadata ?? null,
@@ -330,6 +400,8 @@ function outputExtension(key, toolName) {
   if (/project/.test(k) || /as_project/.test(t)) return '.prproj';
   if (/notes/.test(k) || /notes/.test(t)) return '.txt';
   if (/audio|wav|stem/.test(t)) return '.wav';
+  // A re-render of the source keeps its container; a .txt output made ffmpeg refuse the muxer.
+  if (/loudness|normalize/.test(t)) return '.mp4';
   if (/thumbnail|still|frame|scope|palette|snapshot|false_color/.test(t)) return '.png';
   if (/export|render|encode|reel|spot/.test(t)) return '.mp4';
   return '.txt';
@@ -339,6 +411,35 @@ function outputExtension(key, toolName) {
  * Resolve one leaf by name, then by type. Returns `undefined` when nothing can be justified,
  * which the caller reports as unresolved rather than filling in.
  */
+/**
+ * Tools pointed at the second fixture sequence instead of the first, because on the first they
+ * either destroy what later tools address or leave it in a state later tools cannot edit:
+ *   - placing/assembling tools overwrite V1 (new nodeIds, the Lumetri clip gone);
+ *   - lock/mute/target tools left V1 locked, muted or untargeted for every edit after them;
+ *   - AAF export renders a multi-minute video mixdown of the first sequence's MOGRT, which held
+ *     the host past every timeout (fixture_seq_b is cloned before the MOGRT is added).
+ */
+const SACRIFICIAL_SEQUENCE = /^(storyboard_bin_to_sequence|add_to_timeline|add_to_timeline_batch|insert_from_source|overwrite_from_source|overwrite_clip|lock_track|sync_lock_track|mute_track|set_target_track|export_aaf)$/;
+
+/** Tools that import a new text graphic onto the timeline. */
+const TEXT_PLACING = /^(add_text_overlay|title_card|lower_third_preset|batch_mogrt_from_data|countdown_leader)$/;
+
+/**
+ * Optional keys worth filling anyway for a family, because the tool's default would point it at
+ * the wrong fixture (V1 clip 0 is a plain video clip; the MOGRT is on V3, the audio on A1, the
+ * multicam in its own sequence). Required-only synthesis left these out and the default won.
+ */
+function forcedOptionalKeys(toolName) {
+  const t = toolName.toLowerCase();
+  const keys = [];
+  if ((/mogrt/.test(t) && !/^import_mogrt/.test(t)) || TEXT_PLACING.test(t)) keys.push('trackindex', 'clipindex', 'mogrtpath');
+  if (/multicam/.test(t) && !/^create_multicam/.test(t)) keys.push('sequenceid');
+  if (SACRIFICIAL_SEQUENCE.test(t)) keys.push('sequenceid');
+  if (t === 'three_point_edit') keys.push('sequencetimecode');
+  if (t === 'set_track_lock_qe') keys.push('audio');
+  return keys;
+}
+
 function resolveLeaf({ key, def, toolName, ctx, path }) {
   // Underscores are stripped as well as case, because the catalogue is not consistent about
   // spelling: `has_proxy` declares `projectItemId` while `get_item_info` declares `item_id` for
@@ -349,6 +450,61 @@ function resolveLeaf({ key, def, toolName, ctx, path }) {
   const k = key.toLowerCase().replace(/_/g, '');
   const type = def?.type;
   const files = ctx.files;
+  const tool = toolName.toLowerCase();
+  // Tool families that need a specific kind of fixture rather than "the first clip". Each of these
+  // used to be handed the first V1 clip and then honestly reported that it was the wrong kind:
+  // "Clip is not a MOGRT", "Volume component not found", "canDoMulticam() returned false".
+  const isMogrtTool = /mogrt/.test(tool) && !/^import_mogrt/.test(tool);
+  const isAudioClipTool = /audio_level|audio_keyframe|ducking|clip_pan|clip_gain|clip_peaks|limiter|clip_volume/.test(tool);
+  const isMulticamTool = /multicam/.test(tool) && !/^create_multicam/.test(tool);
+  const isTextPlacingTool = TEXT_PLACING.test(tool);
+
+  // Text-placing tools import a new graphic. Left at their defaults (V2 at 1s) they overwrote the
+  // fixture's V2 clip; at V3 from 40s they land on empty timeline past the fixture MOGRT (V3 at
+  // 20s), which the MOGRT tools later in the run still need.
+  if (isTextPlacingTool && (type === 'number' || type === 'int')) {
+    if (/trackindex/.test(k)) return 2;
+    if (/^(starttime|starttimesecs|timesecs)$/.test(k)) return 40;
+  }
+  // three_point_edit has no sequence argument and overwrites at the playhead by default, which
+  // replaced the fixture's first V1 clip (new nodeId, Lumetri gone) and cost ~40 later tools
+  // "Clip not found" on 2026-10-27. Aimed past the fixture's content it still edits for real.
+  if (tool === 'three_point_edit' && type === 'string' && /^sequencetimecode$/.test(k)) return '00:00:50:00';
+  // set_track_lock_qe has no sequence argument; lock the last audio track, which holds nothing.
+  if (tool === 'set_track_lock_qe') {
+    if (type === 'boolean' && /^audio$/.test(k)) return true;
+    if ((type === 'number' || type === 'int') && /^trackindex$/.test(k)) return Math.max(0, (ctx.audioTracks ?? 1) - 1);
+  }
+
+  if (isMogrtTool && ctx.mogrt && (type === 'number' || type === 'int')) {
+    if (/trackindex/.test(k)) return ctx.mogrt.trackIndex;
+    if (/clipindex/.test(k)) return ctx.mogrt.clipIndex;
+  }
+  if (isMogrtTool && ctx.mogrt && type === 'string' && /^(paramname|parametername|propertyname)$/.test(k)) {
+    return (/color/.test(tool) ? ctx.mogrt.colorParam : ctx.mogrt.textParam) ?? undefined;
+  }
+  if (isAudioClipTool && ctx.audioClip) {
+    if (type === 'string' && /clipid$/.test(k)) return ctx.audioClip.id;
+    if ((type === 'number' || type === 'int') && /trackindex/.test(k)) return ctx.audioClip.trackIndex;
+    if ((type === 'number' || type === 'int') && /clipindex/.test(k)) return ctx.audioClip.clipIndex;
+  }
+  if (isMulticamTool && ctx.multicamSequenceId && type === 'string' && /sequenceid$/.test(k)) return ctx.multicamSequenceId;
+  // Tools that rebuild V1 wholesale get the disposable second sequence. storyboard_bin_to_sequence
+  // overwrote the fixture's V1 with the three camera angles, and every clip id the context holds
+  // then answered "Clip not found" for the rest of the run.
+  if (SACRIFICIAL_SEQUENCE.test(tool) && type === 'string' && /^sequenceid$/.test(k)) return ctx.secondSequenceId ?? undefined;
+  if (/caption/.test(tool) && ctx.captionItemId && type === 'string' && /(projectitemid|itemid)$/.test(k)) return ctx.captionItemId;
+  if (type === 'string' && /^mogrtpath$/.test(k)) return files.mogrt ?? undefined;
+  // "source" and "target" mean two different things. Resolving both to the same clip or sequence
+  // made copy_effect_values, copy_effects_between_clips and copy_markers_between_sequences refuse
+  // ("Source and target are the same...") — a correct answer to a degenerate question.
+  if (type === 'string' && /^(target|to|dest|destination)(clipid)$/.test(k)) return ctx.clipIds?.[1] ?? undefined;
+  if (type === 'string' && /^(source|from)(clipid)$/.test(k)) return ctx.clipIds?.[0] ?? undefined;
+  // A second sequence only for the tools that move things BETWEEN sequences; for the clip-copy
+  // tools both clip ids come from the active sequence, so the target sequence must be that one.
+  if (type === 'string' && /^(target|destination)sequenceid$/.test(k)) {
+    return (/between_sequences|sequences$/.test(tool) ? ctx.secondSequenceId : ctx.sequenceId) ?? undefined;
+  }
 
   // ---- enums: pick a member, preferring one that is meaningful for the fixture -------------
   if (type === 'enum') {
@@ -370,7 +526,7 @@ function resolveLeaf({ key, def, toolName, ctx, path }) {
 
   // ---- strings ----------------------------------------------------------------------------
   if (type === 'string') {
-    if (/^(sequenceid|seqid|targetsequenceid|sourcesequenceid|destinationsequenceid)$/.test(k)) return ctx.sequenceId ?? undefined;
+    if (/^(sequenceid|seqid|sourcesequenceid)$/.test(k)) return ctx.sequenceId ?? undefined;
     if (/sequenceid/.test(k)) return /b$|second|target|destination/.test(k) ? (ctx.secondSequenceId ?? undefined) : (ctx.sequenceId ?? undefined);
     if (/binid$/.test(k)) return ctx.binId ?? ctx.itemId ?? undefined;
     // A trailing 1/2 means "two different ones" (compare_takes, add_transition). Hand back
@@ -404,6 +560,7 @@ function resolveLeaf({ key, def, toolName, ctx, path }) {
     if (/^(key)$/.test(k)) return 'Column.Intrinsic.Name';
     if (/^(value|text|contents|comment|comments|description|summary|note)$/.test(k)) return 'synthesised by the live sweep';
     if (/^(columnid)$/.test(k)) return 'Sweep.Synth.Field';
+    if (/^binname$/.test(k)) return ctx.binName ?? undefined;
     if (/(displayname|reelname|sequencename|name)$/.test(k) || /^(label|title)$/.test(k)) {
       return /sequencename$/.test(k) ? 'synth_seq' : 'synth_name';
     }
@@ -413,7 +570,9 @@ function resolveLeaf({ key, def, toolName, ctx, path }) {
     if (/^(renderername)$/.test(k)) return 'Mercury Playback Engine GPU Acceleration (Metal)';
     if (/^(gradejson)$/.test(k)) return JSON.stringify({ Exposure: 0.1, Contrast: 5 });
     if (/^(location|folder|dir|directory|outputdir|destination|destinationdir)$/.test(k) || /(dir|folder)$/.test(k)) return files.outDir;
-    if (/^lutpath$/.test(k) || /lutpath/.test(k)) return files.lut;
+    // A LUT Premiere actually lists: the Input LUT slot is a dropdown, so apply_lut can only select
+    // an installed LUT, and the identity fixture renders like "no LUT" and is (correctly) refused.
+    if (/^lutpath$/.test(k) || /lutpath/.test(k)) return files.premiereLut ?? files.lut;
     if (/^(srtpath|srtpatha|captionpath|captionspath)$/.test(k)) return files.srtA;
     if (/^srtpathb$/.test(k)) return files.srtB;
     if (/srtpath|captionfile/.test(k)) return files.srtA;
@@ -462,6 +621,9 @@ function resolveLeaf({ key, def, toolName, ctx, path }) {
     if (/^(count|limit|max|maxresults)$/.test(k)) return 3;
     if (/(fps|framerate)$/.test(k) || /^sourcefps$/.test(k)) return 24;
     if (/percent/.test(k)) return 50;
+    if (/lufs$/.test(k)) return -14;
+    if (/^truepeakdb$/.test(k)) return -1;
+    if (/^loudnessrange$/.test(k)) return 11;
     if (/^(gaindb|volumedb|db|leveldb)$/.test(k) || /db$/.test(k)) return 0;
     if (/^(opacity|scale|uniformscale)$/.test(k)) return 100;
     if (/^(r|g|b|red|green|blue)$/.test(k)) return 128;
@@ -486,6 +648,10 @@ function resolveLeaf({ key, def, toolName, ctx, path }) {
     // tool is being asked to reorder components that are not there.
     if (/^neworder$/.test(k) && ctx.componentNames?.length > 1) {
       return [...ctx.componentNames].reverse();
+    }
+    if (/^projectitemids$/.test(k)) {
+      const pool = /multicam/.test(toolName) && ctx.camItemIds?.length ? ctx.camItemIds : ctx.itemIds;
+      return pool?.length ? [...pool] : undefined;
     }
     const singular = key.replace(/(ies)$/, 'y').replace(/s$/, '');
     const one = synthesizeValue({ key: singular, schema: element, toolName, ctx, path: `${path}[0]` });
@@ -538,9 +704,16 @@ export function synthesizeArgs(tool, ctx) {
   const args = {};
   const unresolved = [];
 
+  const forced = forcedOptionalKeys(tool.name);
   for (const [key, schema] of Object.entries(shape)) {
     const { optional } = unwrap(schema);
-    if (optional) continue;
+    if (optional) {
+      if (forced.includes(key.toLowerCase().replace(/_/g, ''))) {
+        const { value } = synthesizeValue({ key, schema, toolName: tool.name, ctx, path: key });
+        if (value !== undefined) args[key] = value;
+      }
+      continue;
+    }
     const { value } = synthesizeValue({ key, schema, toolName: tool.name, ctx, path: key });
     if (value === undefined) unresolved.push(key);
     else args[key] = value;

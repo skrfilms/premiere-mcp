@@ -112,16 +112,32 @@ describe('create_recovery_checkpoint', () => {
     expect(calls.some((s) => s.includes('originalSeq.clone()'))).toBe(true);
   });
 
-  it('uses an explicit sequenceId without resolving the active sequence', async () => {
-    const { bridge, calls } = routingBridge();
+  it('clones an explicit sequenceId rather than the active sequence', async () => {
+    const { bridge, calls } = routingBridge({ activeSequence: { id: 'OTHER', name: 'Other' } });
     const tools = new PremiereProTools(bridge);
     const result = await tools.executeTool('create_recovery_checkpoint', { sequenceId: 'SEQ-42' });
 
     expect(result.success).toBe(true);
     expect(result.sourceSequenceId).toBe('SEQ-42');
-    expect(calls.some((s) => s.includes('var seq = app.project.activeSequence;'))).toBe(false);
-    // The clone script targets the requested sequence.
-    expect(calls.find((s) => s.includes('originalSeq.clone()'))).toContain('SEQ-42');
+    // The clone script targets the requested sequence, not the active one.
+    const clone = calls.find((s) => s.includes('originalSeq.clone()'));
+    expect(clone).toContain('SEQ-42');
+    expect(clone).not.toContain('OTHER');
+  });
+
+  it('puts the previously active sequence back after cloning', async () => {
+    // Premiere activates a fresh clone; left alone, every later call that defaults to the active
+    // sequence would edit the snapshot instead of the cut.
+    const { bridge, calls } = routingBridge({ activeSequence: { id: 'S1', name: 'Edit' } });
+    const tools = new PremiereProTools(bridge);
+    const result = await tools.executeTool('create_recovery_checkpoint', {});
+
+    expect(result.success).toBe(true);
+    const cloneAt = calls.findIndex((s) => s.includes('originalSeq.clone()'));
+    const restoreAt = calls.findIndex((s, i) => i > cloneAt && s.includes('app.project.openSequence(want)'));
+    expect(restoreAt).toBeGreaterThan(cloneAt);
+    expect(calls[restoreAt]).toContain('"S1"');
+    expect(result).toHaveProperty('activeSequenceRestored');
   });
 
   it('fails clearly when there is no active sequence to snapshot', async () => {
