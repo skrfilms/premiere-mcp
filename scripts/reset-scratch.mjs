@@ -25,6 +25,7 @@
  */
 import { PremiereProBridge } from '../dist/bridge/index.js';
 import { writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { requireScratchProject } from './lib/require-scratch-project.mjs';
@@ -35,6 +36,15 @@ const MEDIA_DIR = join(SCRATCH_DIR, 'media');
 const SRT_PATH = join(SCRATCH_DIR, 'fixture-captions.srt');
 const CLIPS = ['fixture_a.mp4', 'fixture_b.mp4', 'fixture_c.mp4'].map((n) => join(MEDIA_DIR, n));
 const STILL = join(MEDIA_DIR, 'fixture_still.png');
+// Three synced camera angles (same timecode, distinct colour + tone) for the multicam family.
+const CAMS = [1, 2, 3].map((n) => join(MEDIA_DIR, `fixture_cam_${n}.mp4`));
+const MULTICAM_XML = join(SCRATCH_DIR, 'synth', 'fixture-multicam.xml');
+// Premiere ships its own templates; borrowing one is better than authoring a .mogrt, which needs
+// After Effects. It has to be one of the AE-authored [AE] packages: Premiere-native titles (Basic
+// Title and the Titles/Lower Thirds folders) place fine but expose no MGT component, so every
+// MOGRT tool would still report "not a MOGRT". Read-only use — nothing is written into the bundle.
+const MOGRT = process.env.PREMIERE_MCP_FIXTURE_MOGRT
+  || '/Applications/Adobe Premiere Pro 2026/Adobe Premiere Pro 2026.app/Contents/Essential Graphics/[AE] Video Gaming Package/Gaming Lower Third Left.mogrt';
 
 const verifyOnly = process.argv.includes('--verify-only');
 
@@ -47,6 +57,52 @@ for (const p of [...CLIPS, STILL]) {
     console.error(`missing fixture media: ${p}\nGenerate the fixture media with ffmpeg first (see scripts/build-test-fixture.mjs).`);
     process.exit(2);
   }
+}
+
+// The camera angles are generated here rather than by hand, matched to fixture_a's format
+// (1280x720 / 24fps / h264 + mono 44.1k aac) so placing one never raises Clip Mismatch Warning.
+const FFMPEG = process.env.PREMIERE_MCP_FFMPEG_CMD || 'ffmpeg';
+const COLOURS = ['red', 'green', 'blue'];
+CAMS.forEach((cam, i) => {
+  if (existsSync(cam)) return;
+  const r = spawnSync(FFMPEG, [
+    '-y', '-v', 'error',
+    '-f', 'lavfi', '-i', `color=c=${COLOURS[i]}:s=1280x720:r=24:d=6`,
+    '-f', 'lavfi', '-i', `sine=frequency=${300 * (i + 1)}:sample_rate=44100:duration=6`,
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-ac', '1',
+    '-timecode', '01:00:00:00', '-shortest', cam,
+  ], { encoding: 'utf8' });
+  if (r.status !== 0) {
+    console.error(`could not generate ${cam} with ${FFMPEG}: ${r.stderr || r.error}`);
+    process.exit(2);
+  }
+});
+
+// An FCP7 XML holding one 3-angle multiclip. ExtendScript has no call that creates a multicam
+// source sequence, but importing this XML does, silently (measured on 26.5.2): it yields a real
+// multicam project item (isMulticamClip() true) and an edit sequence that already carries it.
+mkdirSync(dirname(MULTICAM_XML), { recursive: true });
+{
+  const rate = '<rate><timebase>24</timebase><ntsc>FALSE</ntsc></rate>';
+  const esc = (v) => v.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const fileEl = (cam, n) => `<file id="file-cam${n}"><name>fixture_cam_${n}.mp4</name>`
+    + `<pathurl>file://localhost${esc(encodeURI(cam))}</pathurl>${rate}<duration>144</duration>`
+    + `<timecode>${rate}<string>01:00:00:00</string><frame>86400</frame><displayformat>NDF</displayformat></timecode>`
+    + `<media><video><samplecharacteristics>${rate}<width>1280</width><height>720</height></samplecharacteristics></video>`
+    + `<audio><samplecharacteristics><depth>16</depth><samplerate>44100</samplerate></samplecharacteristics><channelcount>1</channelcount></audio></media></file>`;
+  const angles = CAMS.map((cam, i) => {
+    const n = i + 1;
+    const active = n === 1 ? '<activevideoangle>TRUE</activevideoangle><activeaudioangle>TRUE</activeaudioangle>' : '';
+    return `<angle><name>CAM ${n}</name>${active}<clip id="cam${n}-clip"><name>fixture_cam_${n}.mp4</name><duration>144</duration>${rate}<in>0</in><out>144</out>`
+      + `<media><video><track><clipitem id="cam${n}-v"><name>fixture_cam_${n}.mp4</name><duration>144</duration>${rate}`
+      + `<start>0</start><end>144</end><in>0</in><out>144</out>${fileEl(cam, n)}</clipitem></track></video></media></clip></angle>`;
+  }).join('');
+  writeFileSync(MULTICAM_XML, `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE xmeml>\n<xmeml version="4">`
+    + `<sequence id="mc-seq"><name>fixture_mc_edit</name><duration>144</duration>${rate}`
+    + `<media><video><format><samplecharacteristics>${rate}<width>1280</width><height>720</height></samplecharacteristics></format>`
+    + `<track><clipitem id="mc-item"><name>fixture_multicam</name><duration>144</duration>${rate}<start>0</start><end>144</end><in>0</in><out>144</out>`
+    + `<multiclip id="mc-1"><name>fixture_multicam</name><collapsed>FALSE</collapsed><synctype>1</synctype>${angles}</multiclip>`
+    + `</clipitem></track></video></media></sequence></xmeml>\n`);
 }
 
 const bridge = new PremiereProBridge();
@@ -122,14 +178,16 @@ const record = (label, detail) => { steps.push({ label, detail }); console.log(`
       if (app.project.sequences.numSequences >= before) { failures.push('sequence count did not drop'); break; }
       removedSeqs++;
     }
-    var guard2 = 0;
-    while (app.project.rootItem.children.numItems > 0 && guard2++ < 200) {
-      var item = app.project.rootItem.children[0];
-      var nm = String(item.name);
-      if (!deleteAnyItem(item)) { failures.push('item ' + nm); break; }
-      if (app.project.rootItem.children.numItems > 0 && String(app.project.rootItem.children[0].name) === nm) {
-        failures.push('item ' + nm + ' survived deletion'); break;
-      }
+    // Skip past an item that will not go rather than stopping at it: stopping left everything
+    // behind it in place too, and those leftovers sorted ahead of the fresh fixture.
+    var guard2 = 0, at = 0;
+    while (at < app.project.rootItem.children.numItems && guard2++ < 400) {
+      var item = app.project.rootItem.children[at];
+      var nm = String(item.name), id = String(item.nodeId);
+      var before2 = app.project.rootItem.children.numItems;
+      deleteAnyItem(item);
+      var still = at < app.project.rootItem.children.numItems && String(app.project.rootItem.children[at].nodeId) === id;
+      if (still || app.project.rootItem.children.numItems >= before2) { failures.push('item ' + nm + ' survived deletion'); at++; continue; }
       removedItems++;
     }
     return JSON.stringify({
@@ -140,6 +198,20 @@ const record = (label, detail) => { steps.push({ label, detail }); console.log(`
     });
   })();`);
   record('wipe', `${r.removedSeqs} sequences, ${r.removedItems} items removed; ${r.remainingItems} items / ${r.remainingSeqs} sequences remain${r.failures.length ? '; FAILURES: ' + r.failures.join(' | ') : ''}`);
+}
+
+// 1b. Ingest off. With Project Settings > Ingest set to "copy", every importFiles() writes a fresh
+//     numbered copy of the media (fixture_a_151.mp4 ...), and the fixture then points at the copy.
+//     A sweep run of set_transcode_on_ingest switched it on once and ~600 copies piled up in
+//     .scratch/media before anyone noticed. The setting lives in the .prproj, so the wipe above does
+//     not clear it.
+{
+  const r = await host('ingest', `(function(){
+    var r = null;
+    try { r = app.project.setEnableTranscodeOnIngest(false); } catch (e) { return JSON.stringify({ ok: false, error: e.toString() }); }
+    return JSON.stringify({ ok: true, result: String(r) });
+  })();`);
+  record('ingest', r.ok ? 'copy/transcode on import disabled' : `could not disable: ${r.error}`);
 }
 
 // 2. Import the synthetic media. importFiles(paths, suppressUI, targetBin, numberedStills).
@@ -321,6 +393,91 @@ writeFileSync(SRT_PATH, [
   '3', '00:00:03,100 --> 00:00:04,000', 'Third fixture caption line.', '',
 ].join('\n'));
 record('srt', SRT_PATH);
+
+// 10b. Camera angles into fixture_bin, so the bin-driven tools (create_sequence_from_bin,
+//      storyboard_bin_to_sequence, create_multicam_source_sequence) have clips to build from.
+//      An empty bin made every one of them refuse — correctly, and on every sweep.
+{
+  const r = await host('cams', `(function(){
+    ${HELPERS}
+    var bin = findRootItemByName('fixture_bin');
+    if (!bin) return JSON.stringify({ ok: false, error: 'fixture_bin missing' });
+    if (bin.children.numItems === 0) app.project.importFiles(${JSON.stringify(CAMS)}, true, bin, false);
+    return JSON.stringify({ ok: true, count: bin.children.numItems });
+  })();`);
+  record('cams', `${r.count} angle clips in fixture_bin`);
+}
+
+// 10c. A real multicam: import the multiclip XML into its own bin. This also creates
+//      fixture_mc_edit, a sequence whose V1 clip is the multicam, for the clip-level multicam tools.
+{
+  const r = await host('multicam', `(function(){
+    ${HELPERS}
+    var bin = findRootItemByName('fixture_multicam_bin');
+    if (!bin) {
+      bin = app.project.rootItem.createBin('fixture_multicam_bin');
+      app.project.importFiles([${JSON.stringify(MULTICAM_XML)}], true, bin, false);
+    }
+    var mc = null;
+    for (var i = 0; i < bin.children.numItems; i++) {
+      try { if (bin.children[i].isMulticamClip()) { mc = bin.children[i]; break; } } catch (e) {}
+    }
+    var edit = null;
+    for (var s = 0; s < app.project.sequences.numSequences; s++) {
+      if (String(app.project.sequences[s].name) === 'fixture_mc_edit') edit = app.project.sequences[s];
+    }
+    return JSON.stringify({ multicam: mc ? String(mc.name) : null, edit: edit ? String(edit.name) : null });
+  })();`);
+  record('multicam', r.multicam ? `multicam item "${r.multicam}", edit sequence ${r.edit}` : 'NOT CREATED — the XML import yielded no multicam item');
+}
+
+// 10d. The SRT as a project item plus a caption track built from it. create_caption_track needs a
+//      caption project item to point at; with none in the project it could only report "not found".
+{
+  const r = await host('captions', `(function(){
+    ${HELPERS}
+    var item = findRootItemByName('fixture-captions.srt');
+    if (!item) {
+      app.project.importFiles([${JSON.stringify(SRT_PATH)}], true, app.project.rootItem, false);
+      item = findRootItemByName('fixture-captions.srt');
+    }
+    if (!item) return JSON.stringify({ ok: false, error: 'SRT import produced no project item' });
+    var made = false;
+    try { made = app.project.activeSequence.createCaptionTrack(item, 0, Sequence.CAPTION_FORMAT_SUBTITLE); } catch (e) {
+      return JSON.stringify({ ok: false, error: 'createCaptionTrack: ' + e.toString() });
+    }
+    return JSON.stringify({ ok: true, made: String(made) });
+  })();`);
+  // There is no caption read API, so "made" is Premiere's own return value, not a readback.
+  record('captions', r.ok ? `SRT imported; createCaptionTrack returned ${r.made}` : `FAILED: ${r.error}`);
+}
+
+// 10e. A MOGRT on V3 so the MOGRT family (set_mogrt_text/param/color, mogrt_params_report) has an
+//      isMGT() clip to address. At 20s, past the V1/V2 content: placed at 0 it spanned the V1 edit
+//      points, and the ripple tools (correctly) refused to ripple V1 under it.
+if (existsSync(MOGRT)) {
+  const r = await host('mogrt', `(function(){
+    var seq = app.project.activeSequence;
+    var v3 = seq.videoTracks[2];
+    for (var i = 0; i < v3.clips.numItems; i++) {
+      if (v3.clips[i].isMGT() && v3.clips[i].getMGTComponent()) return JSON.stringify({ ok: true, already: true, name: String(v3.clips[i].name) });
+    }
+    var t = new Time(); t.seconds = 20;
+    var clip = seq.importMGT(${JSON.stringify(MOGRT)}, t.ticks, 2, 2);
+    return JSON.stringify({ ok: !!(clip && clip.getMGTComponent()), name: clip ? String(clip.name) : null });
+  })();`);
+  record('mogrt', r.ok ? `"${r.name}" on V3${r.already ? ' (already there)' : ''}` : 'NOT USABLE — importMGT returned no clip with an MGT component');
+} else {
+  record('mogrt', `SKIPPED — no template at ${MOGRT} (set PREMIERE_MCP_FIXTURE_MOGRT)`);
+}
+
+// Imports can change the active sequence; every sweep must start on fixture_seq_a.
+await host('reactivate', `(function(){
+  for (var k = 0; k < app.project.sequences.numSequences; k++) {
+    if (String(app.project.sequences[k].name) === 'fixture_seq_a') { app.project.openSequence(app.project.sequences[k].sequenceID); break; }
+  }
+  return JSON.stringify({ active: String(app.project.activeSequence.name) });
+})();`);
 
 // 11. Save, so a crash or a force-quit recovery reopens this exact state rather than replaying
 //     the build. Verified by reading the dirty flag back where the build exposes one.

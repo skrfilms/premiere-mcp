@@ -56,12 +56,21 @@ export async function collectEnvironment({ tools, harness, mode }) {
   };
 }
 
+/**
+ * Strip machine-specific paths from a ledger. Sweep files are committed to a public repo, and a
+ * tool's error text routinely quotes the path it was given — which is the operator's checkout and
+ * home directory. The repo root becomes <repo> and the home directory ~.
+ */
+export function scrubPaths(text) {
+  return text.split(REPO_ROOT).join('<repo>').split(os.homedir()).join('~');
+}
+
 /** Write the sweep file. Returns its absolute path. */
 export function recordSweep({ environment, tools }) {
   mkdirSync(SWEEP_DIR, { recursive: true });
   const stamp = environment.ranAt.replace(/[:]/g, '').replace(/-/g, '');
   const path = join(SWEEP_DIR, `${stamp}-${environment.harness}.json`);
   const sorted = [...tools].sort((a, b) => a.name.localeCompare(b.name));
-  writeFileSync(path, JSON.stringify({ environment, tools: sorted }, null, 2) + '\n');
+  writeFileSync(path, scrubPaths(JSON.stringify({ environment, tools: sorted }, null, 2)) + '\n');
   return path;
 }

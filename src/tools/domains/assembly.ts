@@ -6,8 +6,108 @@
  */
 import { ToolsBase } from './base.js';
 import { TRIM_LIB } from '../trim-lib.js';
+import { runFf } from '../ff-exec.js';
+import { mkdirSync, existsSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 export class AssemblyTools extends ToolsBase {
+  /**
+   * Freeze frame: hold the frame at `time` for `durationSecs`, as an overwrite on the clip's track.
+   *
+   * There is no frame-hold call on 26.5.2 (setFrameHold / freezeFrame do not exist on TrackItem or
+   * the QE clip), so this builds it from parts that are each verified: ffmpeg pulls the SOURCE
+   * frame the clip shows at `time` (mapped through its in point and speed), the PNG is imported
+   * with in/out set to the hold length, and it is overwritten onto the same track at `time`.
+   * Overwrite rather than insert so nothing on other tracks slides out of sync; the clip's tail
+   * after the hold keeps playing from where it would have been.
+   *
+   * Limits, reported rather than hidden: the still is the raw source frame, so effects on the
+   * original clip (Lumetri, Motion) are not carried onto it; reversed or time-remapped clips are
+   * refused because their source time cannot be computed from in point and speed.
+   */
+  protected async freezeFrame(args: any): Promise<any> {
+    const clipId = String(args.clipId ?? args.node_id ?? args.nodeId ?? '');
+    if (!clipId) return { success: false, error: 'freeze_frame requires clipId.' };
+    const at = Number(args.time ?? args.seconds ?? NaN);
+    const hold = Number(args.durationSecs ?? args.duration ?? 2);
+    if (!(hold > 0)) return { success: false, error: 'durationSecs must be greater than 0.' };
+    const seqArg = JSON.stringify(args.sequenceId ?? null);
+    const info: any = await this.bridge.executeScript(`
+      try {
+        var f = __findClip(${JSON.stringify(clipId)}, ${seqArg});
+        if (!f) return JSON.stringify({success:false,error:'Clip not found'});
+        if (f.trackType !== 'video') return JSON.stringify({success:false,error:'freeze_frame needs a video clip.'});
+        var c = f.clip, speed = 1, reversed = false;
+        try { speed = Number(c.getSpeed()); } catch (eS) {}
+        try { reversed = !!c.isSpeedReversed(); } catch (eR) {}
+        var path = '';
+        try { path = String(c.projectItem.getMediaPath()); } catch (eP) {}
+        var projDir = '';
+        try { projDir = String(app.project.path).replace(/[\\/][^\\/]*$/, ''); } catch (eD) {}
+        return JSON.stringify({success:true,start:c.start.seconds,end:c.end.seconds,inPoint:c.inPoint.seconds,speed:speed,reversed:reversed,
+          mediaPath:path,projectDir:projDir,trackIndex:f.trackIndex,sequenceId:String(f.sequenceId),name:String(c.name)});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+    if (!info || info.success === false) return info;
+    const t = Number.isFinite(at) ? at : info.start;
+    if (t < info.start - 1e-6 || t >= info.end) {
+      return { success: false, error: `time ${t}s is outside "${info.name}" (${info.start}s-${info.end}s). Nothing was changed.` };
+    }
+    if (info.reversed || !(info.speed > 0)) {
+      return { success: false, error: `"${info.name}" is reversed or time-remapped, so the source frame at ${t}s cannot be computed. Nothing was changed.` };
+    }
+    if (!info.mediaPath || !existsSync(info.mediaPath)) {
+      return { success: false, error: `The clip's media is not on disk (${info.mediaPath || 'no path'}), so its frame cannot be extracted.` };
+    }
+    const sourceSecs = info.inPoint + (t - info.start) * info.speed;
+    const outDir = join(info.projectDir || dirname(info.mediaPath), 'Freeze Frames');
+    mkdirSync(outDir, { recursive: true });
+    const stamp = sourceSecs.toFixed(3).replace('.', '_');
+    const base = String(info.name).replace(/\.[^.]+$/, '').replace(/[^A-Za-z0-9_-]+/g, '_');
+    const png = join(outDir, `${base}_hold_${stamp}.png`);
+    try {
+      runFf('ffmpeg', ['-v', 'error', '-y', '-ss', String(sourceSecs), '-i', info.mediaPath, '-frames:v', '1', png], { timeoutMs: 60000 });
+    } catch (e: any) {
+      return { success: false, error: `ffmpeg could not extract the frame: ${e.message}` };
+    }
+    if (!existsSync(png)) return { success: false, error: 'ffmpeg ran but wrote no frame.' };
+    return await this.bridge.executeScript(`
+      try {
+        var seq = __findSequence(${JSON.stringify(info.sequenceId)});
+        if (!seq) return JSON.stringify({success:false,error:'Sequence not found'});
+        var png = ${JSON.stringify(png)};
+        var bin = null;
+        for (var b = 0; b < app.project.rootItem.children.numItems; b++) {
+          var ch = app.project.rootItem.children[b];
+          if (ch.type === 2 && String(ch.name) === 'Freeze Frames') { bin = ch; break; }
+        }
+        if (!bin) bin = app.project.rootItem.createBin('Freeze Frames');
+        app.project.importFiles([png], true, bin, false);
+        var still = null, wanted = png.replace(/^.*[\\/]/, '');
+        for (var i = bin.children.numItems - 1; i >= 0; i--) {
+          if (String(bin.children[i].name) === wanted) { still = bin.children[i]; break; }
+        }
+        if (!still) return JSON.stringify({success:false,error:'The frame was extracted but importing it produced no project item.',png:png});
+        still.setInPoint(0, 4);
+        still.setOutPoint(${hold}, 4);
+        var track = seq.videoTracks[${info.trackIndex}];
+        var when = new Time(); when.seconds = ${t};
+        track.overwriteClip(still, when);
+        var landed = null;
+        for (var k = 0; k < track.clips.numItems; k++) {
+          var tc = track.clips[k];
+          if (Math.abs(tc.start.seconds - ${t}) < 0.02 && String(tc.projectItem.nodeId) === String(still.nodeId)) { landed = tc; break; }
+        }
+        if (!landed) return JSON.stringify({success:false,verified:true,error:'The still was imported but did not land at ${t}s on V${info.trackIndex + 1} (locked or untargeted track?).',png:png});
+        var len = landed.end.seconds - landed.start.seconds;
+        return JSON.stringify({success:Math.abs(len - ${hold}) < 0.05,verified:true,verifiedBy:'track item readback',method:'source frame extracted with ffmpeg, overwritten as a still',
+          heldFrameSourceSecs:${sourceSecs},startSecs:landed.start.seconds,endSecs:landed.end.seconds,holdSecs:len,png:png,stillItemId:String(still.nodeId),
+          note:'Effects on the original clip are not carried onto the still.',
+          error: Math.abs(len - ${hold}) < 0.05 ? undefined : 'The hold landed but is ' + len + 's long instead of ${hold}s.'});
+      } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
+    `);
+  }
+
   protected async threePointEdit(projectItemId: string, sourceIn?: string, sourceOut?: string, sequenceTimecode?: string, mode = 'overwrite', videoTrack = 0, _audioTrack = 0): Promise<any> {
     return await this.bridge.executeScript(`
       try {
@@ -19,7 +119,24 @@ export class AssemblyTools extends ToolsBase {
         ${sourceIn ? `app.enableQE(); qe.source.clip.setInPoint(${JSON.stringify(sourceIn)});` : ''}
         ${sourceOut ? `app.enableQE(); qe.source.clip.setOutPoint(${JSON.stringify(sourceOut)});` : ''}
         var seq = app.project.activeSequence;
-        ${sequenceTimecode ? `var t = new Time(); t.seconds = ${JSON.stringify(sequenceTimecode)}; seq.setPlayerPosition(String(t.ticks));` : ''}
+        // sequenceTimecode is a timecode string ("00:00:50:00", ';' for drop-frame) or plain
+        // seconds. It was assigned straight to Time.seconds, which throws "Illegal Parameter type"
+        // for every timecode, so passing one at all made the tool fail.
+        ${sequenceTimecode ? `
+        var tcRaw = ${JSON.stringify(String(sequenceTimecode))};
+        var tcSecs = NaN;
+        if (/^[0-9]+(\.[0-9]+)?$/.test(tcRaw)) {
+          tcSecs = Number(tcRaw);
+        } else {
+          var tcParts = tcRaw.split(/[:;]/);
+          if (tcParts.length === 4) {
+            var tcFps = 254016000000 / Number(seq.timebase);
+            var tcNominal = Math.round(tcFps);
+            tcSecs = Number(tcParts[0]) * 3600 + Number(tcParts[1]) * 60 + Number(tcParts[2]) + Number(tcParts[3]) / tcNominal;
+          }
+        }
+        if (isNaN(tcSecs)) return JSON.stringify({success:false,error:'sequenceTimecode "' + tcRaw + '" is neither HH:MM:SS:FF nor a number of seconds. Nothing was edited.'});
+        var t = new Time(); t.seconds = tcSecs; seq.setPlayerPosition(String(t.ticks));` : ''}
         var destTrack = seq.videoTracks[${videoTrack}];
         if (!destTrack) return JSON.stringify({success:false,error:'Video track ${videoTrack} does not exist on this sequence'});
         var beforeCount = destTrack.clips.numItems;

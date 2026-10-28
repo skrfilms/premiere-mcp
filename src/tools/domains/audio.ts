@@ -106,37 +106,59 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
+  /**
+   * Clip gain through an Amplify effect on the clip.
+   *
+   * True clip gain is not scriptable on 26.5.2 (the audio clip carries only Volume > Bypass/Level,
+   * and QE staticClipGain is read-only: writes are accepted and read back 0). Amplify is the same
+   * pre-fader gain stage, so it is used instead: the first Amplify on the clip is reused, or one is
+   * added through QE. Its Gain parameter is stored normalised, value = (dB + 96) / 144, so 0.6667
+   * is 0 dB and the range is -96..+48 dB. Measured in a render on 2026-10-27: 0.708333 raised the
+   * clip by exactly 6.0 dB.
+   *
+   * The old version searched every component for any parameter whose name contained "gain" and
+   * wrote raw dB into it — which, once an Amplify was present, would have written e.g. 6 into a
+   * 0..1 field.
+   */
   protected async setClipGain(sequenceId: string | undefined, ati: number, ci: number, gainDb: number): Promise<any> {
     return await this.bridge.executeScript(`
       try {
+        var wantDb = Number(${JSON.stringify(gainDb)});
+        if (isNaN(wantDb) || wantDb < -96 || wantDb > 48) return JSON.stringify({success:false,error:'gainDb must be between -96 and +48 dB (the Amplify range). Nothing was changed.'});
         var seq = ${this.buildSeqRes(sequenceId)};
-        var clip = seq.audioTracks[${ati}].clips[${ci}];
+        var track = seq.audioTracks[${ati}];
+        var clip = track ? track.clips[${ci}] : null;
         if (!clip) return JSON.stringify({success:false,error:'Audio clip not found'});
-        var gainProp = null;
-        for (var ci2=0;ci2<clip.components.numItems;ci2++) {
-          var comp = clip.components[ci2];
-          for (var pi=0;pi<comp.properties.numItems;pi++) {
-            var pn = String(comp.properties[pi].displayName).toLowerCase();
-            if (pn.indexOf('gain') >= 0) { gainProp = comp.properties[pi]; break; }
+        function findAmp() {
+          for (var k = 0; k < clip.components.numItems; k++) {
+            if (String(clip.components[k].displayName) === 'Amplify') return clip.components[k];
           }
-          if (gainProp) break;
+          return null;
         }
-        if (!gainProp) return JSON.stringify({success:false,error:'This clip exposes no gain parameter to scripting. On 26.5.2 an audio clip carries only Volume (Bypass, Level); clip gain lives in the Audio Gain dialog, which no script can reach. Nothing was changed.',note:'set_clip_volume sets Volume > Level, which changes loudness the same way for a static offset.'});
-        var before = null; try { before = gainProp.getValue(); } catch(eB) {}
-        var setError = null;
-        try { gainProp.setValue(${gainDb}, true); } catch(eS) { setError = eS.toString(); }
-        var after = null; try { after = gainProp.getValue(); } catch(eA) {}
-        if (after === null) {
-          return JSON.stringify({success:true,verified:false,before:before,gainDb:${gainDb},setError:setError,
-            unverifiedReason:'The gain parameter is not readable after the write on this clip, so the level cannot be confirmed.'});
+        var amp = findAmp(), added = false;
+        if (!amp) {
+          app.enableQE();
+          var qseq = __qeSequenceOpening(seq);
+          var qclip = qseq ? __qeClipByIndex(qseq, 'audio', ${ati}, ${ci}) : null;
+          var eff = qe.project.getAudioEffectByName('Amplify');
+          if (!qclip || !eff) return JSON.stringify({success:false,error:'Could not reach the clip through QE, or the Amplify effect is not installed, so no gain stage could be added.'});
+          qclip.addAudioEffect(eff);
+          amp = findAmp(); added = true;
+          if (!amp) return JSON.stringify({success:false,error:'addAudioEffect(Amplify) created no component on the clip.'});
         }
-        var onTarget = Math.abs(Number(after)-${gainDb}) < 0.1;
-        if (!onTarget) {
-          return JSON.stringify({success:false,verified:true,verifiedBy:'clip gain parameter getValue() readback',changed:Number(before)!==Number(after),before:before,after:after,gainDb:${gainDb},setError:setError,
-            error:'Clip gain reads ' + String(after) + ' dB instead of the requested ${gainDb} dB. Premiere clamps clip gain to roughly -96..+96 dB.'});
+        var gainProp = null;
+        for (var pi = 0; pi < amp.properties.numItems; pi++) {
+          if (String(amp.properties[pi].displayName) === 'Gain') { gainProp = amp.properties[pi]; break; }
         }
-        return JSON.stringify({success:true,verified:true,verifiedBy:'clip gain parameter getValue() readback',changed:Number(before)!==Number(after),before:before,after:after,gainDb:${gainDb},
-          note: Number(before) === Number(after) ? 'The clip was already at this gain; nothing changed.' : undefined});
+        if (!gainProp) return JSON.stringify({success:false,error:'The Amplify effect has no Gain parameter on this build.'});
+        var beforeDb = Number(gainProp.getValue()) * 144 - 96;
+        gainProp.setValue((wantDb + 96) / 144, true);
+        var afterDb = Number(gainProp.getValue()) * 144 - 96;
+        if (Math.abs(afterDb - wantDb) > 0.05) {
+          return JSON.stringify({success:false,verified:true,verifiedBy:'Amplify Gain readback',before:beforeDb,after:afterDb,gainDb:wantDb,error:'Amplify Gain reads ' + afterDb.toFixed(2) + ' dB instead of the requested ' + wantDb + ' dB.'});
+        }
+        return JSON.stringify({success:true,verified:true,verifiedBy:'Amplify Gain readback (render-checked mapping)',method:'Amplify effect',addedAmplify:added,beforeDb:Math.round(beforeDb*100)/100,afterDb:Math.round(afterDb*100)/100,gainDb:wantDb,
+          note:'Applied as an Amplify effect, the scriptable equivalent of clip gain; the Audio Gain dialog value itself is not reachable from script.'});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
@@ -1308,6 +1330,15 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
+  /**
+   * Fill [gapStart, gapStart + gapDuration) on one audio track with room tone, and nothing else.
+   *
+   * The old version overwrote the whole project item at gapStart: an A/V source dropped its VIDEO
+   * onto V1 as well (it replaced the fixture's first clip in a live sweep), the gap length was
+   * ignored so the tone ran on over whatever followed, and an occupied "gap" was overwritten
+   * without a word. Now: refuse unless the span is empty on that track, then lay audio-only
+   * subclips cut to fit, looping the source when the gap is longer than the media.
+   */
   protected async fillRoomTone(seqId: string|undefined, trackIndex: number, gapStart: number, gapDuration: number, roomToneItemId: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
@@ -1316,9 +1347,44 @@ export class AudioTools extends ExportRenderTools {
         if (!item) return JSON.stringify({success:false,error:'Room tone item not found'});
         var track = seq.audioTracks[${trackIndex}];
         if (!track) return JSON.stringify({success:false,error:'Audio track not found'});
-        var t = new Time(); t.seconds = ${gapStart};
-        track.overwriteClip(item, t);
-        return JSON.stringify({success:true,gapStartSecs:${gapStart},gapDurationSecs:${gapDuration},roomToneItem:String(item.name)});
+        var gs = ${Number(gapStart)}, gd = ${Number(gapDuration)}, ge = gs + gd;
+        if (!(gd > 0)) return JSON.stringify({success:false,error:'gapDurationSecs must be greater than 0.'});
+        for (var c = 0; c < track.clips.numItems; c++) {
+          var cl = track.clips[c];
+          if (cl.start.seconds < ge - 0.0005 && cl.end.seconds > gs + 0.0005) {
+            return JSON.stringify({success:false,verified:true,error:'A' + (${trackIndex} + 1) + ' is not empty between ' + gs + 's and ' + ge + 's: "' + String(cl.name) + '" covers ' + cl.start.seconds + 's-' + cl.end.seconds + 's. Nothing was placed.'});
+          }
+        }
+        // Real media length, not the bin out point (which is a mark).
+        var mediaSecs = NaN;
+        try {
+          var md = String(item.getProjectMetadata());
+          var m = /<premierePrivateProjectMetaData:Column\.Intrinsic\.MediaDuration>([^<]*)</.exec(md);
+          if (m) { var tc = m[1].split(/[:;]/); if (tc.length === 4) mediaSecs = Number(tc[0])*3600 + Number(tc[1])*60 + Number(tc[2]) + Number(tc[3]) / Math.round(254016000000 / Number(seq.timebase)); }
+        } catch (eMd) {}
+        if (!(mediaSecs > 0)) { try { mediaSecs = item.getOutPoint().seconds - item.getInPoint().seconds; } catch (eIo) {} }
+        if (!(mediaSecs > 0)) return JSON.stringify({success:false,error:'Could not read the room tone media length.'});
+        var placed = [], at = gs, guard = 0;
+        while (at < ge - 0.0005 && guard++ < 200) {
+          var len = Math.min(mediaSecs, ge - at);
+          // (name, start, end, hardBoundaries, takeVideo, takeAudio): audio only.
+          var sub = item.createSubClip(String(item.name) + ' room tone', __secondsToTicks(0), __secondsToTicks(len), 1, 0, 1);
+          if (!sub) return JSON.stringify({success:false,error:'createSubClip() returned nothing; placed ' + placed.length + ' piece(s) before stopping.',placed:placed});
+          var t = new Time(); t.seconds = at;
+          track.overwriteClip(sub, t);
+          placed.push({atSecs: at, lengthSecs: len});
+          at += len;
+        }
+        // Read back: the span should now be covered on this track and by nothing else new.
+        var covered = 0;
+        for (var r = 0; r < track.clips.numItems; r++) {
+          var rc = track.clips[r];
+          var s0 = Math.max(gs, rc.start.seconds), e0 = Math.min(ge, rc.end.seconds);
+          if (e0 > s0) covered += e0 - s0;
+        }
+        var ok = Math.abs(covered - gd) < 0.05;
+        return JSON.stringify({success:ok,verified:true,verifiedBy:'audio track coverage readback',gapStartSecs:gs,gapDurationSecs:gd,coveredSecs:covered,pieces:placed.length,looped:placed.length > 1,roomToneItem:String(item.name),
+          error: ok ? undefined : 'Room tone was placed but covers ' + covered + 's of the ' + gd + 's gap.'});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }

@@ -3121,7 +3121,25 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           if (!args.clipId && !args.node_id && !args.nodeId) return fail(toolName + " requires clipId.");
           var transformClip = findClip(args.clipId || args.node_id || args.nodeId);
           if (!transformClip) return fail(pendingSequenceError || "Clip not found");
-          var componentName = (toolName === "set_clip_volume" || toolName === "set_clip_pan") ? "Volume" : "Motion";
+          // Pan lives on the QE clip's pan component, not the DOM Volume component (which carries
+          // only Bypass + Level on 26.5.2). setParamValue takes the value as a STRING — a number
+          // raises "Illegal Parameter type". Verified in a render on 2026-10-27: Pan "-100" on every
+          // audio clip left the right channel at -91 dB.
+          if (toolName === "set_clip_pan") {
+            var panQe = qeClipForClip(transformClip);
+            var panComp = null;
+            try { panComp = panQe && panQe.getClipPanComponent ? panQe.getClipPanComponent() : null; } catch (ePc) {}
+            if (!panComp) return fail("This clip has no QE pan component (is it an audio clip?). Pan applies to audio track items.");
+            var panRaw = typeof args.pan !== "undefined" ? args.pan : args.value;
+            var panWanted = Number(typeof panRaw === "undefined" ? 0 : panRaw);
+            if (isNaN(panWanted) || panWanted < -100 || panWanted > 100) return fail("pan must be a number from -100 (full left) to 100 (full right).");
+            var panBefore = Number(panComp.getParamValue("Pan"));
+            panComp.setParamValue("Pan", String(panWanted));
+            var panAfter = Number(panComp.getParamValue("Pan"));
+            if (Math.abs(panAfter - panWanted) > 0.01) return fail("Pan reads back " + panAfter + " after being set to " + panWanted + ".", { before: panBefore, after: panAfter });
+            return ok({ component: "QE clip pan", property: "Pan", before: panBefore, after: panAfter, verified: true, verifiedBy: "QE getParamValue readback" });
+          }
+          var componentName = toolName === "set_clip_volume" ? "Volume" : "Motion";
           if (toolName === "set_clip_opacity") componentName = "Opacity";
           var transformComponent = findComponent(transformClip.clip, componentName);
           if (!transformComponent && toolName === "set_clip_volume") {
@@ -3130,11 +3148,6 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
             var volumeBefore = Number(volumeQeClip.staticClipGain);
             volumeQeClip.staticClipGain = Number(args.amount || args.volume || args.value || 0);
             return ok({ component: "QE", property: "staticClipGain", before: volumeBefore, after: Number(volumeQeClip.staticClipGain) });
-          }
-          if (!transformComponent && toolName === "set_clip_pan") {
-            var requestedPan = Number(args.pan || args.value || 0);
-            if (requestedPan === 0) return ok({ component: "QE", property: "pan", changed: false, value: 0, note: "No pan API is exposed; requested centered pan is already the neutral state." });
-            return fail("Volume component not found and no pan API is exposed for this clip");
           }
           if (!transformComponent) return fail(componentName + " component not found");
           var transformMap = {

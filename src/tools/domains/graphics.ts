@@ -192,6 +192,9 @@ export class GraphicsTools extends SpeedTimeTools {
 
   // Text and Graphics Implementation
   protected async addTextOverlay(args: any): Promise<any> {
+    if (!args.mogrtPath && process.env.PREMIERE_MCP_DEFAULT_MOGRT) {
+      args = { ...args, mogrtPath: process.env.PREMIERE_MCP_DEFAULT_MOGRT };
+    }
     if (args.mogrtPath) {
       // FIX vs upstream: upstream silently ignored args.text; the MOGRT was imported but
       // its text properties stayed at default placeholders ("Su nombre aquí", etc.)
@@ -576,7 +579,7 @@ export class GraphicsTools extends SpeedTimeTools {
         if (!sequence) return JSON.stringify({ success: false, error: "Sequence not found" });
         return JSON.stringify({
           success: false,
-          error: "Text overlay requires a MOGRT file path. Use the mogrtPath parameter with a .mogrt template file, or use import_mogrt tool.",
+          error: "Text overlay requires a MOGRT file path. Pass mogrtPath, or set PREMIERE_MCP_DEFAULT_MOGRT in the server environment. The template must be After Effects-authored (Premiere ships some under Essential Graphics/[AE] Video Gaming Package and [AE] Sports Package): Premiere-native titles such as Basic Title expose no scriptable text, so their text cannot be set.",
           note: "Legacy titles (app.project.createNewTitle) are not supported in current Premiere Pro ExtendScript API."
         });
       } catch (e) {

@@ -1,0 +1,24 @@
+{
+  "id": "com.premiere-mcp.uxp-probe",
+  "name": "MCP UXP Probe",
+  "version": "0.1.0",
+  "main": "index.html",
+  "host": {
+    "app": "premierepro",
+    "minVersion": "25.6.0"
+  },
+  "manifestVersion": 5,
+  "entrypoints": [
+    {
+      "type": "panel",
+      "id": "uxpProbePanel",
+      "label": { "default": "MCP UXP Probe" },
+      "minimumSize": { "width": 230, "height": 120 },
+      "preferredDockedSize": { "width": 260, "height": 160 }
+    }
+  ],
+  "requiredPermissions": {
+    "localFileSystem": "fullAccess",
+    "allowCodeGenerationFromStrings": true
+  }
+}
