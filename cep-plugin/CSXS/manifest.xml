@@ -2,6 +2,7 @@
 <ExtensionManifest Version="10.0" ExtensionBundleId="com.mcp.premiere.cepbridge" ExtensionBundleVersion="1.1.6" ExtensionBundleName="MCP Bridge (CEP)">
   <ExtensionList>
     <Extension Id="com.mcp.premiere.cepbridge.panel" Version="1.1.6"/>
+    <Extension Id="com.mcp.premiere.cepbridge.background" Version="1.1.6"/>
   </ExtensionList>
   <ExecutionEnvironment>
     <HostList>
@@ -45,6 +46,30 @@
             </MaxSize>
           </Geometry>
           <Icons/>
+        </UI>
+      </DispatchInfo>
+    </Extension>
+    <!-- The invisible bridge: started by Premiere at launch, no UI, same code as the panel. -->
+    <Extension Id="com.mcp.premiere.cepbridge.background">
+      <DispatchInfo>
+        <Resources>
+          <MainPath>./background.html</MainPath>
+          <CEFCommandLine>
+            <Parameter>--enable-nodejs</Parameter>
+            <Parameter>--mixed-context</Parameter>
+          </CEFCommandLine>
+        </Resources>
+        <Lifecycle>
+          <AutoVisible>false</AutoVisible>
+          <StartOn>
+            <Event>com.adobe.csxs.events.ApplicationActivate</Event>
+          </StartOn>
+        </Lifecycle>
+        <UI>
+          <Type>Custom</Type>
+          <Geometry>
+            <Size><Height>1</Height><Width>1</Width></Size>
+          </Geometry>
         </UI>
       </DispatchInfo>
     </Extension>

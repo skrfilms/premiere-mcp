@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<!--
+  The invisible bridge. Premiere starts this extension at launch (CSXS/manifest.xml, StartOn
+  ApplicationActivate), so the MCP connection works without opening any panel. It runs the same
+  bridge-cep.js as the panel; the lease in bridge-owner.json makes sure only one of them executes
+  commands. It does nothing while "Run in background" is off in the panel.
+-->
+<script>window.MCP_BRIDGE_ROLE = 'background';</script>
+<script src="CSInterface.js"></script>
+<script src="bridge-cep.js"></script>
+</head>
+<body></body>
+</html>

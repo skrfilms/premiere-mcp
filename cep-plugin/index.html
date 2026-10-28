@@ -325,6 +325,9 @@ h1,h2,p,dl,dd,dt{margin:0}
   .stat-copy h1{font-size:22px}
 }
 .pane[hidden]{display:none}
+.bg-toggle{display:flex;gap:9px;align-items:flex-start;margin:10px 0 2px;font-size:12px;color:var(--ink-1, #eee);cursor:pointer}
+.bg-toggle input{margin-top:2px;accent-color:var(--accent, #f0a040)}
+.bg-toggle .dim{color:var(--ink-3, #999);font-size:11px}
 
 button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
@@ -364,6 +367,11 @@ button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline
       <div class="fact"><dt>Last round trip</dt><dd class="mono dim" id="fRtt">—</dd></div>
       <div class="fact"><dt>Heartbeat</dt><dd class="dim" id="fBeat">—</dd></div>
     </dl>
+
+    <label class="bg-toggle">
+      <input type="checkbox" id="bgToggle" checked onchange="setRunInBackground(this.checked)">
+      <span><b>Run in background</b><br><span class="dim">Keeps the bridge running with this panel closed.</span></span>
+    </label>
 
     <div class="act">
       <button class="btn" id="startButton" type="button" onclick="startBridge()">

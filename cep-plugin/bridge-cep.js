@@ -224,6 +224,19 @@
         return path.join(configDir, 'config.json');
     }
 
+    /** Settings shared by the panel and the background bridge (same file the panel already uses). */
+    function readSettings() {
+        try { return JSON.parse(fs.readFileSync(getPanelConfigPath(), 'utf8')) || {}; } catch (e) { return {}; }
+    }
+    function writeSettings(patch) {
+        var next = readSettings();
+        for (var k in patch) if (Object.prototype.hasOwnProperty.call(patch, k)) next[k] = patch[k];
+        fs.writeFileSync(getPanelConfigPath(), JSON.stringify(next, null, 2));
+        return next;
+    }
+    /** Background is the default: absent means on. */
+    function backgroundEnabled() { return readSettings().runInBackground !== false; }
+
     function ensureDirectory(dirPath) {
         if (!dirPath) return null;
         var resolvedPath = path.resolve(dirPath);
@@ -296,8 +309,126 @@
         this.lastProjectName = null;     // project name from that round trip
         this.lastHeartbeatAt = null;     // ts of the last heartbeat we successfully wrote
         this.csInterface = new CSInterface();
+        // ONE BRIDGE AT A TIME. The same code runs as the visible panel and as an invisible
+        // extension Premiere starts at launch (background.html). Whichever holds a fresh lease in
+        // bridge-owner.json executes commands and writes the heartbeat; the other stands by, so a
+        // command can never run twice. The background copy is preferred while "Run in background"
+        // is on; if it dies, the panel takes over once the lease goes stale.
+        this.role = (typeof window !== 'undefined' && window.MCP_BRIDGE_ROLE) || 'panel';
+        this.headless = this.role === 'background';
+        this.instanceId = this.role + '-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+        this.active = false;
+        this.leaseTakenAt = 0;
         this.init();
     }
+
+    var LEASE_FILE = 'bridge-owner.json';
+    var LEASE_STALE_MS = 3000;
+    // A new holder waits one more tick before acting, so if two instances grabbed a stale lease in
+    // the same instant, the one whose write lost sees it on re-read and stands down unharmed.
+    var LEASE_CONFIRM_MS = 300;
+
+    MCPPremiereBridge.prototype.readLease = function() {
+        try {
+            var dir = this.getTempDirectory();
+            return dir ? JSON.parse(fs.readFileSync(path.join(dir, LEASE_FILE), 'utf8')) : null;
+        } catch (e) { return null; }
+    };
+
+    MCPPremiereBridge.prototype.writeLease = function() {
+        try {
+            var dir = this.getTempDirectory();
+            if (!dir) return;
+            var file = path.join(dir, LEASE_FILE);
+            fs.writeFileSync(file + '.part', JSON.stringify({ id: this.instanceId, role: this.role, ts: Date.now(), busy: this.isProcessing === true }));
+            fs.renameSync(file + '.part', file);
+        } catch (e) {}
+    };
+
+    MCPPremiereBridge.prototype.releaseLease = function() {
+        var lease = this.readLease();
+        if (lease && lease.id === this.instanceId) {
+            try { fs.unlinkSync(path.join(this.getTempDirectory(), LEASE_FILE)); } catch (e) {}
+        }
+    };
+
+    /** Decide, each tick, whether this instance is the one that runs. */
+    MCPPremiereBridge.prototype.updateRole = function() {
+        var wantRun = this.headless ? backgroundEnabled() : this.panelAutoStart !== false;
+        if (!wantRun) {
+            this.releaseLease();
+            this.setActive(false);
+            return;
+        }
+        var now = Date.now();
+        var lease = this.readLease();
+        var mine = lease && lease.id === this.instanceId;
+        var fresh = lease && (now - Number(lease.ts)) < LEASE_STALE_MS;
+        if (mine) {
+            this.writeLease();
+            // Do not activate while the previous holder is still finishing a command: its command
+            // file is still in the directory, and picking it up here would run it twice.
+            if (!this.active && now - this.leaseTakenAt >= LEASE_CONFIRM_MS && !this.otherInstanceBusy()) this.setActive(true);
+            return;
+        }
+        // Take the lease when it is free or stale, or (background only) from an idle panel when
+        // the toggle has just been turned on. Never from a holder that is mid-command: its
+        // command file is still in the directory and would be picked up a second time.
+        var takeover = !fresh || (this.headless && lease.role === 'panel' && !lease.busy);
+        if (takeover) {
+            this.writeLease();
+            this.leaseTakenAt = now;
+            return;
+        }
+        this.setActive(false);
+    };
+
+    /** True while a heartbeat from ANOTHER instance says a host command is still running. */
+    MCPPremiereBridge.prototype.otherInstanceBusy = function() {
+        try {
+            var hb = JSON.parse(fs.readFileSync(path.join(this.getTempDirectory(), 'bridge-heartbeat.json'), 'utf8'));
+            return hb.owner !== this.instanceId && hb.isProcessing === true && (Date.now() - Number(hb.ts)) < LEASE_STALE_MS;
+        } catch (e) { return false; }
+    };
+
+    MCPPremiereBridge.prototype.setActive = function(on) {
+        if (on === this.active) return;
+        this.active = on;
+        try { var factsEl = document.querySelector('.facts'); if (factsEl) factsEl.style.display = on ? '' : 'none'; } catch (eF2) {}
+        if (on) {
+            this.log('This ' + this.role + ' bridge is now handling commands.', 'info');
+            this.startBridge();
+        } else if (this.isConnected) {
+            // Standing down stops new pickups only; an outstanding host script finishes and its
+            // response is still written by the callback that owns it.
+            this.isConnected = false;
+            this.disconnectSocket();
+            this.updateUI();
+        }
+    };
+
+    /** Panel only: while the background bridge holds the lease, show its state, not ours. */
+    MCPPremiereBridge.prototype.updateStandbyUI = function() {
+        if (this.headless) return;
+        var hb = null;
+        try { hb = JSON.parse(fs.readFileSync(path.join(this.getTempDirectory(), 'bridge-heartbeat.json'), 'utf8')); } catch (e) {}
+        var alive = hb && (Date.now() - Number(hb.ts)) < LEASE_STALE_MS;
+        var dot = document.getElementById('connectionStatus');
+        var text = document.getElementById('connectionText');
+        var host = document.getElementById('serverText');
+        var hostDot = document.getElementById('serverStatus');
+        // The facts (project, channel, round trip, heartbeat) belong to the instance doing the work;
+        // a standing-by panel has none of its own, so it hides them rather than showing dashes.
+        try { var facts = document.querySelector('.facts'); if (facts) facts.style.display = 'none'; } catch (eF) {}
+        if (dot) dot.className = 'status-dot ' + (alive ? 'connected' : 'disconnected');
+        if (text) text.textContent = alive ? 'Connected' : 'Starting…';
+        if (hostDot) hostDot.className = 'status-dot ' + (alive ? 'connected' : 'disconnected');
+        if (host) host.textContent = alive ? 'Running in the background' : 'Waiting for the background bridge';
+        var startBtn = document.getElementById('startButton');
+        var stopBtn = document.getElementById('stopButton');
+        if (startBtn) startBtn.disabled = true;
+        if (stopBtn) stopBtn.disabled = true;
+    };
 
     MCPPremiereBridge.prototype.normalizeHostEnvironment = function(hostEnv) {
         if (!hostEnv) return null;
@@ -338,19 +469,28 @@
             }
         } catch (storageError) { /* localStorage unavailable: keep the default */ }
 
-        if (autoStart) {
-            var self = this;
-            setTimeout(function() {
-                try {
-                    if (!self.isConnected) {
-                        self.log('Auto-starting bridge on panel open...', 'info');
-                        self.startBridge();
-                    }
-                } catch (e) {
-                    self.log('Auto-start failed, use Start Bridge manually: ' + e.message, 'warning');
-                }
-            }, 500);
+        // Starting is now decided by the lease in pollTick (updateRole), so a panel opened while
+        // the background bridge runs stands by instead of starting a second bridge.
+        this.panelAutoStart = autoStart;
+        this.syncBackgroundToggle();
+        var selfUnload = this;
+        try { window.addEventListener('unload', function() { selfUnload.releaseLease(); }); } catch (eUnload) {}
+    };
+
+    MCPPremiereBridge.prototype.syncBackgroundToggle = function() {
+        var t = document.getElementById('bgToggle');
+        if (t) t.checked = backgroundEnabled();
+    };
+
+    MCPPremiereBridge.prototype.setRunInBackground = function(on) {
+        try {
+            writeSettings({ runInBackground: !!on });
+            this.log(on ? 'Run in background: on. The bridge keeps running with this panel closed.'
+                        : 'Run in background: off. The bridge runs only while this panel is open.', 'info');
+        } catch (e) {
+            this.log('Could not save the background setting: ' + e.message, 'error');
         }
+        this.syncBackgroundToggle();
     };
 
     MCPPremiereBridge.prototype.getTempDirectory = function() {
@@ -716,7 +856,9 @@
                 isProcessing: this.isProcessing === true,
                 currentCommandId: this.currentCommandId || null,
                 currentCommandStartedAt: this.currentCommandStartedAt || null,
-                queueLength: this.commandQueue ? this.commandQueue.length : 0
+                queueLength: this.commandQueue ? this.commandQueue.length : 0,
+                owner: this.instanceId,
+                role: this.role
             };
             var hbFile = path.join(tempPath, 'bridge-heartbeat.json');
             var staging = hbFile + '.part';
@@ -1008,6 +1150,14 @@
         // The FILE heartbeat is kept whatever the socket is doing, because it is the only
         // liveness signal that survives the socket being down — which is exactly when the
         // question "is the panel alive?" gets asked.
+        this.updateRole();
+        if (!this.active) {
+            // Standing down mid-command: keep beating "busy" until the host script returns, so the
+            // new holder waits instead of re-reading the same command file.
+            if (this.isProcessing) this.writeHeartbeat();
+            this.updateStandbyUI();
+            return;
+        }
         this.writeHeartbeat();
         // Refresh the live status pane on the same 250ms cadence: the meter's elapsed
         // time and the heartbeat-age fact are both wall-clock and must keep ticking.
@@ -1163,7 +1313,8 @@
             }
             if (tempEl) tempEl.value = this.tempDirectory;
             fs.writeFileSync(path.join(ensuredTempDir, 'config.json'), JSON.stringify({ tempDirectory: this.tempDirectory }, null, 2));
-            fs.writeFileSync(getPanelConfigPath(), JSON.stringify({ tempDirectory: this.tempDirectory }, null, 2));
+            // Merged, not overwritten: the same file carries runInBackground.
+            writeSettings({ tempDirectory: this.tempDirectory });
             this.log('Configuration saved', 'info');
         } catch (e) {
             this.log('Error saving config: ' + e.message, 'error');
@@ -1566,6 +1717,7 @@
     window.runDiagnostics = function() { if (window.bridge) window.bridge.runDiagnostics(); };
     window.saveConfig = function() { if (window.bridge) window.bridge.saveConfig(); };
     window.clearLog = function() { if (window.bridge) window.bridge.clearLog(); };
+    window.setRunInBackground = function(on) { if (window.bridge) window.bridge.setRunInBackground(on); };
     document.addEventListener('DOMContentLoaded', function() {
         window.bridge = new MCPPremiereBridge();
     });
