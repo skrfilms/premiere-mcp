@@ -365,7 +365,7 @@ export class PlaybackTools extends SequenceTrackTools {
         if (!s) return { found: false };
         const r = ppro.WorkAreaUtils.setWorkAreaInOutPoints(s, ppro.TickTime.createWithSeconds(${Number(inPoint)}), ppro.TickTime.createWithSeconds(${Number(outPoint)}));
         return { found: true, set: r && r.then ? await r : r, guid: String(s.guid) };
-      `);
+      `, 20000, 'Set work area');
       if (u.ok && u.result?.found) {
         const rb: any = await this.bridge.executeScript(`
           try {
