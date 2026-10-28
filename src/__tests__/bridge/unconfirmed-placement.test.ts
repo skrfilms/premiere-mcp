@@ -209,7 +209,7 @@ describe('bins that do not resolve', () => {
     await tools.executeTool('import_folder', { folderPath: '/tmp/x', binName: 'SC008_0710' });
     const script = bridge.executeScript.mock.calls[0][0] as string;
 
-    expect(script).toContain('__resolveBin(');
+    expect(script).toContain('__resolveImportBin(');
     expect(script).not.toContain('function __binByName(');
   });
 
@@ -217,7 +217,7 @@ describe('bins that do not resolve', () => {
     await tools.executeTool('import_folder', { folderPath: '/tmp/x', binId: '000f62fa' });
     const script = bridge.executeScript.mock.calls[0][0] as string;
 
-    expect(script).toContain('__resolveBin("000f62fa", null)');
+    expect(script).toContain('__resolveImportBin("000f62fa", null)');
   });
 
   it('import_media targets the resolved bin instead of hardcoding the project root', async () => {
@@ -230,7 +230,7 @@ describe('bins that do not resolve', () => {
     await realBridge.importMedia('/tmp/a.mp4', undefined, '000f62fa');
     const script = spy.mock.calls[0]![0] as string;
 
-    expect(script).toContain('__resolveBin("000f62fa", null)');
+    expect(script).toContain('__resolveImportBin("000f62fa", null)');
     expect(script).toContain('importFiles([file.fsName], true, __destBin, false)');
     expect(script).not.toContain('importFiles([file.fsName], true, app.project.rootItem, false)');
   });
@@ -322,7 +322,7 @@ describe('bins are resolved by walking, not by string key', () => {
     await tools.executeTool('import_folder', { folderPath: '/tmp/x', binName: 'Footage' });
     const script = bridge.executeScript.mock.calls[0][0] as string;
 
-    expect(script).toContain('__resolveBin(null, "Footage")');
+    expect(script).toContain('__resolveImportBin(null, "Footage")');
     // Assert on the EMITTED script, not the template. `${JSON.stringify(` never
     // survives emission, so a not.toContain on it can never fail -- the same
     // source-versus-emitted confusion this change exists to fix.
@@ -337,11 +337,14 @@ describe('bins are resolved by walking, not by string key', () => {
     await realBridge.importMedia('/tmp/a.mp4', 'Footage');
     const emittedScript = spy.mock.calls[0]![0] as string;
 
-    expect(emittedScript).toContain('__resolveBin(null, "Footage")');
+    expect(emittedScript).toContain('__resolveImportBin(null, "Footage")');
     // The prelude is prepended by executeScript, so it is not in the spied
     // argument; assert the helper text itself off the exported prelude.
     const { EXTENDSCRIPT_HELPERS } = await import('../../bridge/index.js');
     expect(EXTENDSCRIPT_HELPERS).toContain('function __resolveBin(');
+    // Import destinations go through __resolveImportBin, which is __resolveBin plus creating a
+    // missing named bin; it must still defer to __resolveBin for everything it does not create.
+    expect(EXTENDSCRIPT_HELPERS).toContain('var r = __resolveBin(binId, binName);');
     expect(EXTENDSCRIPT_HELPERS).toContain('__binsByNameDeep(root, binName, [])');
     expect(EXTENDSCRIPT_HELPERS).toContain('is ambiguous (');
   });

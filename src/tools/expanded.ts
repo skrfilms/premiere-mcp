@@ -2963,8 +2963,36 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           var replaceItem = findItem(args.projectItemId || args.itemId || args.item_id);
           if (!replaceItem) return fail("Project item not found");
           if (!replaceItem.canChangeMediaPath || !replaceItem.canChangeMediaPath()) return fail("Project item cannot change media path");
-          replaceItem.changeMediaPath(String(args.newFilePath || args.filePath || args.path || ""), Boolean(args.overrideChecks !== false));
-          return ok({ replaced: true, item: replaceItem.name, newFilePath: String(args.newFilePath || args.filePath || args.path || "") });
+          var replaceNewPath = String(args.newFilePath || args.filePath || args.path || "");
+          var replaceOldPath = ""; try { replaceOldPath = String(replaceItem.getMediaPath()); } catch (replaceOldPathError) {}
+          var replaceOldName = String(replaceItem.name);
+          replaceItem.changeMediaPath(replaceNewPath, Boolean(args.overrideChecks !== false));
+          var replaceNowPath = ""; try { replaceNowPath = String(replaceItem.getMediaPath()); } catch (replaceNowPathError) {}
+          if (replaceNowPath.replace(/\\\\/g, "/") !== replaceNewPath.replace(/\\\\/g, "/")) return fail("changeMediaPath() ran but the item still points at " + replaceNowPath, { item: replaceOldName });
+          // A bin item still NAMED "SH020_comp_v001.mp4" while it plays v002 misleads everyone who
+          // looks at the bin, so an item that carried its old file name takes the new one. A name
+          // someone chose by hand is left alone.
+          var replaceRenamed = false;
+          var replaceOldFile = replaceOldPath.replace(/^.*[\\\\\\/]/, ""), replaceNewFile = replaceNewPath.replace(/^.*[\\\\\\/]/, "");
+          if (replaceOldFile && replaceOldName === replaceOldFile && replaceNewFile && replaceNewFile !== replaceOldName) { try { replaceItem.name = replaceNewFile; replaceRenamed = true; } catch (replaceRenameError) {} }
+          // Timeline clips carry their own name, copied from the item when they were cut in; the
+          // ones still showing the old file name would read "v001" on the timeline while playing v002.
+          var replaceClipsRenamed = 0;
+          if (replaceOldFile && replaceNewFile && replaceNewFile !== replaceOldFile) {
+            for (var rs = 0; rs < app.project.sequences.numSequences; rs++) {
+              var rseq = app.project.sequences[rs];
+              var rkinds = [rseq.videoTracks, rseq.audioTracks];
+              for (var rk = 0; rk < 2; rk++) for (var rt = 0; rt < rkinds[rk].numTracks; rt++) {
+                var rtr = rkinds[rk][rt];
+                for (var rc = 0; rc < rtr.clips.numItems; rc++) {
+                  var rclip = rtr.clips[rc];
+                  try { if (rclip.projectItem && String(rclip.projectItem.nodeId) === String(replaceItem.nodeId) && String(rclip.name) === replaceOldFile) { rclip.name = replaceNewFile; replaceClipsRenamed++; } } catch (replaceClipNameError) {}
+                }
+              }
+            }
+          }
+          return ok({ replaced: true, verified: true, verifiedBy: "getMediaPath() readback", item: String(replaceItem.name), previousName: replaceOldName, renamed: replaceRenamed, timelineClipsRenamed: replaceClipsRenamed, newFilePath: replaceNewPath,
+            note: "Every use of this project item in every sequence now plays the new media; timeline clips, trims and effects are unchanged. Premiere loads the new file asynchronously, so a frame rendered in the first second or so can come back black." });
 
         case "batch_apply_effect":
           var seqErr = sequenceRequestError();
