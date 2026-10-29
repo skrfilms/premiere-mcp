@@ -4,6 +4,14 @@ All notable changes are documented here. Releases use semantic versioning.
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-10-29
+
+Premiere MCP that teammates can install with one double-click, that works with no panel open,
+and that is safe to drive under timeouts: retries do not apply an edit twice, a whole call can be
+undone, hand edits in Premiere are noticed, and replies are sized to fit. New editor workflows
+(version up every shot, remove silence, sync by audio, stringout from a transcript) each come
+with a live workflow test; all nine pass on Premiere Pro 26.5.2.
+
 ### Added: safe retries and editor workflows
 
 - **"Did my last call run?"** Every call is journaled; `get_recent_calls` shows what ran,
