@@ -11,6 +11,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { promises as fs } from 'fs';
 import { extname, join } from 'path';
 import { createSecureTempDir, validateFilePath } from '../utils/security.js';
+import { currentEnv, sharedBridgeDir } from '../setup/setup.js';
 import type { PremiereProTransport } from './types.js';
 import {
   BridgeSocketTransport,
@@ -1109,10 +1110,15 @@ export class PremiereProBridge implements PremiereProTransport {
     const preference = (process.env.PREMIERE_MCP_TRANSPORT || 'auto').trim().toLowerCase();
     this.transportPreference =
       preference === 'file' || preference === 'socket' ? preference : 'auto';
-    // Use PREMIERE_TEMP_DIR if set (same path as UXP plugin "Temp Directory"), else session-specific
+    // PREMIERE_TEMP_DIR if set; else the folder the bridge in Premiere watches by default (its saved
+    // choice, else /tmp/premiere-mcp-bridge). A per-session folder here meant a server started
+    // without the variable never met the background bridge, and every call timed out.
+    // PREMIERE_MCP_SESSION_TEMP=1 keeps the old private per-session folder.
     const envDir = process.env.PREMIERE_TEMP_DIR;
-    this.usesExternalTempDir = Boolean(envDir);
-    this.tempDir = envDir ? envDir.replace(/\/$/, '') : createSecureTempDir(this.sessionId);
+    this.usesExternalTempDir = Boolean(envDir) || process.env.PREMIERE_MCP_SESSION_TEMP !== '1';
+    this.tempDir = envDir
+      ? envDir.replace(/\/$/, '')
+      : process.env.PREMIERE_MCP_SESSION_TEMP === '1' ? createSecureTempDir(this.sessionId) : sharedBridgeDir(currentEnv());
   }
 
   async initialize(): Promise<void> {

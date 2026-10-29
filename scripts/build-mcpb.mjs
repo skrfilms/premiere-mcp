@@ -1,4 +1,5 @@
 import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFile } from 'node:child_process';
@@ -51,37 +52,42 @@ import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
+import { currentEnv, handCopiedBridge, installedBridgeVersion, pluginInstallerPath, runSetup, sharedBridgeDir } from './dist/setup/setup.js';
+import { PACKAGE_VERSION } from './dist/version.js';
 
 const root = dirname(fileURLToPath(import.meta.url));
-const bridgeSource = join(root, 'cep-plugin');
-const tempDirectory = process.env.PREMIERE_TEMP_DIR || join(tmpdir(), 'premiere-mcp-bridge');
+const env = currentEnv();
+const tempDirectory = process.env.PREMIERE_TEMP_DIR || sharedBridgeDir(env);
 
-function installCepBridge() {
-  let target;
+// Premiere side, first launch only. The signed bridge goes through Adobe's own installer (no
+// developer mode); an already-installed signed bridge is left alone, because a hand copy next to
+// it has the same id and clashes. The unsigned hand copy is the fallback for a bundle built
+// without the signed plugins, or a machine without Creative Cloud's installer.
+function ensureBridge() {
+  if (installedBridgeVersion(env)) return;
+  const signed = existsSync(join(root, 'installer', 'MCPBridgeCEP-signed.zxp'));
+  if (signed && pluginInstallerPath(env)) {
+    const { results } = runSetup(root, PACKAGE_VERSION, { skipClients: true });
+    for (const r of results) if (!r.ok) process.stderr.write('Premiere MCP setup: ' + r.step + ': ' + r.detail + '\\n');
+    return;
+  }
+  const target = handCopiedBridge(env);
+  if (existsSync(target)) return;
   if (process.platform === 'darwin') {
-    target = join(homedir(), 'Library', 'Application Support', 'Adobe', 'CEP', 'extensions', 'MCPBridgeCEP');
-    for (let version = 9; version <= 15; version += 1) {
-      spawnSync('defaults', ['write', 'com.adobe.CSXS.' + version, 'PlayerDebugMode', '-bool', 'true'], { stdio: 'ignore' });
-    }
+    for (let version = 9; version <= 15; version += 1) spawnSync('defaults', ['write', 'com.adobe.CSXS.' + version, 'PlayerDebugMode', '-bool', 'true'], { stdio: 'ignore' });
   } else if (process.platform === 'win32') {
-    target = join(process.env.APPDATA || homedir(), 'Adobe', 'CEP', 'extensions', 'MCPBridgeCEP');
-    for (let version = 9; version <= 15; version += 1) {
-      spawnSync('reg.exe', ['add', 'HKCU\\\\Software\\\\Adobe\\\\CSXS.' + version, '/v', 'PlayerDebugMode', '/t', 'REG_SZ', '/d', '1', '/f'], { stdio: 'ignore' });
-    }
+    for (let version = 9; version <= 15; version += 1) spawnSync('reg.exe', ['add', 'HKCU\\\\Software\\\\Adobe\\\\CSXS.' + version, '/v', 'PlayerDebugMode', '/t', 'REG_SZ', '/d', '1', '/f'], { stdio: 'ignore' });
   } else {
     throw new Error('Adobe Premiere Pro MCP supports macOS and Windows only.');
   }
-
-  if (!existsSync(bridgeSource)) throw new Error('The bundled CEP bridge is missing. Reinstall the MCP bundle.');
-  cpSync(bridgeSource, target, { recursive: true, force: true });
-  mkdirSync(tempDirectory, { recursive: true });
+  cpSync(join(root, 'cep-plugin'), target, { recursive: true, force: true, filter: (p) => !p.includes('_design') });
 }
 
 try {
-  installCepBridge();
+  ensureBridge();
+  mkdirSync(tempDirectory, { recursive: true });
 } catch (error) {
   process.stderr.write('Premiere Pro MCP setup failed: ' + (error instanceof Error ? error.message : String(error)) + '\\n');
-  process.exit(1);
 }
 
 const server = spawn(process.execPath, [join(root, 'dist', 'index.js')], {
@@ -97,8 +103,11 @@ server.on('exit', (code) => process.exit(code ?? 1));
 
 await rm(stagingDirectory, { recursive: true, force: true });
 await mkdir(serverDirectory, { recursive: true });
-await cp(join(root, 'dist'), join(serverDirectory, 'dist'), { recursive: true });
-await cp(join(root, 'cep-plugin'), join(serverDirectory, 'cep-plugin'), { recursive: true });
+await cp(join(root, 'dist'), join(serverDirectory, 'dist'), { recursive: true, filter: (p) => !p.includes('__tests__') && !p.endsWith('.tsbuildinfo') });
+await cp(join(root, 'cep-plugin'), join(serverDirectory, 'cep-plugin'), { recursive: true, filter: (p) => !p.includes('_design') });
+// The signed plugins, when this machine can build them (npm run release:installer); without them
+// the bundle falls back to the unsigned hand copy.
+if (existsSync(join(root, 'installer', 'MCPBridgeCEP-signed.zxp'))) await cp(join(root, 'installer'), join(serverDirectory, 'installer'), { recursive: true });
 await cp(join(root, 'package.json'), join(serverDirectory, 'package.json'));
 await cp(join(root, 'package-lock.json'), join(serverDirectory, 'package-lock.json'));
 await writeFile(join(serverDirectory, 'launcher.js'), launcher);

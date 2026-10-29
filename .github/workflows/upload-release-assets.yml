@@ -30,13 +30,18 @@ jobs:
       - name: Build unsigned CEP archive
         run: |
           cd cep-plugin
-          zip -r "../MCPBridgeCEP-${{ github.event.release.tag_name }}-unsigned.zip" .
+          zip -r "../MCPBridgeCEP-${{ github.event.release.tag_name }}-unsigned.zip" . -x "_design/*"
 
       - name: Upload CEP archive
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload "${{ github.event.release.tag_name }}" \
-            "MCPBridgeCEP-${{ github.event.release.tag_name }}-unsigned.zip" \
-            "release-artifacts/premiere-mcp-*.mcpb" \
-            --clobber
+            "MCPBridgeCEP-${{ github.event.release.tag_name }}-unsigned.zip" --clobber
+          # A bundle uploaded by hand was built with the signed plugins (the certificate is not in
+          # CI); keep it rather than replacing it with this unsigned-plugin build.
+          if gh release view "${{ github.event.release.tag_name }}" --json assets -q '.assets[].name' | grep -q '\.mcpb$'; then
+            echo "Release already has an .mcpb; leaving it."
+          else
+            gh release upload "${{ github.event.release.tag_name }}" release-artifacts/premiere-mcp-*.mcpb
+          fi

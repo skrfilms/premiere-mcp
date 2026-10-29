@@ -19,55 +19,23 @@ Use this skill when working with the Premiere MCP server from `skrfilms/premiere
 
 ## Install Workflow
 
-If the user asks you to install or set up the MCP:
+If the user asks you to install or set up the MCP (macOS or Windows, on the computer with Premiere):
 
-1. Check the OS. The automated installer is macOS-focused.
-2. Clone or open the repo:
+1. Check Node.js 20+ (`node --version`). If it is missing, ask the user to install it.
+2. Ask the user to quit Premiere Pro.
+3. Run `npx -y premiere-mcp@latest setup`. It installs the signed Premiere plugins through Adobe's
+   own installer and adds the server to every AI app it finds, backing up each config it edits.
+   `--dry-run` shows the plan; `--clients codex` (or `claude-code`, `cursor`, `vscode`,
+   `claude-desktop`) limits it to one app. Every output line is `ok` or `FAIL` with the reason.
+4. Ask the user to start Premiere Pro and restart the AI app. The bridge starts with Premiere and
+   runs in the background; no panel needs opening.
+5. Run `npx -y premiere-mcp@latest doctor` (every line `ok`), then call `verify_premiere_connection`.
 
-```bash
-git clone https://github.com/skrfilms/premiere-mcp.git
-cd premiere-mcp
-```
+Do not hand-copy `cep-plugin/` or turn on `PlayerDebugMode`; that old route clashes with the signed
+install. From a clone, see AGENTS.md.
 
-3. On macOS, run:
-
-```bash
-npm run setup:mac
-```
-
-4. For non-macOS or manual client setup, run:
-
-```bash
-npm install
-npm run build
-```
-
-5. Register the MCP server in the user's client with:
-
-```text
-command: node /absolute/path/to/premiere-mcp/dist/index.js
-env: PREMIERE_TEMP_DIR=/tmp/premiere-mcp-bridge
-```
-
-For Codex, prefer:
-
-```bash
-codex mcp add premiere_pro --env PREMIERE_TEMP_DIR=/tmp/premiere-mcp-bridge -- node /absolute/path/to/premiere-mcp/dist/index.js
-```
-
-## Premiere Bridge Startup
-
-After installing:
-
-1. Restart the MCP client if it reads config only at startup.
-2. Restart Premiere Pro.
-3. Open `Window > Extensions > MCP Bridge (CEP)`.
-4. Set `Temp Directory` to `/tmp/premiere-mcp-bridge`.
-5. Click `Save Configuration`.
-6. Click `Start Bridge`.
-7. Confirm the bridge panel says Premiere is ready before running editing tools.
-
-If Premiere is not running, you can install/build/register the MCP, but tell the user live tool verification requires Premiere and the CEP bridge panel.
+If Premiere is not running, you can still set up and register the MCP; tell the user live tool
+checks need Premiere open.
 
 ## Verification
 

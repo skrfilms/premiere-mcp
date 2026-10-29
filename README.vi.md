@@ -1,3 +1,6 @@
+
+> **Install:** the steps below may be out of date. Use the English [Install](README.md#install) section: quit Premiere Pro, run `npx -y premiere-mcp@latest setup`, reopen Premiere and your AI app, then run `verify_premiere_connection`. AI agents: see [AGENTS.md](AGENTS.md).
+
 # Adobe Premiere Pro MCP Server
 
 [English](README.md)

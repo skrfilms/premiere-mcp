@@ -12,6 +12,25 @@ undone, hand edits in Premiere are noticed, and replies are sized to fit. New ed
 (version up every shot, remove silence, sync by audio, stringout from a transcript) each come
 with a live workflow test; all nine pass on Premiere Pro 26.5.2.
 
+### Setup in one command
+
+- `npx -y premiere-mcp setup` installs the signed Premiere plugins through Adobe's own plugin
+  installer and adds the server to Claude Desktop, Claude Code, Codex, Cursor and VS Code
+  (`--clients` to choose, `--dry-run` to preview; each edited config is backed up). `doctor`
+  checks Node, the installed bridge, Premiere's heartbeat and each app. The old hand-copy route
+  (CEP developer mode) is now `setup --unsigned`.
+- The server now uses the bridge folder the background bridge watches when `PREMIERE_TEMP_DIR`
+  is not set. It used to make a private folder per session, so a server started without the
+  variable never reached Premiere. `PREMIERE_MCP_SESSION_TEMP=1` keeps the old behaviour.
+- The Claude Desktop bundle installs the signed bridge on first launch and leaves an existing
+  signed install alone (it used to hand-copy the panel and turn on developer mode every launch).
+- Packages shrink from 56 MB to 1 MB (npm) and 57 MB to 2.6 MB (`.mcpb`): design screenshots and
+  compiled tests are no longer shipped.
+- `AGENTS.md` / `CLAUDE.md`: steps for an AI agent setting this up; README and QUICKSTART
+  rewritten around `setup`.
+- `set_parametric_eq` and `set_compressor` no longer report success when no parameter was
+  accepted, and say they cannot read the values back (`verified: false`).
+
 ### Added: safe retries and editor workflows
 
 - **"Did my last call run?"** Every call is journaled; `get_recent_calls` shows what ran,

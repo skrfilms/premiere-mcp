@@ -16,6 +16,10 @@ const requiredPaths = [
   'LICENSE.md',
 ];
 
+// Publishing: setup installs the signed plugins from the package, so a release without them
+// would install a server that can never reach Premiere. `npm run release:installer` builds them.
+if (process.argv.includes('--release')) requiredPaths.push('installer/MCPBridgeCEP-signed.zxp', 'installer/mcp-uxp-probe.ccx');
+
 const { stdout } = await execFileAsync('npm', ['pack', '--dry-run', '--json'], { maxBuffer: 1024 * 1024 });
 const [pack] = JSON.parse(stdout);
 const packagedPaths = new Set(pack.files.map((file) => file.path));
