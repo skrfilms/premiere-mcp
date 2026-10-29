@@ -28,8 +28,15 @@ with a live workflow test; all nine pass on Premiere Pro 26.5.2.
   compiled tests are no longer shipped.
 - `AGENTS.md` / `CLAUDE.md`: steps for an AI agent setting this up; README and QUICKSTART
   rewritten around `setup`.
-- `set_parametric_eq` and `set_compressor` no longer report success when no parameter was
-  accepted, and say they cannot read the values back (`verified: false`).
+- Tools that write without a way to read back say so: `set_parametric_eq`, `set_compressor`
+  and `set_limiter` return `verified: false`, and fail when no parameter was accepted.
+- `stabilize_clip` wrote Smoothness into the wrong effect: Premiere inserts Warp Stabilizer ahead
+  of Lumetri, and the tool took the last effect on the clip. It now finds the stabilizer by its
+  internal name and reads Smoothness back. The Lumetri tools find their effect the same way.
+- `verify_color_grade` and `verify_effect_rendered` accepted a `sequenceId` and used the active
+  sequence; a source audit that should have caught it only read the first line of a signature.
+- Code formatted throughout (one formatting-only commit, listed in `.git-blame-ignore-revs`), and
+  formatting is now checked in CI. Stale comments fixed; out-of-date README translations removed.
 
 ### Added: safe retries and editor workflows
 

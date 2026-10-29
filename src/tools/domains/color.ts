@@ -926,9 +926,18 @@ export class ColorTools extends ProjectMediaTools {
         if (!qeClip) return JSON.stringify({ success: false, error: "Could not address the clip through the QE API." });
         var effect = qe.project.getVideoEffectByName("Lumetri Color");
         if (!effect) return JSON.stringify({ success: false, error: "Lumetri Color effect not found" });
-        qeClip.addVideoEffect(effect);
         var clip = info.clip;
-        var lastComp = clip.components[clip.components.numItems - 1];
+        function lumetris() {
+          var out = [];
+          for (var q = 0; q < clip.components.numItems; q++) if (String(clip.components[q].matchName) === "AE.ADBE Lumetri") out.push(clip.components[q]);
+          return out;
+        }
+        var lumBefore = lumetris().length;
+        qeClip.addVideoEffect(effect);
+        // The new Lumetri by internal name: Premiere does not always append effects last.
+        var lumAfter = lumetris();
+        if (lumAfter.length <= lumBefore) return JSON.stringify({ success: false, verified: true, error: "Lumetri Color was not added to the clip." });
+        var lastComp = lumAfter[lumAfter.length - 1];
 
         function normalizeName(s) { return String(s).toLowerCase().replace(/[\\s_-]+/g, ''); }
         function valuesEquivalent(actual, requested) {

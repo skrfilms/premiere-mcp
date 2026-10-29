@@ -1101,15 +1101,30 @@ export class EffectsTools extends AssemblyTools {
         var qeClip = __findQeClipByDomClip(qeTrack, info.clip);
         var effect = qe.project.getVideoEffectByName("Warp Stabilizer");
         if (!effect) return JSON.stringify({ success: false, error: "Warp Stabilizer effect not found" });
-        qeClip.addVideoEffect(effect);
         var clip = info.clip;
-        var lastComp = clip.components[clip.components.numItems - 1];
-        for (var j = 0; j < lastComp.properties.numItems; j++) {
-          try {
-            if (lastComp.properties[j].displayName === "Smoothness") lastComp.properties[j].setValue(${smoothness}, true);
-          } catch (e2) {}
+        // Found by internal name, not position: Premiere inserts it ahead of Lumetri, so "the
+        // last component" was Lumetri Color, and Smoothness was being written there.
+        function stabilizers() {
+          var out = [];
+          for (var k = 0; k < clip.components.numItems; k++) if (String(clip.components[k].matchName) === "AE.ADBE SubspaceStabilizer") out.push(clip.components[k]);
+          return out;
         }
-        return JSON.stringify({ success: true, message: "Warp Stabilizer applied", clipId: ${JSON.stringify(clipId)}, smoothness: ${smoothness} });
+        var before = stabilizers().length;
+        qeClip.addVideoEffect(effect);
+        var found = stabilizers();
+        if (found.length <= before) {
+          return JSON.stringify({ success: false, verified: true, error: "Warp Stabilizer was not added to the clip." });
+        }
+        var stab = found[found.length - 1];
+        var gotSmoothness = null;
+        for (var j = 0; j < stab.properties.numItems; j++) {
+          var pr = stab.properties[j];
+          if (pr.displayName === "Smoothness") {
+            try { pr.setValue(${smoothness}, true); gotSmoothness = Number(pr.getValue()); } catch (e2) {}
+          }
+        }
+        var smoothOk = gotSmoothness !== null && Math.abs(gotSmoothness - ${smoothness}) < 0.5;
+        return JSON.stringify({ success: true, verified: smoothOk, verifiedBy: "effect present on the clip; Smoothness read back", message: "Warp Stabilizer applied" + (smoothOk ? "" : " (Smoothness could not be set; it is at its default)"), clipId: ${JSON.stringify(clipId)}, smoothness: gotSmoothness, note: "Analysis runs in the background in Premiere and takes a while." });
       } catch (e) {
         return JSON.stringify({ success: false, error: e.toString() });
       }
