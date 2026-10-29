@@ -1482,7 +1482,7 @@ export class AudioTools extends ExportRenderTools {
             var list = String(comp.getParamList());
             if (list.indexOf('Ceiling') >= 0 || list.indexOf('Maximum') >= 0) {
               comp.setParamValue('Maximum Amplitude', '${ceiling}');
-              return JSON.stringify({success:true,ceiling:${ceiling}});
+              return JSON.stringify({success:true,verified:false,verifiedBy:'none: QE accepted the write but it cannot be read back',ceiling:${ceiling}});
             }
           } catch(ec) { break; }
         }
