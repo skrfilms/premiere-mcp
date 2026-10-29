@@ -1,13 +1,14 @@
 {
   "name": "premiere-mcp",
   "version": "1.5.0",
-  "description": "Premiere MCP — an MCP bridge for Adobe Premiere Pro with 663 tools for AI-driven video editing. By Skry. Based on Adobe_Premiere_Pro_MCP (MIT).",
+  "description": "Premiere MCP \u2014 an MCP bridge for Adobe Premiere Pro with 663 tools for AI-driven video editing. By Skry. Based on Adobe_Premiere_Pro_MCP (MIT).",
   "main": "dist/index.js",
   "bin": {
     "premiere-mcp": "dist/cli.js"
   },
   "files": [
     "dist",
+    "installer",
     "cep-plugin",
     "uxp-plugin",
     "uxp-probe",
@@ -18,12 +19,18 @@
     "scripts",
     "skills",
     "README.md",
+    "CLAUDE.md",
+    "AGENTS.md",
     "QUICKSTART.md",
     "CHANGELOG.md",
     "SECURITY.md",
     "PRIVACY.md",
     "TERMS.md",
-    "LICENSE.md"
+    "LICENSE.md",
+    "!cep-plugin/_design",
+    "!dist/__tests__",
+    "!dist/.tsbuildinfo",
+    "!dist/**/*.map"
   ],
   "type": "module",
   "scripts": {
@@ -56,7 +63,8 @@
     "pack:check": "node scripts/verify-package.mjs",
     "bundle:mcpb": "node scripts/build-mcpb.mjs",
     "sign:zxp": "node scripts/sign-zxp.mjs",
-    "create:self-signed-zxp-cert": "node scripts/create-self-signed-zxp-cert.mjs"
+    "create:self-signed-zxp-cert": "node scripts/create-self-signed-zxp-cert.mjs",
+    "prepublishOnly": "node scripts/verify-package.mjs --release"
   },
   "keywords": [
     "premiere-mcp",

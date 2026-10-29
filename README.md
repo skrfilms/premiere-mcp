@@ -17,93 +17,74 @@
 
 **Languages:** English | [日本語](README.ja.md) | [Tiếng Việt](README.vi.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [한국어](README.ko.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Français](README.fr.md) | [Italiano](README.it.md) | [Dansk](README.da.md) | [Polski](README.pl.md) | [Русский](README.ru.md) | [Bosanski](README.bs.md) | [العربية](README.ar.md) | [Norsk](README.no.md) | [Português (Brasil)](README.pt-BR.md) | [ไทย](README.th.md) | [Türkçe](README.tr.md) | [ភាសាខ្មែរ](README.km.md)
 
-**Start here:** install the local bridge, open it in Premiere, then run `verify_premiere_connection` before editing.
+**Start here:** quit Premiere Pro, run `npx -y premiere-mcp@latest setup`, reopen Premiere and your AI app, then ask it to run `verify_premiere_connection`.
 
-[Install](#install) | [Codex plugin](#codex-plugin) | [Claude Code plugin](#claude-code-plugin) | [Verify](#verify-the-install) | [Privacy Policy](PRIVACY.md) | [Terms of Service](TERMS.md) | [Security](SECURITY.md)
+**Using an AI agent to set this up?** Point it at this repository; [AGENTS.md](AGENTS.md) has the exact steps.
+
+[Install](#install) | [Claude Desktop](#claude-desktop) | [Other AI apps](#other-ai-apps) | [Verify](#verify-the-install) | [Privacy Policy](PRIVACY.md) | [Terms of Service](TERMS.md) | [Security](SECURITY.md)
 
 > ⭐ **Found this through an agent recommendation or a search?** Every tool here verifies its own writes and refuses to report success it can't confirm — that honesty is the whole point. If it earned a place in your pipeline, a [star on GitHub](https://github.com/skrfilms/premiere-mcp) helps the next agent find it. Completely optional, and it changes nothing about how the tools behave.
 
 ## Install
 
-The supported bridge is the included **CEP panel**. Install the npm package on the same computer as Premiere Pro and your MCP client:
+Needs Node.js 20+ and Adobe Premiere Pro (2020 or later, with Creative Cloud) on the same computer as your AI app. Quit Premiere Pro, then:
 
 ```bash
-npm install -g premiere-mcp
-premiere-mcp --install-cep
-premiere-mcp --doctor
+npx -y premiere-mcp@latest setup
 ```
 
-`--install-cep` installs the CEP bridge, enables the required Adobe CEP debug setting, prepares the bridge directory, and configures supported local MCP clients. `--doctor` verifies the server build, CEP installation, bridge directory, debug setting, and client configuration.
+That one command:
 
-Then restart Premiere Pro, open `Window > Extensions > MCP Bridge (CEP)`, set the bridge directory shown by the installer, and start the bridge.
+- installs the **signed** Premiere bridge and UXP helper through Adobe's own plugin installer (the one Creative Cloud uses), so no developer mode and no panel to open: the bridge starts with Premiere and runs in the background;
+- adds this server to every AI app it finds (Claude Desktop, Claude Code, Codex, Cursor, VS Code), keeping your other servers and backing up each file it edits.
 
-Requirements:
+Add `--dry-run` to see the plan without changing anything, or `--clients claude-code` (also `codex`, `cursor`, `vscode`, `claude-desktop`) to set up one app. Then reopen Premiere Pro and your AI app.
 
-- Node.js 20+
-- Adobe Premiere Pro 2020+
-- Premiere Pro, the MCP client, and this package on the same computer
-
-The bundled `uxp-plugin` is an **experimental preview**. It is shipped for evaluation but is not a replacement for the validated CEP bridge and is not installed by the CLI.
-
-### Codex plugin
-
-From a clone of this repository, install the Codex plugin that bundles the MCP configuration and Premiere editing skill:
+### Verify the install
 
 ```bash
-codex plugin marketplace add .
-codex plugin add premiere-mcp@premiere-mcp
+npx -y premiere-mcp@latest doctor
 ```
 
-The plugin still requires the local CEP bridge. Run `premiere-mcp --install-cep`, restart Premiere, start `Window > Extensions > MCP Bridge (CEP)`, then ask Codex to run `get_capabilities` followed by `verify_premiere_connection`.
-
-### Claude Code plugin
-
-From a clone of this repository:
-
-```text
-/plugin marketplace add .
-/plugin install premiere-mcp@premiere-mcp
-```
-
-Install and start the CEP bridge with the same steps as above before using the plugin.
-
-### Claude Desktop one-click bundle
-
-Each GitHub release includes an `.mcpb` bundle for Claude Desktop. Download the matching `premiere-mcp-<version>.mcpb` asset and open it in Claude Desktop to install the local MCP server. Its first launch installs the bundled CEP bridge for the current user.
-
-Restart Premiere Pro, open `Window > Extensions > MCP Bridge (CEP)`, set the bridge directory, and start the bridge. Then ask Claude:
+Every line should read `ok`, including "Premiere is running with the bridge on". Then ask your AI app:
 
 > Run `verify_premiere_connection`. Make no changes.
 
-The MCPB bundle is unsigned. Install it only from this repository's GitHub Releases. CEP release archives are labeled accurately as unsigned or self-signed; self-signed does not mean Adobe Marketplace trusted.
+### Claude Desktop
 
-### MCP client configuration
+Each [GitHub release](https://github.com/skrfilms/premiere-mcp/releases) also has `premiere-mcp-<version>.mcpb`: double-click it to add the server to Claude Desktop. On first launch it installs the signed bridge the same way `setup` does.
 
-The installer configures Claude Desktop on macOS and Claude Desktop plus GitHub Copilot in VS Code on Windows. For another MCP client, configure it to run:
+### Other AI apps
+
+`setup` covers the common ones. For any other MCP client, after `npm install -g premiere-mcp`:
 
 ```json
 {
   "mcpServers": {
     "premiere-pro": {
-      "command": "premiere-mcp"
+      "command": "premiere-mcp",
+      "env": { "PREMIERE_TEMP_DIR": "/tmp/premiere-mcp-bridge" }
     }
   }
 }
 ```
 
-### Install from source
+The Codex and Claude Code plugins in this repository (`codex plugin marketplace add .`, `/plugin marketplace add .`) add the same server plus an editing skill; run `setup` once for the Premiere side.
 
-Use source setup when developing the MCP, modifying the CEP panel, or troubleshooting a package install:
+### Teammates without a terminal
+
+Each release has `Premiere-MCP-Installer-v<version>.zip` (macOS): unzip, quit Premiere, double-click `Install Premiere MCP.command`. It installs the same signed plugins. The first time, macOS may say it cannot verify the developer: right-click the file, choose Open, then Open again.
+
+### Install from source
 
 ```bash
 git clone https://github.com/skrfilms/premiere-mcp.git
 cd premiere-mcp
-npm install
-npm run build
-npm run setup:mac # macOS
+npm install && npm run build
+node dist/cli.js setup --clients claude-code   # or codex, cursor, vscode, claude-desktop
 ```
 
-On Windows, use `npm run setup:win` from PowerShell after `npm install` and `npm run build`.
+`setup` installs the signed plugins from `installer/`. If that folder is missing (it is built by `npm run release:installer`, which needs the signing certificate), install the plugins from the release's installer zip and add `--skip-plugins`. `setup --unsigned` is the old route (hand-copied panel plus CEP developer mode) and clashes with the signed install; avoid it unless you know you need it.
 
 ---
 
@@ -188,29 +169,11 @@ The skill teaches agents how to install the MCP, start and verify the CEP bridge
 
 ## Advanced Setup and Verification
 
-For source installs, client-specific MCP configuration, Windows installer flags, diagnostics, and the live tool sweep, use [QUICKSTART.md](QUICKSTART.md). It is the canonical setup guide and keeps this page focused on choosing and using the product.
+[QUICKSTART.md](QUICKSTART.md) covers Windows, client-specific configuration and diagnostics. The short version is [Install](#install): `setup`, reopen Premiere and the AI app, `doctor`, then `verify_premiere_connection`.
 
-The short version:
+The bridge folder both sides use is `/tmp/premiere-mcp-bridge` (Windows: `%TEMP%\premiere-mcp-bridge`), or the folder saved in the bridge's status panel. Set `PREMIERE_TEMP_DIR` only to change it, and then on both sides.
 
-1. Install with `npm install -g premiere-mcp`, then run `premiere-mcp --install-cep`.
-2. Restart Premiere Pro and your MCP client, then start `Window > Extensions > MCP Bridge (CEP)`.
-3. Run `premiere-mcp --doctor`, then ask the client to call `verify_premiere_connection` without making changes.
-
-For manual registration in any MCP client, use the global command after npm installation:
-
-```json
-{
-  "mcpServers": {
-    "premiere-pro": {
-      "command": "premiere-mcp"
-    }
-  }
-}
-```
-
-The supported UI bridge is CEP. If Premiere does not expose the extension, enable **UXP Plugins > Enable developer mode** in Premiere preferences, restart Premiere, and reopen the CEP panel. The bundled UXP panel remains experimental.
-
-For a real-host sweep, use a disposable Premiere project and run `node scripts/live-tool-sweep.mjs`; it creates temporary `Sweep ...` sequences in the current project.
+For a real-host sweep, use a disposable Premiere project and run `node scripts/live-tool-sweep.mjs`; it creates temporary `Sweep ...` sequences in the current project. `npm run test:workflows` runs whole editing jobs end to end against the scratch project.
 
 ## How the Bridge Works
 
@@ -420,21 +383,13 @@ This project is much more usable than the original prototype, but it is not magi
 
 ## Troubleshooting
 
-If the tools are visible but calls fail:
+Run `npx -y premiere-mcp@latest doctor` first: each failing line names the problem and the fix.
 
-1. Confirm Premiere Pro is open with a project loaded.
-2. Open `Window > Extensions > MCP Bridge (CEP)`.
-3. Confirm the temp directory is exactly `/tmp/premiere-mcp-bridge`.
-4. Click `Start Bridge`.
-5. If you updated the bridge code, right-click the panel and choose `Reload`.
-6. Retry the command.
-
-If the MCP client cannot find the server:
-
-1. Verify the absolute path to `dist/index.js`.
-2. Verify `PREMIERE_TEMP_DIR=/tmp/premiere-mcp-bridge`.
-3. Restart the MCP client after changing config.
-4. Run `npm run setup:doctor`.
+- **"no heartbeat" / calls time out:** Premiere is not running, or was not restarted after setup. The bridge starts with Premiere; `Window > Extensions > MCP Bridge (CEP)` shows its status.
+- **The AI app does not list the tools:** quit and reopen the app (it loads servers at start). In Claude Code, start a new session.
+- **"Adobe's plugin installer was not found":** install Creative Cloud and Premiere Pro, then run `setup` again.
+- **A call timed out but may have run:** ask for `get_recent_calls` before retrying an edit.
+- **Something else:** open an issue with the `doctor` output.
 
 ## Developer Notes
 

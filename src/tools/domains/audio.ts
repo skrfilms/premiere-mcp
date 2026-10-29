@@ -1236,7 +1236,10 @@ export class AudioTools extends ExportRenderTools {
             }
           } catch(ec) { break; }
         }
-        return JSON.stringify({success:true,paramsSet:set,band:${band},frequency:${frequency??null},gain:${gain??null},q:${q??null}});
+        // No readback exists for these QE params, so the honest claim is only "the writes were
+        // accepted"; none accepted is a failure, not a success with paramsSet 0.
+        if (set === 0) return JSON.stringify({success:false,verified:false,paramsSet:0,error:'No EQ parameter was accepted on this clip (is a Parametric EQ applied?). Nothing was changed.'});
+        return JSON.stringify({success:true,verified:false,verifiedBy:'none: QE accepted the writes but they cannot be read back',paramsSet:set,band:${band},frequency:${frequency??null},gain:${gain??null},q:${q??null}});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
@@ -1261,7 +1264,8 @@ export class AudioTools extends ExportRenderTools {
             }
           } catch(ec) { break; }
         }
-        return JSON.stringify({success:true,paramsSet:set});
+        if (set === 0) return JSON.stringify({success:false,verified:false,paramsSet:0,error:'No compressor parameter was accepted on this clip (is a compressor applied?). Nothing was changed.'});
+        return JSON.stringify({success:true,verified:false,verifiedBy:'none: QE accepted the writes but they cannot be read back',paramsSet:set});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }

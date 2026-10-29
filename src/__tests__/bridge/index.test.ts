@@ -44,6 +44,7 @@ describe('PremiereProBridge', () => {
 
   afterEach(() => {
     delete process.env.PREMIERE_TEMP_DIR;
+    delete process.env.PREMIERE_MCP_SESSION_TEMP;
   });
 
   it('initializes using the configured temp directory', async () => {
@@ -416,6 +417,9 @@ describe('PremiereProBridge', () => {
 
   it('deletes generated temp directories when no external temp dir is configured', async () => {
     delete process.env.PREMIERE_TEMP_DIR;
+    // The private per-session folder is opt-in now; by default the server shares the folder the
+    // bridge in Premiere watches (and never deletes it).
+    process.env.PREMIERE_MCP_SESSION_TEMP = '1';
     const bridge = new PremiereProBridge();
     mockFs.mkdir.mockResolvedValue(undefined);
     mockFs.access.mockRejectedValue(new Error('Not found'));

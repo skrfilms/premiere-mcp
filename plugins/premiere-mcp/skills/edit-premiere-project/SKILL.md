@@ -24,12 +24,11 @@ Operate Premiere through the `premiere-pro` MCP tools. Preserve the user's proje
 
 ## Setup And Recovery
 
-Install the companion bridge on the same computer as Premiere and Codex:
+On the computer with Premiere, ask the user to quit Premiere Pro, then:
 
 ```bash
-npm install -g premiere-mcp
-premiere-mcp --install-cep
-premiere-mcp --doctor
+npx -y premiere-mcp@latest setup
+npx -y premiere-mcp@latest doctor
 ```
 
-Restart Premiere Pro, open `Window > Extensions > MCP Bridge (CEP)`, start the bridge, then run `verify_premiere_connection`.
+`setup` installs the signed Premiere plugins and adds the server to the AI apps it finds. Reopen Premiere Pro (the bridge starts with it; no panel needs opening) and the AI app, then run `verify_premiere_connection`.

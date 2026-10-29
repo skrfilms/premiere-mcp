@@ -21,3 +21,4 @@ release-artifacts/
 # Instrumented tool-coverage scratch (aggregated into verification/test-coverage.json)
 .tool-coverage/
 dist-uxp/
+installer/
