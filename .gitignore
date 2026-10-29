@@ -22,3 +22,4 @@ release-artifacts/
 .tool-coverage/
 dist-uxp/
 installer/
+cep-plugin/_design/

@@ -1476,7 +1476,7 @@ export class ColorTools extends ProjectMediaTools {
   }
 
   protected async verifyColorGrade(
-    _seqId: string | undefined,
+    seqId: string | undefined,
     trackIndex: number,
     clipIndex: number,
     gradeParams: Record<string, number>,
@@ -1491,7 +1491,7 @@ export class ColorTools extends ProjectMediaTools {
     // Get clip media path
     const mediaInfo: any = await this.bridge.executeScript(`
       try {
-        var clip = app.project.activeSequence.videoTracks[${trackIndex}].clips[${clipIndex}];
+        var clip = ${this.buildSeqRes(seqId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         var mediaPath = clip.projectItem ? String(clip.projectItem.getMediaPath()) : '';
         var midSecs = (clip.start.seconds + clip.end.seconds) / 2;
@@ -1544,7 +1544,7 @@ export class ColorTools extends ProjectMediaTools {
 
     const gradeResult: any = await this.bridge.executeScript(`
       try {
-        var clip = app.project.activeSequence.videoTracks[${trackIndex}].clips[${clipIndex}];
+        var clip = ${this.buildSeqRes(seqId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
         var lumetriComp = null;
         for (var i = 0; i < clip.components.numItems; i++) {
           if (String(clip.components[i].displayName).indexOf('Lumetri') >= 0) { lumetriComp = clip.components[i]; break; }

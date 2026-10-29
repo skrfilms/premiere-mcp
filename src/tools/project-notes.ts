@@ -15,7 +15,7 @@ export function notesPathFor(projectPath: string): string {
 
 /** Append a bullet under `## section`, creating the file header and section when missing. */
 export function addNote(text: string, note: string, section: string, when: Date): string {
-  let doc = text.trim()
+  const doc = text.trim()
     ? text.replace(/\s*$/, '\n')
     : '# Project notes\n\nConventions for this project, kept by Premiere MCP and read at the start of each session.\n';
   const line = `- ${note.replace(/\s*\n\s*/g, ' ')} _(${when.toISOString().slice(0, 10)})_`;
