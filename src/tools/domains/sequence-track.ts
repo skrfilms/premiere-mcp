@@ -6,7 +6,7 @@
  */
 import { EffectsTools } from './effects.js';
 // Synchronous fs/path/os bindings for the Node-side (non-ExtendScript) tools.
-// Kept separate from the `promises as fs` import above, which is the async API.
+// The async API is the separate `promises as fs` import.
 import * as fsSync from 'node:fs';
 import * as pathSync from 'node:path';
 import { runFf } from '../ff-exec.js';

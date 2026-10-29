@@ -15,8 +15,6 @@
 
 </div>
 
-**Languages:** English | [日本語](README.ja.md) | [Tiếng Việt](README.vi.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [한국어](README.ko.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Français](README.fr.md) | [Italiano](README.it.md) | [Dansk](README.da.md) | [Polski](README.pl.md) | [Русский](README.ru.md) | [Bosanski](README.bs.md) | [العربية](README.ar.md) | [Norsk](README.no.md) | [Português (Brasil)](README.pt-BR.md) | [ไทย](README.th.md) | [Türkçe](README.tr.md) | [ភាសាខ្មែរ](README.km.md)
-
 **Start here:** quit Premiere Pro, run `npx -y premiere-mcp@latest setup`, reopen Premiere and your AI app, then ask it to run `verify_premiere_connection`.
 
 **Using an AI agent to set this up?** Point it at this repository; [AGENTS.md](AGENTS.md) has the exact steps.
@@ -105,7 +103,7 @@ This repository is currently validated for:
 - the included Windows installer path for GitHub Copilot in VS Code and Claude Desktop config
 - manual MCP registration for Codex, Claude Code, and similar MCP clients
 
-Current catalog status as of August 21, 2026:
+Current catalog status (v1.5.0):
 
 - `663` MCP tools are implemented for AI-driven video editing. **`112` are advertised by default** (the `core` profile) and **all `663` stay reachable** — advertising every tool costs roughly 113,600 tokens (~57% of a 200k context) before the conversation starts, published guidance puts tool-selection degradation past 30–50 tools, and VS Code / Copilot hard-errors above 128, so a curated menu is a context-cost decision rather than a capability one. Nothing is hidden silently and nothing is out of reach: `find_tool` searches all `663` and reports a profile-hidden match as `exposed: false` **with the reason**, `call_tool` invokes it anyway, and `activate_tools` promotes it into the advertised list mid-session (with a `tools/list_changed` notification). Set `PREMIERE_MCP_PROFILE=all` to advertise everything up front
 - coverage spans project setup, media ingest, bins, sequences, timeline editing, transitions, effects, keyframes, captions, markers, metadata, proxies, multicam, color, audio, exports, and higher-level assembly workflows
@@ -372,14 +370,11 @@ Use MCP introspection in your client for each tool's exact input schema and retu
 
 ## Real Limits
 
-- A self-signed CEP `.zxp` confirms archive integrity but is not Adobe Marketplace approval or a public trust guarantee. The reproducible signing workflow requires private certificate secrets and target-platform Premiere validation.
-
-This project is much more usable than the original prototype, but it is not magic.
-
 - Premiere scripting still does not expose every UI operation cleanly.
 - Professional title design still depends on real MOGRT assets or external graphics workflows.
 - `get_render_queue_status` is only useful when Adobe Media Encoder integration is available.
 - The best results come from real source footage, real audio, and real brand assets. The automation layer assembles and manipulates them; it does not replace editorial judgment.
+- The bridge is signed with this project's own certificate. Premiere accepts it without developer mode, but it is not Adobe Marketplace approval, and macOS asks once before running the teammate installer.
 
 ## Troubleshooting
 

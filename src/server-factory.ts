@@ -12,10 +12,7 @@
  * so a tool called over HTTP runs the same code, against the same bridge, and returns the
  * same result shape as the same tool called over stdio.
  *
- * NOTE for whoever owns src/index.ts: index.ts still carries its own copy of this wiring.
- * Until it calls `buildPremiereMcpServer` the two copies CAN drift, and this comment is
- * the only thing warning you about it. See docs/HTTP-TRANSPORT.md ("Change needed in
- * src/index.ts").
+ * src/index.ts (stdio) and src/http (HTTP) both build their server here.
  */
 
 import {

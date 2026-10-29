@@ -1672,8 +1672,7 @@ export class PremiereProBridge implements PremiereProTransport {
       await fs.writeFile(commandStaging, JSON.stringify(payload));
       await fs.rename(commandStaging, commandFile);
 
-      // Wait for response (in a real implementation, this would be handled by the UXP plugin).
-      // Batch operations pass a larger timeout because a single round-trip does the work of
+      // Wait for the panel's response file. Batch operations pass a larger timeout because a single round-trip does the work of
       // dozens of individual calls inside one ExtendScript pass.
       return await this.waitForResponse(responseFile, effectiveTimeout, commandId);
     } finally {
@@ -2011,9 +2010,9 @@ export class PremiereProBridge implements PremiereProTransport {
     const startTime = Date.now();
     // A response that exists but will not parse is a different failure from one that has
     // not arrived, and reporting it as the latter sends the reader to check whether
-    // Premiere is running when the real problem is the payload. Allow a few attempts for a
-    // torn read — the panel's write is not atomic on every host — then surface the parse
-    // error and a sample of what was actually on disk.
+    // Premiere is running when the real problem is the payload. A torn read (the panel's write
+    // is not atomic on every host) is retried until the timeout; if it never parses, the
+    // timeout reports the parse error and a sample of what was actually on disk.
     let lastParseError: Error | null = null;
     let lastRawResponse = '';
     // Track the panel's liveness so a dead/frozen panel fails fast instead of blocking
@@ -2049,8 +2048,8 @@ export class PremiereProBridge implements PremiereProTransport {
           const age = hb ? `${hb.ageMs}ms old` : 'gone';
           throw new Error(
             `Bridge panel stopped responding: its heartbeat is ${age} while waiting for a ` +
-              'response. Premiere Pro or the CEP panel likely crashed, was closed, or froze. ' +
-              'Reopen the MCP Bridge panel and click Start Bridge. Temp Directory should be ' +
+              'response. Premiere Pro likely crashed, was closed, or froze. Restart Premiere Pro ' +
+              '(the bridge starts with it); `premiere-mcp doctor` checks it. Bridge folder: ' +
               this.tempDir +
               '.',
           );

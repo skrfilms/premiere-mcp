@@ -106,26 +106,9 @@ jobs:
       # class of bug, so it stays gating and must never be suppressed to buy a tick.
       - name: Lint (eslint)
         run: npm run lint
-
-      # A REPORT, NOT A GATE. Prettier disagrees with most of the tree (measured
-      # 2026-08-25: 90 of 101 files under src/, ~21,000 changed lines, three quarters
-      # of it in src/tools/index.ts and src/tools/expanded-schemas.ts). Gating on it
-      # would mean landing a 21k-line reformat first, which would bury every real
-      # change in review and invalidate every open branch. So the number is
-      # published on every run and the decision stays with a human. Flip this to
-      # `npm run format:check` once the backlog is cleared.
-      - name: Formatting backlog (report only — does not fail the build)
-        if: always()
-        run: |
-          COUNT=$(npm run --silent format:report | grep -c . || true)
-          TOTAL=$(find src -name '*.ts' | wc -l | tr -d ' ')
-          echo "prettier would rewrite ${COUNT} of ${TOTAL} .ts files under src/"
-          {
-            echo "### Formatting backlog"
-            echo ""
-            echo "prettier would rewrite **${COUNT} of ${TOTAL}** \`.ts\` files under \`src/\`."
-            echo "Not a gate — see the comment in \`.github/workflows/ci.yml\`."
-          } >> "$GITHUB_STEP_SUMMARY"
+      # Formatting is a gate: the tree was reformatted once (see .git-blame-ignore-revs).
+      - name: Formatting
+        run: npm run format:check
 
       # THE JEST EXIT CODE IS NOT TRUSTED HERE.
       #

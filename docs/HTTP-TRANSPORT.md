@@ -237,41 +237,22 @@ npx jest --runInBand src/__tests__/http/
 
 ## Known gaps and follow-ups
 
-1. **`src/index.ts` still has its own copy of the handler wiring.** It should import
-   `buildPremiereMcpServer` from `src/server-factory.ts` instead — see "Change needed in
-   src/index.ts" below. Until it does, the two transports can drift.
-2. **No `@modelcontextprotocol/node` dependency.** That package ships `toNodeHandler`, the
+1. **No `@modelcontextprotocol/node` dependency.** That package ships `toNodeHandler`, the
    adapter the SDK documents for `node:http`. Adding it lets `nodeRequestToWeb` /
    `writeWebResponse` be deleted outright. They are a socket adapter, not a parallel
    protocol stack, but they are still ~60 lines the SDK would otherwise own.
-3. **`HEARTBEAT_STALE_MS` is duplicated.** `src/bridge/index.ts` has the authoritative 4000
+2. **`HEARTBEAT_STALE_MS` is duplicated.** `src/bridge/index.ts` has the authoritative 4000
    and does not export it. If that changes and this copy does not, `/health` will disagree
    with the bridge about liveness. Exporting it from the bridge fixes this.
-4. **No `tools/list_changed` over HTTP.** Per-request server instances have nowhere to push
+3. **No `tools/list_changed` over HTTP.** Per-request server instances have nowhere to push
    it. Delivering it would need either a long-lived subscription stream or an
    unsubscribe on `PremiereProTools.onExposureChanged`, which currently only appends.
-5. **The rate limiter is per-process and in-memory.** Fine for one listener; it is not a
+4. **The rate limiter is per-process and in-memory.** Fine for one listener; it is not a
    shared quota.
-6. **Bearer tokens do not expire.** `AuthInfo.expiresAt` is stamped an hour ahead on each
+5. **Bearer tokens do not expire.** `AuthInfo.expiresAt` is stamped an hour ahead on each
    verification because the SDK rejects an AuthInfo without one; the token itself is valid
    for the life of the process. Rotation means a restart.
 
-### Change needed in `src/index.ts`
-
-Not made here — that file has another owner. The change is to replace the private
-`buildServer()` body with a call to the shared factory:
-
-```ts
-import { buildPremiereMcpServer } from './server-factory.js';
-
-// ...
-private buildServer(): Server {
-  return buildPremiereMcpServer(
-    { tools: this.tools, resources: this.resources, prompts: this.prompts },
-    { logger: this.logger, wireExposureNotifications: true },
-  );
-}
-```
 
 `wireExposureNotifications: true` preserves today's stdio behaviour exactly (the
 `onExposureChanged` → `notifications/tools/list_changed` hook). Everything else in
