@@ -7,8 +7,20 @@ import { diffStates, describeDiff, type TimelineState } from '../../tools/timeli
 import { join } from 'node:path';
 import { addNote, notesPathFor } from '../../tools/project-notes.js';
 
-const state = (hash: string, clips: TimelineState['clips'], extra: Partial<TimelineState> = {}): TimelineState => ({
-  sequenceId: 's', sequenceName: 'Cut', hash, tracks: { video: 2, audio: 2 }, clips, markers: 0, project: { sequences: 3, items: 10 }, capturedAt: '', ...extra,
+const state = (
+  hash: string,
+  clips: TimelineState['clips'],
+  extra: Partial<TimelineState> = {},
+): TimelineState => ({
+  sequenceId: 's',
+  sequenceName: 'Cut',
+  hash,
+  tracks: { video: 2, audio: 2 },
+  clips,
+  markers: 0,
+  project: { sequences: 3, items: 10 },
+  capturedAt: '',
+  ...extra,
 });
 
 describe('what_changed diff', () => {
@@ -19,17 +31,23 @@ describe('what_changed diff', () => {
   ]);
 
   it('reports added, removed, trimmed and renamed clips by id', () => {
-    const b = state('b', [
-      { id: '1', track: 'V1', name: 'SH010', start: 0, end: 1.5, inPoint: 0 },
-      { id: '2', track: 'V1', name: 'SH020_v2', start: 2, end: 4, inPoint: 0 },
-      { id: '9', track: 'V2', name: 'title', start: 0, end: 3, inPoint: 0 },
-    ], { markers: 2 });
+    const b = state(
+      'b',
+      [
+        { id: '1', track: 'V1', name: 'SH010', start: 0, end: 1.5, inPoint: 0 },
+        { id: '2', track: 'V1', name: 'SH020_v2', start: 2, end: 4, inPoint: 0 },
+        { id: '9', track: 'V2', name: 'title', start: 0, end: 3, inPoint: 0 },
+      ],
+      { markers: 2 },
+    );
     const d = diffStates(a, b);
     expect(d.added.map((c) => c.id)).toEqual(['9']);
     expect(d.removed.map((c) => c.id)).toEqual(['3']);
     expect(d.moved.map((m) => m.id)).toEqual(['1']);
     expect(d.renamed).toEqual([{ id: '2', from: 'SH020', to: 'SH020_v2' }]);
-    expect(describeDiff(d)).toBe('1 clip added, 1 removed, 1 moved or trimmed, 1 renamed, markers 0 -> 2.');
+    expect(describeDiff(d)).toBe(
+      '1 clip added, 1 removed, 1 moved or trimmed, 1 renamed, markers 0 -> 2.',
+    );
   });
 
   it('follows a clip moved to another track', () => {
@@ -51,7 +69,11 @@ describe('result size cap', () => {
   });
 
   it('halves the longest list until it fits and says what was cut', () => {
-    const items = Array.from({ length: 4000 }, (_, i) => ({ id: String(i), name: `clip_${i}`, path: `/renders/sh${i}/clip_${i}.mov` }));
+    const items = Array.from({ length: 4000 }, (_, i) => ({
+      id: String(i),
+      name: `clip_${i}`,
+      path: `/renders/sh${i}/clip_${i}.mov`,
+    }));
     const { value, cuts } = capResult({ success: true, items, bins: [{ name: 'a' }] }, 40000);
     expect(JSON.stringify(value).length).toBeLessThanOrEqual(40000);
     expect(cuts).toEqual([{ path: 'items', total: 4000, kept: (value as any).items.length }]);
@@ -76,7 +98,9 @@ describe('result size cap', () => {
 describe('project notes', () => {
   it('live next to the project file', () => {
     // Native separators, like the project path Premiere reports on each platform.
-    expect(notesPathFor(join('/shows', 'SPHE', 'SPHE_SQ05.prproj'))).toBe(join('/shows', 'SPHE', 'SPHE_SQ05.mcp-notes.md'));
+    expect(notesPathFor(join('/shows', 'SPHE', 'SPHE_SQ05.prproj'))).toBe(
+      join('/shows', 'SPHE', 'SPHE_SQ05.mcp-notes.md'),
+    );
   });
 
   it('start a file, add under a section, and keep sections apart', () => {

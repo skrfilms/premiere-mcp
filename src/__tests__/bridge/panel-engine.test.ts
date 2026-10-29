@@ -11,7 +11,10 @@ function panel() {
   const sent: string[] = [];
   bridge.csInterface = {
     getHostEnvironment: () => ({ appVersion: '26.5.2' }),
-    evalScript: (script: string, cb: (r: string) => void) => { sent.push(script); pending.push(cb); },
+    evalScript: (script: string, cb: (r: string) => void) => {
+      sent.push(script);
+      pending.push(cb);
+    },
   };
   bridge.validateScript = () => true;
   bridge.commandQueue = [];
@@ -22,7 +25,6 @@ const run = (bridge: Record<string, any>) =>
   new Promise<any>((resolve) => bridge.executeCommand({ id: 'c1', script: 'return 1;' }, resolve));
 
 describe('ExtendScript engine health', () => {
-
   // The panel's 45s watchdog runs on the sandbox's own timers, which jest cannot fast-forward,
   // so the handler it calls is driven directly; the watchdog->handler wiring is checked live.
   it('a stall keeps exactly one sentinel in flight', () => {
@@ -68,10 +70,21 @@ describe('ExtendScript engine health', () => {
 
   it('reports the engine state in the heartbeat', () => {
     const writes: Record<string, string> = {};
-    const { bridge } = loadPanel({ fs: { writeFileSync: (p: string, d: string) => { writes[p] = d; }, renameSync: (a: string, b: string) => { writes[b] = writes[a] as string; } } });
+    const { bridge } = loadPanel({
+      fs: {
+        writeFileSync: (p: string, d: string) => {
+          writes[p] = d;
+        },
+        renameSync: (a: string, b: string) => {
+          writes[b] = writes[a] as string;
+        },
+      },
+    });
     bridge.getTempDirectory = () => '/tmp/bridge';
     bridge.engineState = 'stalled';
     bridge.writeHeartbeat();
-    expect(JSON.parse(writes['/tmp/bridge/bridge-heartbeat.json'] as string).engine).toBe('stalled');
+    expect(JSON.parse(writes['/tmp/bridge/bridge-heartbeat.json'] as string).engine).toBe(
+      'stalled',
+    );
   });
 });

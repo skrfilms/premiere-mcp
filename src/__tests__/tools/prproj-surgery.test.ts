@@ -25,7 +25,16 @@
  * writer itself has been proven: the evidence is about the writer, not about any given file.
  */
 
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, mkdirSync, readdirSync, chmodSync } from 'node:fs';
+import {
+  mkdtempSync,
+  writeFileSync,
+  readFileSync,
+  existsSync,
+  rmSync,
+  mkdirSync,
+  readdirSync,
+  chmodSync,
+} from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -118,7 +127,11 @@ describe('reading a project file', () => {
     ['a missing file', path.join(tmpdir(), 'definitely-not-here-9d2f.prproj'), 'NOT_FOUND'],
   ])('refuses %s', (_label, input, code) => {
     expect(() => readProjectFile(input)).toThrow(SurgeryRefusal);
-    try { readProjectFile(input); } catch (e) { expect((e as SurgeryRefusal).code).toBe(code); }
+    try {
+      readProjectFile(input);
+    } catch (e) {
+      expect((e as SurgeryRefusal).code).toBe(code);
+    }
   });
 
   it('refuses a directory', () => {
@@ -207,7 +220,11 @@ describe('invariant 4 — container canary', () => {
 
   it('serializes at the measured level rather than whatever zlib defaults to next', () => {
     expect(PRPROJ_GZIP_LEVEL).toBe(6);
-    expect(serializeProjectFile(FIXTURE_XML, true).equals(gzipSync(Buffer.from(FIXTURE_XML, 'utf8'), { level: 6 }))).toBe(true);
+    expect(
+      serializeProjectFile(FIXTURE_XML, true).equals(
+        gzipSync(Buffer.from(FIXTURE_XML, 'utf8'), { level: 6 }),
+      ),
+    ).toBe(true);
   });
 });
 
@@ -236,13 +253,18 @@ describe('the census', () => {
 
   it('does not mistake a longer tag for a shorter one', () => {
     // `<SequenceSource` must not count as `<Sequence`; the real project has four of them.
-    expect(censusOf('<SequenceSource Version="4"><Sequence ObjectURef="x"/></SequenceSource>').nodes.Sequence).toBe(1);
+    expect(
+      censusOf('<SequenceSource Version="4"><Sequence ObjectURef="x"/></SequenceSource>').nodes
+        .Sequence,
+    ).toBe(1);
   });
 });
 
 describe('invariant 5 — exactly-N matches', () => {
   it('applies a unique replacement', () => {
-    const { xml, applied } = applyReplacements(FIXTURE_XML, [{ find: 'fixture_bin', replace: 'renamed_bin' }]);
+    const { xml, applied } = applyReplacements(FIXTURE_XML, [
+      { find: 'fixture_bin', replace: 'renamed_bin' },
+    ]);
     expect(xml).toContain('<Name>renamed_bin</Name>');
     expect(applied).toEqual([{ find: 'fixture_bin', replace: 'renamed_bin', matches: 1 }]);
   });
@@ -268,7 +290,9 @@ describe('invariant 5 — exactly-N matches', () => {
   });
 
   it('allows a deliberate multi-site edit when the count is stated', () => {
-    const { xml, applied } = applyReplacements(FIXTURE_XML, [{ find: 'uid-seq-a', replace: 'uid-seq-z', expectedMatches: 2 }]);
+    const { xml, applied } = applyReplacements(FIXTURE_XML, [
+      { find: 'uid-seq-a', replace: 'uid-seq-z', expectedMatches: 2 },
+    ]);
     expect(applied[0]!.matches).toBe(2);
     expect(countOccurrences(xml, 'uid-seq-z')).toBe(2);
     expect(countOccurrences(xml, 'uid-seq-a')).toBe(0);
@@ -279,7 +303,7 @@ describe('invariant 5 — exactly-N matches', () => {
    * this pair would "succeed": the first edit manufactures the second's match, so each would have
    * been validated against a document that is not the one it edited.
    */
-  it('does not let one replacement manufacture another one\'s match', () => {
+  it("does not let one replacement manufacture another one's match", () => {
     try {
       applyReplacements(FIXTURE_XML, [
         { find: 'fixture_bin', replace: 'interim_bin' },
@@ -334,14 +358,19 @@ describe('XML metacharacters in a replacement', () => {
    * A blanket ban on '&' would have refused this — the check is for a valid ENTITY, not a character.
    */
   it('accepts the escaped form', () => {
-    const { xml } = applyReplacements(FIXTURE_XML, [{ find: 'fixture_bin', replace: 'Cuts &amp; Trims' }]);
+    const { xml } = applyReplacements(FIXTURE_XML, [
+      { find: 'fixture_bin', replace: 'Cuts &amp; Trims' },
+    ]);
     expect(xml).toContain('<Name>Cuts &amp; Trims</Name>');
     expect(hasOnlyValidEntities(xml)).toBe(true);
   });
 
-  it.each(['&amp;', '&lt;', '&gt;', '&quot;', '&apos;', '&#39;', '&#x27;'])('treats %s as a valid entity', (entity) => {
-    expect(hasOnlyValidEntities(`a${entity}b`)).toBe(true);
-  });
+  it.each(['&amp;', '&lt;', '&gt;', '&quot;', '&apos;', '&#39;', '&#x27;'])(
+    'treats %s as a valid entity',
+    (entity) => {
+      expect(hasOnlyValidEntities(`a${entity}b`)).toBe(true);
+    },
+  );
 
   it.each(['&', '&nbsp;', '&amp', '& amp;'])('treats %s as a bare ampersand', (bad) => {
     expect(hasOnlyValidEntities(`a${bad}b`)).toBe(false);
@@ -359,7 +388,11 @@ describe('XML metacharacters in a replacement', () => {
 
   it('permits a markup edit when allowMarkupEdit is set', () => {
     const { xml } = applyReplacements(FIXTURE_XML, [
-      { find: '<Sequence ObjectURef="uid-seq-a"/>', replace: '<!-- gone -->', allowMarkupEdit: true },
+      {
+        find: '<Sequence ObjectURef="uid-seq-a"/>',
+        replace: '<!-- gone -->',
+        allowMarkupEdit: true,
+      },
     ]);
     expect(xml).toContain('<!-- gone -->');
   });
@@ -448,7 +481,9 @@ describe('writing and reading back', () => {
     const source = writeFixture();
     const before = sha256(readFileSync(source));
     const { file } = readProjectFile(source);
-    const { xml: edited } = applyReplacements(file.xml, [{ find: 'fixture_bin', replace: 'renamed_bin' }]);
+    const { xml: edited } = applyReplacements(file.xml, [
+      { find: 'fixture_bin', replace: 'renamed_bin' },
+    ]);
     const output = path.join(dir, 'out.prproj');
 
     const result = writeEditedProject(output, edited, file.compressed, censusOf(edited));
@@ -463,7 +498,9 @@ describe('writing and reading back', () => {
   it('produces a file that itself round-trips byte-identically, so it can be edited again', () => {
     const source = writeFixture();
     const { file } = readProjectFile(source);
-    const { xml: edited } = applyReplacements(file.xml, [{ find: 'fixture_bin', replace: 'renamed_bin' }]);
+    const { xml: edited } = applyReplacements(file.xml, [
+      { find: 'fixture_bin', replace: 'renamed_bin' },
+    ]);
     const output = path.join(dir, 'out.prproj');
     writeEditedProject(output, edited, file.compressed, censusOf(edited));
 
@@ -473,10 +510,17 @@ describe('writing and reading back', () => {
 });
 
 describe('invariant 8 — off unless the operator opts in', () => {
-  it.each([['1', true], ['true', true], ['on', true], ['yes', true], ['0', false], ['', false], ['maybe', false]])(
-    '%s -> %s', (value, expected) => {
-      expect(surgeryEnabled({ [SURGERY_ENV_FLAG]: value } as NodeJS.ProcessEnv)).toBe(expected);
-    });
+  it.each([
+    ['1', true],
+    ['true', true],
+    ['on', true],
+    ['yes', true],
+    ['0', false],
+    ['', false],
+    ['maybe', false],
+  ])('%s -> %s', (value, expected) => {
+    expect(surgeryEnabled({ [SURGERY_ENV_FLAG]: value } as NodeJS.ProcessEnv)).toBe(expected);
+  });
 
   it('is off when the flag is absent entirely', () => {
     expect(surgeryEnabled({} as NodeJS.ProcessEnv)).toBe(false);
@@ -514,7 +558,9 @@ describe('project_file_edit as a tool', () => {
     const output = path.join(dir, 'out.prproj');
 
     const result: any = await tools.executeTool('project_file_edit', {
-      sourcePath: source, outputPath: output, replacements: [{ find: 'fixture_bin', replace: 'renamed_bin' }],
+      sourcePath: source,
+      outputPath: output,
+      replacements: [{ find: 'fixture_bin', replace: 'renamed_bin' }],
     });
 
     expect(result.success).toBe(false);
@@ -534,7 +580,9 @@ describe('project_file_edit as a tool', () => {
     const output = path.join(dir, 'out.prproj');
 
     const result: any = await tools.executeTool('project_file_edit', {
-      sourcePath: source, outputPath: output, replacements: [{ find: 'fixture_bin', replace: 'renamed_bin' }],
+      sourcePath: source,
+      outputPath: output,
+      replacements: [{ find: 'fixture_bin', replace: 'renamed_bin' }],
     });
 
     expect(result.success).toBe(false);
@@ -550,7 +598,9 @@ describe('project_file_edit as a tool', () => {
     const tools = new PremiereProTools(fakeHost([output]).transport);
 
     const result: any = await tools.executeTool('project_file_edit', {
-      sourcePath: source, outputPath: output, replacements: [{ find: 'fixture_bin', replace: 'renamed_bin' }],
+      sourcePath: source,
+      outputPath: output,
+      replacements: [{ find: 'fixture_bin', replace: 'renamed_bin' }],
     });
 
     expect(result.success).toBe(false);
@@ -564,7 +614,9 @@ describe('project_file_edit as a tool', () => {
     const output = path.join(dir, 'out.prproj');
 
     const result: any = await tools.executeTool('project_file_edit', {
-      sourcePath: source, outputPath: output, dryRun: true,
+      sourcePath: source,
+      outputPath: output,
+      dryRun: true,
       replacements: [{ find: 'fixture_bin', replace: 'renamed_bin' }],
     });
 
@@ -586,7 +638,8 @@ describe('project_file_edit as a tool', () => {
     const output = path.join(dir, 'out.prproj');
 
     const result: any = await tools.executeTool('project_file_edit', {
-      sourcePath: source, outputPath: output,
+      sourcePath: source,
+      outputPath: output,
       replacements: [{ find: 'fixture_bin', replace: 'renamed_bin' }],
     });
 
@@ -614,8 +667,15 @@ describe('project_file_edit as a tool', () => {
 
     // Deleting the closing tag of the cross-reference removes a Sequence node.
     const result: any = await tools.executeTool('project_file_edit', {
-      sourcePath: source, outputPath: output,
-      replacements: [{ find: '<Sequence ObjectURef="uid-seq-a"/>', replace: '<!-- gone -->', allowMarkupEdit: true }],
+      sourcePath: source,
+      outputPath: output,
+      replacements: [
+        {
+          find: '<Sequence ObjectURef="uid-seq-a"/>',
+          replace: '<!-- gone -->',
+          allowMarkupEdit: true,
+        },
+      ],
     });
 
     expect(result.success).toBe(false);
@@ -631,8 +691,16 @@ describe('project_file_edit as a tool', () => {
     const output = path.join(dir, 'out.prproj');
 
     const result: any = await tools.executeTool('project_file_edit', {
-      sourcePath: source, outputPath: output, allowCensusChange: true,
-      replacements: [{ find: '<Sequence ObjectURef="uid-seq-a"/>', replace: '<!-- gone -->', allowMarkupEdit: true }],
+      sourcePath: source,
+      outputPath: output,
+      allowCensusChange: true,
+      replacements: [
+        {
+          find: '<Sequence ObjectURef="uid-seq-a"/>',
+          replace: '<!-- gone -->',
+          allowMarkupEdit: true,
+        },
+      ],
     });
 
     expect(result.success).toBe(true);
@@ -651,8 +719,12 @@ describe('project_file_edit as a tool', () => {
     const output = path.join(dir, 'out.prproj');
 
     const result: any = await tools.executeTool('project_file_edit', {
-      sourcePath: source, outputPath: output, allowCensusChange: true,
-      replacements: [{ find: '<Sequence ObjectURef="uid-seq-a"/>', replace: '<Sequence', allowMarkupEdit: true }],
+      sourcePath: source,
+      outputPath: output,
+      allowCensusChange: true,
+      replacements: [
+        { find: '<Sequence ObjectURef="uid-seq-a"/>', replace: '<Sequence', allowMarkupEdit: true },
+      ],
     });
 
     expect(result.success).toBe(false);
@@ -668,7 +740,8 @@ describe('project_file_edit as a tool', () => {
     const output = path.join(dir, 'out.prproj');
 
     const result: any = await tools.executeTool('project_file_edit', {
-      sourcePath: source, outputPath: output,
+      sourcePath: source,
+      outputPath: output,
       replacements: [{ find: 'fixture_bin', replace: 'renamed_bin' }],
     });
 
@@ -684,7 +757,8 @@ describe('project_file_edit as a tool', () => {
     const tools = new PremiereProTools(host.transport);
 
     const result: any = await tools.executeTool('project_file_edit', {
-      sourcePath: source, outputPath: path.join(dir, 'out.prproj'),
+      sourcePath: source,
+      outputPath: path.join(dir, 'out.prproj'),
       replacements: [{ find: 'fixture_bin', replace: 'renamed_bin' }],
     });
 
@@ -725,7 +799,9 @@ describe('project_file_inspect as a tool', () => {
     delete process.env[SURGERY_ENV_FLAG];
     try {
       const tools = new PremiereProTools(fakeHost([]).transport);
-      const result: any = await tools.executeTool('project_file_inspect', { projectPath: writeFixture() });
+      const result: any = await tools.executeTool('project_file_inspect', {
+        projectPath: writeFixture(),
+      });
       expect(result.success).toBe(true);
     } finally {
       if (before !== undefined) process.env[SURGERY_ENV_FLAG] = before;
@@ -744,7 +820,8 @@ describe('project_file_inspect as a tool', () => {
   it('says so plainly when an excerpt literal is absent', async () => {
     const tools = new PremiereProTools(fakeHost([]).transport);
     const result: any = await tools.executeTool('project_file_inspect', {
-      projectPath: writeFixture(), xmlExcerptAround: 'no_such_text',
+      projectPath: writeFixture(),
+      xmlExcerptAround: 'no_such_text',
     });
     expect(result.excerpt.found).toBe(false);
   });
@@ -823,12 +900,28 @@ describe('one-pass replacement', () => {
       { find: 'fixture_bin', replace: 'fixture_seq_a' },
       { find: 'fixture_seq_a', replace: 'fixture_bin' },
     ]);
-    expect(xml).toBe(FIXTURE_XML.replace('<Name>fixture_seq_a</Name>', '<Name>@@</Name>').replace('<Name>fixture_bin</Name>', '<Name>fixture_seq_a</Name>').replace('@@', 'fixture_bin'));
+    expect(xml).toBe(
+      FIXTURE_XML.replace('<Name>fixture_seq_a</Name>', '<Name>@@</Name>')
+        .replace('<Name>fixture_bin</Name>', '<Name>fixture_seq_a</Name>')
+        .replace('@@', 'fixture_bin'),
+    );
   });
 
   it.each([
-    ['one find contained in another', [{ find: 'fixture_bin', replace: 'x' }, { find: 'xture_bin', replace: 'y' }]],
-    ['the same find twice', [{ find: 'fixture_bin', replace: 'x' }, { find: 'fixture_bin', replace: 'y' }]],
+    [
+      'one find contained in another',
+      [
+        { find: 'fixture_bin', replace: 'x' },
+        { find: 'xture_bin', replace: 'y' },
+      ],
+    ],
+    [
+      'the same find twice',
+      [
+        { find: 'fixture_bin', replace: 'x' },
+        { find: 'fixture_bin', replace: 'y' },
+      ],
+    ],
   ])('refuses %s rather than picking a winner', (_label, replacements) => {
     try {
       applyReplacements(FIXTURE_XML, replacements);
@@ -841,7 +934,10 @@ describe('one-pass replacement', () => {
   it('refuses two finds whose matches overlap in the original', () => {
     try {
       // "fixture_s" and "e_seq" both sit inside "fixture_seq_a", sharing "e_s".
-      applyReplacements(FIXTURE_XML, [{ find: 'fixture_s', replace: 'x' }, { find: 'e_seq', replace: 'y' }]);
+      applyReplacements(FIXTURE_XML, [
+        { find: 'fixture_s', replace: 'x' },
+        { find: 'e_seq', replace: 'y' },
+      ]);
       throw new Error('should have refused');
     } catch (e) {
       expect((e as SurgeryRefusal).code).toBe('OVERLAPPING_FINDS');
@@ -863,7 +959,9 @@ describe('markup in a find', () => {
   it('refuses a bracket-free find that matches inside tag names', () => {
     const renamed = FIXTURE_XML.split('Name').join('Nom');
     expect(censusDiff(censusOf(FIXTURE_XML), censusOf(renamed))).toEqual([]);
-    expect(markupDiff(markupSignature(FIXTURE_XML), markupSignature(renamed))).toContain('open:Name: 2 -> 0');
+    expect(markupDiff(markupSignature(FIXTURE_XML), markupSignature(renamed))).toContain(
+      'open:Name: 2 -> 0',
+    );
     try {
       applyReplacements(FIXTURE_XML, [{ find: 'Name', replace: 'Nom', expectedMatches: 4 }]);
       throw new Error('should have refused');
@@ -879,20 +977,24 @@ describe('markup in a find', () => {
       const tools = new PremiereProTools(fakeHost([]).transport);
       const output = path.join(dir, 'out.prproj');
       const result: any = await tools.executeTool('project_file_edit', {
-        sourcePath: writeFixture(), outputPath: output,
+        sourcePath: writeFixture(),
+        outputPath: output,
         replacements: [{ find: 'fixture_bin</Name>', replace: 'fixture_bin' }],
       });
       expect(result).toMatchObject({ success: false, code: 'MARKUP_IN_FIND', wrote: false });
       expect(existsSync(output)).toBe(false);
     } finally {
-      if (before === undefined) delete process.env[SURGERY_ENV_FLAG]; else process.env[SURGERY_ENV_FLAG] = before;
+      if (before === undefined) delete process.env[SURGERY_ENV_FLAG];
+      else process.env[SURGERY_ENV_FLAG] = before;
     }
   });
 });
 
 describe('the write never clobbers and reports wrote honestly', () => {
   const ORIGINAL_FLAG = process.env[SURGERY_ENV_FLAG];
-  beforeEach(() => { process.env[SURGERY_ENV_FLAG] = '1'; });
+  beforeEach(() => {
+    process.env[SURGERY_ENV_FLAG] = '1';
+  });
   afterEach(() => {
     if (ORIGINAL_FLAG === undefined) delete process.env[SURGERY_ENV_FLAG];
     else process.env[SURGERY_ENV_FLAG] = ORIGINAL_FLAG;
@@ -923,7 +1025,9 @@ describe('the write never clobbers and reports wrote honestly', () => {
     } as any;
 
     const result: any = await new PremiereProTools(transport).executeTool('project_file_edit', {
-      sourcePath: source, outputPath: output, replacements: [{ find: 'fixture_bin', replace: 'renamed_bin' }],
+      sourcePath: source,
+      outputPath: output,
+      replacements: [{ find: 'fixture_bin', replace: 'renamed_bin' }],
     });
 
     expect(result).toMatchObject({ success: false, code: 'OUTPUT_EXISTS', wrote: false });
@@ -931,23 +1035,34 @@ describe('the write never clobbers and reports wrote honestly', () => {
     expect(readdirSync(dir).sort()).toEqual(['fixture.prproj', 'out.prproj']);
   });
 
-  const posixNonRoot = process.platform !== 'win32' && typeof process.getuid === 'function' && process.getuid() !== 0;
-  (posixNonRoot ? it : it.skip)('reports wrote:false with nothing left behind when the write itself fails', async () => {
-    const source = writeFixture();
-    const output = path.join(dir, 'out.prproj');
-    chmodSync(dir, 0o555);
-    try {
-      expect(() => writeEditedProject(output, FIXTURE_XML, true, censusOf(FIXTURE_XML))).toThrow(ProjectWriteError);
-      const result: any = await new PremiereProTools(fakeHost([]).transport).executeTool('project_file_edit', {
-        sourcePath: source, outputPath: output, replacements: [{ find: 'fixture_bin', replace: 'renamed_bin' }],
-      });
-      expect(result).toMatchObject({ success: false, code: 'WRITE_FAILED', wrote: false });
-      expect(result.outputPath).toBeUndefined();
-    } finally {
-      chmodSync(dir, 0o755);
-    }
-    expect(readdirSync(dir)).toEqual(['fixture.prproj']);
-  });
+  const posixNonRoot =
+    process.platform !== 'win32' && typeof process.getuid === 'function' && process.getuid() !== 0;
+  (posixNonRoot ? it : it.skip)(
+    'reports wrote:false with nothing left behind when the write itself fails',
+    async () => {
+      const source = writeFixture();
+      const output = path.join(dir, 'out.prproj');
+      chmodSync(dir, 0o555);
+      try {
+        expect(() => writeEditedProject(output, FIXTURE_XML, true, censusOf(FIXTURE_XML))).toThrow(
+          ProjectWriteError,
+        );
+        const result: any = await new PremiereProTools(fakeHost([]).transport).executeTool(
+          'project_file_edit',
+          {
+            sourcePath: source,
+            outputPath: output,
+            replacements: [{ find: 'fixture_bin', replace: 'renamed_bin' }],
+          },
+        );
+        expect(result).toMatchObject({ success: false, code: 'WRITE_FAILED', wrote: false });
+        expect(result.outputPath).toBeUndefined();
+      } finally {
+        chmodSync(dir, 0o755);
+      }
+      expect(readdirSync(dir)).toEqual(['fixture.prproj']);
+    },
+  );
 
   it('leaves no temp file behind on success', () => {
     const output = path.join(dir, 'out.prproj');
@@ -966,20 +1081,28 @@ describe('the open-in-Premiere check ignores case where the volume does', () => 
     else process.env[SURGERY_ENV_FLAG] = ORIGINAL_FLAG;
   });
 
-  it.each(['darwin', 'win32'])('treats a differently-cased open path as the same file on %s', async (platform) => {
-    process.env[SURGERY_ENV_FLAG] = '1';
-    const source = writeFixture();
-    const reported = require('node:fs').realpathSync.native(source).toUpperCase();
-    Object.defineProperty(process, 'platform', { value: platform, configurable: true });
-    const output = path.join(dir, 'out.prproj');
+  it.each(['darwin', 'win32'])(
+    'treats a differently-cased open path as the same file on %s',
+    async (platform) => {
+      process.env[SURGERY_ENV_FLAG] = '1';
+      const source = writeFixture();
+      const reported = require('node:fs').realpathSync.native(source).toUpperCase();
+      Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+      const output = path.join(dir, 'out.prproj');
 
-    const result: any = await new PremiereProTools(fakeHost([reported]).transport).executeTool('project_file_edit', {
-      sourcePath: source, outputPath: output, replacements: [{ find: 'fixture_bin', replace: 'renamed_bin' }],
-    });
+      const result: any = await new PremiereProTools(fakeHost([reported]).transport).executeTool(
+        'project_file_edit',
+        {
+          sourcePath: source,
+          outputPath: output,
+          replacements: [{ find: 'fixture_bin', replace: 'renamed_bin' }],
+        },
+      );
 
-    expect(result.code).toBe('PROJECT_IS_OPEN');
-    expect(existsSync(output)).toBe(false);
-  });
+      expect(result.code).toBe('PROJECT_IS_OPEN');
+      expect(existsSync(output)).toBe(false);
+    },
+  );
 
   it('matches an output given through a symlinked directory against the resolved open path', async () => {
     process.env[SURGERY_ENV_FLAG] = '1';
@@ -987,9 +1110,14 @@ describe('the open-in-Premiere check ignores case where the volume does', () => 
     const output = path.join(dir, 'out.prproj');
     const reported = path.join(require('node:fs').realpathSync.native(dir), 'out.prproj');
 
-    const result: any = await new PremiereProTools(fakeHost([reported]).transport).executeTool('project_file_edit', {
-      sourcePath: source, outputPath: output, replacements: [{ find: 'fixture_bin', replace: 'renamed_bin' }],
-    });
+    const result: any = await new PremiereProTools(fakeHost([reported]).transport).executeTool(
+      'project_file_edit',
+      {
+        sourcePath: source,
+        outputPath: output,
+        replacements: [{ find: 'fixture_bin', replace: 'renamed_bin' }],
+      },
+    );
 
     expect(result.code).toBe('PROJECT_IS_OPEN');
   });
@@ -999,9 +1127,13 @@ describe('only .prproj paths', () => {
   it('inspect refuses a non-.prproj file and returns none of its contents', async () => {
     const secret = path.join(dir, 'notes.txt');
     writeFileSync(secret, 'token=abc123');
-    const result: any = await new PremiereProTools(fakeHost([]).transport).executeTool('project_file_inspect', {
-      projectPath: secret, xmlExcerptAround: 'token',
-    });
+    const result: any = await new PremiereProTools(fakeHost([]).transport).executeTool(
+      'project_file_inspect',
+      {
+        projectPath: secret,
+        xmlExcerptAround: 'token',
+      },
+    );
     expect(result).toMatchObject({ success: false, code: 'NOT_PRPROJ_PATH' });
     expect(JSON.stringify(result)).not.toContain('abc123');
   });
@@ -1026,12 +1158,18 @@ describe('only .prproj paths', () => {
     try {
       const source = path.join(dir, 'project.xml');
       writeFileSync(source, FIXTURE_XML);
-      const result: any = await new PremiereProTools(fakeHost([]).transport).executeTool('project_file_edit', {
-        sourcePath: source, outputPath: path.join(dir, 'out.prproj'), replacements: [{ find: 'fixture_bin', replace: 'x' }],
-      });
+      const result: any = await new PremiereProTools(fakeHost([]).transport).executeTool(
+        'project_file_edit',
+        {
+          sourcePath: source,
+          outputPath: path.join(dir, 'out.prproj'),
+          replacements: [{ find: 'fixture_bin', replace: 'x' }],
+        },
+      );
       expect(result).toMatchObject({ success: false, code: 'NOT_PRPROJ_PATH', wrote: false });
     } finally {
-      if (before === undefined) delete process.env[SURGERY_ENV_FLAG]; else process.env[SURGERY_ENV_FLAG] = before;
+      if (before === undefined) delete process.env[SURGERY_ENV_FLAG];
+      else process.env[SURGERY_ENV_FLAG] = before;
     }
   });
 });

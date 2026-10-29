@@ -58,10 +58,12 @@ export function validateCropRect(crop: CropRect): string | null {
   const fields: Array<keyof CropRect> = ['x', 'y', 'width', 'height'];
   for (const f of fields) {
     const v = crop[f];
-    if (!Number.isInteger(v)) return `crop.${f} must be a whole number of pixels (got ${String(v)}).`;
+    if (!Number.isInteger(v))
+      return `crop.${f} must be a whole number of pixels (got ${String(v)}).`;
     if (v < 0) return `crop.${f} must not be negative (got ${v}).`;
   }
-  if (crop.width < 2 || crop.height < 2) return 'crop.width and crop.height must both be at least 2 pixels.';
+  if (crop.width < 2 || crop.height < 2)
+    return 'crop.width and crop.height must both be at least 2 pixels.';
   return null;
 }
 
@@ -70,15 +72,27 @@ export function buildScreenInputArgs(target: ScreenTargetSpec, framerate: number
   switch (target.inputFormat) {
     case 'avfoundation':
       return [
-        '-f', 'avfoundation',
-        '-capture_cursor', '0',
+        '-f',
+        'avfoundation',
+        '-capture_cursor',
+        '0',
         // avfoundation screen input refuses yuv420p; bgr0 is what it offers.
-        '-pixel_format', 'bgr0',
-        '-framerate', String(framerate),
-        '-i', String(target.displayIndex ?? 1),
+        '-pixel_format',
+        'bgr0',
+        '-framerate',
+        String(framerate),
+        '-i',
+        String(target.displayIndex ?? 1),
       ];
     case 'gdigrab':
-      return ['-f', 'gdigrab', '-framerate', String(framerate), '-i', target.displaySpec || 'desktop'];
+      return [
+        '-f',
+        'gdigrab',
+        '-framerate',
+        String(framerate),
+        '-i',
+        target.displaySpec || 'desktop',
+      ];
     case 'x11grab':
       return ['-f', 'x11grab', '-framerate', String(framerate), '-i', target.displaySpec || ':0.0'];
   }
@@ -92,12 +106,20 @@ export function buildScreenStillArgs(opts: {
   framerate?: number | undefined;
 }): string[] {
   const filters: string[] = [];
-  if (opts.crop) filters.push(`crop=${opts.crop.width}:${opts.crop.height}:${opts.crop.x}:${opts.crop.y}`);
+  if (opts.crop)
+    filters.push(`crop=${opts.crop.width}:${opts.crop.height}:${opts.crop.x}:${opts.crop.y}`);
   return [
-    '-hide_banner', '-loglevel', 'error',
+    '-hide_banner',
+    '-loglevel',
+    'error',
     ...buildScreenInputArgs(opts.target, opts.framerate ?? 30),
     ...(filters.length ? ['-vf', filters.join(',')] : []),
-    '-frames:v', '1', '-update', '1', '-y', opts.outputPath,
+    '-frames:v',
+    '1',
+    '-update',
+    '1',
+    '-y',
+    opts.outputPath,
   ];
 }
 
@@ -112,15 +134,21 @@ export function buildScreenClipArgs(opts: {
   scaleWidth?: number | undefined;
 }): string[] {
   const filters: string[] = [];
-  if (opts.crop) filters.push(`crop=${opts.crop.width}:${opts.crop.height}:${opts.crop.x}:${opts.crop.y}`);
+  if (opts.crop)
+    filters.push(`crop=${opts.crop.width}:${opts.crop.height}:${opts.crop.x}:${opts.crop.y}`);
   if (opts.scaleWidth) filters.push(`scale=${opts.scaleWidth}:-2`);
   return [
-    '-hide_banner', '-loglevel', 'error',
+    '-hide_banner',
+    '-loglevel',
+    'error',
     ...buildScreenInputArgs(opts.target, opts.framerate ?? 30),
-    '-t', String(opts.durationSeconds),
+    '-t',
+    String(opts.durationSeconds),
     ...(filters.length ? ['-vf', filters.join(',')] : []),
-    '-pix_fmt', 'yuv420p',
-    '-y', opts.outputPath,
+    '-pix_fmt',
+    'yuv420p',
+    '-y',
+    opts.outputPath,
   ];
 }
 
@@ -143,7 +171,9 @@ export function buildCalibrationArgs(opts: {
   framerate?: number | undefined;
 }): string[] {
   const spacing = Math.max(50, Math.trunc(opts.spacing ?? 200));
-  const filters: string[] = [`drawgrid=width=${spacing}:height=${spacing}:thickness=1:color=red@0.5`];
+  const filters: string[] = [
+    `drawgrid=width=${spacing}:height=${spacing}:thickness=1:color=red@0.5`,
+  ];
 
   if (opts.fontFile) {
     const font = escapeDrawtextValue(opts.fontFile);
@@ -162,9 +192,18 @@ export function buildCalibrationArgs(opts: {
   }
 
   return [
-    '-hide_banner', '-loglevel', 'error',
+    '-hide_banner',
+    '-loglevel',
+    'error',
     ...buildScreenInputArgs(opts.target, opts.framerate ?? 30),
-    '-frames:v', '1', '-vf', filters.join(','), '-update', '1', '-y', opts.outputPath,
+    '-frames:v',
+    '1',
+    '-vf',
+    filters.join(','),
+    '-update',
+    '1',
+    '-y',
+    opts.outputPath,
   ];
 }
 
@@ -174,10 +213,7 @@ export function buildCalibrationArgs(opts: {
  * backslashes and a timecode is full of colons, so this is not cosmetic.
  */
 export function escapeDrawtextValue(value: string): string {
-  return value
-    .replace(/\\/g, '\\\\\\\\')
-    .replace(/'/g, "\\\\'")
-    .replace(/:/g, '\\:');
+  return value.replace(/\\/g, '\\\\\\\\').replace(/'/g, "\\\\'").replace(/:/g, '\\:');
 }
 
 /** Font files worth trying, in preference order (monospace first for timecode). */
@@ -205,7 +241,9 @@ export async function resolveFontFile(): Promise<string | null> {
     try {
       await fs.access(candidate);
       return candidate;
-    } catch { /* try the next one */ }
+    } catch {
+      /* try the next one */
+    }
   }
   return null;
 }
@@ -221,7 +259,10 @@ export interface ScreenCaptureResult {
   ffmpegStderr?: string | undefined;
 }
 
-async function runCapture(argv: string[], timeoutMs: number): Promise<{ ok: boolean; stderr: string; spawnError?: string | undefined; code: number | null }> {
+async function runCapture(
+  argv: string[],
+  timeoutMs: number,
+): Promise<{ ok: boolean; stderr: string; spawnError?: string | undefined; code: number | null }> {
   const res = await runBinary(ffmpegCmd(), argv, timeoutMs);
   return { ok: res.ok, stderr: res.stderr, spawnError: res.spawnError, code: res.code };
 }
@@ -241,7 +282,11 @@ export async function captureScreenStill(opts: {
   timeoutMs?: number | undefined;
 }): Promise<ScreenCaptureResult> {
   if (!(await binaryAvailable(ffmpegCmd()))) {
-    return { success: false, error: `ffmpeg ('${ffmpegCmd()}') was not found. The screen tap is an ffmpeg capture.`, install: FFMPEG_INSTALL_GUIDANCE };
+    return {
+      success: false,
+      error: `ffmpeg ('${ffmpegCmd()}') was not found. The screen tap is an ffmpeg capture.`,
+      install: FFMPEG_INSTALL_GUIDANCE,
+    };
   }
   if (opts.crop) {
     const bad = validateCropRect(opts.crop);
@@ -255,7 +300,8 @@ export async function captureScreenStill(opts: {
     return {
       success: false,
       error: `No frame was written to ${opts.outputPath}. ${run.spawnError ? `ffmpeg could not start: ${run.spawnError}. ` : ''}On macOS this is usually a missing Screen Recording permission for the process running this server.`,
-      install: 'System Settings > Privacy & Security > Screen Recording: enable the app running this server, then restart it.',
+      install:
+        'System Settings > Privacy & Security > Screen Recording: enable the app running this server, then restart it.',
       command: [ffmpegCmd(), ...argv].join(' '),
       ffmpegStderr: run.stderr.slice(-1500),
     };
@@ -263,9 +309,14 @@ export async function captureScreenStill(opts: {
 
   const dims = await probeDimensions(opts.outputPath);
   const caveats: string[] = [];
-  if (!opts.crop) caveats.push('No crop rect was given, so this is the WHOLE display including Premiere\'s UI, not just the Program monitor.');
+  if (!opts.crop)
+    caveats.push(
+      "No crop rect was given, so this is the WHOLE display including Premiere's UI, not just the Program monitor.",
+    );
   if (typeof opts.assertedSequenceSeconds === 'number') {
-    caveats.push('The sequence time on this record was asserted by the caller; a screen grab carries no timecode of its own.');
+    caveats.push(
+      'The sequence time on this record was asserted by the caller; a screen grab carries no timecode of its own.',
+    );
   } else {
     caveats.push('No sequence time is attached: this frame is located on the wall clock only.');
   }
@@ -304,7 +355,11 @@ export async function captureScreenClip(opts: {
   timeoutMs?: number | undefined;
 }): Promise<ScreenCaptureResult & { frameCount?: Known<number> | undefined }> {
   if (!(await binaryAvailable(ffmpegCmd()))) {
-    return { success: false, error: `ffmpeg ('${ffmpegCmd()}') was not found. The screen tap is an ffmpeg capture.`, install: FFMPEG_INSTALL_GUIDANCE };
+    return {
+      success: false,
+      error: `ffmpeg ('${ffmpegCmd()}') was not found. The screen tap is an ffmpeg capture.`,
+      install: FFMPEG_INSTALL_GUIDANCE,
+    };
   }
   if (!Number.isFinite(opts.durationSeconds) || opts.durationSeconds <= 0) {
     return { success: false, error: 'durationSeconds must be greater than 0.' };
@@ -323,7 +378,8 @@ export async function captureScreenClip(opts: {
     return {
       success: false,
       error: `No clip was written to ${opts.outputPath}. ${run.spawnError ? `ffmpeg could not start: ${run.spawnError}. ` : ''}On macOS this is usually a missing Screen Recording permission for the process running this server.`,
-      install: 'System Settings > Privacy & Security > Screen Recording: enable the app running this server, then restart it.',
+      install:
+        'System Settings > Privacy & Security > Screen Recording: enable the app running this server, then restart it.',
       command: [ffmpegCmd(), ...argv].join(' '),
       ffmpegStderr: run.stderr.slice(-1500),
     };
@@ -337,8 +393,13 @@ export async function captureScreenClip(opts: {
   const caveats: string[] = [
     `Requested ${opts.durationSeconds}s at ${opts.framerate ?? 30}fps; ${typeof frameCount === 'number' ? `${frameCount} frames landed` : 'the frame count could not be read'}. A shortfall means the capture dropped frames, not that the timeline did.`,
   ];
-  if (!opts.crop) caveats.push('No crop rect was given, so this is the WHOLE display including Premiere\'s UI, not just the Program monitor.');
-  caveats.push('Frames are located on the wall clock. Nothing here maps them to sequence timecodes.');
+  if (!opts.crop)
+    caveats.push(
+      "No crop rect was given, so this is the WHOLE display including Premiere's UI, not just the Program monitor.",
+    );
+  caveats.push(
+    'Frames are located on the wall clock. Nothing here maps them to sequence timecodes.',
+  );
 
   return {
     success: true,
@@ -390,8 +451,10 @@ export async function captureCalibrationFrame(opts: {
       success: false,
       gridSpacing: spacing,
       labelled: Boolean(fontFile),
-      error: `No calibration frame was written to ${opts.outputPath}. ${run.spawnError ? `ffmpeg could not start: ${run.spawnError}. ` : ''}`.trim(),
-      install: 'System Settings > Privacy & Security > Screen Recording: enable the app running this server, then restart it.',
+      error:
+        `No calibration frame was written to ${opts.outputPath}. ${run.spawnError ? `ffmpeg could not start: ${run.spawnError}. ` : ''}`.trim(),
+      install:
+        'System Settings > Privacy & Security > Screen Recording: enable the app running this server, then restart it.',
       command: [ffmpegCmd(), ...argv].join(' '),
       ffmpegStderr: run.stderr.slice(-1500),
     };
@@ -413,7 +476,7 @@ export async function captureCalibrationFrame(opts: {
       sizeBytes: size,
       caveats: [
         `Calibration aid, not evidence about the edit. Grid pitch ${spacing}px${fontFile ? `, labelled with the font at ${fontFile}` : ' (UNLABELLED: no usable font file was found, so read coordinates by counting cells, or set PREMIERE_MCP_CAPTURE_FONT)'}.`,
-        'Coordinates read off this grid are in the captured display\'s pixel space, which on a scaled Retina display is not the same as macOS point coordinates.',
+        "Coordinates read off this grid are in the captured display's pixel space, which on a scaled Retina display is not the same as macOS point coordinates.",
       ],
     }),
   };

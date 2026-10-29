@@ -15,12 +15,37 @@ export interface PremiereProTransport {
   /** binName accepts a "/"-separated bin path; binId (a bin nodeId) wins over it. */
   importMedia(filePath: string, binName?: string, binId?: string): Promise<PremiereProProjectItem>;
   createSequence(name: string, presetPath: string): Promise<PremiereProSequence>;
-  addToTimeline(sequenceId: string, projectItemId: string, trackIndex: number, time: number, linkAudio?: boolean, sourceInPoint?: number, sourceOutPoint?: number, insertMode?: string): Promise<PremiereProClip>;
-  addToTimelineBatch(sequenceId: string, clips: Array<{ projectItemId: string; trackIndex: number; time?: number; linkAudio?: boolean; sourceInPoint?: number; sourceOutPoint?: number }>, mode?: 'absolute' | 'append'): Promise<any>;
-  renderSequence(sequenceId: string, outputPath: string, presetPath: string, options?: {
-    sourceRange?: 'entire' | 'in_out' | 'work_area';
-    removeOnCompletion?: boolean;
-  }): Promise<{
+  addToTimeline(
+    sequenceId: string,
+    projectItemId: string,
+    trackIndex: number,
+    time: number,
+    linkAudio?: boolean,
+    sourceInPoint?: number,
+    sourceOutPoint?: number,
+    insertMode?: string,
+  ): Promise<PremiereProClip>;
+  addToTimelineBatch(
+    sequenceId: string,
+    clips: Array<{
+      projectItemId: string;
+      trackIndex: number;
+      time?: number;
+      linkAudio?: boolean;
+      sourceInPoint?: number;
+      sourceOutPoint?: number;
+    }>,
+    mode?: 'absolute' | 'append',
+  ): Promise<any>;
+  renderSequence(
+    sequenceId: string,
+    outputPath: string,
+    presetPath: string,
+    options?: {
+      sourceRange?: 'entire' | 'in_out' | 'work_area';
+      removeOnCompletion?: boolean;
+    },
+  ): Promise<{
     success: boolean;
     status?: string;
     queued?: boolean;

@@ -16,8 +16,17 @@ import { executeExpandedTool } from '../../tools/expanded.js';
 describe('QE targeting, second pass', () => {
   const expandedScript = async (name: string): Promise<string> => {
     let script = '';
-    const bridge = { executeScript: async (s: string) => { script = s; return { success: true }; } };
-    try { await executeExpandedTool(bridge as any, name, {}); } catch { /* arg guards are fine */ }
+    const bridge = {
+      executeScript: async (s: string) => {
+        script = s;
+        return { success: true };
+      },
+    };
+    try {
+      await executeExpandedTool(bridge as any, name, {});
+    } catch {
+      /* arg guards are fine */
+    }
     return script;
   };
 
@@ -73,7 +82,10 @@ describe('QE targeting, second pass', () => {
       // set_clip_pan and set_clip_opacity. While it used getActiveSequence() every
       // one of them mutated whatever sat at that index on screen.
       const script = await expandedScript('set_frame_blend');
-      const body = script.slice(script.indexOf('function qeClipForClip'), script.indexOf('function markerCollectionForTool'));
+      const body = script.slice(
+        script.indexOf('function qeClipForClip'),
+        script.indexOf('function markerCollectionForTool'),
+      );
 
       expect(body).toContain('qeSequenceFor(found.sequence)');
       expect(body).not.toContain('qe.project.getActiveSequence()');
@@ -81,7 +93,10 @@ describe('QE targeting, second pass', () => {
 
     it('qeClipForClip matches the QE item by start time, not by index', async () => {
       const script = await expandedScript('set_frame_blend');
-      const body = script.slice(script.indexOf('function qeClipForClip'), script.indexOf('function markerCollectionForTool'));
+      const body = script.slice(
+        script.indexOf('function qeClipForClip'),
+        script.indexOf('function markerCollectionForTool'),
+      );
 
       expect(body).toContain('__findQeClipByDomClip(qeTrack, found.clip)');
       expect(body).not.toContain('getItemAt(found.clipIndex)');
@@ -111,9 +126,18 @@ describe('QE targeting, second pass', () => {
 
       // Count code only. Comments in the generated script mention the call by
       // name to explain what replaced it, and a naive count picks those up.
-      const code = script.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+      const code = script
+        .split('\n')
+        .filter((l) => !l.trim().startsWith('//'))
+        .join('\n');
       const total = (code.match(/qe\.project\.getActiveSequence\(\)/g) || []).length;
-      const inHelper = (inFallback.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n').match(/qe\.project\.getActiveSequence\(\)/g) || []).length;
+      const inHelper = (
+        inFallback
+          .split('\n')
+          .filter((l) => !l.trim().startsWith('//'))
+          .join('\n')
+          .match(/qe\.project\.getActiveSequence\(\)/g) || []
+      ).length;
       // Both reads live in the helper and both are guid-checked: the plain fallback, and the one
       // after openSequence() makes a hidden sequence active.
       expect(total).toBe(2);
@@ -125,8 +149,13 @@ describe('QE targeting, second pass', () => {
 
   describe('tools that took a sequenceId and ignored it', () => {
     it.each([
-      'rename_track', 'set_target_track', 'get_track_info', 'get_target_tracks',
-      'insert_from_source', 'unnest_sequence', 'get_clip_at_playhead',
+      'rename_track',
+      'set_target_track',
+      'get_track_info',
+      'get_target_tracks',
+      'insert_from_source',
+      'unnest_sequence',
+      'get_clip_at_playhead',
     ])('%s resolves the requested sequence', async (tool) => {
       const block = caseBlock(await expandedScript(tool), tool);
 
@@ -135,16 +164,17 @@ describe('QE targeting, second pass', () => {
       expect(block).not.toContain('activeSequence');
     });
 
-    it.each([
-      'get_timeline_summary', 'get_total_clip_count', 'get_sequence_structure',
-    ])('%s rejects an id that does not resolve', async (tool) => {
-      // These answered a stale id with success:true and a null sequence, which a
-      // caller cannot tell apart from a genuinely empty one.
-      const block = caseBlock(await expandedScript(tool), tool);
+    it.each(['get_timeline_summary', 'get_total_clip_count', 'get_sequence_structure'])(
+      '%s rejects an id that does not resolve',
+      async (tool) => {
+        // These answered a stale id with success:true and a null sequence, which a
+        // caller cannot tell apart from a genuinely empty one.
+        const block = caseBlock(await expandedScript(tool), tool);
 
-      expect(block).toContain('var seqErr = sequenceRequestError();');
-      expect(block).not.toContain('activeSequence');
-    });
+        expect(block).toContain('var seqErr = sequenceRequestError();');
+        expect(block).not.toContain('activeSequence');
+      },
+    );
   });
 
   describe('split_clip timecode', () => {
@@ -165,7 +195,9 @@ describe('QE targeting, second pass', () => {
       const tools = new PremiereProTools(bridge as any);
 
       const result = await tools.executeTool('move_clip', {
-        clipId: 'c', newTime: 1, newTrackIndex: 3,
+        clipId: 'c',
+        newTime: 1,
+        newTrackIndex: 3,
       });
 
       expect(result.success).toBe(false);
@@ -179,7 +211,9 @@ describe('QE targeting, second pass', () => {
       const bridge = { executeScript: jest.fn().mockResolvedValue({ success: true }) };
       const tools = new PremiereProTools(bridge as any);
       await tools.executeTool('toggle_track_visibility', {
-        sequenceId: 'seq', trackIndex: 0, visible: false,
+        sequenceId: 'seq',
+        trackIndex: 0,
+        visible: false,
       });
       const script = bridge.executeScript.mock.calls[0][0] as string;
 

@@ -40,8 +40,16 @@ describe('move_clip_to_track fallback safety', () => {
    */
   const caseBlock = async (): Promise<string> => {
     let script = '';
-    const bridge = { executeScript: async (s: string) => { script = s; return { success: true }; } };
-    await executeExpandedTool(bridge as any, 'move_clip_to_track', { clipId: 'clip-1', trackIndex: 1 });
+    const bridge = {
+      executeScript: async (s: string) => {
+        script = s;
+        return { success: true };
+      },
+    };
+    await executeExpandedTool(bridge as any, 'move_clip_to_track', {
+      clipId: 'clip-1',
+      trackIndex: 1,
+    });
 
     const start = script.indexOf('case "move_clip_to_track":');
     expect(start).toBeGreaterThan(-1);
@@ -196,7 +204,9 @@ describe('move_clip_to_track fallback safety', () => {
     expect(reFind).toBeGreaterThan(call);
     expect(byItem).toBeGreaterThan(reFind);
     // Track type, index and start are all checked.
-    expect(block).toContain('nativeFound.trackType !== moveTrackClip.trackType || nativeFound.trackIndex !== moveTargetIndex || Math.abs(nativeStart - moveStart) > 0.05');
+    expect(block).toContain(
+      'nativeFound.trackType !== moveTrackClip.trackType || nativeFound.trackIndex !== moveTargetIndex || Math.abs(nativeStart - moveStart) > 0.05',
+    );
     // Not found -> ok but unverified, the same shape the rest of the file uses.
     expect(block).toMatch(/verified: false, unverifiedReason: nativeMove\.method/);
   });
@@ -208,7 +218,9 @@ describe('move_clip_to_track fallback safety', () => {
     // Lossiness uses the shared intrinsic notion plus speed.
     expect(block).toContain('reIsIntrinsic(moveComp)');
     expect(block).toContain('moveTrackClip.clip.getSpeed()');
-    const refusal = block.indexOf('if (!moveNativeName && moveLost.length && !allowLossy) return moveLossyRefusal();');
+    const refusal = block.indexOf(
+      'if (!moveNativeName && moveLost.length && !allowLossy) return moveLossyRefusal();',
+    );
     expect(refusal).toBeGreaterThan(-1);
     // The fallback is never lossless (static values, markers and name reset on a fresh copy), so
     // moveLost is unconditionally non-empty before the refusal and every fallback needs the flag.
@@ -216,7 +228,12 @@ describe('move_clip_to_track fallback safety', () => {
     expect(always).toBeGreaterThan(-1);
     expect(always).toBeLessThan(refusal);
     expect(block.slice(always - 200, always)).not.toMatch(/\bif \([^)]*\)\s*$/);
-    const mutations = ['.remove(false, true)', 'overwriteClip(', 'tryCall(moveTrackClip.clip', 'placed.move('];
+    const mutations = [
+      '.remove(false, true)',
+      'overwriteClip(',
+      'tryCall(moveTrackClip.clip',
+      'placed.move(',
+    ];
     for (const m of mutations) {
       expect(block.indexOf(m)).toBeGreaterThan(refusal);
     }
@@ -243,8 +260,17 @@ describe('move_clip_to_track fallback safety', () => {
 
   it('stays ES3: parses in acorn ES3 mode and uses no let/const/arrows', async () => {
     let script = '';
-    const bridge = { executeScript: async (s: string) => { script = s; return { success: true }; } };
-    await executeExpandedTool(bridge as any, 'move_clip_to_track', { clipId: 'clip-1', trackIndex: 1, allowLossyMove: true });
+    const bridge = {
+      executeScript: async (s: string) => {
+        script = s;
+        return { success: true };
+      },
+    };
+    await executeExpandedTool(bridge as any, 'move_clip_to_track', {
+      clipId: 'clip-1',
+      trackIndex: 1,
+      allowLossyMove: true,
+    });
     expect(() => parse(script, { ecmaVersion: 3, allowReturnOutsideFunction: true })).not.toThrow();
 
     const block = await caseBlock();

@@ -50,7 +50,8 @@ describe('set_sequence_settings', () => {
   it('accepts a ratio string without mangling it', async () => {
     // z.number() alone rejected "16:9" at the schema before reaching the host.
     const result = await tools.executeTool('set_sequence_settings', {
-      sequenceId: 'seq', settings: { pixelAspectRatio: '16:9' },
+      sequenceId: 'seq',
+      settings: { pixelAspectRatio: '16:9' },
     });
 
     expect(result.success).not.toBe(false);

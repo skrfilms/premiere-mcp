@@ -37,7 +37,7 @@ describe('MCP Adobe Premiere Pro Integration', () => {
       items: [],
       bins: [],
       totalItems: 0,
-      totalBins: 0
+      totalBins: 0,
     });
 
     const result = await tools.executeTool('list_project_items', {});
@@ -62,7 +62,7 @@ describe('MCP Adobe Premiere Pro Integration', () => {
       .mockResolvedValue({ success: true, videoTracks: [], audioTracks: [] });
 
     const result = await tools.executeTool('build_motion_graphics_demo', {
-      sequenceName: 'Demo Sequence'
+      sequenceName: 'Demo Sequence',
     });
 
     expect(result.success).toBe(true);
@@ -77,8 +77,20 @@ describe('MCP Adobe Premiere Pro Integration', () => {
       .mockResolvedValueOnce({ success: true, id: 'item-b', name: 'b.mp4' } as any);
     mockBridge.addToTimeline = jest
       .fn()
-      .mockResolvedValueOnce({ success: true, id: 'clip-a', name: 'a.mp4', inPoint: 0, outPoint: 4 } as any)
-      .mockResolvedValueOnce({ success: true, id: 'clip-b', name: 'b.mp4', inPoint: 4, outPoint: 8 } as any);
+      .mockResolvedValueOnce({
+        success: true,
+        id: 'clip-a',
+        name: 'a.mp4',
+        inPoint: 0,
+        outPoint: 4,
+      } as any)
+      .mockResolvedValueOnce({
+        success: true,
+        id: 'clip-b',
+        name: 'b.mp4',
+        inPoint: 4,
+        outPoint: 8,
+      } as any);
     mockBridge.executeScript
       .mockResolvedValueOnce({ success: true, id: 'seq-2', name: 'Product Spot' })
       .mockResolvedValue({ success: true, videoTracks: [], audioTracks: [] });
@@ -86,7 +98,7 @@ describe('MCP Adobe Premiere Pro Integration', () => {
     const result = await tools.executeTool('assemble_product_spot', {
       sequenceName: 'Product Spot',
       assetPaths: ['/a.mp4', '/b.mp4'],
-      clipDuration: 4
+      clipDuration: 4,
     });
 
     expect(result.success).toBe(true);
@@ -100,15 +112,27 @@ describe('MCP Adobe Premiere Pro Integration', () => {
       .mockResolvedValueOnce({ success: true, id: 'item-b', name: 'b.mp4' } as any);
     mockBridge.addToTimeline = jest
       .fn()
-      .mockResolvedValueOnce({ success: true, id: 'clip-a', name: 'a.mp4', inPoint: 0, outPoint: 4 } as any)
-      .mockResolvedValueOnce({ success: true, id: 'clip-b', name: 'b.mp4', inPoint: 4, outPoint: 8 } as any);
+      .mockResolvedValueOnce({
+        success: true,
+        id: 'clip-a',
+        name: 'a.mp4',
+        inPoint: 0,
+        outPoint: 4,
+      } as any)
+      .mockResolvedValueOnce({
+        success: true,
+        id: 'clip-b',
+        name: 'b.mp4',
+        inPoint: 4,
+        outPoint: 8,
+      } as any);
     mockBridge.executeScript
       .mockResolvedValueOnce({ success: true, id: 'seq-3', name: 'Brand Spot' })
       .mockResolvedValue({ success: true, videoTracks: [], audioTracks: [] });
 
     const result = await tools.executeTool('build_brand_spot_from_mogrt_and_assets', {
       sequenceName: 'Brand Spot',
-      assetPaths: ['/a.mp4', '/b.mp4']
+      assetPaths: ['/a.mp4', '/b.mp4'],
     });
 
     expect(result.success).toBe(true);
@@ -119,7 +143,7 @@ describe('MCP Adobe Premiere Pro Integration', () => {
   it('reads resources through the shared bridge', async () => {
     mockBridge.executeScript.mockResolvedValue({
       id: 'proj-123',
-      name: 'Test Project'
+      name: 'Test Project',
     });
 
     const result = await resources.readResource('premiere://project/info');
@@ -129,7 +153,7 @@ describe('MCP Adobe Premiere Pro Integration', () => {
 
   it('generates prompts', async () => {
     const result = await prompts.getPrompt('create_video_project', {
-      project_type: 'commercial'
+      project_type: 'commercial',
     });
 
     expect(result.description).toBeTruthy();

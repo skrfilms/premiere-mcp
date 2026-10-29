@@ -1,6 +1,6 @@
 /**
  * MCP Resources for Adobe Premiere Pro
- * 
+ *
  * This module provides resources that give AI agents access to contextual
  * information about Adobe Premiere Pro projects, sequences, and media.
  */
@@ -549,22 +549,38 @@ const RECIPES: Recipe[] = [
         lines.push(`    ${cost}`);
       }
       lines.push('');
-      lines.push('Size-shaped selections also exist: core (the everyday editorial default), read-only');
-      lines.push('(non-mutating introspection, safe for an untrusted agent), audio, color, and all.');
+      lines.push(
+        'Size-shaped selections also exist: core (the everyday editorial default), read-only',
+      );
+      lines.push(
+        '(non-mutating introspection, safe for an untrusted agent), audio, color, and all.',
+      );
       lines.push('');
       lines.push('## A bundle never hides a capability');
       lines.push('');
       lines.push('If the tool you need is not in your list:');
       lines.push('');
-      lines.push('  find_tool          searches the WHOLE catalogue by keyword and marks a hidden match');
+      lines.push(
+        '  find_tool          searches the WHOLE catalogue by keyword and marks a hidden match',
+      );
       lines.push('                     exposed:false with the reason, instead of omitting it.');
-      lines.push('  get_tool_typings   gives you that tool s exact argument shape before you call it.');
+      lines.push(
+        '  get_tool_typings   gives you that tool s exact argument shape before you call it.',
+      );
       lines.push('  call_tool          invokes it, whether or not it is advertised.');
-      lines.push('  activate_tools     promotes it into your advertised list for the rest of the session.');
+      lines.push(
+        '  activate_tools     promotes it into your advertised list for the rest of the session.',
+      );
       lines.push('');
-      lines.push('The one exception is deliberate: read-only, an exact PREMIERE_MCP_TOOLS allowlist, and');
-      lines.push('any PREMIERE_MCP_EXCLUDE veto are AUTHORITY boundaries, and the router refuses to reach');
-      lines.push('past them. A refusal names the setting responsible, so treat it as a real boundary and');
+      lines.push(
+        'The one exception is deliberate: read-only, an exact PREMIERE_MCP_TOOLS allowlist, and',
+      );
+      lines.push(
+        'any PREMIERE_MCP_EXCLUDE veto are AUTHORITY boundaries, and the router refuses to reach',
+      );
+      lines.push(
+        'past them. A refusal names the setting responsible, so treat it as a real boundary and',
+      );
       lines.push('report it to the user rather than retrying.');
       return lines.join('\n');
     },
@@ -586,79 +602,80 @@ export class PremiereProResources {
         uri: 'premiere://project/info',
         name: 'Current Project Information',
         description: 'Information about the currently open Premiere Pro project',
-        mimeType: 'application/json'
+        mimeType: 'application/json',
       },
       {
         uri: 'premiere://project/sequences',
         name: 'Project Sequences',
         description: 'List of all sequences in the current project',
-        mimeType: 'application/json'
+        mimeType: 'application/json',
       },
       {
         uri: 'premiere://project/media',
         name: 'Project Media',
         description: 'List of all media items in the current project',
-        mimeType: 'application/json'
+        mimeType: 'application/json',
       },
       {
         uri: 'premiere://project/bins',
         name: 'Project Bins',
         description: 'Organizational structure of bins in the current project',
-        mimeType: 'application/json'
+        mimeType: 'application/json',
       },
       {
         uri: 'premiere://timeline/clips',
         name: 'Timeline Clips',
         description: 'All clips currently on the timeline',
-        mimeType: 'application/json'
+        mimeType: 'application/json',
       },
       {
         uri: 'premiere://timeline/tracks',
         name: 'Timeline Tracks',
         description: 'Information about video and audio tracks',
-        mimeType: 'application/json'
+        mimeType: 'application/json',
       },
       {
         uri: 'premiere://timeline/markers',
         name: 'Timeline Markers',
         description: 'Markers and their positions on the timeline',
-        mimeType: 'application/json'
+        mimeType: 'application/json',
       },
       {
         uri: 'premiere://effects/available',
         name: 'Available Effects',
         description: 'List of all available effects in Premiere Pro',
-        mimeType: 'application/json'
+        mimeType: 'application/json',
       },
       {
         uri: 'premiere://effects/applied',
         name: 'Applied Effects',
         description: 'Effects currently applied to clips',
-        mimeType: 'application/json'
+        mimeType: 'application/json',
       },
       {
         uri: 'premiere://transitions/available',
         name: 'Available Transitions',
         description: 'List of all available transitions in Premiere Pro',
-        mimeType: 'application/json'
+        mimeType: 'application/json',
       },
       {
         uri: 'premiere://export/presets',
         name: 'Export Presets',
         description: 'Available export presets and their settings',
-        mimeType: 'application/json'
+        mimeType: 'application/json',
       },
       {
         uri: 'premiere://project/metadata',
         name: 'Project Metadata',
         description: 'Metadata information for the current project',
-        mimeType: 'application/json'
+        mimeType: 'application/json',
       },
       {
         uri: 'premiere://config/get_instructions',
         name: 'Premiere Operating Instructions',
-        description: 'Attach this before editing to give the model workflow and safety guidance for using the Premiere MCP server',
-        mimeType: 'text/plain'
+        description:
+          'Attach this before editing to give the model workflow and safety guidance for using the Premiere MCP server',
+        mimeType: 'text/plain',
       },
       // Static, host-independent recipes. Listed after the live projections so a client
       // that truncates the list still sees the project state it came for.
@@ -687,43 +704,43 @@ export class PremiereProResources {
     switch (uri) {
       case 'premiere://project/info':
         return await this.getProjectInfo();
-      
+
       case 'premiere://project/sequences':
         return await this.getProjectSequences();
-      
+
       case 'premiere://project/media':
         return await this.getProjectMedia();
-      
+
       case 'premiere://project/bins':
         return await this.getProjectBins();
-      
+
       case 'premiere://timeline/clips':
         return await this.getTimelineClips();
-      
+
       case 'premiere://timeline/tracks':
         return await this.getTimelineTracks();
-      
+
       case 'premiere://timeline/markers':
         return await this.getTimelineMarkers();
-      
+
       case 'premiere://effects/available':
         return await this.getAvailableEffects();
-      
+
       case 'premiere://effects/applied':
         return await this.getAppliedEffects();
-      
+
       case 'premiere://transitions/available':
         return await this.getAvailableTransitions();
-      
+
       case 'premiere://export/presets':
         return await this.getExportPresets();
-      
+
       case 'premiere://project/metadata':
         return await this.getProjectMetadata();
 
       case 'premiere://config/get_instructions':
         return this.getInstructions();
-      
+
       default:
         throw new Error(`Resource '${uri}' not found`);
     }
@@ -752,7 +769,7 @@ export class PremiereProResources {
         }
       });
     `;
-    
+
     return await this.bridge.executeScript(script);
   }
 
@@ -786,7 +803,7 @@ export class PremiereProResources {
         totalCount: project.sequences.numSequences
       });
     `;
-    
+
     return await this.bridge.executeScript(script);
   }
 
@@ -827,7 +844,7 @@ export class PremiereProResources {
         totalCount: mediaItems.length
       });
     `;
-    
+
     return await this.bridge.executeScript(script);
   }
 
@@ -859,7 +876,7 @@ export class PremiereProResources {
         totalCount: bins.length
       });
     `;
-    
+
     return await this.bridge.executeScript(script);
   }
 
@@ -920,7 +937,7 @@ export class PremiereProResources {
         activeSequence: project.activeSequence ? project.activeSequence.name : null
       });
     `;
-    
+
     return await this.bridge.executeScript(script);
   }
 
@@ -971,7 +988,7 @@ export class PremiereProResources {
         activeSequence: project.activeSequence ? project.activeSequence.name : null
       });
     `;
-    
+
     return await this.bridge.executeScript(script);
   }
 
@@ -1004,7 +1021,7 @@ export class PremiereProResources {
         activeSequence: project.activeSequence ? project.activeSequence.name : null
       });
     `;
-    
+
     return await this.bridge.executeScript(script);
   }
 
@@ -1039,7 +1056,7 @@ export class PremiereProResources {
         totalCount: effects.length
       });
     `;
-    
+
     return await this.bridge.executeScript(script);
   }
 
@@ -1097,7 +1114,7 @@ export class PremiereProResources {
         totalCount: appliedEffects.length
       });
     `;
-    
+
     return await this.bridge.executeScript(script);
   }
 
@@ -1132,7 +1149,7 @@ export class PremiereProResources {
         totalCount: transitions.length
       });
     `;
-    
+
     return await this.bridge.executeScript(script);
   }
 
@@ -1158,7 +1175,7 @@ export class PremiereProResources {
         totalCount: presets.length
       });
     `;
-    
+
     return await this.bridge.executeScript(script);
   }
 
@@ -1221,7 +1238,7 @@ export class PremiereProResources {
       
       JSON.stringify(metadata);
     `;
-    
+
     return await this.bridge.executeScript(script);
   }
 

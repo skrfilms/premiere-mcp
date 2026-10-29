@@ -42,7 +42,10 @@ function catalogueNames(): string[] {
 
 function loadCoverage(): TestCoverage | null {
   if (!existsSync(DATA)) return null;
-  return validateTestCoverage(JSON.parse(readFileSync(DATA, 'utf8')), 'verification/test-coverage.json');
+  return validateTestCoverage(
+    JSON.parse(readFileSync(DATA, 'utf8')),
+    'verification/test-coverage.json',
+  );
 }
 
 function loadSweeps(): Sweep[] {
@@ -74,10 +77,21 @@ describe('verification/test-coverage.json', () => {
     expect(() => validateTestCoverage({ tools: [] }, 'x')).toThrow(/catalogueSize/);
     const base = { catalogueSize: 1, testFileCount: 1, gitSha: 'abc', gitDirty: false };
     expect(() => validateTestCoverage({ ...base }, 'x')).toThrow(/tools/);
-    expect(() => validateTestCoverage({ ...base, tools: [{ name: 'ping' }] }, 'x')).toThrow(/testFiles/);
-    expect(() => validateTestCoverage(
-      { ...base, tools: [{ name: 'ping', testFiles: [] }, { name: 'ping', testFiles: [] }] }, 'x',
-    )).toThrow(/repeats ping/);
+    expect(() => validateTestCoverage({ ...base, tools: [{ name: 'ping' }] }, 'x')).toThrow(
+      /testFiles/,
+    );
+    expect(() =>
+      validateTestCoverage(
+        {
+          ...base,
+          tools: [
+            { name: 'ping', testFiles: [] },
+            { name: 'ping', testFiles: [] },
+          ],
+        },
+        'x',
+      ),
+    ).toThrow(/repeats ping/);
   });
 
   it('attributes every record to a test file, so a row cannot be evidence of nothing', () => {
@@ -95,11 +109,13 @@ describe('docs/TOOL-COVERAGE.md', () => {
   it('is exactly what the coverage data renders — a hand-edited claim fails here', () => {
     // The load-bearing assertion. Regenerate with `npm run coverage:tools`; to change what it
     // says, exercise a tool.
-    expect(readFileSync(DOC, 'utf8')).toBe(renderCoverageReport({
-      coverage: loadCoverage(),
-      executedLive: executedLive(),
-      catalogue: catalogueNames(),
-    }));
+    expect(readFileSync(DOC, 'utf8')).toBe(
+      renderCoverageReport({
+        coverage: loadCoverage(),
+        executedLive: executedLive(),
+        catalogue: catalogueNames(),
+      }),
+    );
   });
 
   it('keeps the suite axis and the live axis apart', () => {

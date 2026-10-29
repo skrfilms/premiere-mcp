@@ -48,28 +48,60 @@ beforeAll(() => {
 });
 afterAll(() => {
   process.chdir(originalCwd);
-  try { rmSync(scratchCwd, { recursive: true, force: true }); } catch { /* best effort */ }
+  try {
+    rmSync(scratchCwd, { recursive: true, force: true });
+  } catch {
+    /* best effort */
+  }
 });
 
 /** Methods the host engine does not have. Adding one here is a claim that must be measured. */
 const ABSENT: Array<{ pattern: RegExp; name: string; use: string }> = [
-  { pattern: /\.trim\s*\(/g, name: "String.prototype.trim", use: "s.replace(/^\\s+|\\s+$/g,'')" },
+  { pattern: /\.trim\s*\(/g, name: 'String.prototype.trim', use: "s.replace(/^\\s+|\\s+$/g,'')" },
   { pattern: /\.startsWith\s*\(/g, name: 'String.prototype.startsWith', use: 's.indexOf(x) === 0' },
-  { pattern: /\.endsWith\s*\(/g, name: 'String.prototype.endsWith', use: 's.slice(-x.length) === x' },
-  { pattern: /\.includes\s*\(/g, name: 'String/Array.prototype.includes', use: 's.indexOf(x) !== -1' },
+  {
+    pattern: /\.endsWith\s*\(/g,
+    name: 'String.prototype.endsWith',
+    use: 's.slice(-x.length) === x',
+  },
+  {
+    pattern: /\.includes\s*\(/g,
+    name: 'String/Array.prototype.includes',
+    use: 's.indexOf(x) !== -1',
+  },
   { pattern: /\.forEach\s*\(/g, name: 'Array.prototype.forEach', use: 'a plain for loop' },
-  { pattern: /\bObject\.keys\s*\(/g, name: 'Object.keys', use: 'for (var k in obj) with a hasOwnProperty guard' },
+  {
+    pattern: /\bObject\.keys\s*\(/g,
+    name: 'Object.keys',
+    use: 'for (var k in obj) with a hasOwnProperty guard',
+  },
   { pattern: /\bnew\s+Set\s*\(/g, name: 'Set', use: 'a plain object used as a lookup table' },
   { pattern: /\bnew\s+Map\s*\(/g, name: 'Map', use: 'a plain object' },
   // Added after frames_to_timecode threw "String().padStart is not a function" on a live host.
-  { pattern: /\.padStart\s*\(/g, name: 'String.prototype.padStart', use: "a while loop, or __padLeft in the prelude" },
+  {
+    pattern: /\.padStart\s*\(/g,
+    name: 'String.prototype.padStart',
+    use: 'a while loop, or __padLeft in the prelude',
+  },
   { pattern: /\.padEnd\s*\(/g, name: 'String.prototype.padEnd', use: 'a while loop' },
   { pattern: /\.repeat\s*\(/g, name: 'String.prototype.repeat', use: 'a while loop' },
   { pattern: /\.findIndex\s*\(/g, name: 'Array.prototype.findIndex', use: 'a for loop' },
   { pattern: /\.some\s*\(/g, name: 'Array.prototype.some', use: 'a for loop with an early return' },
-  { pattern: /\.every\s*\(/g, name: 'Array.prototype.every', use: 'a for loop with an early return' },
-  { pattern: /\.reduce\s*\(/g, name: 'Array.prototype.reduce', use: 'a for loop with an accumulator' },
-  { pattern: /\.lastIndexOf\s*\(/g, name: 'Array.prototype.lastIndexOf', use: 'a reverse for loop' },
+  {
+    pattern: /\.every\s*\(/g,
+    name: 'Array.prototype.every',
+    use: 'a for loop with an early return',
+  },
+  {
+    pattern: /\.reduce\s*\(/g,
+    name: 'Array.prototype.reduce',
+    use: 'a for loop with an accumulator',
+  },
+  {
+    pattern: /\.lastIndexOf\s*\(/g,
+    name: 'Array.prototype.lastIndexOf',
+    use: 'a reverse for loop',
+  },
   { pattern: /\bObject\.assign\s*\(/g, name: 'Object.assign', use: 'explicit property copies' },
 ];
 
@@ -83,16 +115,27 @@ const ARBITRARY = new Set(['execute_extendscript', 'evaluate_expression', 'batch
 function seed(tool: any): Record<string, unknown> {
   const shape = tool.inputSchema?._def?.shape ?? tool.inputSchema?.shape;
   let keys: string[] = [];
-  try { keys = Object.keys(typeof shape === 'function' ? shape() : (shape ?? {})); } catch { keys = []; }
+  try {
+    keys = Object.keys(typeof shape === 'function' ? shape() : (shape ?? {}));
+  } catch {
+    keys = [];
+  }
   const args: Record<string, unknown> = {};
   for (const k of keys) {
     if (/Id$/i.test(k)) args[k] = 'seed-id';
     else if (/Ids$/i.test(k)) args[k] = ['seed-id'];
     else if (/Path$/i.test(k)) args[k] = '/tmp/es3-probe.mp4';
     else if (/Index$/i.test(k)) args[k] = 0;
-    else if (/^(enabled|reverse|recursive|includeAudio|suppressUI|visible|locked|muted)$/i.test(k)) args[k] = true;
-    else if (/(seconds|time|duration|inPoint|outPoint|value|amount|level|gain|opacity|scale|rotation|frames|count|limit|width|height|index)$/i.test(k)) args[k] = 1;
-    else if (/^(adjustments|params|options|settings|properties|metadata)$/i.test(k)) args[k] = { brightness: 1 };
+    else if (/^(enabled|reverse|recursive|includeAudio|suppressUI|visible|locked|muted)$/i.test(k))
+      args[k] = true;
+    else if (
+      /(seconds|time|duration|inPoint|outPoint|value|amount|level|gain|opacity|scale|rotation|frames|count|limit|width|height|index)$/i.test(
+        k,
+      )
+    )
+      args[k] = 1;
+    else if (/^(adjustments|params|options|settings|properties|metadata)$/i.test(k))
+      args[k] = { brightness: 1 };
     else args[k] = 'seed';
   }
   return args;
@@ -107,20 +150,30 @@ describe('generated ExtendScript avoids methods this engine does not have', () =
   // suite pass vacuously. This asserts the patterns fire against known-bad text, which is exactly
   // the shape of the code that shipped in grade_snapshot and threw on every call.
   it('detects the absent-method calls it is looking for', () => {
-    const knownBad = "var t = name.trim(); if (s.startsWith('_')) {} arr.forEach(function(x){}); Object.keys(o); var q = new Set(); var p = String(h).padStart(2,'0'); arr.reduce(function(a,b){return a;});";
-    const fired = ABSENT.filter(({ pattern }) => { pattern.lastIndex = 0; return pattern.test(knownBad); }).map((a) => a.name);
-    expect(fired).toEqual(expect.arrayContaining([
-      'String.prototype.trim',
-      'String.prototype.startsWith',
-      'Array.prototype.forEach',
-      'Object.keys',
-      'Set',
-      'String.prototype.padStart',
-      'Array.prototype.reduce',
-    ]));
+    const knownBad =
+      "var t = name.trim(); if (s.startsWith('_')) {} arr.forEach(function(x){}); Object.keys(o); var q = new Set(); var p = String(h).padStart(2,'0'); arr.reduce(function(a,b){return a;});";
+    const fired = ABSENT.filter(({ pattern }) => {
+      pattern.lastIndex = 0;
+      return pattern.test(knownBad);
+    }).map((a) => a.name);
+    expect(fired).toEqual(
+      expect.arrayContaining([
+        'String.prototype.trim',
+        'String.prototype.startsWith',
+        'Array.prototype.forEach',
+        'Object.keys',
+        'Set',
+        'String.prototype.padStart',
+        'Array.prototype.reduce',
+      ]),
+    );
     // And it must not fire on the ES3-safe replacements the codebase uses instead.
-    const knownGood = "var t = name.replace(/^\\s+|\\s+$/g,''); if (s.indexOf('_') === 0) {} for (var k in o) {} var m = [1].map(function(x){return x;});";
-    const falsePositives = ABSENT.filter(({ pattern }) => { pattern.lastIndex = 0; return pattern.test(knownGood); }).map((a) => a.name);
+    const knownGood =
+      "var t = name.replace(/^\\s+|\\s+$/g,''); if (s.indexOf('_') === 0) {} for (var k in o) {} var m = [1].map(function(x){return x;});";
+    const falsePositives = ABSENT.filter(({ pattern }) => {
+      pattern.lastIndex = 0;
+      return pattern.test(knownGood);
+    }).map((a) => a.name);
     expect(falsePositives).toEqual([]);
   });
 
@@ -137,7 +190,10 @@ describe('generated ExtendScript avoids methods this engine does not have', () =
 
       const scripts: string[] = [];
       const tools = new PremiereProTools({
-        executeScript: async (s: string) => { scripts.push(s); return { success: true }; },
+        executeScript: async (s: string) => {
+          scripts.push(s);
+          return { success: true };
+        },
       } as never);
       try {
         await tools.executeTool(tool.name, seed(tool));

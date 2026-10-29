@@ -15,12 +15,24 @@ import { constants as fsConstants, promises as fs } from 'node:fs';
 import { homedir, platform, tmpdir } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, parse } from 'node:path';
 import { summarizeBatch } from './shared.js';
-import type { AddToRenderQueueArgs, CaptureTapReport, EncoderPresetDiscovery, EncoderPresetEntry, ExportSequenceArgs } from './shared.js';
+import type {
+  AddToRenderQueueArgs,
+  CaptureTapReport,
+  EncoderPresetDiscovery,
+  EncoderPresetEntry,
+  ExportSequenceArgs,
+} from './shared.js';
 import { runFf } from '../ff-exec.js';
 import { generatedAssetsDir } from '../../utils/scratch-paths.js';
 
 export class ExportRenderTools extends PlaybackTools {
-  protected async validateProjectForExport(sequenceId?: string, outputPath?: string, presetPath?: string, requireNonEmptyTimeline = true, checkGaps = true): Promise<any> {
+  protected async validateProjectForExport(
+    sequenceId?: string,
+    outputPath?: string,
+    presetPath?: string,
+    requireNonEmptyTimeline = true,
+    checkGaps = true,
+  ): Promise<any> {
     const script = `
       try {
         var errors = [];
@@ -328,7 +340,11 @@ export class ExportRenderTools extends PlaybackTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async exportInOutRange(outputPath: string, presetPath: string, sequenceId?: string): Promise<any> {
+  protected async exportInOutRange(
+    outputPath: string,
+    presetPath: string,
+    sequenceId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(sequenceId)};
@@ -345,42 +361,92 @@ export class ExportRenderTools extends PlaybackTools {
     try {
       // Use AME encoder list from our probed catalog
       const formats: Record<string, string[]> = {
-        'H.264': ['Match Source - High bitrate', 'Match Source - Medium bitrate', 'YouTube 1080p Full HD', 'YouTube 720p HD', 'Vimeo 1080p Full HD'],
+        'H.264': [
+          'Match Source - High bitrate',
+          'Match Source - Medium bitrate',
+          'YouTube 1080p Full HD',
+          'YouTube 720p HD',
+          'Vimeo 1080p Full HD',
+        ],
         'H.264 Blu-ray': ['HD 1080i 25', 'HD 1080p 23.976', 'HD 720p 25'],
         'HEVC (H.265)': ['Match Source - High bitrate', 'Match Source - Medium bitrate'],
-        'QuickTime': ['Match Source (Rewrap)', 'Apple ProRes 422 HQ', 'Apple ProRes 422', 'Apple ProRes 4444'],
-        'Apple ProRes MXF OP1a': ['Apple ProRes 422 HQ', 'Apple ProRes 422 LT', 'Apple ProRes 422 Proxy'],
+        QuickTime: [
+          'Match Source (Rewrap)',
+          'Apple ProRes 422 HQ',
+          'Apple ProRes 422',
+          'Apple ProRes 4444',
+        ],
+        'Apple ProRes MXF OP1a': [
+          'Apple ProRes 422 HQ',
+          'Apple ProRes 422 LT',
+          'Apple ProRes 422 Proxy',
+        ],
         'DNxHR/DNxHD MXF OP1a': ['DNX HQ 1080i 50', 'DNX HQ 1080i 59.94', 'Match Source (Rewrap)'],
         'MXF OP1a': ['Match Source (Rewrap)'],
-        'MPEG2': ['Match Source - High bitrate', 'Match Source - Medium bitrate'],
-        'MPEG4': ['3GPP 176 x 144 H.263'],
-        'DPX': ['DPX Sequence - Standard (Match Source)', 'DPX Sequence - Full Range (Match Source)'],
-        'OpenEXR': ['OpenEXR Sequence - Piz (Match Source)', 'OpenEXR Sequence - 32bit Float (Match Source)'],
-        'PNG': ['PNG Sequence (Match Source)', 'PNG Sequence with Alpha (Match Source)'],
-        'TIFF': ['TIFF Sequence (Match Source)'],
-        'Targa': ['Targa Sequence (Match Source)'],
-        'JPEG': ['JPEG Sequence (Match Source)'],
+        MPEG2: ['Match Source - High bitrate', 'Match Source - Medium bitrate'],
+        MPEG4: ['3GPP 176 x 144 H.263'],
+        DPX: ['DPX Sequence - Standard (Match Source)', 'DPX Sequence - Full Range (Match Source)'],
+        OpenEXR: [
+          'OpenEXR Sequence - Piz (Match Source)',
+          'OpenEXR Sequence - 32bit Float (Match Source)',
+        ],
+        PNG: ['PNG Sequence (Match Source)', 'PNG Sequence with Alpha (Match Source)'],
+        TIFF: ['TIFF Sequence (Match Source)'],
+        Targa: ['Targa Sequence (Match Source)'],
+        JPEG: ['JPEG Sequence (Match Source)'],
         'Waveform Audio': ['WAV 48 kHz 16-bit'],
-        'AIFF': ['AIFF 48 kHz'],
-        'MP3': ['MP3 128 kbps', 'MP3 192 kbps High Quality', 'MP3 256 kbps High Quality'],
+        AIFF: ['AIFF 48 kHz'],
+        MP3: ['MP3 128 kbps', 'MP3 192 kbps High Quality', 'MP3 256 kbps High Quality'],
         'AAC Audio': ['Stereo AAC, 44.1 kHz 128 kbps', 'Stereo AAC, 48 kHz 256 kbps'],
-        'Animated GIF': ['Animated GIF (Match Source)', 'Animated GIF with Transparency (Match Source)'],
+        'Animated GIF': [
+          'Animated GIF (Match Source)',
+          'Animated GIF with Transparency (Match Source)',
+        ],
       };
       const result = format ? { [format]: formats[format] ?? [] } : formats;
-      return { success: true, formats: result, note: 'Static catalog from live probe. Use create_custom_export_preset to modify params.' };
+      return {
+        success: true,
+        formats: result,
+        note: 'Static catalog from live probe. Use create_custom_export_preset to modify params.',
+      };
     } catch (e: any) {
       return { success: false, error: e.message };
     }
   }
 
-  protected createCustomExportPreset(_format: string, _basePresetName: string | undefined, _params: Record<string, string>, _outputPresetPath: string): any {
-    return { success: false, error: 'create_custom_export_preset requires the AME bridge (app.encoder). Use execute_extendscript with: var exp = app.encoder.getExporters(); then find your format, call getPresets(), setExportParamValue(k,v) for each param, writeToFile(path).' };
+  protected createCustomExportPreset(
+    _format: string,
+    _basePresetName: string | undefined,
+    _params: Record<string, string>,
+    _outputPresetPath: string,
+  ): any {
+    return {
+      success: false,
+      error:
+        'create_custom_export_preset requires the AME bridge (app.encoder). Use execute_extendscript with: var exp = app.encoder.getExporters(); then find your format, call getPresets(), setExportParamValue(k,v) for each param, writeToFile(path).',
+    };
   }
 
-  protected async exportSocialPreset(outputPath: string, preset: string, sequenceId?: string): Promise<any> {
+  protected async exportSocialPreset(
+    outputPath: string,
+    preset: string,
+    sequenceId?: string,
+  ): Promise<any> {
     const presetSettings: Record<string, Record<string, string>> = {
-      youtube_1080p: { Width: '1920', Height: '1080', TargetBitrate: '8', MaxBitrate: '10', FrameRate: '29.97' },
-      youtube_4k: { Width: '3840', Height: '2160', TargetBitrate: '40', MaxBitrate: '50', FrameRate: '29.97' },
+      youtube_1080p: {
+        Width: '1920',
+        Height: '1080',
+        TargetBitrate: '8',
+        MaxBitrate: '10',
+        FrameRate: '29.97',
+      },
+      youtube_4k: {
+        Width: '3840',
+        Height: '2160',
+        TargetBitrate: '40',
+        MaxBitrate: '50',
+        FrameRate: '29.97',
+      },
       instagram_1080p: { Width: '1080', Height: '1080', TargetBitrate: '3.5', MaxBitrate: '5' },
       instagram_reels: { Width: '1080', Height: '1920', TargetBitrate: '3.5', MaxBitrate: '5' },
       tiktok: { Width: '1080', Height: '1920', TargetBitrate: '4', MaxBitrate: '6' },
@@ -388,7 +454,12 @@ export class ExportRenderTools extends PlaybackTools {
     };
     const settings = presetSettings[preset] ?? presetSettings.youtube_1080p;
     const settingsEntries = Object.entries(settings ?? {}) as Array<[string, string]>;
-    const paramStr = settingsEntries.map((entry: [string, string]) => `preset.setExportParamValue(${JSON.stringify(entry[0])}, ${JSON.stringify(entry[1])});`).join('\n');
+    const paramStr = settingsEntries
+      .map(
+        (entry: [string, string]) =>
+          `preset.setExportParamValue(${JSON.stringify(entry[0])}, ${JSON.stringify(entry[1])});`,
+      )
+      .join('\n');
     return await this.bridge.executeScript(`
       try {
         var exporters = app.encoder.getExporters();
@@ -407,7 +478,11 @@ export class ExportRenderTools extends PlaybackTools {
     `);
   }
 
-  protected async exportAudioOnly(outputPath: string, format: string, sequenceId?: string): Promise<any> {
+  protected async exportAudioOnly(
+    outputPath: string,
+    format: string,
+    sequenceId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var exporters = app.encoder.getExporters();
@@ -423,11 +498,21 @@ export class ExportRenderTools extends PlaybackTools {
     `);
   }
 
-  protected verifyExport(filePath: string, expectedDurationSecs?: number, expectedFps?: number, expectedWidth?: number, expectedHeight?: number): any {
+  protected verifyExport(
+    filePath: string,
+    expectedDurationSecs?: number,
+    expectedFps?: number,
+    expectedWidth?: number,
+    expectedHeight?: number,
+  ): any {
     const fs = fsSync;
     try {
       if (!fs.existsSync(filePath)) return { success: false, error: 'File not found: ' + filePath };
-      const probe = runFf('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-of', 'json', '-show_streams', filePath], { timeoutMs: 10000 });
+      const probe = runFf(
+        'ffprobe',
+        ['-v', 'error', '-select_streams', 'v:0', '-of', 'json', '-show_streams', filePath],
+        { timeoutMs: 10000 },
+      );
       const data = JSON.parse(probe);
       const stream = data.streams?.[0] ?? {};
       const durationSecs = parseFloat(stream.duration ?? '0');
@@ -439,13 +524,34 @@ export class ExportRenderTools extends PlaybackTools {
       const checks: string[] = [];
       if (expectedDurationSecs !== undefined) {
         const durationOk = Math.abs(durationSecs - expectedDurationSecs) <= 1;
-        checks.push(`duration: ${durationOk ? 'PASS' : 'FAIL'} (got ${durationSecs.toFixed(2)}s, expected ${expectedDurationSecs}s)`);
+        checks.push(
+          `duration: ${durationOk ? 'PASS' : 'FAIL'} (got ${durationSecs.toFixed(2)}s, expected ${expectedDurationSecs}s)`,
+        );
       }
-      if (expectedFps !== undefined) checks.push(`fps: ${Math.abs(fps - expectedFps) < 0.1 ? 'PASS' : 'FAIL'} (got ${fps.toFixed(3)}, expected ${expectedFps})`);
-      if (expectedWidth !== undefined) checks.push(`width: ${width === expectedWidth ? 'PASS' : 'FAIL'} (got ${width}, expected ${expectedWidth})`);
-      if (expectedHeight !== undefined) checks.push(`height: ${height === expectedHeight ? 'PASS' : 'FAIL'} (got ${height}, expected ${expectedHeight})`);
-      const allPass = checks.every(c => c.includes('PASS'));
-      return { success: true, qcPass: allPass || checks.length === 0, checks, filePath, durationSecs, width, height, fps, fileSize: fs.statSync(filePath).size };
+      if (expectedFps !== undefined)
+        checks.push(
+          `fps: ${Math.abs(fps - expectedFps) < 0.1 ? 'PASS' : 'FAIL'} (got ${fps.toFixed(3)}, expected ${expectedFps})`,
+        );
+      if (expectedWidth !== undefined)
+        checks.push(
+          `width: ${width === expectedWidth ? 'PASS' : 'FAIL'} (got ${width}, expected ${expectedWidth})`,
+        );
+      if (expectedHeight !== undefined)
+        checks.push(
+          `height: ${height === expectedHeight ? 'PASS' : 'FAIL'} (got ${height}, expected ${expectedHeight})`,
+        );
+      const allPass = checks.every((c) => c.includes('PASS'));
+      return {
+        success: true,
+        qcPass: allPass || checks.length === 0,
+        checks,
+        filePath,
+        durationSecs,
+        width,
+        height,
+        fps,
+        fileSize: fs.statSync(filePath).size,
+      };
     } catch (e: any) {
       return { success: false, error: e.message };
     }
@@ -485,7 +591,13 @@ export class ExportRenderTools extends PlaybackTools {
     `);
   }
 
-  protected async setRenderPreviewQuality(useMaxQuality?: boolean, presetPath?: string, width?: number, height?: number, sequenceId?: string): Promise<any> {
+  protected async setRenderPreviewQuality(
+    useMaxQuality?: boolean,
+    presetPath?: string,
+    width?: number,
+    height?: number,
+    sequenceId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -493,7 +605,7 @@ export class ExportRenderTools extends PlaybackTools {
         ${useMaxQuality !== undefined ? `qseq.setUseMaxRenderQuality(${useMaxQuality}); qseq.setUseMaxBitDepth(${useMaxQuality});` : ''}
         ${presetPath ? `qseq.setPreviewPresetPath(${JSON.stringify(presetPath)});` : ''}
         ${width && height ? `qseq.setPreviewFrameSize(${width}, ${height});` : ''}
-        return JSON.stringify({success:true,useMaxQuality:${useMaxQuality??null},presetPath:${JSON.stringify(presetPath??null)},size:${width&&height?`"${width}x${height}"`:'null'}});
+        return JSON.stringify({success:true,useMaxQuality:${useMaxQuality ?? null},presetPath:${JSON.stringify(presetPath ?? null)},size:${width && height ? `"${width}x${height}"` : 'null'}});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
@@ -518,7 +630,8 @@ export class ExportRenderTools extends PlaybackTools {
       if (resolved.error) return { success: false, error: resolved.error };
       resolvedPath = resolved.path;
     }
-    if (!resolvedPath) return { success: false, error: 'Provide either mediaPath or projectItemId' };
+    if (!resolvedPath)
+      return { success: false, error: 'Provide either mediaPath or projectItemId' };
 
     try {
       await fs.access(resolvedPath, fsConstants.R_OK);
@@ -536,14 +649,30 @@ export class ExportRenderTools extends PlaybackTools {
     }
 
     return await new Promise((resolve) => {
-      const argv = ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', resolvedPath as string];
+      const argv = [
+        '-v',
+        'error',
+        '-print_format',
+        'json',
+        '-show_format',
+        '-show_streams',
+        resolvedPath as string,
+      ];
       const proc = spawn(ffprobe, argv);
       let stdout = '';
       let stderr = '';
-      proc.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
-      proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+      proc.stdout.on('data', (chunk) => {
+        stdout += chunk.toString();
+      });
+      proc.stderr.on('data', (chunk) => {
+        stderr += chunk.toString();
+      });
       proc.on('error', (err) => {
-        resolve({ success: false, error: `Failed to run ffprobe ('${ffprobe}'): ${err.message}`, mediaPath: resolvedPath });
+        resolve({
+          success: false,
+          error: `Failed to run ffprobe ('${ffprobe}'): ${err.message}`,
+          mediaPath: resolvedPath,
+        });
       });
       proc.on('close', (code) => {
         let parsed: any;
@@ -608,7 +737,8 @@ export class ExportRenderTools extends PlaybackTools {
         video: true,
         audio: true,
         realtime: false,
-        reason: 'Zero-dependency: captures the composited frame via Premiere\'s own frame export. Requires only that Premiere is connected.',
+        reason:
+          "Zero-dependency: captures the composited frame via Premiere's own frame export. Requires only that Premiere is connected.",
       },
       {
         tap: 'ndi',
@@ -631,12 +761,13 @@ export class ExportRenderTools extends PlaybackTools {
         realtime: true,
         reason: !isMac
           ? `Syphon is macOS-only; this host is ${os}. Use Spout on Windows or NDI cross-platform.`
-          : (syphonEnv
+          : syphonEnv
             ? 'Syphon receiver advertised via PREMIERE_MCP_SYPHON_RECEIVER.'
-            : 'No Syphon receiver detected. Syphon is the lowest-latency macOS GPU frame tap (video only).'),
-        install: isMac && !syphonEnv
-          ? 'Install a Syphon-capable Transmit plugin for Premiere plus a Syphon receiver, then set PREMIERE_MCP_SYPHON_RECEIVER to your receiver command.'
-          : undefined,
+            : 'No Syphon receiver detected. Syphon is the lowest-latency macOS GPU frame tap (video only).',
+        install:
+          isMac && !syphonEnv
+            ? 'Install a Syphon-capable Transmit plugin for Premiere plus a Syphon receiver, then set PREMIERE_MCP_SYPHON_RECEIVER to your receiver command.'
+            : undefined,
       },
       {
         tap: 'spout',
@@ -646,12 +777,13 @@ export class ExportRenderTools extends PlaybackTools {
         realtime: true,
         reason: !isWin
           ? `Spout is Windows-only; this host is ${os}. Use Syphon on macOS or NDI cross-platform.`
-          : (spoutEnv
+          : spoutEnv
             ? 'Spout receiver advertised via PREMIERE_MCP_SPOUT_RECEIVER.'
-            : 'No Spout receiver detected. Spout is the lowest-latency Windows GPU frame tap (video only).'),
-        install: isWin && !spoutEnv
-          ? 'Install a Spout-capable Transmit plugin for Premiere plus a Spout receiver, then set PREMIERE_MCP_SPOUT_RECEIVER to your receiver command.'
-          : undefined,
+            : 'No Spout receiver detected. Spout is the lowest-latency Windows GPU frame tap (video only).',
+        install:
+          isWin && !spoutEnv
+            ? 'Install a Spout-capable Transmit plugin for Premiere plus a Spout receiver, then set PREMIERE_MCP_SPOUT_RECEIVER to your receiver command.'
+            : undefined,
       },
     ];
 
@@ -686,7 +818,8 @@ export class ExportRenderTools extends PlaybackTools {
     probeOnly = false,
   ): Promise<any> {
     const taps = this.probeCaptureTaps();
-    const tapReport = (name: string): CaptureTapReport | undefined => taps.find((t) => t.tap === name);
+    const tapReport = (name: string): CaptureTapReport | undefined =>
+      taps.find((t) => t.tap === name);
 
     if (probeOnly) {
       const best = taps.find((t) => t.available && t.realtime) || tapReport('render');
@@ -696,7 +829,7 @@ export class ExportRenderTools extends PlaybackTools {
         os: platform(),
         taps,
         recommendedTap: best ? best.tap : 'render',
-        note: 'Capability probe only -- no frame was captured. render/export is always available when Premiere is connected; NDI/Syphon/Spout need a Transmit plugin + native receiver (see each tap\'s install guidance).',
+        note: "Capability probe only -- no frame was captured. render/export is always available when Premiere is connected; NDI/Syphon/Spout need a Transmit plugin + native receiver (see each tap's install guidance).",
       };
     }
 
@@ -710,7 +843,8 @@ export class ExportRenderTools extends PlaybackTools {
         success: false,
         requestedTap: requested,
         available: false,
-        error: `Capture tap '${requested}' is not available on this machine. ${report ? report.reason : ''}`.trim(),
+        error:
+          `Capture tap '${requested}' is not available on this machine. ${report ? report.reason : ''}`.trim(),
         install: report ? report.install : undefined,
         hint: 'Pass tap:"render" (or tap:"auto") to use the zero-dependency render/export tap, or probeOnly:true to see all taps.',
         taps,
@@ -739,17 +873,19 @@ export class ExportRenderTools extends PlaybackTools {
     let resolvedTime: number;
     if (time === undefined || time === null) {
       const playhead = await this.getPlayheadPosition(resolvedSequenceId);
-      resolvedTime = (playhead && playhead.success && typeof playhead.position === 'number')
-        ? playhead.position
-        : 0;
+      resolvedTime =
+        playhead && playhead.success && typeof playhead.position === 'number'
+          ? playhead.position
+          : 0;
     } else {
       resolvedTime = time;
     }
 
     // Default output path: a timestamped file in the system temp dir so we never
     // scatter files at the caller's cwd and never overwrite a prior capture.
-    const outPath = (outputPath && outputPath.trim())
-      || join(tmpdir(), `premiere-program-${resolvedSequenceId}-${Date.now()}.${format}`);
+    const outPath =
+      (outputPath && outputPath.trim()) ||
+      join(tmpdir(), `premiere-program-${resolvedSequenceId}-${Date.now()}.${format}`);
 
     const result = await this.exportFrame(resolvedSequenceId, resolvedTime, outPath, format);
 
@@ -836,9 +972,10 @@ export class ExportRenderTools extends PlaybackTools {
   }
 
   protected async getEncoderPresets(directories?: string[]): Promise<EncoderPresetDiscovery> {
-    const searchedDirectories = directories && directories.length > 0
-      ? directories
-      : await this.defaultEncoderPresetDirectories();
+    const searchedDirectories =
+      directories && directories.length > 0
+        ? directories
+        : await this.defaultEncoderPresetDirectories();
     const presets: EncoderPresetEntry[] = [];
     const errors: Array<{ path: string; error: string }> = [];
 
@@ -849,7 +986,10 @@ export class ExportRenderTools extends PlaybackTools {
       } catch (error) {
         const code = (error as NodeJS.ErrnoException).code;
         if (code !== 'ENOENT' && code !== 'ENOTDIR') {
-          errors.push({ path: directory, error: error instanceof Error ? error.message : String(error) });
+          errors.push({
+            path: directory,
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
         continue;
       }
@@ -867,7 +1007,10 @@ export class ExportRenderTools extends PlaybackTools {
             ameVersion: this.ameVersionFromPresetDirectory(directory),
           });
         } catch (error) {
-          errors.push({ path: presetPath, error: error instanceof Error ? error.message : String(error) });
+          errors.push({
+            path: presetPath,
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
       }
     }
@@ -886,12 +1029,25 @@ export class ExportRenderTools extends PlaybackTools {
     };
   }
 
-  private async resolvePresetPath(presetPath?: string, presetName?: string): Promise<
-    { success: true; presetPath: string; presetName?: string; presetResolution?: any } |
-    { success: false; error: string; presetName?: string; matches?: EncoderPresetEntry[]; searchedDirectories?: string[] }
+  private async resolvePresetPath(
+    presetPath?: string,
+    presetName?: string,
+  ): Promise<
+    | { success: true; presetPath: string; presetName?: string; presetResolution?: any }
+    | {
+        success: false;
+        error: string;
+        presetName?: string;
+        matches?: EncoderPresetEntry[];
+        searchedDirectories?: string[];
+      }
   > {
     if (presetPath && presetName) {
-      return { success: false, error: 'Provide either presetPath or presetName, not both.', presetName };
+      return {
+        success: false,
+        error: 'Provide either presetPath or presetName, not both.',
+        presetName,
+      };
     }
 
     if (presetPath) {
@@ -901,12 +1057,15 @@ export class ExportRenderTools extends PlaybackTools {
     if (!presetName) {
       return {
         success: false,
-        error: 'presetPath or presetName required — Adobe encodeSequence requires an absolute .epr preset file.',
+        error:
+          'presetPath or presetName required — Adobe encodeSequence requires an absolute .epr preset file.',
       };
     }
 
     const discovery = await this.getEncoderPresets();
-    const matches = discovery.presets.filter((preset) => preset.name === presetName || parse(preset.path).name === presetName);
+    const matches = discovery.presets.filter(
+      (preset) => preset.name === presetName || parse(preset.path).name === presetName,
+    );
     if (matches.length === 1) {
       const [match] = matches as [EncoderPresetEntry];
       return {
@@ -938,38 +1097,70 @@ export class ExportRenderTools extends PlaybackTools {
     };
   }
 
-  private async validateExportPaths(outputPath: string, presetPath: string, allowOverwrite = false): Promise<Array<{ code: string; message: string; path?: string }>> {
+  private async validateExportPaths(
+    outputPath: string,
+    presetPath: string,
+    allowOverwrite = false,
+  ): Promise<Array<{ code: string; message: string; path?: string }>> {
     const errors: Array<{ code: string; message: string; path?: string }> = [];
 
     if (!isAbsolute(presetPath)) {
-      errors.push({ code: 'PRESET_PATH_NOT_ABSOLUTE', message: 'presetPath must be an absolute .epr path.', path: presetPath });
+      errors.push({
+        code: 'PRESET_PATH_NOT_ABSOLUTE',
+        message: 'presetPath must be an absolute .epr path.',
+        path: presetPath,
+      });
     } else if (extname(presetPath).toLowerCase() !== '.epr') {
-      errors.push({ code: 'PRESET_EXTENSION', message: 'presetPath must point to a .epr file.', path: presetPath });
+      errors.push({
+        code: 'PRESET_EXTENSION',
+        message: 'presetPath must point to a .epr file.',
+        path: presetPath,
+      });
     } else {
       try {
         await fs.access(presetPath, fsConstants.R_OK);
       } catch {
-        errors.push({ code: 'PRESET_NOT_READABLE', message: 'Export preset file does not exist or is not readable.', path: presetPath });
+        errors.push({
+          code: 'PRESET_NOT_READABLE',
+          message: 'Export preset file does not exist or is not readable.',
+          path: presetPath,
+        });
       }
     }
 
     if (!isAbsolute(outputPath)) {
-      errors.push({ code: 'OUTPUT_PATH_NOT_ABSOLUTE', message: 'outputPath must be absolute.', path: outputPath });
+      errors.push({
+        code: 'OUTPUT_PATH_NOT_ABSOLUTE',
+        message: 'outputPath must be absolute.',
+        path: outputPath,
+      });
     } else {
       const outputDirectory = dirname(outputPath);
       try {
         const stat = await fs.stat(outputDirectory);
         if (!stat.isDirectory()) {
-          errors.push({ code: 'OUTPUT_FOLDER_NOT_DIRECTORY', message: 'Output parent path is not a directory.', path: outputDirectory });
+          errors.push({
+            code: 'OUTPUT_FOLDER_NOT_DIRECTORY',
+            message: 'Output parent path is not a directory.',
+            path: outputDirectory,
+          });
         }
       } catch {
-        errors.push({ code: 'OUTPUT_FOLDER_NOT_FOUND', message: 'Output parent folder does not exist.', path: outputDirectory });
+        errors.push({
+          code: 'OUTPUT_FOLDER_NOT_FOUND',
+          message: 'Output parent folder does not exist.',
+          path: outputDirectory,
+        });
       }
 
       try {
         await fs.access(outputPath, fsConstants.F_OK);
         if (!allowOverwrite) {
-          errors.push({ code: 'OUTPUT_EXISTS', message: 'Output file already exists; pass allowOverwrite:true to replace it.', path: outputPath });
+          errors.push({
+            code: 'OUTPUT_EXISTS',
+            message: 'Output file already exists; pass allowOverwrite:true to replace it.',
+            path: outputPath,
+          });
         }
       } catch {
         // Missing output file is the normal export case.
@@ -979,11 +1170,33 @@ export class ExportRenderTools extends PlaybackTools {
     return errors;
   }
 
-  private deprecatedExportOptionWarnings(format?: string, quality?: string, resolution?: string): Array<{ code: string; message: string; value?: string }> {
+  private deprecatedExportOptionWarnings(
+    format?: string,
+    quality?: string,
+    resolution?: string,
+  ): Array<{ code: string; message: string; value?: string }> {
     const warnings: Array<{ code: string; message: string; value?: string }> = [];
-    if (format) warnings.push({ code: 'FORMAT_IGNORED', message: 'format is deprecated for export_sequence; the .epr preset controls the container and codec.', value: format });
-    if (quality) warnings.push({ code: 'QUALITY_IGNORED', message: 'quality is deprecated for export_sequence; the .epr preset controls export quality.', value: quality });
-    if (resolution) warnings.push({ code: 'RESOLUTION_IGNORED', message: 'resolution is deprecated for export_sequence; the .epr preset controls output dimensions.', value: resolution });
+    if (format)
+      warnings.push({
+        code: 'FORMAT_IGNORED',
+        message:
+          'format is deprecated for export_sequence; the .epr preset controls the container and codec.',
+        value: format,
+      });
+    if (quality)
+      warnings.push({
+        code: 'QUALITY_IGNORED',
+        message:
+          'quality is deprecated for export_sequence; the .epr preset controls export quality.',
+        value: quality,
+      });
+    if (resolution)
+      warnings.push({
+        code: 'RESOLUTION_IGNORED',
+        message:
+          'resolution is deprecated for export_sequence; the .epr preset controls output dimensions.',
+        value: resolution,
+      });
     return warnings;
   }
 
@@ -1070,7 +1283,8 @@ export class ExportRenderTools extends PlaybackTools {
       return {
         success: true,
         status: result?.status ?? 'queued',
-        message: 'Sequence queued in Adobe Media Encoder. Render runs asynchronously — verify by checking the output file size growth.',
+        message:
+          'Sequence queued in Adobe Media Encoder. Render runs asynchronously — verify by checking the output file size growth.',
         sequenceId,
         outputPath,
         presetPath,
@@ -1099,7 +1313,12 @@ export class ExportRenderTools extends PlaybackTools {
     }
   }
 
-  protected async exportFrame(sequenceId: string, time: number, outputPath: string, format = 'png'): Promise<any> {
+  protected async exportFrame(
+    sequenceId: string,
+    time: number,
+    outputPath: string,
+    format = 'png',
+  ): Promise<any> {
     const script = `
       try {
         var sequence = __findSequence(${JSON.stringify(sequenceId)});
@@ -1260,26 +1479,77 @@ export class ExportRenderTools extends PlaybackTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected exportGif(mediaPath: string, startSecs: number, durationSecs: number, fps: number, width: number, outputPath: string): any {
+  protected exportGif(
+    mediaPath: string,
+    startSecs: number,
+    durationSecs: number,
+    fps: number,
+    width: number,
+    outputPath: string,
+  ): any {
     const palette = outputPath.replace(/\.gif$/i, '_palette.png');
     try {
-      runFf('ffmpeg', ['-y', '-ss', String(startSecs), '-t', String(durationSecs), '-i', mediaPath, '-vf', `fps=${Number(fps)},scale=${Number(width)}:-1:flags=lanczos,palettegen`, '-update', '1', palette], { timeoutMs: 30000 });
-      runFf('ffmpeg', ['-y', '-ss', String(startSecs), '-t', String(durationSecs), '-i', mediaPath, '-i', palette, '-filter_complex', `fps=${Number(fps)},scale=${Number(width)}:-1:flags=lanczos[x];[x][1:v]paletteuse`, outputPath], { timeoutMs: 30000 });
+      runFf(
+        'ffmpeg',
+        [
+          '-y',
+          '-ss',
+          String(startSecs),
+          '-t',
+          String(durationSecs),
+          '-i',
+          mediaPath,
+          '-vf',
+          `fps=${Number(fps)},scale=${Number(width)}:-1:flags=lanczos,palettegen`,
+          '-update',
+          '1',
+          palette,
+        ],
+        { timeoutMs: 30000 },
+      );
+      runFf(
+        'ffmpeg',
+        [
+          '-y',
+          '-ss',
+          String(startSecs),
+          '-t',
+          String(durationSecs),
+          '-i',
+          mediaPath,
+          '-i',
+          palette,
+          '-filter_complex',
+          `fps=${Number(fps)},scale=${Number(width)}:-1:flags=lanczos[x];[x][1:v]paletteuse`,
+          outputPath,
+        ],
+        { timeoutMs: 30000 },
+      );
       const fs = fsSync;
-      try { fs.unlinkSync(palette); } catch {}
+      try {
+        fs.unlinkSync(palette);
+      } catch {}
       return { success: fs.existsSync(outputPath), outputPath, fps, width };
-    } catch (e: any) { return { success: false, error: e.message }; }
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
   }
 
   protected exportStillsBatch(mediaPath: string, outputDir: string, _seqId?: string): any {
-    const path = pathSync, fs = fsSync;
+    const path = pathSync,
+      fs = fsSync;
     try {
       if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
       const prefix = path.join(outputDir, 'still_%04d.jpg');
       runFf('ffmpeg', ['-y', '-i', mediaPath, '-vf', 'fps=1/10', prefix], { timeoutMs: 60000 });
-      const files = fs.readdirSync(outputDir).filter((f: string) => f.match(/still_\d+\.jpg/)).map((f: string) => path.join(outputDir, f));
+      const files = fs
+        .readdirSync(outputDir)
+        .filter((f: string) => f.match(/still_\d+\.jpg/))
+        .map((f: string) => path.join(outputDir, f));
       return { success: true, count: files.length, paths: files };
-    } catch (e: any) { return { success: false, error: e.message }; }
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
   }
 
   /**
@@ -1335,13 +1605,22 @@ export class ExportRenderTools extends PlaybackTools {
     `);
 
     if (qe?.qeWrote) {
-      return { success: true, verified: true, path: qe.path, timecode: qe.timecode,
-        route: 'qe.exportFrameJPEG', composited: true };
+      return {
+        success: true,
+        verified: true,
+        path: qe.path,
+        timecode: qe.timecode,
+        route: 'qe.exportFrameJPEG',
+        composited: true,
+      };
     }
 
     if (!qe?.mediaPath) {
       return {
-        success: false, verified: true, path: outputPath, timecode: qe?.timecode ?? null,
+        success: false,
+        verified: true,
+        path: outputPath,
+        timecode: qe?.timecode ?? null,
         route: 'none',
         error: `QE exportFrameJPEG returned "${qe?.qeResult ?? 'error'}" and wrote no file (it is inert on this build), and no clip was found under the playhead to fall back to. Move the playhead over a clip, or use capture_program_output for a composited frame.`,
       };
@@ -1350,22 +1629,51 @@ export class ExportRenderTools extends PlaybackTools {
     const ff = await this.runFfmpegStill(qe.mediaPath, Number(qe.sourceSecs ?? 0), outputPath);
     if (!ff.ok) {
       return {
-        success: false, verified: true, path: outputPath, route: 'ffmpeg',
+        success: false,
+        verified: true,
+        path: outputPath,
+        route: 'ffmpeg',
         error: `QE exportFrameJPEG wrote nothing (inert on this build) and the ffmpeg fallback failed: ${ff.error}`,
       };
     }
     return {
-      success: true, verified: true, path: outputPath, timecode: qe.timecode,
-      route: 'ffmpeg-source-frame', composited: false,
-      sourceMedia: qe.mediaPath, sourceSeconds: qe.sourceSecs,
+      success: true,
+      verified: true,
+      path: outputPath,
+      timecode: qe.timecode,
+      route: 'ffmpeg-source-frame',
+      composited: false,
+      sourceMedia: qe.mediaPath,
+      sourceSeconds: qe.sourceSecs,
       note: 'QE frame export is inert on this build, so this is the SOURCE frame from the clip under the playhead: no effects, no transitions, and nothing from higher tracks. Use capture_program_output for a composited frame.',
     };
   }
 
   /** Single-frame still via ffmpeg. Returns a result object rather than throwing. */
-  private async runFfmpegStill(mediaPath: string, atSeconds: number, outputPath: string): Promise<{ ok: boolean; error?: string }> {
+  private async runFfmpegStill(
+    mediaPath: string,
+    atSeconds: number,
+    outputPath: string,
+  ): Promise<{ ok: boolean; error?: string }> {
     try {
-      runFf('ffmpeg', ['-y', '-v', 'error', '-ss', Math.max(0, atSeconds).toFixed(3), '-i', mediaPath, '-frames:v', '1', '-update', '1', outputPath], { timeoutMs: 60_000 });
+      runFf(
+        'ffmpeg',
+        [
+          '-y',
+          '-v',
+          'error',
+          '-ss',
+          Math.max(0, atSeconds).toFixed(3),
+          '-i',
+          mediaPath,
+          '-frames:v',
+          '1',
+          '-update',
+          '1',
+          outputPath,
+        ],
+        { timeoutMs: 60_000 },
+      );
     } catch (e: any) {
       return { ok: false, error: String(e?.message || e).slice(0, 300) };
     }
@@ -1376,12 +1684,13 @@ export class ExportRenderTools extends PlaybackTools {
   }
 
   protected listExportPresets(filter?: string): any {
-    const path = pathSync, fs = fsSync;
+    const path = pathSync,
+      fs = fsSync;
     const baseDirs = [
       path.join(osSync.homedir(), 'Library/Application Support/Adobe/Common/AMEPresets'),
-      '/Library/Application Support/Adobe/Common/AMEPresets'
+      '/Library/Application Support/Adobe/Common/AMEPresets',
     ];
-    const results: Array<{name: string, path: string}> = [];
+    const results: Array<{ name: string; path: string }> = [];
     const walk = (dir: string) => {
       if (!fs.existsSync(dir)) return;
       fs.readdirSync(dir).forEach((f: string) => {
@@ -1389,7 +1698,8 @@ export class ExportRenderTools extends PlaybackTools {
         if (fs.statSync(fp).isDirectory()) walk(fp);
         else if (f.endsWith('.epr')) {
           const name = f.replace('.epr', '');
-          if (!filter || name.toLowerCase().includes(filter.toLowerCase())) results.push({ name, path: fp });
+          if (!filter || name.toLowerCase().includes(filter.toLowerCase()))
+            results.push({ name, path: fp });
         }
       });
     };
@@ -1408,7 +1718,12 @@ export class ExportRenderTools extends PlaybackTools {
     `);
   }
 
-  protected async exportPerMarkerSegments(_presetPath: string, _outputDir: string, _filePrefix: string, seqId?: string): Promise<any> {
+  protected async exportPerMarkerSegments(
+    _presetPath: string,
+    _outputDir: string,
+    _filePrefix: string,
+    seqId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq=${this.buildSeqRes(seqId)};
@@ -1483,7 +1798,13 @@ export class ExportRenderTools extends PlaybackTools {
     `);
   }
 
-  protected async setPreviewQuality(maxRenderQuality?: boolean, maxBitDepth?: boolean, previewWidth?: number, previewHeight?: number, seqId?: string): Promise<any> {
+  protected async setPreviewQuality(
+    maxRenderQuality?: boolean,
+    maxBitDepth?: boolean,
+    previewWidth?: number,
+    previewHeight?: number,
+    seqId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -1504,7 +1825,7 @@ export class ExportRenderTools extends PlaybackTools {
             error:'Some preview settings were rejected by the host: ' + failures.join(' | ') + '.'});
         }
         return JSON.stringify({success:true,verified:false,dispatched:calls,
-          maxRenderQuality:${maxRenderQuality??'null'},maxBitDepth:${maxBitDepth??'null'},previewSize:${previewWidth !== undefined ? `[${previewWidth},${previewHeight}]` : 'null'},
+          maxRenderQuality:${maxRenderQuality ?? 'null'},maxBitDepth:${maxBitDepth ?? 'null'},previewSize:${previewWidth !== undefined ? `[${previewWidth},${previewHeight}]` : 'null'},
           unverifiedReason:'The QE sequence object exposes no getters for max render quality, max bit depth or preview frame size, so these writes are reported as dispatched without throwing rather than as verified. Confirm them in Sequence Settings, or read the whole settings block with get_qe_sequence_settings.'});
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
     `);
@@ -1513,7 +1834,12 @@ export class ExportRenderTools extends PlaybackTools {
   protected async renderNeedsPreview(seqId?: string): Promise<any> {
     const result = await this.getSequenceRenderStatus(seqId);
     if (!result || !result.success) return result;
-    return { success: true, needsRender: result.needsRender, unrenderedSegments: result.red?.count ?? 0, partialSegments: result.yellow?.count ?? 0 };
+    return {
+      success: true,
+      needsRender: result.needsRender,
+      unrenderedSegments: result.red?.count ?? 0,
+      partialSegments: result.yellow?.count ?? 0,
+    };
   }
 
   // Render Queue
@@ -1529,8 +1855,8 @@ export class ExportRenderTools extends PlaybackTools {
     //      way to watch an AME render actually progress (poll repeatedly).
     const note =
       "Premiere cannot read Adobe Media Encoder's queue directly. To track a render, " +
-      "pass outputPath and poll this tool: a growing byte size means the encode is running; " +
-      "a stable size over successive calls means it has finished (or stalled).";
+      'pass outputPath and poll this tool: a growing byte size means the encode is running; ' +
+      'a stable size over successive calls means it has finished (or stalled).';
 
     // Best-effort encoder-bridge probe. A bridge failure must not sink the file report.
     let encoder: any = { available: false, methods: [] };
@@ -1621,19 +1947,34 @@ export class ExportRenderTools extends PlaybackTools {
     try {
       fs.mkdirSync(outputDir, { recursive: true });
       const manifest: any[] = [];
-      for (const f of (mediaInfo.files || [])) {
-        if (!fs.existsSync(f.path)) { manifest.push({ ...f, status: 'missing' }); continue; }
+      for (const f of mediaInfo.files || []) {
+        if (!fs.existsSync(f.path)) {
+          manifest.push({ ...f, status: 'missing' });
+          continue;
+        }
         const dest = path.join(outputDir, path.basename(f.path));
         if (!fs.existsSync(dest)) fs.copyFileSync(f.path, dest, fs.constants.COPYFILE_EXCL);
         const stat = fs.statSync(dest);
         manifest.push({ ...f, dest, size: stat.size, status: 'copied' });
       }
       fs.writeFileSync(path.join(outputDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
-      return { success: true, outputDir, filesCopied: manifest.filter((f: any) => f.status === 'copied').length, missing: manifest.filter((f: any) => f.status === 'missing').length, manifestPath: path.join(outputDir, 'manifest.json') };
-    } catch (e: any) { return { success: false, error: e.message?.slice(0, 200) }; }
+      return {
+        success: true,
+        outputDir,
+        filesCopied: manifest.filter((f: any) => f.status === 'copied').length,
+        missing: manifest.filter((f: any) => f.status === 'missing').length,
+        manifestPath: path.join(outputDir, 'manifest.json'),
+      };
+    } catch (e: any) {
+      return { success: false, error: e.message?.slice(0, 200) };
+    }
   }
 
-  protected async startEncodeAndMonitor(outputPath: string, presetPath?: string, workAreaType = 0): Promise<any> {
+  protected async startEncodeAndMonitor(
+    outputPath: string,
+    presetPath?: string,
+    workAreaType = 0,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = app.project.activeSequence;
@@ -1645,7 +1986,11 @@ export class ExportRenderTools extends PlaybackTools {
     `);
   }
 
-  protected async batchExportSequences(sequenceIds: string[], outputDir: string, presetPath?: string): Promise<any> {
+  protected async batchExportSequences(
+    sequenceIds: string[],
+    outputDir: string,
+    presetPath?: string,
+  ): Promise<any> {
     const results: any[] = [];
     for (const seqId of sequenceIds) {
       const r: any = await this.bridge.executeScript(`
@@ -1674,21 +2019,28 @@ export class ExportRenderTools extends PlaybackTools {
     // trimAudioFiles, handleFrames, includePan). The old call passed strings and booleans where
     // numbers belong, Premiere rejected it, and a zero-argument fallback ran that cannot take a
     // path. Measured on 26.5.2: this typed form writes the file (returns 1). No fallback.
-    return await this.exportInterchange('OMF', outputPath, `
+    return await this.exportInterchange(
+      'OMF',
+      outputPath,
+      `
       try {
         var seq = app.project.activeSequence;
         if (!seq) return JSON.stringify({called:false,error:'No active sequence'});
         app.project.exportOMF(seq, ${JSON.stringify(outputPath)}, String(seq.name), 48000, 16, 1, 0, 0, 0, 0);
         return JSON.stringify({called:true,fallbackUsed:false});
       } catch(e) { return JSON.stringify({called:false,error:e.toString()}); }
-    `);
+    `,
+    );
   }
 
   protected async exportAafWithSettings(outputPath: string): Promise<any> {
     // Same typed argument list export_aaf uses (seq, path, mixDownVideo, explodeToMono, sampleRate,
     // bitsPerSample, embedAudio, audioFileFormat, trimSources, handleFrames). The old string/boolean
     // list was rejected and fell back to a zero-argument call that cannot take a path.
-    return await this.exportInterchange('AAF', outputPath, `
+    return await this.exportInterchange(
+      'AAF',
+      outputPath,
+      `
       try {
         var seq = app.project.activeSequence;
         if (!seq) return JSON.stringify({called:false,error:'No active sequence'});
@@ -1696,7 +2048,8 @@ export class ExportRenderTools extends PlaybackTools {
         app.project.exportAAF(seq, ${JSON.stringify(outputPath)}, 0, 0, 48000, 16, 0, 0, 1, 0);
         return JSON.stringify({called:true,fallbackUsed:false});
       } catch(e) { return JSON.stringify({called:false,error:e.toString()}); }
-    `);
+    `,
+    );
   }
 
   /**
@@ -1714,13 +2067,20 @@ export class ExportRenderTools extends PlaybackTools {
    * assume-it-worked reasoning in a new place — so an unchanged size+mtime counts as "no file
    * produced".
    */
-  private async exportInterchange(kind: 'OMF' | 'AAF', outputPath: string, script: string): Promise<any> {
+  private async exportInterchange(
+    kind: 'OMF' | 'AAF',
+    outputPath: string,
+    script: string,
+  ): Promise<any> {
     const before = this.statSnapshot(outputPath);
     const raw: any = await this.bridge.executeScript(script);
 
     if (!raw || raw.called !== true) {
       return {
-        success: false, verified: false, kind, outputPath,
+        success: false,
+        verified: false,
+        kind,
+        outputPath,
         error: raw?.error ? `${kind} export failed: ${raw.error}` : `${kind} export did not run.`,
         firstError: raw?.firstError ?? null,
       };
@@ -1728,11 +2088,17 @@ export class ExportRenderTools extends PlaybackTools {
 
     const after = this.statSnapshot(outputPath);
     const fallbackUsed = raw.fallbackUsed === true;
-    const produced = after !== null && (before === null || after.mtimeMs !== before.mtimeMs || after.size !== before.size);
+    const produced =
+      after !== null &&
+      (before === null || after.mtimeMs !== before.mtimeMs || after.size !== before.size);
 
     if (!produced) {
       return {
-        success: false, verified: true, kind, outputPath, fallbackUsed,
+        success: false,
+        verified: true,
+        kind,
+        outputPath,
+        fallbackUsed,
         fileExisted: before !== null,
         error: fallbackUsed
           ? `Premiere rejected the full ${kind} argument list, so the zero-argument fallback ran instead. That form takes no path, so nothing was written to ${outputPath}; whatever it produced went to the project's own default location.`
@@ -1742,8 +2108,12 @@ export class ExportRenderTools extends PlaybackTools {
     }
 
     return {
-      success: true, verified: true, kind, outputPath,
-      fileSizeBytes: after.size, fallbackUsed,
+      success: true,
+      verified: true,
+      kind,
+      outputPath,
+      fileSizeBytes: after.size,
+      fallbackUsed,
       note: fallbackUsed
         ? `The full ${kind} argument list was rejected and the zero-argument fallback ran, but a new file is present at the requested path.`
         : `${kind} exported. This API exposes limited parameter control, so only the path is honoured.`,
@@ -1751,27 +2121,65 @@ export class ExportRenderTools extends PlaybackTools {
     };
   }
 
-  protected verifyExportFile(filePath: string, expectedDuration?: number, expectedFps?: number, expectedWidth?: number, expectedHeight?: number): any {
+  protected verifyExportFile(
+    filePath: string,
+    expectedDuration?: number,
+    expectedFps?: number,
+    expectedWidth?: number,
+    expectedHeight?: number,
+  ): any {
     const fs = fsSync;
-    if (!fs.existsSync(filePath)) return { success: false, error: 'File does not exist: ' + filePath };
+    if (!fs.existsSync(filePath))
+      return { success: false, error: 'File does not exist: ' + filePath };
     try {
-      const out = runFf('ffprobe', ['-v', 'quiet', '-print_format', 'json', '-show_streams', '-show_format', filePath], { timeoutMs: 15000 });
+      const out = runFf(
+        'ffprobe',
+        ['-v', 'quiet', '-print_format', 'json', '-show_streams', '-show_format', filePath],
+        { timeoutMs: 15000 },
+      );
       const info = JSON.parse(out);
       const video = (info.streams || []).find((s: any) => s.codec_type === 'video');
       const dur = parseFloat(info.format?.duration ?? '0');
       // r_frame_rate arrives as "num/den" (e.g. "24000/1001"). Parsed rather than eval'd: this is a
       // string from an external process, and the comment on the generated-script builder above says
       // this codebase does not reach for eval()/Function() in the host — that applies here too.
-      const fps = (video && typeof video.r_frame_rate === 'string' ? this.parseFrameRate(video.r_frame_rate) : 0) ?? 0;
-      const w = video?.width, h = video?.height;
+      const fps =
+        (video && typeof video.r_frame_rate === 'string'
+          ? this.parseFrameRate(video.r_frame_rate)
+          : 0) ?? 0;
+      const w = video?.width,
+        h = video?.height;
       const codec = video?.codec_name;
       const size = fs.statSync(filePath).size;
       const checks: any = {};
-      if (expectedDuration) checks.duration = { expected: expectedDuration, actual: dur, match: Math.abs(dur - expectedDuration) < 0.5 };
-      if (expectedFps) checks.fps = { expected: expectedFps, actual: fps, match: Math.abs(fps - expectedFps) < 0.1 };
-      if (expectedWidth) checks.width = { expected: expectedWidth, actual: w, match: w === expectedWidth };
-      if (expectedHeight) checks.height = { expected: expectedHeight, actual: h, match: h === expectedHeight };
-      return { success: true, duration: dur, fps, width: w, height: h, codec, fileSizeBytes: size, checks };
-    } catch (e: any) { return { success: false, error: e.message?.slice(0, 200) }; }
+      if (expectedDuration)
+        checks.duration = {
+          expected: expectedDuration,
+          actual: dur,
+          match: Math.abs(dur - expectedDuration) < 0.5,
+        };
+      if (expectedFps)
+        checks.fps = {
+          expected: expectedFps,
+          actual: fps,
+          match: Math.abs(fps - expectedFps) < 0.1,
+        };
+      if (expectedWidth)
+        checks.width = { expected: expectedWidth, actual: w, match: w === expectedWidth };
+      if (expectedHeight)
+        checks.height = { expected: expectedHeight, actual: h, match: h === expectedHeight };
+      return {
+        success: true,
+        duration: dur,
+        fps,
+        width: w,
+        height: h,
+        codec,
+        fileSizeBytes: size,
+        checks,
+      };
+    } catch (e: any) {
+      return { success: false, error: e.message?.slice(0, 200) };
+    }
   }
 }

@@ -110,10 +110,7 @@ describe('Logger', () => {
       const errorObj = new Error('test error');
       logger.error('error occurred', errorObj);
 
-      expect(consoleErrorSpy).toHaveBeenCalledWith(
-        expect.stringContaining('[ERROR]'),
-        errorObj
-      );
+      expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('[ERROR]'), errorObj);
     });
   });
 
@@ -195,7 +192,7 @@ describe('Logger', () => {
       expect(consoleErrorSpy).toHaveBeenCalledWith(
         expect.stringContaining('message with objects'),
         obj,
-        arr
+        arr,
       );
     });
   });

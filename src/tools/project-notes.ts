@@ -7,12 +7,17 @@
 import { basename, dirname, join } from 'node:path';
 
 export function notesPathFor(projectPath: string): string {
-  return join(dirname(projectPath), `${basename(projectPath).replace(/\.prproj$/i, '')}.mcp-notes.md`);
+  return join(
+    dirname(projectPath),
+    `${basename(projectPath).replace(/\.prproj$/i, '')}.mcp-notes.md`,
+  );
 }
 
 /** Append a bullet under `## section`, creating the file header and section when missing. */
 export function addNote(text: string, note: string, section: string, when: Date): string {
-  let doc = text.trim() ? text.replace(/\s*$/, '\n') : '# Project notes\n\nConventions for this project, kept by Premiere MCP and read at the start of each session.\n';
+  let doc = text.trim()
+    ? text.replace(/\s*$/, '\n')
+    : '# Project notes\n\nConventions for this project, kept by Premiere MCP and read at the start of each session.\n';
   const line = `- ${note.replace(/\s*\n\s*/g, ' ')} _(${when.toISOString().slice(0, 10)})_`;
   const heading = `## ${section}`;
   const lines = doc.split('\n');

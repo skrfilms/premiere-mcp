@@ -22,7 +22,7 @@ jest.mock('fs', () => ({
     unlink: jest.fn(),
     rename: jest.fn(),
     rm: jest.fn(),
-  }
+  },
 }));
 
 jest.mock('node:crypto', () => ({
@@ -110,7 +110,7 @@ describe('bridge file-queue protocol', () => {
     it('recovers from a torn read once the whole file lands', async () => {
       const whole = JSON.stringify({ result: { ok: true } });
       mockFs.readFile
-        .mockResolvedValueOnce(whole.slice(0, 12) as any)  // caught mid-write
+        .mockResolvedValueOnce(whole.slice(0, 12) as any) // caught mid-write
         .mockResolvedValue(whole as any);
       const bridge = await readyBridge();
 
@@ -127,18 +127,14 @@ describe('bridge file-queue protocol', () => {
       await expect(bridge.executeScript('return 1;', 500)).rejects.toThrow(
         /never became valid JSON/,
       );
-      await expect(bridge.executeScript('return 1;', 500)).rejects.toThrow(
-        /Last parse error/,
-      );
+      await expect(bridge.executeScript('return 1;', 500)).rejects.toThrow(/Last parse error/);
     });
 
     it('includes what was actually on disk so the payload can be diagnosed', async () => {
       mockFs.readFile.mockResolvedValue('NOT JSON AT ALL' as any);
       const bridge = await readyBridge();
 
-      await expect(bridge.executeScript('return 1;', 500)).rejects.toThrow(
-        /NOT JSON AT ALL/,
-      );
+      await expect(bridge.executeScript('return 1;', 500)).rejects.toThrow(/NOT JSON AT ALL/);
     });
   });
 

@@ -81,10 +81,19 @@ describe('remove_effect — generated script', () => {
     const payload = {
       success: true,
       tool: 'remove_effect',
-      data: { removed: true, changed: true, matchName: 'AE.ADBE Gaussian Blur 2', method: 'qe.removeEffects', verified: true },
+      data: {
+        removed: true,
+        changed: true,
+        matchName: 'AE.ADBE Gaussian Blur 2',
+        method: 'qe.removeEffects',
+        verified: true,
+      },
     };
     const { bridge } = captureBridge(() => payload);
-    const res = await executeExpandedTool(bridge as any, 'remove_effect', { clipId: 'node-1', effectName: 'Gaussian Blur' });
+    const res = await executeExpandedTool(bridge as any, 'remove_effect', {
+      clipId: 'node-1',
+      effectName: 'Gaussian Blur',
+    });
     expect(res).toEqual(payload);
     expect(res.data.verified).toBe(true);
   });

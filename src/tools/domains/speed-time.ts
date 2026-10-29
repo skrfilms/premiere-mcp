@@ -12,7 +12,12 @@ import { TRIM_LIB } from '../trim-lib.js';
 import { runFf } from '../ff-exec.js';
 
 export class SpeedTimeTools extends SourceMonitorTools {
-  protected async setClipReverse(trackIndex: number, clipIndex: number, reverse: boolean, sequenceId?: string): Promise<any> {
+  protected async setClipReverse(
+    trackIndex: number,
+    clipIndex: number,
+    reverse: boolean,
+    sequenceId?: string,
+  ): Promise<any> {
     // qeClip.setReverse() killed the engine on 26.3.2 and throws on 26.5.2. setSpeed() with the
     // reverse flag works, with an in-point correction (see __setReversed in trim-lib.ts).
     return await this.bridge.executeScript(`
@@ -49,7 +54,10 @@ export class SpeedTimeTools extends SourceMonitorTools {
     preservePitch = true,
   ): Promise<any> {
     if (typeof speed !== 'number' || !Number.isFinite(speed) || speed <= 0) {
-      return { success: false, error: 'Provide a speed multiplier greater than 0 (e.g. 0.5 for half speed, 2 for double).' };
+      return {
+        success: false,
+        error: 'Provide a speed multiplier greater than 0 (e.g. 0.5 for half speed, 2 for double).',
+      };
     }
 
     let resolvedPath = mediaPath;
@@ -58,7 +66,8 @@ export class SpeedTimeTools extends SourceMonitorTools {
       if (resolved.error) return { success: false, error: resolved.error };
       resolvedPath = resolved.path;
     }
-    if (!resolvedPath) return { success: false, error: 'Provide either mediaPath or projectItemId' };
+    if (!resolvedPath)
+      return { success: false, error: 'Provide either mediaPath or projectItemId' };
 
     try {
       await fs.access(resolvedPath, fsConstants.R_OK);
@@ -77,18 +86,41 @@ export class SpeedTimeTools extends SourceMonitorTools {
 
     const ext = extname(resolvedPath) || '.mp4';
     const speedLabel = String(speed).replace(/\./g, '_');
-    const outFile = (outputPath && outputPath.trim())
-      || join(dirname(resolvedPath), `${basename(resolvedPath, extname(resolvedPath))}_${speedLabel}x${ext}`);
+    const outFile =
+      (outputPath && outputPath.trim()) ||
+      join(
+        dirname(resolvedPath),
+        `${basename(resolvedPath, extname(resolvedPath))}_${speedLabel}x${ext}`,
+      );
 
     // The source's own frame rate and sample rate, so the retime is exact rather than assumed.
-    let srcFps: string | null = null, srcRate = 48000;
+    let srcFps: string | null = null,
+      srcRate = 48000;
     try {
-      const probe = JSON.parse(runFf('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_type,r_frame_rate,sample_rate', '-of', 'json', resolvedPath as string], { timeoutMs: 15000 }));
+      const probe = JSON.parse(
+        runFf(
+          'ffprobe',
+          [
+            '-v',
+            'error',
+            '-show_entries',
+            'stream=codec_type,r_frame_rate,sample_rate',
+            '-of',
+            'json',
+            resolvedPath as string,
+          ],
+          { timeoutMs: 15000 },
+        ),
+      );
       for (const st of probe.streams ?? []) {
-        if (st.codec_type === 'video' && st.r_frame_rate && st.r_frame_rate !== '0/0') srcFps = String(st.r_frame_rate);
-        if (st.codec_type === 'audio' && Number(st.sample_rate) > 0) srcRate = Number(st.sample_rate);
+        if (st.codec_type === 'video' && st.r_frame_rate && st.r_frame_rate !== '0/0')
+          srcFps = String(st.r_frame_rate);
+        if (st.codec_type === 'audio' && Number(st.sample_rate) > 0)
+          srcRate = Number(st.sample_rate);
       }
-    } catch { /* fall back to ffmpeg's own choice below */ }
+    } catch {
+      /* fall back to ffmpeg's own choice below */
+    }
     // Video: setpts scales presentation timestamps by 1/speed, then fps= resamples back onto the
     // source frame grid. setpts alone leaves the muxer to pick frames, and it got the head wrong:
     // measured on a frame-counter clip at 2x, the output began 0,1,2,3,5,7 instead of 0,2,4,6 and
@@ -98,8 +130,8 @@ export class SpeedTimeTools extends SourceMonitorTools {
     if (includeAudio) {
       const audioFilter = preservePitch
         ? this.buildAtempoChain(speed)
-        // Pitch shifts with speed: run the sample clock faster, then resample back to the source rate.
-        : `asetrate=${srcRate}*${speed},aresample=${srcRate}`;
+        : // Pitch shifts with speed: run the sample clock faster, then resample back to the source rate.
+          `asetrate=${srcRate}*${speed},aresample=${srcRate}`;
       argv.push('-af', audioFilter);
     } else {
       argv.push('-an');
@@ -109,9 +141,15 @@ export class SpeedTimeTools extends SourceMonitorTools {
     return await new Promise((resolve) => {
       const proc = spawn(ffmpeg, argv);
       let stderr = '';
-      proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+      proc.stderr.on('data', (chunk) => {
+        stderr += chunk.toString();
+      });
       proc.on('error', (err) => {
-        resolve({ success: false, error: `Failed to run ffmpeg ('${ffmpeg}'): ${err.message}`, mediaPath: resolvedPath });
+        resolve({
+          success: false,
+          error: `Failed to run ffmpeg ('${ffmpeg}'): ${err.message}`,
+          mediaPath: resolvedPath,
+        });
       });
       proc.on('close', async (code) => {
         let sizeBytes = 0;
@@ -221,7 +259,12 @@ export class SpeedTimeTools extends SourceMonitorTools {
     `);
   }
 
-  protected async rateStretchToFill(trackIndex: number, clipIndex: number, targetDurationSecs?: number, seqId?: string): Promise<any> {
+  protected async rateStretchToFill(
+    trackIndex: number,
+    clipIndex: number,
+    targetDurationSecs?: number,
+    seqId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -232,7 +275,7 @@ export class SpeedTimeTools extends SourceMonitorTools {
         var currentDur=clip.duration.seconds;
         var targetDur=${targetDurationSecs ?? 'null'};
         if(!targetDur){
-          var nextClip=domSeq.videoTracks[${trackIndex}].clips[${clipIndex+1}];
+          var nextClip=domSeq.videoTracks[${trackIndex}].clips[${clipIndex + 1}];
           targetDur=nextClip?nextClip.start.seconds-clip.start.seconds:currentDur;
         }
         var ratio=currentDur/targetDur;
@@ -269,8 +312,15 @@ export class SpeedTimeTools extends SourceMonitorTools {
     `);
   }
 
-  protected async fitClipDuration(trackIndex: number, clipIndex: number, targetSeconds: number, method: string, seqId?: string): Promise<any> {
-    if (method === 'speed') return this.rateStretchToFill(trackIndex, clipIndex, targetSeconds, seqId);
+  protected async fitClipDuration(
+    trackIndex: number,
+    clipIndex: number,
+    targetSeconds: number,
+    method: string,
+    seqId?: string,
+  ): Promise<any> {
+    if (method === 'speed')
+      return this.rateStretchToFill(trackIndex, clipIndex, targetSeconds, seqId);
     return await this.bridge.executeScript(`
       try {
         var clip=${this.buildSeqRes(seqId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
@@ -282,7 +332,12 @@ export class SpeedTimeTools extends SourceMonitorTools {
     `);
   }
 
-  protected async verifySpeedDuration(trackIndex: number, clipIndex: number, expectedSpeedPercent?: number, seqId?: string): Promise<any> {
+  protected async verifySpeedDuration(
+    trackIndex: number,
+    clipIndex: number,
+    expectedSpeedPercent?: number,
+    seqId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var clip=${this.buildSeqRes(seqId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
@@ -295,7 +350,11 @@ export class SpeedTimeTools extends SourceMonitorTools {
     `);
   }
 
-  protected async getClipSpeedInfo(trackIndex: number, clipIndex: number, seqId?: string): Promise<any> {
+  protected async getClipSpeedInfo(
+    trackIndex: number,
+    clipIndex: number,
+    seqId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -306,7 +365,11 @@ export class SpeedTimeTools extends SourceMonitorTools {
     `);
   }
 
-  protected async removeTimeRemap(trackIndex: number, clipIndex: number, seqId?: string): Promise<any> {
+  protected async removeTimeRemap(
+    trackIndex: number,
+    clipIndex: number,
+    seqId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -338,10 +401,26 @@ export class SpeedTimeTools extends SourceMonitorTools {
   protected slowmoQualityReport(sourceFps: number, targetSpeedPercent: number): any {
     const effectiveFps = sourceFps * (targetSpeedPercent / 100);
     const willJudder = effectiveFps < 24;
-    return { success: true, sourceFps, targetSpeedPercent, effectiveFps: Math.round(effectiveFps * 100) / 100, willJudder, recommendation: willJudder ? 'Use Optical Flow time interpolation for smooth slow-motion' : 'Frame sample or frame blend will work fine', minimumSpeedForSmooth: Math.ceil(2400 / sourceFps) };
+    return {
+      success: true,
+      sourceFps,
+      targetSpeedPercent,
+      effectiveFps: Math.round(effectiveFps * 100) / 100,
+      willJudder,
+      recommendation: willJudder
+        ? 'Use Optical Flow time interpolation for smooth slow-motion'
+        : 'Frame sample or frame blend will work fine',
+      minimumSpeedForSmooth: Math.ceil(2400 / sourceFps),
+    };
   }
 
-  protected async speedRampBake(trackIndex: number, clipIndex: number, speedPercent: number, _outputDir: string, seqId?: string): Promise<any> {
+  protected async speedRampBake(
+    trackIndex: number,
+    clipIndex: number,
+    speedPercent: number,
+    _outputDir: string,
+    seqId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var clip=${this.buildSeqRes(seqId)}.videoTracks[${trackIndex}].clips[${clipIndex}];

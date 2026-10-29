@@ -35,7 +35,17 @@
  * point — the guard that failed on 2026-08-26 was one that could only be exercised live.
  */
 
-import { readFileSync, writeFileSync, existsSync, realpathSync, statSync, linkSync, unlinkSync, copyFileSync, constants as fsConstants } from 'node:fs';
+import {
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  realpathSync,
+  statSync,
+  linkSync,
+  unlinkSync,
+  copyFileSync,
+  constants as fsConstants,
+} from 'node:fs';
 import { createHash, randomBytes } from 'node:crypto';
 import { gzipSync, gunzipSync } from 'node:zlib';
 import path from 'node:path';
@@ -70,11 +80,31 @@ export const PRPROJ_GZIP_LEVEL = 6;
  * `censusOf` for the numbers that carry real meaning.
  */
 export const CENSUS_TAGS: readonly string[] = [
-  'Sequence', 'ProjectItem', 'BinProjectItem', 'RootProjectItem', 'ClipProjectItem',
-  'MasterClip', 'SubClip', 'Media', 'Track', 'ClipTrack', 'TrackItem', 'Clip',
-  'VideoClip', 'AudioClip', 'ClipTrackItem', 'VideoClipTrackItem', 'AudioClipTrackItem',
-  'VideoTransitionTrackItem', 'AudioTransitionTrackItem', 'Marker', 'ComponentChain',
-  'VideoComponentParam', 'AudioComponentParam', 'Node', 'Properties',
+  'Sequence',
+  'ProjectItem',
+  'BinProjectItem',
+  'RootProjectItem',
+  'ClipProjectItem',
+  'MasterClip',
+  'SubClip',
+  'Media',
+  'Track',
+  'ClipTrack',
+  'TrackItem',
+  'Clip',
+  'VideoClip',
+  'AudioClip',
+  'ClipTrackItem',
+  'VideoClipTrackItem',
+  'AudioClipTrackItem',
+  'VideoTransitionTrackItem',
+  'AudioTransitionTrackItem',
+  'Marker',
+  'ComponentChain',
+  'VideoComponentParam',
+  'AudioComponentParam',
+  'Node',
+  'Properties',
 ];
 
 /**
@@ -85,7 +115,12 @@ export const CENSUS_TAGS: readonly string[] = [
  * pointers. Counting raw tags would have reported "6 sequences" — and on the 111-sequence cut, 333.
  * Counting `ObjectUID` gives 2 and 111, matching what Premiere itself reports.
  */
-export const DEFINITION_TAGS: readonly string[] = ['Sequence', 'MasterClip', 'BinProjectItem', 'ClipProjectItem'];
+export const DEFINITION_TAGS: readonly string[] = [
+  'Sequence',
+  'MasterClip',
+  'BinProjectItem',
+  'ClipProjectItem',
+];
 
 export interface PrprojCensus {
   /** Raw tag counts. A tripwire for structural damage; not a semantic inventory. */
@@ -113,7 +148,10 @@ export interface PrprojFile {
 
 /** Thrown for every refusal, so a caller cannot mistake one for a normal result. */
 export class SurgeryRefusal extends Error {
-  constructor(message: string, readonly code: string) {
+  constructor(
+    message: string,
+    readonly code: string,
+  ) {
     super(message);
     this.name = 'SurgeryRefusal';
   }
@@ -157,7 +195,10 @@ export function censusOf(xml: string): PrprojCensus {
  */
 export function censusDiff(before: PrprojCensus, after: PrprojCensus): string[] {
   const out: string[] = [];
-  for (const [group, key] of [[before.nodes, 'nodes'], [before.definitions, 'definitions']] as const) {
+  for (const [group, key] of [
+    [before.nodes, 'nodes'],
+    [before.definitions, 'definitions'],
+  ] as const) {
     const afterGroup = key === 'nodes' ? after.nodes : after.definitions;
     for (const tag of Object.keys(group)) {
       const b = group[tag] ?? 0;
@@ -213,7 +254,12 @@ export function containsMarkup(value: string): boolean {
  * would make `premiereWillLoad: unverified` sound weaker than it is — but they catch the realistic
  * damage from a text substitution, which is a stray bracket or a bare ampersand.
  */
-export function documentSanity(xml: string): { angleBalanced: boolean; openAngles: number; closeAngles: number; entitiesValid: boolean } {
+export function documentSanity(xml: string): {
+  angleBalanced: boolean;
+  openAngles: number;
+  closeAngles: number;
+  entitiesValid: boolean;
+} {
   const openAngles = (xml.match(/</g) || []).length;
   const closeAngles = (xml.match(/>/g) || []).length;
   return {
@@ -256,7 +302,10 @@ export function markupSignature(xml: string): Record<string, number> {
 }
 
 /** Human-readable differences between two markup signatures. Empty array means identical markup. */
-export function markupDiff(before: Record<string, number>, after: Record<string, number>): string[] {
+export function markupDiff(
+  before: Record<string, number>,
+  after: Record<string, number>,
+): string[] {
   const out: string[] = [];
   for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
     const b = before[key] ?? 0;
@@ -301,9 +350,15 @@ export interface AppliedReplacement {
  * writing one. And because a find with no brackets can still match inside a tag name (`Name` hits
  * `<Name>`), the result's element signature must be unchanged unless some replacement opted in.
  */
-export function applyReplacements(xml: string, replacements: readonly Replacement[]): { xml: string; applied: AppliedReplacement[] } {
+export function applyReplacements(
+  xml: string,
+  replacements: readonly Replacement[],
+): { xml: string; applied: AppliedReplacement[] } {
   if (replacements.length === 0) {
-    throw new SurgeryRefusal('No replacements were given, so there is nothing to verify or apply.', 'NO_REPLACEMENTS');
+    throw new SurgeryRefusal(
+      'No replacements were given, so there is nothing to verify or apply.',
+      'NO_REPLACEMENTS',
+    );
   }
 
   const applied: AppliedReplacement[] = [];
@@ -312,29 +367,35 @@ export function applyReplacements(xml: string, replacements: readonly Replacemen
     const expected = replacement.expectedMatches ?? 1;
 
     if (typeof find !== 'string' || find.length === 0) {
-      throw new SurgeryRefusal(`replacements[${index}].find is empty. Refusing rather than guessing what to match.`, 'EMPTY_FIND');
+      throw new SurgeryRefusal(
+        `replacements[${index}].find is empty. Refusing rather than guessing what to match.`,
+        'EMPTY_FIND',
+      );
     }
     if (find === replace) {
-      throw new SurgeryRefusal(`replacements[${index}] would change nothing (find === replace). Refusing so a no-op cannot be reported as an edit.`, 'NO_OP_REPLACEMENT');
+      throw new SurgeryRefusal(
+        `replacements[${index}] would change nothing (find === replace). Refusing so a no-op cannot be reported as an edit.`,
+        'NO_OP_REPLACEMENT',
+      );
     }
     if (!hasOnlyValidEntities(replace)) {
       throw new SurgeryRefusal(
         `replacements[${index}].replace contains a bare "&" that is not a valid entity reference. That alone makes the document malformed, ` +
-        'and the census cannot detect it. Write &amp; for a literal ampersand.',
+          'and the census cannot detect it. Write &amp; for a literal ampersand.',
         'BARE_AMPERSAND',
       );
     }
     if (containsMarkup(replace) && replacement.allowMarkupEdit !== true) {
       throw new SurgeryRefusal(
         `replacements[${index}].replace contains a raw < or >, so it is editing markup rather than text. ` +
-        'Write &lt; / &gt; for literal angle brackets in a name, or set allowMarkupEdit: true if restructuring the XML is genuinely what you intend.',
+          'Write &lt; / &gt; for literal angle brackets in a name, or set allowMarkupEdit: true if restructuring the XML is genuinely what you intend.',
         'MARKUP_IN_REPLACEMENT',
       );
     }
     if (containsMarkup(find) && replacement.allowMarkupEdit !== true) {
       throw new SurgeryRefusal(
         `replacements[${index}].find contains a raw < or >, so replacing it edits markup rather than text — e.g. find "Bin A</Name>" ` +
-        'with replace "Bin A" deletes a closing tag. Find only the text between the tags, or set allowMarkupEdit: true if restructuring the XML is genuinely what you intend.',
+          'with replace "Bin A" deletes a closing tag. Find only the text between the tags, or set allowMarkupEdit: true if restructuring the XML is genuinely what you intend.',
         'MARKUP_IN_FIND',
       );
     }
@@ -343,9 +404,9 @@ export function applyReplacements(xml: string, replacements: readonly Replacemen
     if (matches !== expected) {
       throw new SurgeryRefusal(
         `replacements[${index}] matched ${matches} time(s), expected exactly ${expected}. Nothing was written. ` +
-        (matches === 0
-          ? 'Run project_file_inspect and search the XML for the exact literal first.'
-          : 'Lengthen the find string until it is unique, or set expectedMatches deliberately.'),
+          (matches === 0
+            ? 'Run project_file_inspect and search the XML for the exact literal first.'
+            : 'Lengthen the find string until it is unique, or set expectedMatches deliberately.'),
         'MATCH_COUNT_MISMATCH',
       );
     }
@@ -357,7 +418,7 @@ export function applyReplacements(xml: string, replacements: readonly Replacemen
       if (i !== j && b.find.includes(a.find)) {
         throw new SurgeryRefusal(
           `replacements[${i}].find is contained in replacements[${j}].find, so a match site could belong to either and the outcome would depend on an ordering rule. ` +
-          'Nothing was written. Make the finds disjoint, or split this into two separate edits.',
+            'Nothing was written. Make the finds disjoint, or split this into two separate edits.',
           'FIND_CONTAINS_FIND',
         );
       }
@@ -367,7 +428,8 @@ export function applyReplacements(xml: string, replacements: readonly Replacemen
   // Every match site in the ORIGINAL, tagged with the replacement it belongs to.
   const sites: Array<{ start: number; end: number; index: number }> = [];
   for (const [index, { find }] of applied.entries()) {
-    for (const start of occurrenceOffsets(xml, find)) sites.push({ start, end: start + find.length, index });
+    for (const start of occurrenceOffsets(xml, find))
+      sites.push({ start, end: start + find.length, index });
   }
   sites.sort((a, b) => a.start - b.start);
   for (let k = 1; k < sites.length; k++) {
@@ -395,7 +457,7 @@ export function applyReplacements(xml: string, replacements: readonly Replacemen
     if (diff.length > 0) {
       throw new SurgeryRefusal(
         `The edit changed the document's markup even though no replacement set allowMarkupEdit: ${diff.slice(0, 10).join('; ')}. ` +
-        'A find matched inside a tag name or attribute rather than in text. Nothing was written.',
+          'A find matched inside a tag name or attribute rather than in text. Nothing was written.',
         'MARKUP_CHANGED',
       );
     }
@@ -417,7 +479,10 @@ export function serializeProjectFile(xml: string, compressed: boolean): Buffer {
  * difference in the output is the edit itself. A failure means the file came from a writer we have
  * not verified against, which is a reason to stop rather than a reason to try.
  */
-export function containerCanary(original: Buffer, file: PrprojFile): { byteIdentical: boolean; semantic: boolean; reencodedBytes: number } {
+export function containerCanary(
+  original: Buffer,
+  file: PrprojFile,
+): { byteIdentical: boolean; semantic: boolean; reencodedBytes: number } {
   const reencoded = serializeProjectFile(file.xml, file.compressed);
   let semantic = false;
   try {
@@ -440,7 +505,10 @@ export function readProjectFile(filePath: string): { file: PrprojFile; raw: Buff
     throw new SurgeryRefusal('A project file path is required.', 'NO_PATH');
   }
   if (!path.isAbsolute(filePath)) {
-    throw new SurgeryRefusal(`"${filePath}" is not an absolute path. Relative paths resolve against this server's working directory, which is not the caller's.`, 'RELATIVE_PATH');
+    throw new SurgeryRefusal(
+      `"${filePath}" is not an absolute path. Relative paths resolve against this server's working directory, which is not the caller's.`,
+      'RELATIVE_PATH',
+    );
   }
   if (!existsSync(filePath)) {
     throw new SurgeryRefusal(`"${filePath}" does not exist.`, 'NOT_FOUND');
@@ -458,7 +526,10 @@ export function readProjectFile(filePath: string): { file: PrprojFile; raw: Buff
   try {
     xml = (compressed ? gunzipSync(raw) : raw).toString('utf8');
   } catch (error) {
-    throw new SurgeryRefusal(`"${filePath}" could not be decompressed: ${error instanceof Error ? error.message : String(error)}`, 'DECOMPRESS_FAILED');
+    throw new SurgeryRefusal(
+      `"${filePath}" could not be decompressed: ${error instanceof Error ? error.message : String(error)}`,
+      'DECOMPRESS_FAILED',
+    );
   }
 
   const formatVersion = parseFormatVersion(xml);
@@ -486,19 +557,25 @@ export function readProjectFile(filePath: string): { file: PrprojFile; raw: Buff
  */
 export function assertPrprojExtension(filePath: string, role: 'source' | 'output'): void {
   if (path.extname(filePath).toLowerCase() !== '.prproj') {
-    throw new SurgeryRefusal(`"${filePath}" does not end in .prproj. This tool only reads and writes Premiere project files (the ${role} path).`, 'NOT_PRPROJ_PATH');
+    throw new SurgeryRefusal(
+      `"${filePath}" does not end in .prproj. This tool only reads and writes Premiere project files (the ${role} path).`,
+      'NOT_PRPROJ_PATH',
+    );
   }
 }
 
 /** Invariant 3. Called separately from reading so `project_file_inspect` can report on odd files. */
 export function assertSupportedFormat(file: PrprojFile): void {
   if (file.formatVersion === null) {
-    throw new SurgeryRefusal(`"${file.path}" has no <PremiereData Version="..."> root element, so it is not a Premiere project file.`, 'NOT_A_PROJECT');
+    throw new SurgeryRefusal(
+      `"${file.path}" has no <PremiereData Version="..."> root element, so it is not a Premiere project file.`,
+      'NOT_A_PROJECT',
+    );
   }
   if (!PRPROJ_SUPPORTED_FORMAT_VERSIONS.has(file.formatVersion)) {
     throw new SurgeryRefusal(
       `"${file.path}" is PremiereData Version="${file.formatVersion}". This build has only been verified against ` +
-      `${[...PRPROJ_SUPPORTED_FORMAT_VERSIONS].join(', ')}, and editing an unverified layout is how a project gets silently corrupted.`,
+        `${[...PRPROJ_SUPPORTED_FORMAT_VERSIONS].join(', ')}, and editing an unverified layout is how a project gets silently corrupted.`,
       'UNSUPPORTED_FORMAT_VERSION',
     );
   }
@@ -507,7 +584,10 @@ export function assertSupportedFormat(file: PrprojFile): void {
 /** Invariant 1. The output must be somewhere new; an existing file is never overwritten. */
 export function assertOutputWritable(sourceRealpath: string, outputPath: string): void {
   if (!outputPath || typeof outputPath !== 'string') {
-    throw new SurgeryRefusal('An output path is required. This tool never edits in place.', 'NO_OUTPUT_PATH');
+    throw new SurgeryRefusal(
+      'An output path is required. This tool never edits in place.',
+      'NO_OUTPUT_PATH',
+    );
   }
   if (!path.isAbsolute(outputPath)) {
     throw new SurgeryRefusal(`"${outputPath}" is not an absolute path.`, 'RELATIVE_OUTPUT_PATH');
@@ -526,7 +606,10 @@ export function assertOutputWritable(sourceRealpath: string, outputPath: string)
   // Belt and braces for invariant 1: `existsSync` above already rules this out unless the source is
   // a dangling symlink, but in-place editing is the failure mode with no recovery path.
   if (path.resolve(outputPath) === sourceRealpath) {
-    throw new SurgeryRefusal('The output path is the source file. This tool never edits in place.', 'IN_PLACE_REFUSED');
+    throw new SurgeryRefusal(
+      'The output path is the source file. This tool never edits in place.',
+      'IN_PLACE_REFUSED',
+    );
   }
 }
 
@@ -563,7 +646,11 @@ export interface WriteResult {
  * refusal is a SurgeryRefusal instead, and always means nothing was written.
  */
 export class ProjectWriteError extends Error {
-  constructor(message: string, readonly outputCreated: boolean, readonly outputPath: string) {
+  constructor(
+    message: string,
+    readonly outputCreated: boolean,
+    readonly outputPath: string,
+  ) {
     super(message);
     this.name = 'ProjectWriteError';
   }
@@ -571,10 +658,20 @@ export class ProjectWriteError extends Error {
 
 /** Errno codes meaning "this filesystem cannot hard-link", as opposed to a real failure. */
 // EISDIR: libuv maps Windows ERROR_INVALID_FUNCTION (FAT/exFAT have no hard links) to it.
-const NO_HARDLINK_CODES = new Set(['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'EXDEV', 'ENOSYS', 'EINVAL', 'EISDIR']);
+const NO_HARDLINK_CODES = new Set([
+  'EPERM',
+  'ENOTSUP',
+  'EOPNOTSUPP',
+  'EXDEV',
+  'ENOSYS',
+  'EINVAL',
+  'EISDIR',
+]);
 
 function errnoCode(error: unknown): string | undefined {
-  return error && typeof error === 'object' && 'code' in error ? String((error as { code: unknown }).code) : undefined;
+  return error && typeof error === 'object' && 'code' in error
+    ? String((error as { code: unknown }).code)
+    : undefined;
 }
 
 function errorText(error: unknown): string {
@@ -596,9 +693,17 @@ function errorText(error: unknown): string {
  * clobbers but can leave a partial file on failure — that file is ours, so it is removed, and
  * reported if it cannot be.
  */
-export function writeEditedProject(outputPath: string, editedXml: string, compressed: boolean, expectedCensus: PrprojCensus): WriteResult {
+export function writeEditedProject(
+  outputPath: string,
+  editedXml: string,
+  compressed: boolean,
+  expectedCensus: PrprojCensus,
+): WriteResult {
   const payload = serializeProjectFile(editedXml, compressed);
-  const temp = path.join(path.dirname(outputPath), `.${path.basename(outputPath)}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`);
+  const temp = path.join(
+    path.dirname(outputPath),
+    `.${path.basename(outputPath)}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`,
+  );
 
   let created = false;
   try {
@@ -624,7 +729,12 @@ export function writeEditedProject(outputPath: string, editedXml: string, compre
   } catch (error) {
     if (error instanceof SurgeryRefusal) throw error;
     if (created) {
-      try { unlinkSync(outputPath); created = false; } catch { /* reported below */ }
+      try {
+        unlinkSync(outputPath);
+        created = false;
+      } catch {
+        /* reported below */
+      }
     }
     throw new ProjectWriteError(
       created
@@ -634,7 +744,11 @@ export function writeEditedProject(outputPath: string, editedXml: string, compre
       outputPath,
     );
   } finally {
-    try { unlinkSync(temp); } catch { /* never created, or already gone */ }
+    try {
+      unlinkSync(temp);
+    } catch {
+      /* never created, or already gone */
+    }
   }
 
   // From here the output exists and is complete, so a readback failure is a verification failure,

@@ -26,7 +26,7 @@ jest.mock('fs', () => ({
     unlink: jest.fn(),
     rename: jest.fn(),
     rm: jest.fn(),
-  }
+  },
 }));
 
 jest.mock('node:crypto', () => ({
@@ -90,12 +90,17 @@ describe('bridge panel heartbeat', () => {
   // so it starts fresh and eventually goes stale on its own.
   const frozenBeat = (extra: Record<string, unknown> = {}) => {
     const ts = Date.now();
-    return () => Promise.resolve(JSON.stringify({ ts, connected: true, isProcessing: false, ...extra }));
+    return () =>
+      Promise.resolve(JSON.stringify({ ts, connected: true, isProcessing: false, ...extra }));
   };
 
   // A heartbeat that re-stamps itself on every read: always fresh (a live panel).
-  const liveBeat = (extra: Record<string, unknown> = {}) =>
-    () => Promise.resolve(JSON.stringify({ ts: Date.now(), connected: true, isProcessing: false, ...extra }));
+  const liveBeat =
+    (extra: Record<string, unknown> = {}) =>
+    () =>
+      Promise.resolve(
+        JSON.stringify({ ts: Date.now(), connected: true, isProcessing: false, ...extra }),
+      );
 
   describe('fail fast', () => {
     it('gives up early when a once-live panel stops ticking', async () => {

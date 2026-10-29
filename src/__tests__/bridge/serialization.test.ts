@@ -21,7 +21,7 @@ jest.mock('fs', () => ({
     unlink: jest.fn(),
     rename: jest.fn(),
     rm: jest.fn(),
-  }
+  },
 }));
 
 jest.mock('node:crypto', () => ({
@@ -222,7 +222,9 @@ describe('script serialization', () => {
       const hostile: Record<string, unknown> = { name: 'clip' };
       Object.defineProperty(hostile, 'explodes', {
         enumerable: true,
-        get() { throw new Error('host refused'); },
+        get() {
+          throw new Error('host refused');
+        },
       });
 
       expect(() => stringify(hostile)).not.toThrow();
@@ -260,7 +262,7 @@ describe('script serialization', () => {
       // is only one realm.
       vm.runInContext(
         prelude.slice(0, prelude.indexOf('function __findSequence')) +
-        `;__out = __mcpStringify({
+          `;__out = __mcpStringify({
            success: true,
            markers: [{ name: "a" + String.fromCharCode(1) + "b", comment: 'has "quotes"', time: 1.5 }],
            count: 1
@@ -299,11 +301,30 @@ describe('script serialization', () => {
     };
 
     const VALID: unknown[] = [
-      null, true, false, 0, -1, 3.5, -2.25e10, 1e-7, 12345678901234,
-      '', 'plain', 'with "quotes"', 'back\\slash', 'tab\there', 'newline\nhere',
-      'unicode \u00e9 \u4e2d', `sep${LINE_SEPARATOR}arator`, 'nul-free \u0001 control',
-      [], {}, [1, 2, 3], ['a', ['b', ['c']]],
-      { a: 1 }, { nested: { deep: { deeper: [1, { x: null }] } } },
+      null,
+      true,
+      false,
+      0,
+      -1,
+      3.5,
+      -2.25e10,
+      1e-7,
+      12345678901234,
+      '',
+      'plain',
+      'with "quotes"',
+      'back\\slash',
+      'tab\there',
+      'newline\nhere',
+      'unicode \u00e9 \u4e2d',
+      `sep${LINE_SEPARATOR}arator`,
+      'nul-free \u0001 control',
+      [],
+      {},
+      [1, 2, 3],
+      ['a', ['b', ['c']]],
+      { a: 1 },
+      { nested: { deep: { deeper: [1, { x: null }] } } },
       { 'key with spaces': 'v', 'quote"key': 2 },
       { mTextString: 'hello', fontSize: 48, tracking: -1.5 },
     ];
@@ -349,10 +370,28 @@ describe('script serialization', () => {
       const parse = await loadParse();
 
       const REJECTED = [
-        '', '{', '[1,', '[1,]', '{"a":1,}', "{'a':1}", '{a:1}', '{"a" 1}',
-        'undefined', 'NaN', 'Infinity', '+1', '01', '.5', '1.', '0x10',
-        '"unterminated', '"bad \\x escape"', '"raw \u0001 control"',
-        '{"a":1} trailing', 'tru', 'nul',
+        '',
+        '{',
+        '[1,',
+        '[1,]',
+        '{"a":1,}',
+        "{'a':1}",
+        '{a:1}',
+        '{"a" 1}',
+        'undefined',
+        'NaN',
+        'Infinity',
+        '+1',
+        '01',
+        '.5',
+        '1.',
+        '0x10',
+        '"unterminated',
+        '"bad \\x escape"',
+        '"raw \u0001 control"',
+        '{"a":1} trailing',
+        'tru',
+        'nul',
       ];
 
       for (const bad of REJECTED) {
@@ -385,7 +424,8 @@ describe('script serialization', () => {
       }
       vm.runInContext(prelude.slice(0, prelude.indexOf('function __findSequence')), sandbox);
 
-      return vm.runInContext(`
+      return vm.runInContext(
+        `
         var parsed = __mcpParse('{"__proto__":{"mTextString":"INJECTED"},"name":"clip"}');
         var nulled = __mcpParse('{"__proto__":null,"a":1}');
         var stringifies = 'ok';
@@ -396,7 +436,9 @@ describe('script serialization', () => {
           nulled.a,
           stringifies,
           ({}).mTextString === undefined ].join('|');
-      `, sandbox) as string;
+      `,
+        sandbox,
+      ) as string;
     };
 
     it('never injects a field or reparents, whichever path the engine takes', async () => {
@@ -414,9 +456,12 @@ describe('script serialization', () => {
         vm.createContext(sandbox);
         if (!withDefineProperty) vm.runInContext('Object.defineProperty = undefined;', sandbox);
         vm.runInContext(prelude.slice(0, prelude.indexOf('function __findSequence')), sandbox);
-        return vm.runInContext(`
+        return vm.runInContext(
+          `
           Object.prototype.hasOwnProperty.call(__mcpParse('{"__proto__":{"a":1}}'), '__proto__');
-        `, sandbox);
+        `,
+          sandbox,
+        );
       };
 
       // Conformant where possible...
@@ -471,8 +516,9 @@ describe('script serialization', () => {
       // Scoping the repair must not also disable the truncation guard.
       const bridge = await readyBridge();
 
-      await expect(bridge.executeScript(`var n = "p${NUL}q";`, undefined, true))
-        .rejects.toThrow(/NUL byte/);
+      await expect(bridge.executeScript(`var n = "p${NUL}q";`, undefined, true)).rejects.toThrow(
+        /NUL byte/,
+      );
     });
   });
 });

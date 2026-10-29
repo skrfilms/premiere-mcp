@@ -43,21 +43,48 @@ export const accepts = (schema: Schema, value: unknown): boolean => {
 
 /** Values that must stay plausible or the tool rejects before emitting anything. */
 const NUMERIC: Record<string, number> = {
-  width: 1920, height: 1080, frameRate: 25, speed: 100, volume: 0, opacity: 100,
-  scale: 100, rotation: 0, level: 0, trackIndex: 0, time: 1, newTime: 2,
-  splitTime: 1, duration: 1,
+  width: 1920,
+  height: 1080,
+  frameRate: 25,
+  speed: 100,
+  volume: 0,
+  opacity: 100,
+  scale: 100,
+  rotation: 0,
+  level: 0,
+  trackIndex: 0,
+  time: 1,
+  newTime: 2,
+  splitTime: 1,
+  duration: 1,
 };
 
 /** Tried in order against the field's own schema; the first accepted one wins. */
 const CANDIDATES: unknown[] = [
-  'x', '0', '1', 'video', 'audio', 'green', 'start', 'end', 'png', 'both',
-  'Cross Dissolve', '/tmp/f.xml', '00:00:01:00', 'true', 'none', 'default',
-  1, 0, true, false,
+  'x',
+  '0',
+  '1',
+  'video',
+  'audio',
+  'green',
+  'start',
+  'end',
+  'png',
+  'both',
+  'Cross Dissolve',
+  '/tmp/f.xml',
+  '00:00:01:00',
+  'true',
+  'none',
+  'default',
+  1,
+  0,
+  true,
+  false,
 ];
 // Deliberately absent: [], {} and null. A schema accepts them, so they satisfy
 // the acceptance check while carrying no string to fuzz -- which turned a broken
 // array accessor into a silent loss of coverage rather than a visible rejection.
-
 
 /** Preferred value where several are legal and one exercises more of the tool. */
 const STRINGY: Record<string, string> = { position: 'end', format: 'png' };
@@ -139,7 +166,7 @@ export function seedArgs(tool: ToolLike): Record<string, unknown> {
   const schema = tool.inputSchema as unknown as Schema | undefined;
   if (!schema || accepts(schema, args)) return args;
 
-  // Some tools carry cross-field rules that supplying everything violates -- 
+  // Some tools carry cross-field rules that supplying everything violates --
   // trim_clip refuses outPoint and duration together. Drop one optional at a
   // time until the whole object is accepted, so the tool still emits instead of
   // dropping out of every sweep.
@@ -167,7 +194,10 @@ export function seedRequiredArgs(tool: ToolLike): Record<string, unknown> {
 }
 
 /** Every path in a seeded value that holds a string, as a list of keys/indices. */
-export function stringPaths(value: unknown, prefix: (string | number)[] = []): (string | number)[][] {
+export function stringPaths(
+  value: unknown,
+  prefix: (string | number)[] = [],
+): (string | number)[][] {
   if (typeof value === 'string') return [prefix];
   if (Array.isArray(value)) return value.flatMap((v, i) => stringPaths(v, [...prefix, i]));
   if (value && typeof value === 'object') {
@@ -245,8 +275,16 @@ export function seedFreeFormArgs(names: string[]): Record<string, unknown> {
   const args: Record<string, unknown> = {};
   for (const name of names) {
     if (name in NUMERIC) args[name] = NUMERIC[name];
-    else if (/^(is|has|should|enable|enabled|visible|locked|muted|selected|ripple|linked)/.test(name)) args[name] = true;
-    else if (/(index|count|duration|time|level|width|height|rate|speed|volume|opacity|scale|rotation)$/i.test(name)) args[name] = 1;
+    else if (
+      /^(is|has|should|enable|enabled|visible|locked|muted|selected|ripple|linked)/.test(name)
+    )
+      args[name] = true;
+    else if (
+      /(index|count|duration|time|level|width|height|rate|speed|volume|opacity|scale|rotation)$/i.test(
+        name,
+      )
+    )
+      args[name] = 1;
     else args[name] = STRINGY[name] ?? 'x';
   }
   return args;

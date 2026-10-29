@@ -34,7 +34,11 @@ function run(command: string, args: string[]): Promise<number> {
   });
 }
 
-async function runPlatformScript(macScript: string, windowsScript: string, windowsArgs: string[] = []): Promise<void> {
+async function runPlatformScript(
+  macScript: string,
+  windowsScript: string,
+  windowsArgs: string[] = [],
+): Promise<void> {
   let code: number;
   if (process.platform === 'darwin') {
     code = await run('bash', [join(packageRoot, 'scripts', macScript), '--skip-build']);
@@ -89,9 +93,18 @@ async function main(): Promise<void> {
         dryRun: flags.includes('--dry-run'),
         skipPlugins: flags.includes('--skip-plugins'),
         skipClients: flags.includes('--skip-clients'),
-        clients: clientsAt >= 0 ? String(flags[clientsAt + 1] ?? '').split(',').map((c) => c.trim()).filter(Boolean) : undefined,
+        clients:
+          clientsAt >= 0
+            ? String(flags[clientsAt + 1] ?? '')
+                .split(',')
+                .map((c) => c.trim())
+                .filter(Boolean)
+            : undefined,
       });
-      const ok = printResults(`Premiere MCP ${PACKAGE_VERSION} setup${flags.includes('--dry-run') ? ' (dry run: nothing changed)' : ''}`, results);
+      const ok = printResults(
+        `Premiere MCP ${PACKAGE_VERSION} setup${flags.includes('--dry-run') ? ' (dry run: nothing changed)' : ''}`,
+        results,
+      );
       console.log(nextSteps(packageRoot));
       if (!ok) process.exitCode = 1;
       return;

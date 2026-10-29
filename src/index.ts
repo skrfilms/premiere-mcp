@@ -53,13 +53,13 @@ class MCPPremiereProServer {
     try {
       await this.bridge.initialize();
       this.logger.info('Adobe Premiere Pro bridge initialized');
-      
+
       this.stdioHandle = serveStdio(() => this.buildServer(), {
         onerror: (error) => {
           this.logger.error('Stdio transport error:', error);
-        }
+        },
       });
-      
+
       this.logger.info('MCP Adobe Premiere Pro Server started successfully');
 
       // Tell the operator what the active profile actually costs. A catalogue this
@@ -111,4 +111,4 @@ process.on('SIGTERM', async () => {
 server.start().catch((error) => {
   console.error('Failed to start MCP Adobe Premiere Pro Server:', error);
   process.exit(1);
-}); 
+});

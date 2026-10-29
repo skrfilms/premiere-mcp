@@ -22,8 +22,9 @@ import { PremiereProTools } from '../../tools/index.js';
 import { seedArgs, seedRequiredArgs, accepts } from '../helpers/schema-args.js';
 
 describe('seeded arguments', () => {
-  const tools = new PremiereProTools({ executeScript: async () => ({ success: true }) } as never)
-    .getAvailableTools();
+  const tools = new PremiereProTools({
+    executeScript: async () => ({ success: true }),
+  } as never).getAvailableTools();
 
   // The "reach a meaningful share" test drives every tool with seeded args, and
   // a few tools (e.g. consolidate_and_transfer) write files to a path taken from
@@ -38,15 +39,20 @@ describe('seeded arguments', () => {
   });
   afterAll(() => {
     process.chdir(originalCwd);
-    try { rmSync(scratchCwd, { recursive: true, force: true }); } catch { /* best effort */ }
+    try {
+      rmSync(scratchCwd, { recursive: true, force: true });
+    } catch {
+      /* best effort */
+    }
   });
 
   it('are accepted by the schema of every tool', () => {
     const rejected: string[] = [];
 
     for (const tool of tools) {
-      const schema = (tool as { inputSchema?: { safeParse?: (v: unknown) => { success: boolean } } })
-        .inputSchema;
+      const schema = (
+        tool as { inputSchema?: { safeParse?: (v: unknown) => { success: boolean } } }
+      ).inputSchema;
       if (typeof schema?.safeParse !== 'function') continue;
       if (!accepts(schema as never, seedArgs(tool as never))) rejected.push(tool.name);
     }
@@ -59,14 +65,19 @@ describe('seeded arguments', () => {
     // of mediaPath or projectItemId and both are optional, so an object holding
     // only required fields cannot satisfy the cross-field refinement.
     const CANNOT_BE_SATISFIED_BY_REQUIRED_ONLY = new Set([
-      'detect_silence', 'transcribe_to_srt', 'probe_media', 'generate_scope',
-      'bake_speed_change', 'normalize_loudness',
+      'detect_silence',
+      'transcribe_to_srt',
+      'probe_media',
+      'generate_scope',
+      'bake_speed_change',
+      'normalize_loudness',
     ]);
     const rejected: string[] = [];
 
     for (const tool of tools) {
-      const schema = (tool as { inputSchema?: { safeParse?: (v: unknown) => { success: boolean } } })
-        .inputSchema;
+      const schema = (
+        tool as { inputSchema?: { safeParse?: (v: unknown) => { success: boolean } } }
+      ).inputSchema;
       if (typeof schema?.safeParse !== 'function') continue;
       if (CANNOT_BE_SATISFIED_BY_REQUIRED_ONLY.has(tool.name)) continue;
       if (!accepts(schema as never, seedRequiredArgs(tool as never))) rejected.push(tool.name);
@@ -81,14 +92,16 @@ describe('seeded arguments', () => {
     const wrong: string[] = [];
 
     for (const tool of tools) {
-      const shape = (tool as { inputSchema?: { shape?: Record<string, unknown> } }).inputSchema?.shape ?? {};
+      const shape =
+        (tool as { inputSchema?: { shape?: Record<string, unknown> } }).inputSchema?.shape ?? {};
       const args = seedArgs(tool as never);
       for (const [key, field] of Object.entries(shape)) {
         const inner = field as { constructor?: { name?: string }; unwrap?: () => unknown };
         const kind = inner?.constructor?.name;
-        const target = kind === 'ZodOptional' && typeof inner.unwrap === 'function'
-          ? (inner.unwrap() as { constructor?: { name?: string } })
-          : inner;
+        const target =
+          kind === 'ZodOptional' && typeof inner.unwrap === 'function'
+            ? (inner.unwrap() as { constructor?: { name?: string } })
+            : inner;
         if (target?.constructor?.name !== 'ZodEnum') continue;
         if (!accepts(target as never, args[key])) wrong.push(`${tool.name}.${key}`);
       }
@@ -106,7 +119,10 @@ describe('seeded arguments', () => {
     for (const tool of tools) {
       let script = '';
       const driver = new PremiereProTools({
-        executeScript: async (s: string) => { script = s; return { success: true }; },
+        executeScript: async (s: string) => {
+          script = s;
+          return { success: true };
+        },
       } as never);
       try {
         await driver.executeTool(tool.name, seedArgs(tool as never));
