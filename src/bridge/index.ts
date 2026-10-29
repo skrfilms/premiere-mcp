@@ -1,6 +1,6 @@
 /**
  * Bridge module for communicating with Adobe Premiere Pro
- * 
+ *
  * This module handles the communication between the MCP server and Adobe Premiere Pro
  * using various methods including UXP, ExtendScript, and file-based communication.
  */
@@ -11,6 +11,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { promises as fs } from 'fs';
 import { extname, join } from 'path';
 import { createSecureTempDir, validateFilePath } from '../utils/security.js';
+import { currentEnv, sharedBridgeDir } from '../setup/setup.js';
 import type { PremiereProTransport } from './types.js';
 import {
   BridgeSocketTransport,
@@ -20,10 +21,7 @@ import {
   type SocketCommandType,
 } from './socket-transport.js';
 
-const UNSUPPORTED_MODAL_PRONE_IMPORT_EXTENSIONS = new Set([
-  '.ass',
-  '.ssa'
-]);
+const UNSUPPORTED_MODAL_PRONE_IMPORT_EXTENSIONS = new Set(['.ass', '.ssa']);
 
 // The CEP panel writes this file into the shared temp directory on every poll tick
 // (~250ms). The server reads it to tell three failure modes apart that used to be
@@ -1109,10 +1107,17 @@ export class PremiereProBridge implements PremiereProTransport {
     const preference = (process.env.PREMIERE_MCP_TRANSPORT || 'auto').trim().toLowerCase();
     this.transportPreference =
       preference === 'file' || preference === 'socket' ? preference : 'auto';
-    // Use PREMIERE_TEMP_DIR if set (same path as UXP plugin "Temp Directory"), else session-specific
+    // PREMIERE_TEMP_DIR if set; else the folder the bridge in Premiere watches by default (its saved
+    // choice, else /tmp/premiere-mcp-bridge). A per-session folder here meant a server started
+    // without the variable never met the background bridge, and every call timed out.
+    // PREMIERE_MCP_SESSION_TEMP=1 keeps the old private per-session folder.
     const envDir = process.env.PREMIERE_TEMP_DIR;
-    this.usesExternalTempDir = Boolean(envDir);
-    this.tempDir = envDir ? envDir.replace(/\/$/, '') : createSecureTempDir(this.sessionId);
+    this.usesExternalTempDir = Boolean(envDir) || process.env.PREMIERE_MCP_SESSION_TEMP !== '1';
+    this.tempDir = envDir
+      ? envDir.replace(/\/$/, '')
+      : process.env.PREMIERE_MCP_SESSION_TEMP === '1'
+        ? createSecureTempDir(this.sessionId)
+        : sharedBridgeDir(currentEnv());
   }
 
   async initialize(): Promise<void> {
@@ -1174,7 +1179,7 @@ export class PremiereProBridge implements PremiereProTransport {
           if (stats.uid !== processUid) {
             throw new Error(
               `Refusing to use ${this.tempDir}: it is owned by uid ${stats.uid}, not by this process (uid ${processUid}). ` +
-              'A directory owned by someone else can feed arbitrary ExtendScript into Premiere.',
+                'A directory owned by someone else can feed arbitrary ExtendScript into Premiere.',
             );
           }
           const mode = stats.mode & 0o777;
@@ -1185,7 +1190,8 @@ export class PremiereProBridge implements PremiereProTransport {
         } catch (statError) {
           // An ownership mismatch must abort; a stat/chmod failure for any other reason should not
           // take the bridge down, since the directory may still be perfectly usable.
-          if (statError instanceof Error && statError.message.startsWith('Refusing to use')) throw statError;
+          if (statError instanceof Error && statError.message.startsWith('Refusing to use'))
+            throw statError;
           this.logger.warn(`Could not verify temp directory permissions: ${statError}`);
         }
       } else if (process.platform === 'win32') {
@@ -1197,15 +1203,15 @@ export class PremiereProBridge implements PremiereProTransport {
         // it and scripts/doctor-windows.ps1 re-checks it. See docs/WINDOWS-PARITY.md §2.
         this.logger.warn(
           `${this.tempDir}: POSIX permissions are not enforced on Windows, so this directory and ` +
-          'auth-token.json are protected only by their inherited NTFS ACL. Run ' +
-          '`npm run setup:doctor:win` to check it.',
+            'auth-token.json are protected only by their inherited NTFS ACL. Run ' +
+            '`npm run setup:doctor:win` to check it.',
         );
       } else {
         // Neither a uid nor a documented alternative: report the gap rather than imply a
         // check happened.
         this.logger.warn(
           `${this.tempDir}: this runtime exposes no process.getuid, so the directory's owner ` +
-          'could not be verified and its permissions were not asserted.',
+            'could not be verified and its permissions were not asserted.',
         );
       }
 
@@ -1249,10 +1255,12 @@ export class PremiereProBridge implements PremiereProTransport {
     try {
       const entries = await fs.readdir(this.tempDir);
       const peers = await this.livePeers(entries);
-      const candidates = entries.filter((name) =>
-        (name.startsWith('command-') && name.endsWith('.json')) ||
-        (name.startsWith('response-') && name.endsWith('.json')) ||
-        name.startsWith('.tmp-'));
+      const candidates = entries.filter(
+        (name) =>
+          (name.startsWith('command-') && name.endsWith('.json')) ||
+          (name.startsWith('response-') && name.endsWith('.json')) ||
+          name.startsWith('.tmp-'),
+      );
 
       const swept: string[] = [];
       const spared: string[] = [];
@@ -1265,15 +1273,23 @@ export class PremiereProBridge implements PremiereProTransport {
           } catch {
             continue; // vanished under us; nothing to do
           }
-          if (ageMs < FOREIGN_FILE_GRACE_MS) { spared.push(name); continue; }
+          if (ageMs < FOREIGN_FILE_GRACE_MS) {
+            spared.push(name);
+            continue;
+          }
         }
-        try { await fs.unlink(path); swept.push(name); } catch { /* another instance won the race */ }
+        try {
+          await fs.unlink(path);
+          swept.push(name);
+        } catch {
+          /* another instance won the race */
+        }
       }
 
       if (swept.length > 0) {
         this.logger.warn(
           `Swept ${swept.length} leftover command/response file(s) from ${this.tempDir}. ` +
-          'A stale command file would have executed when the panel next started.',
+            'A stale command file would have executed when the panel next started.',
         );
       }
       if (peers.length > 0) {
@@ -1282,9 +1298,9 @@ export class PremiereProBridge implements PremiereProTransport {
         // client's race rather than a real fault.
         this.logger.warn(
           `Another bridge client is live on ${this.tempDir} (pid ${peers.join(', ')})` +
-          (spared.length > 0 ? `; left ${spared.length} recent file(s) alone` : '') +
-          '. The panel is shared, so file round-trip health probes (scripts/engine-sentinel.mjs) ' +
-          'can report a dead engine for a healthy host.',
+            (spared.length > 0 ? `; left ${spared.length} recent file(s) alone` : '') +
+            '. The panel is shared, so file round-trip health probes (scripts/engine-sentinel.mjs) ' +
+            'can report a dead engine for a healthy host.',
         );
       }
     } catch (error) {
@@ -1301,10 +1317,18 @@ export class PremiereProBridge implements PremiereProTransport {
     const path = join(this.tempDir, `${CLIENT_FILE_PREFIX}${process.pid}.json`);
     const touch = async () => {
       try {
-        await fs.writeFile(path, JSON.stringify({
-          pid: process.pid, sessionId: this.sessionId, ts: Date.now(),
-        }), { mode: 0o600 });
-      } catch { /* best effort */ }
+        await fs.writeFile(
+          path,
+          JSON.stringify({
+            pid: process.pid,
+            sessionId: this.sessionId,
+            ts: Date.now(),
+          }),
+          { mode: 0o600 },
+        );
+      } catch {
+        /* best effort */
+      }
     };
     await touch();
     // Comfortably inside CLIENT_STALE_MS so a busy event loop cannot make us look abandoned.
@@ -1430,8 +1454,12 @@ export class PremiereProBridge implements PremiereProTransport {
         }
         try {
           await fs.unlink(path);
-          this.logger.debug(`Reaped the bridge token of a server that is no longer running (${name})`);
-        } catch { /* another instance won the race */ }
+          this.logger.debug(
+            `Reaped the bridge token of a server that is no longer running (${name})`,
+          );
+        } catch {
+          /* another instance won the race */
+        }
       }
     } catch (error) {
       this.logger.debug(`Could not reap stale session tokens: ${error}`);
@@ -1450,13 +1478,17 @@ export class PremiereProBridge implements PremiereProTransport {
   private async retireAuthToken(): Promise<void> {
     try {
       await fs.unlink(this.sessionTokenFile);
-    } catch { /* never written, or already gone */ }
+    } catch {
+      /* never written, or already gone */
+    }
 
     const sharedFile = join(this.tempDir, 'auth-token.json');
     try {
       const parsed = JSON.parse(await fs.readFile(sharedFile, 'utf8'));
       if (parsed?.sessionId === this.sessionId) await fs.unlink(sharedFile);
-    } catch { /* absent, unreadable, or owned by another server — leave it */ }
+    } catch {
+      /* absent, unreadable, or owned by another server — leave it */
+    }
   }
 
   /**
@@ -1485,8 +1517,8 @@ export class PremiereProBridge implements PremiereProTransport {
         // using the channel the operator ruled out.
         throw new Error(
           'PREMIERE_MCP_TRANSPORT=socket was requested but the loopback WebSocket listener could ' +
-          'not be bound, and file IPC was ruled out by that setting. Unset PREMIERE_MCP_TRANSPORT ' +
-          'to allow the file fallback.',
+            'not be bound, and file IPC was ruled out by that setting. Unset PREMIERE_MCP_TRANSPORT ' +
+            'to allow the file fallback.',
         );
       }
       return;
@@ -1505,10 +1537,15 @@ export class PremiereProBridge implements PremiereProTransport {
    * nothing reached the wire, so the command has still been published exactly once when it goes out
    * over file IPC.
    */
-  private chooseChannel(commandType: SocketCommandType): { channel: 'socket' | 'file'; reason: string } {
-    if (this.transportPreference === 'file') return { channel: 'file', reason: 'PREMIERE_MCP_TRANSPORT=file' };
+  private chooseChannel(commandType: SocketCommandType): {
+    channel: 'socket' | 'file';
+    reason: string;
+  } {
+    if (this.transportPreference === 'file')
+      return { channel: 'file', reason: 'PREMIERE_MCP_TRANSPORT=file' };
     if (this.socket === null) return { channel: 'file', reason: 'no socket listener is bound' };
-    if (!this.socket.isPanelReady()) return { channel: 'file', reason: 'no panel is connected to the socket' };
+    if (!this.socket.isPanelReady())
+      return { channel: 'file', reason: 'no panel is connected to the socket' };
     if (!this.socket.supportsFeature(commandType)) {
       return {
         channel: 'file',
@@ -1558,25 +1595,31 @@ export class PremiereProBridge implements PremiereProTransport {
       // wire. This is the ONLY path that continues to a second channel.
       this.logger.warn(
         `Socket publish declined (${outcome.reason}); publishing over file IPC instead. ` +
-        'Nothing was sent over the socket, so this command is still published exactly once.',
+          'Nothing was sent over the socket, so this command is still published exactly once.',
       );
       if (this.transportPreference === 'socket') {
         throw new Error(
           `PREMIERE_MCP_TRANSPORT=socket was requested but the command could not be published over ` +
-          `the socket (${outcome.reason}), and that setting rules out file IPC. Nothing was sent. ` +
-          'Open the MCP Bridge (CEP) panel and start it, or unset PREMIERE_MCP_TRANSPORT.',
+            `the socket (${outcome.reason}), and that setting rules out file IPC. Nothing was sent. ` +
+            'Open the MCP Bridge (CEP) panel and start it, or unset PREMIERE_MCP_TRANSPORT.',
         );
       }
     } else if (this.transportPreference === 'socket') {
       throw new Error(
         `PREMIERE_MCP_TRANSPORT=socket was requested but ${decision.reason}, and that setting rules ` +
-        'out file IPC. Nothing was sent. Open the MCP Bridge (CEP) panel and start it, or unset ' +
-        'PREMIERE_MCP_TRANSPORT.',
+          'out file IPC. Nothing was sent. Open the MCP Bridge (CEP) panel and start it, or unset ' +
+          'PREMIERE_MCP_TRANSPORT.',
       );
     }
 
     this.publications.file += 1;
-    return await this.publishOverFileIpc(commandId, commandType, script, timeoutMs, effectiveTimeout);
+    return await this.publishOverFileIpc(
+      commandId,
+      commandType,
+      script,
+      timeoutMs,
+      effectiveTimeout,
+    );
   }
 
   /**
@@ -1629,8 +1672,7 @@ export class PremiereProBridge implements PremiereProTransport {
       await fs.writeFile(commandStaging, JSON.stringify(payload));
       await fs.rename(commandStaging, commandFile);
 
-      // Wait for response (in a real implementation, this would be handled by the UXP plugin).
-      // Batch operations pass a larger timeout because a single round-trip does the work of
+      // Wait for the panel's response file. Batch operations pass a larger timeout because a single round-trip does the work of
       // dozens of individual calls inside one ExtendScript pass.
       return await this.waitForResponse(responseFile, effectiveTimeout, commandId);
     } finally {
@@ -1693,9 +1735,10 @@ export class PremiereProBridge implements PremiereProTransport {
   private async detectPremiereProInstallation(): Promise<void> {
     // Scan the install root instead of hardcoding release years, so new
     // versions (2025, 2026, ...) are detected without a code change.
-    const searchDirs = process.platform === 'win32'
-      ? [join(process.env['ProgramFiles'] || 'C:\\Program Files', 'Adobe')]
-      : ['/Applications'];
+    const searchDirs =
+      process.platform === 'win32'
+        ? [join(process.env['ProgramFiles'] || 'C:\\Program Files', 'Adobe')]
+        : ['/Applications'];
 
     for (const dir of searchDirs) {
       let entries: string[] = [];
@@ -1708,7 +1751,7 @@ export class PremiereProBridge implements PremiereProTransport {
 
       // Newest release first, e.g. "Adobe Premiere Pro 2026" before "... 2024"
       const candidates = entries
-        .filter(entry => entry.startsWith('Adobe Premiere Pro'))
+        .filter((entry) => entry.startsWith('Adobe Premiere Pro'))
         .sort()
         .reverse();
 
@@ -1752,9 +1795,7 @@ export class PremiereProBridge implements PremiereProTransport {
    * the only place either can appear is inside a string literal.
    */
   private static repairScriptLineTerminators(script: string): string {
-    return script
-      .replace(/\u2028/g, '\\u2028')
-      .replace(/\u2029/g, '\\u2029');
+    return script.replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
   }
 
   /**
@@ -1770,8 +1811,8 @@ export class PremiereProBridge implements PremiereProTransport {
     const context = script.slice(Math.max(0, index - 40), index).replace(/\s+/g, ' ');
     throw new Error(
       'Script contains a NUL byte, which Premiere truncates at rather than ' +
-      'rejecting, silently discarding everything after it. Remove the NUL ' +
-      `from the offending argument. Context before it: ...${context}`,
+        'rejecting, silently discarding everything after it. Remove the NUL ' +
+        `from the offending argument. Context before it: ...${context}`,
     );
   }
 
@@ -1873,7 +1914,8 @@ export class PremiereProBridge implements PremiereProTransport {
         currentCommandStartedAt:
           typeof hb.currentCommandStartedAt === 'number' ? hb.currentCommandStartedAt : null,
         queueLength: typeof hb.queueLength === 'number' ? hb.queueLength : 0,
-        engine: hb.engine === 'ok' || hb.engine === 'stalled' || hb.engine === 'dead' ? hb.engine : null,
+        engine:
+          hb.engine === 'ok' || hb.engine === 'stalled' || hb.engine === 'dead' ? hb.engine : null,
       };
     } catch {
       return null;
@@ -1885,18 +1927,16 @@ export class PremiereProBridge implements PremiereProTransport {
    * names the ONE thing the caller can do about it, instead of the old catch-all that
    * listed every possible cause and left the reader to guess which applied.
    */
-  private describeTimeout(
-    timeout: number,
-    hb: BridgeHeartbeat | null,
-    commandId?: string,
-  ): string {
+  private describeTimeout(timeout: number, hb: BridgeHeartbeat | null, commandId?: string): string {
     const base = `Bridge response timeout after ${timeout}ms.`;
 
     if (!hb) {
       return (
         base +
         ' No panel heartbeat was seen. Ensure Premiere Pro is open, the MCP Bridge (CEP) ' +
-        'panel is open, Temp Directory is set to ' + this.tempDir + ', and Start Bridge is ' +
+        'panel is open, Temp Directory is set to ' +
+        this.tempDir +
+        ', and Start Bridge is ' +
         'clicked. (An older panel build without heartbeat support also produces no heartbeat.)'
       );
     }
@@ -1970,9 +2010,9 @@ export class PremiereProBridge implements PremiereProTransport {
     const startTime = Date.now();
     // A response that exists but will not parse is a different failure from one that has
     // not arrived, and reporting it as the latter sends the reader to check whether
-    // Premiere is running when the real problem is the payload. Allow a few attempts for a
-    // torn read — the panel's write is not atomic on every host — then surface the parse
-    // error and a sample of what was actually on disk.
+    // Premiere is running when the real problem is the payload. A torn read (the panel's write
+    // is not atomic on every host) is retried until the timeout; if it never parses, the
+    // timeout reports the parse error and a sample of what was actually on disk.
     let lastParseError: Error | null = null;
     let lastRawResponse = '';
     // Track the panel's liveness so a dead/frozen panel fails fast instead of blocking
@@ -2008,13 +2048,14 @@ export class PremiereProBridge implements PremiereProTransport {
           const age = hb ? `${hb.ageMs}ms old` : 'gone';
           throw new Error(
             `Bridge panel stopped responding: its heartbeat is ${age} while waiting for a ` +
-            'response. Premiere Pro or the CEP panel likely crashed, was closed, or froze. ' +
-            'Reopen the MCP Bridge panel and click Start Bridge. Temp Directory should be ' +
-            this.tempDir + '.'
+              'response. Premiere Pro likely crashed, was closed, or froze. Restart Premiere Pro ' +
+              '(the bridge starts with it); `premiere-mcp doctor` checks it. Bridge folder: ' +
+              this.tempDir +
+              '.',
           );
         }
 
-        await new Promise(resolve => setTimeout(resolve, 150));
+        await new Promise((resolve) => setTimeout(resolve, 150));
         continue;
       }
 
@@ -2029,15 +2070,15 @@ export class PremiereProBridge implements PremiereProTransport {
         // attempts. A response written non-atomically can be unreadable for many
         // polls, and failing early would turn a slow write into a hard error. The
         // parse failure is remembered so the diagnosis below can still name it.
-        await new Promise(resolve => setTimeout(resolve, 150));
+        await new Promise((resolve) => setTimeout(resolve, 150));
       }
     }
 
     if (lastParseError) {
       throw new Error(
         `Bridge response never became valid JSON before the ${timeout}ms timeout. Last parse ` +
-        `error: ${lastParseError.message}. First 200 characters on disk: ` +
-        JSON.stringify(lastRawResponse.slice(0, 200))
+          `error: ${lastParseError.message}. First 200 characters on disk: ` +
+          JSON.stringify(lastRawResponse.slice(0, 200)),
       );
     }
 
@@ -2093,7 +2134,7 @@ export class PremiereProBridge implements PremiereProTransport {
         projectItems: []
       });
     `;
-    
+
     return await this.executeScript(script);
   }
 
@@ -2134,7 +2175,7 @@ export class PremiereProBridge implements PremiereProTransport {
         projectItems: []
       });
     `;
-    
+
     return await this.executeScript(script);
   }
 
@@ -2144,7 +2185,7 @@ export class PremiereProBridge implements PremiereProTransport {
       app.project.save();
       return JSON.stringify({ success: true });
     `;
-    
+
     await this.executeScript(script);
   }
 
@@ -2158,7 +2199,11 @@ export class PremiereProBridge implements PremiereProTransport {
    * fails before anything is imported, and the parent bin is read back off the
    * imported item rather than restated from the request.
    */
-  async importMedia(filePath: string, binName?: string, binId?: string): Promise<PremiereProProjectItem> {
+  async importMedia(
+    filePath: string,
+    binName?: string,
+    binId?: string,
+  ): Promise<PremiereProProjectItem> {
     // Validate file path for security
     const pathValidation = validateFilePath(filePath);
     if (!pathValidation.valid) {
@@ -2173,7 +2218,7 @@ export class PremiereProBridge implements PremiereProTransport {
         success: false,
         error: `Unsupported import format "${ext}". Premiere Pro can show a blocking "File format not supported" modal for this file type, so the MCP server refused to import it before calling Premiere. Convert it to .srt or another Premiere-supported media format first.`,
         filePath: safePath,
-        blockedBeforePremiere: true
+        blockedBeforePremiere: true,
       } as any;
     }
 
@@ -2428,11 +2473,20 @@ export class PremiereProBridge implements PremiereProTransport {
         });
       }
     `;
-    
+
     return await this.executeScript(script);
   }
 
-  async addToTimeline(sequenceId: string, projectItemId: string, trackIndex: number, time: number, linkAudio: boolean = true, sourceInPoint?: number, sourceOutPoint?: number, insertMode: string = 'overwrite'): Promise<PremiereProClip> {
+  async addToTimeline(
+    sequenceId: string,
+    projectItemId: string,
+    trackIndex: number,
+    time: number,
+    linkAudio: boolean = true,
+    sourceInPoint?: number,
+    sourceOutPoint?: number,
+    insertMode: string = 'overwrite',
+  ): Promise<PremiereProClip> {
     const useInsert = insertMode === 'insert';
     const script = `
       try {
@@ -2608,8 +2662,19 @@ export class PremiereProBridge implements PremiereProTransport {
   // single-clip logic: audio-only routing by extension, Source-monitor in/out marking (mediaType
   // 4 with per-stream + no-arg fallbacks), overwriteClip. Returns a per-clip result array so a
   // single bad clip never sinks the batch.
-  async addToTimelineBatch(sequenceId: string, clips: Array<{ projectItemId: string; trackIndex: number; time?: number; linkAudio?: boolean; sourceInPoint?: number; sourceOutPoint?: number }>, mode: 'absolute' | 'append' = 'absolute'): Promise<any> {
-    const specs = clips.map(c => ({
+  async addToTimelineBatch(
+    sequenceId: string,
+    clips: Array<{
+      projectItemId: string;
+      trackIndex: number;
+      time?: number;
+      linkAudio?: boolean;
+      sourceInPoint?: number;
+      sourceOutPoint?: number;
+    }>,
+    mode: 'absolute' | 'append' = 'absolute',
+  ): Promise<any> {
+    const specs = clips.map((c) => ({
       projectItemId: c.projectItemId,
       trackIndex: c.trackIndex,
       time: typeof c.time === 'number' ? c.time : 0,
@@ -2759,7 +2824,7 @@ export class PremiereProBridge implements PremiereProTransport {
     sequenceId: string,
     outputPath: string,
     presetPath: string,
-    options: { sourceRange?: 'entire' | 'in_out' | 'work_area'; removeOnCompletion?: boolean } = {}
+    options: { sourceRange?: 'entire' | 'in_out' | 'work_area'; removeOnCompletion?: boolean } = {},
   ): Promise<any> {
     const sourceRange = options.sourceRange ?? 'entire';
     const removeOnCompletion = options.removeOnCompletion ?? true;
@@ -2769,7 +2834,8 @@ export class PremiereProBridge implements PremiereProTransport {
         success: false,
         status: 'failed',
         code: 'MEDIA_ENCODER_NOT_INSTALLED',
-        error: 'Adobe Media Encoder is not installed. The export was not sent to Premiere, so no native Media Encoder warning was shown.',
+        error:
+          'Adobe Media Encoder is not installed. The export was not sent to Premiere, so no native Media Encoder warning was shown.',
         searchedPaths: encoder.searchedPaths,
         outputPath,
         presetPath,
@@ -2955,8 +3021,12 @@ export class PremiereProBridge implements PremiereProTransport {
     const raw = await this.executeScript(script);
     // CEP returns the JSON.stringify'd object; bridge.executeScript returns parsed.result if present.
     // Some CEP plugins wrap as string; handle both.
-    if (typeof raw === "string") {
-      try { return JSON.parse(raw); } catch { return { success: false, error: "Bridge returned unparseable string: " + raw }; }
+    if (typeof raw === 'string') {
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return { success: false, error: 'Bridge returned unparseable string: ' + raw };
+      }
     }
     return raw;
   }
@@ -2966,7 +3036,10 @@ export class PremiereProBridge implements PremiereProTransport {
    * a blocking native warning in that case. An unreadable install directory is
    * treated as unknown, so a transient filesystem error does not disable export.
    */
-  private async findInstalledMediaEncoder(): Promise<{ available: boolean; searchedPaths: string[] }> {
+  private async findInstalledMediaEncoder(): Promise<{
+    available: boolean;
+    searchedPaths: string[];
+  }> {
     if (process.platform === 'darwin') {
       const applications = '/Applications';
       try {
@@ -2979,7 +3052,9 @@ export class PremiereProBridge implements PremiereProTransport {
     }
 
     if (process.platform === 'win32') {
-      const roots = [process.env.ProgramFiles, process.env['ProgramFiles(x86)']].filter((value): value is string => Boolean(value));
+      const roots = [process.env.ProgramFiles, process.env['ProgramFiles(x86)']].filter(
+        (value): value is string => Boolean(value),
+      );
       const searchedPaths = roots.map((root) => join(root, 'Adobe'));
       if (searchedPaths.length === 0) return { available: true, searchedPaths };
       try {
@@ -3073,7 +3148,7 @@ export class PremiereProBridge implements PremiereProTransport {
     } catch (error) {
       this.logger.warn('Failed to clean up temp directory:', error);
     }
-    
+
     this.logger.info('Adobe Premiere Pro bridge cleaned up');
   }
-} 
+}

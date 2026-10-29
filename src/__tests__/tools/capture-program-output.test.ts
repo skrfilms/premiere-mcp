@@ -57,9 +57,12 @@ describe('capture_program_output — capability probe', () => {
     expect(result.success).toBe(true);
     expect(result.probeOnly).toBe(true);
     expect(Array.isArray(result.taps)).toBe(true);
-    expect(result.taps.map((t: { tap: string }) => t.tap).sort()).toEqual(
-      ['ndi', 'render', 'spout', 'syphon'],
-    );
+    expect(result.taps.map((t: { tap: string }) => t.tap).sort()).toEqual([
+      'ndi',
+      'render',
+      'spout',
+      'syphon',
+    ]);
     const render = result.taps.find((t: { tap: string }) => t.tap === 'render');
     expect(render.available).toBe(true);
     expect(render.audio).toBe(true);
@@ -150,7 +153,10 @@ describe('capture_program_output — render/export tap', () => {
 
   it('reports failure honestly when the frame export writes nothing', async () => {
     const tools = new PremiereProTools(routingBridge({ exportSucceeds: false }));
-    const result = await tools.executeTool('capture_program_output', { sequenceId: 'SEQ-XYZ', time: 1 });
+    const result = await tools.executeTool('capture_program_output', {
+      sequenceId: 'SEQ-XYZ',
+      time: 1,
+    });
     expect(result.success).toBe(false);
     expect(result.tapUsed).toBe('render');
     expect(String(result.error)).toMatch(/wrote no file|could not produce/i);
@@ -161,9 +167,15 @@ describe('capture_program_output — render/export tap', () => {
     // requested path we handed exportFrame lands under the OS temp dir and
     // carries the unique, non-clobbering "premiere-program-" prefix.
     const tools = new PremiereProTools(routingBridge());
-    const result = await tools.executeTool('capture_program_output', { sequenceId: 'SEQ-XYZ', time: 0 });
+    const result = await tools.executeTool('capture_program_output', {
+      sequenceId: 'SEQ-XYZ',
+      time: 0,
+    });
     expect(result.success).toBe(true);
-    const tempName = tmpdir().replace(/[\\/]+$/, '').split(/[\\/]/).pop() as string;
+    const tempName = tmpdir()
+      .replace(/[\\/]+$/, '')
+      .split(/[\\/]/)
+      .pop() as string;
     expect(String(result.requestedPath)).toContain('premiere-program-SEQ-XYZ');
     expect(String(result.requestedPath)).toContain(tempName);
   });

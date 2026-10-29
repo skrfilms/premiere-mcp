@@ -53,12 +53,17 @@ function propKey(key: string): string {
 function scalarType(node: JsonSchemaNode): string {
   const t = Array.isArray(node.type) ? node.type[0] : node.type;
   switch (t) {
-    case 'string': return 'string';
+    case 'string':
+      return 'string';
     case 'number':
-    case 'integer': return 'number';
-    case 'boolean': return 'boolean';
-    case 'null': return 'null';
-    default: return 'unknown';
+    case 'integer':
+      return 'number';
+    case 'boolean':
+      return 'boolean';
+    case 'null':
+      return 'null';
+    default:
+      return 'unknown';
   }
 }
 
@@ -102,7 +107,10 @@ export function renderType(node: JsonSchemaNode | undefined, depth = 0): string 
     const required = new Set(node.required ?? []);
     const indent = '  '.repeat(depth + 1);
     const body = keys
-      .map((k) => `${indent}${propKey(k)}${required.has(k) ? '' : '?'}: ${renderType(props[k], depth + 1)};`)
+      .map(
+        (k) =>
+          `${indent}${propKey(k)}${required.has(k) ? '' : '?'}: ${renderType(props[k], depth + 1)};`,
+      )
       .join('\n');
     return `{\n${body}\n${'  '.repeat(depth)}}`;
   }
@@ -135,22 +143,28 @@ export interface TypingsOptions {
  */
 export function generateToolTypings(tools: TypingsTool[], options: TypingsOptions = {}): string {
   const { exposedNames, only } = options;
-  const selected = only && only.length
-    ? tools.filter((t) => only.includes(t.name))
-    : tools;
+  const selected = only && only.length ? tools.filter((t) => only.includes(t.name)) : tools;
   const sorted = [...selected].sort((a, b) => a.name.localeCompare(b.name));
 
   const out: string[] = [];
-  out.push('// Generated from this build\'s tool schemas. Do not edit by hand.');
-  out.push('// Produced by get_tool_typings from the same z.toJSONSchema output that tools/list serves,');
-  out.push('// so these declarations cannot drift from the schemas the server actually validates against.');
+  out.push("// Generated from this build's tool schemas. Do not edit by hand.");
+  out.push(
+    '// Produced by get_tool_typings from the same z.toJSONSchema output that tools/list serves,',
+  );
+  out.push(
+    '// so these declarations cannot drift from the schemas the server actually validates against.',
+  );
   out.push('');
   out.push(`// ${sorted.length} tool${sorted.length === 1 ? '' : 's'} declared.`);
   if (exposedNames) {
     const hidden = sorted.filter((t) => !exposedNames.has(t.name)).length;
     if (hidden > 0) {
-      out.push(`// ${hidden} of them are hidden by the active tool profile: declared here and marked`);
-      out.push('// @profileHidden, but not callable until the profile is widened (see get_capabilities).');
+      out.push(
+        `// ${hidden} of them are hidden by the active tool profile: declared here and marked`,
+      );
+      out.push(
+        '// @profileHidden, but not callable until the profile is widened (see get_capabilities).',
+      );
     }
   }
   out.push('');
@@ -168,18 +182,24 @@ export function generateToolTypings(tools: TypingsTool[], options: TypingsOption
     // Doc comment and declaration are pushed as ONE entry: joining them with the array separator
     // put a blank line between them, which detaches the JSDoc from the interface in TypeScript and
     // loses every description in an editor — the main reason to emit typings at all.
-    out.push(`${docComment(`${tool.description ?? tool.name}${notes}`, '')}export interface ${iface} ${body}`);
+    out.push(
+      `${docComment(`${tool.description ?? tool.name}${notes}`, '')}export interface ${iface} ${body}`,
+    );
     out.push('');
     if (exposed) callable.push({ name: tool.name, iface });
   }
 
   out.push('/** Every tool name this build implements. */');
-  out.push(`export type ToolName =\n${sorted.map((t) => `  | ${JSON.stringify(t.name)}`).join('\n')};`);
+  out.push(
+    `export type ToolName =\n${sorted.map((t) => `  | ${JSON.stringify(t.name)}`).join('\n')};`,
+  );
   out.push('');
   out.push('/** Tool names callable under the ACTIVE profile. */');
-  out.push(callable.length
-    ? `export type CallableToolName =\n${callable.map((t) => `  | ${JSON.stringify(t.name)}`).join('\n')};`
-    : 'export type CallableToolName = never;');
+  out.push(
+    callable.length
+      ? `export type CallableToolName =\n${callable.map((t) => `  | ${JSON.stringify(t.name)}`).join('\n')};`
+      : 'export type CallableToolName = never;',
+  );
   out.push('');
   out.push('/** Argument type for a given tool name. */');
   out.push('export interface ToolArgs {');
@@ -191,7 +211,9 @@ export function generateToolTypings(tools: TypingsTool[], options: TypingsOption
   out.push(' * compile-time error rather than a runtime tool failure.');
   out.push(' */');
   for (const t of callable) {
-    out.push(`export declare function callTool(name: ${JSON.stringify(t.name)}, params: ${t.iface}): Promise<unknown>;`);
+    out.push(
+      `export declare function callTool(name: ${JSON.stringify(t.name)}, params: ${t.iface}): Promise<unknown>;`,
+    );
   }
   out.push('');
 

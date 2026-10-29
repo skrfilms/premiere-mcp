@@ -15,7 +15,11 @@ import { PremiereProTools } from '../../tools/index.js';
 import { PremiereProResources } from '../../resources/index.js';
 import { PremiereProPrompts } from '../../prompts/index.js';
 import type { PremiereMcpSurface } from '../../server-factory.js';
-import { startHttpTransport, type BridgeProbe, type HttpTransportHandle } from '../../http-server.js';
+import {
+  startHttpTransport,
+  type BridgeProbe,
+  type HttpTransportHandle,
+} from '../../http-server.js';
 
 const TOKEN = 'listener-token-abcdefghijkl';
 
@@ -32,8 +36,17 @@ function makeSurface(): PremiereMcpSurface {
   };
 }
 
-const connected: BridgeProbe = async () => ({ state: 'connected', checked: true, reason: 'stubbed', heartbeatAgeMs: 80 });
-const down: BridgeProbe = async () => ({ state: 'no-heartbeat', checked: true, reason: 'panel closed; click Start Bridge.' });
+const connected: BridgeProbe = async () => ({
+  state: 'connected',
+  checked: true,
+  reason: 'stubbed',
+  heartbeatAgeMs: 80,
+});
+const down: BridgeProbe = async () => ({
+  state: 'no-heartbeat',
+  checked: true,
+  reason: 'panel closed; click Start Bridge.',
+});
 
 async function start(argv: string[], probe: BridgeProbe): Promise<HttpTransportHandle> {
   return startHttpTransport({
@@ -62,7 +75,9 @@ describe('HTTP listener over a real socket', () => {
     expect(handle.config.host).toBe('127.0.0.1');
     expect(handle.address.port).toBeGreaterThan(0);
 
-    const response = await fetch(`${base}/health`, { headers: { authorization: `Bearer ${TOKEN}` } });
+    const response = await fetch(`${base}/health`, {
+      headers: { authorization: `Bearer ${TOKEN}` },
+    });
     expect(response.status).toBe(200);
     const report = await response.json();
     expect(report.bind).toBe(`127.0.0.1:${handle.address.port}`);
@@ -82,7 +97,12 @@ describe('HTTP listener over a real socket', () => {
     const response = await fetch(`${base}/mcp`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: { pad: 'x'.repeat(2000) } }),
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/list',
+        params: { pad: 'x'.repeat(2000) },
+      }),
     });
     expect(response.status).toBe(413);
     expect((await response.json()).error.message).toMatch(/cap is 256/);
@@ -148,7 +168,11 @@ describe('HTTP listener over a real socket', () => {
       jsonrpc: '2.0',
       id: 1,
       method: 'initialize',
-      params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } },
+      params: {
+        protocolVersion: '2025-06-18',
+        capabilities: {},
+        clientInfo: { name: 'test', version: '1' },
+      },
     });
     expect(init.status).toBe(200);
     await init.text();

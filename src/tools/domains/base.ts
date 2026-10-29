@@ -6,7 +6,7 @@
  */
 import { spawn } from 'child_process';
 // Synchronous fs/path/os bindings for the Node-side (non-ExtendScript) tools.
-// Kept separate from the `promises as fs` import above, which is the async API.
+// The async API is the separate `promises as fs` import.
 import * as fsSync from 'node:fs';
 import type { PremiereProTransport } from '../../bridge/types.js';
 import { Logger } from '../../utils/logger.js';
@@ -34,8 +34,6 @@ export class ToolsBase {
     this.logger = new Logger('PremiereProTools');
   }
 
-
-
   /**
    * The locally-implemented tool catalogue, built ONCE per process.
    *
@@ -58,8 +56,6 @@ export class ToolsBase {
    */
   protected static localToolsCache: MCPTool[] | null = null;
 
-
-
   /**
    * Every tool this build implements, before the active profile filters anything.
    *
@@ -68,56 +64,30 @@ export class ToolsBase {
    */
   protected static registeredToolsCache: MCPTool[] | null = null;
 
-
-
   // ── New Wave-1 tools ───────────────────────────────────────────────────
-
-
 
   // ── Wave 1 — Navigation & Editing Verbs ───────────────────────────────
 
-
-
   // ── Batch 1: Lumetri Numeric Control ─────────────────────────────────
-
-
 
   // ── Batch 2: Motion, Transform, Layout ──────────────────────────────
 
-
-
   // ── Batch 3: Audio Tools ─────────────────────────────────────────────
-
-
 
   // ── Batch 4: Export & AME Tools ─────────────────────────────────────
 
-
-
   // ── Batch 5: Batch & Metadata ────────────────────────────────────────
-
-
 
   // ── Batch 6: Review & Delivery ───────────────────────────────────────
 
-
-
   // ── Batch 7: VFX & Interchange ───────────────────────────────────────
-
-
 
   // ── Batch 8: MOGRT / Titles ──────────────────────────────────────────
 
-
-
   // ── Batch 9: QE Utilities + Productions ─────────────────────────────
-
-
 
   // ──────────────────────────────────────────────────────────────────────
   // ── Batches A-H Implementations ───────────────────────────────────────
-
-
 
   // Batch C: Audio
   //
@@ -131,8 +101,6 @@ export class ToolsBase {
   protected static readonly OBSOLETE_AUDIO_EFFECTS: Record<string, string> = {
     'Adaptive Noise Reduction': 'DeNoise',
   };
-
-
 
   // PARKED: import_ae_comps is intentionally NOT exposed as a tool.
   // app.project.importAEComps() exists on 26.3.2 (signature confirmed by reflection),
@@ -154,11 +122,7 @@ export class ToolsBase {
   // `);
   // }
 
-
-
   // ──────────────────────────────────────────────────────────────────────
-
-
 
   // ---------------------------------------------------------------------------
   // SRT subtitle CRUD (host-independent; operates on the .srt file on disk).
@@ -168,16 +132,34 @@ export class ToolsBase {
   // serialize/edit logic is in ./srt; these methods add only the I/O shell.
   // ---------------------------------------------------------------------------
 
-
-
   /** Default media extensions the footage index scans (lowercase, no dot). */
   protected static readonly FOOTAGE_EXTENSIONS = [
-    'mov', 'mp4', 'm4v', 'mxf', 'avi', 'mkv', 'webm', 'r3d', 'braw', 'prores',
-    'wav', 'aif', 'aiff', 'mp3', 'aac', 'flac', 'm4a',
-    'png', 'jpg', 'jpeg', 'tif', 'tiff', 'exr', 'dpx', 'psd',
+    'mov',
+    'mp4',
+    'm4v',
+    'mxf',
+    'avi',
+    'mkv',
+    'webm',
+    'r3d',
+    'braw',
+    'prores',
+    'wav',
+    'aif',
+    'aiff',
+    'mp3',
+    'aac',
+    'flac',
+    'm4a',
+    'png',
+    'jpg',
+    'jpeg',
+    'tif',
+    'tiff',
+    'exr',
+    'dpx',
+    'psd',
   ];
-
-
 
   // ============================================
   // NEW TOOLS IMPLEMENTATION
@@ -185,18 +167,12 @@ export class ToolsBase {
 
   // Markers Implementation
 
-
-
   // ── Final batch implementations ───────────────────────────────────────
-
-
 
   // ── Gap-closure implementations ─────────────────────────────────────────
   // Every method below exposes a live-reflected symbol that no tool previously called.
   // Where the API has a getter, the mutation is read back and `verified` reflects the
   // readback. Where no getter exists the response says so rather than implying proof.
-
-
 
   /**
    * Premiere's Auto Save preferences, by their real key names.
@@ -215,28 +191,15 @@ export class ToolsBase {
 
   protected static readonly AUTOSAVE_FOLDER_KEY = 'BE.Prefs.ScratchDisks.FirstAutoSaveFolder';
 
-
-
-
-
   // ──────────────────────────────────────────────────────────────────────
-
-
 
   // ── Batch Final implementations ────────────────────────────────────────
 
-
-
   // ── #5: Batch execution ─────────────────────────────────────────────────
-
-
 
   // ── #7: Cross-app integration ────────────────────────────────────────────
 
-
-
   // ─────────────────────────────────────────────────────────────────────────
-
 
   /**
    * Batch B: QE clip ops. Delegates to buildQSeqResolver rather than inlining its own lookup —
@@ -249,7 +212,9 @@ export class ToolsBase {
   }
 
   // Audio Analysis Implementation
-  protected async resolveProjectItemMediaPath(projectItemId: string): Promise<{ path?: string; error?: string }> {
+  protected async resolveProjectItemMediaPath(
+    projectItemId: string,
+  ): Promise<{ path?: string; error?: string }> {
     const script = `
       try {
         var item = __findProjectItem(${JSON.stringify(projectItemId)});
@@ -283,7 +248,10 @@ export class ToolsBase {
    * (whisper imports torch on --help, several seconds) to finish; the probe is
    * killed the instant it launches. ENOENT (not on PATH) surfaces as 'error'.
    */
-  protected checkCommandAvailable(command: string, probeArgs: string[] = ['--help']): Promise<boolean> {
+  protected checkCommandAvailable(
+    command: string,
+    probeArgs: string[] = ['--help'],
+  ): Promise<boolean> {
     return new Promise((resolve) => {
       let settled = false;
       const done = (value: boolean): void => {
@@ -296,7 +264,11 @@ export class ToolsBase {
         proc.on('error', () => done(false));
         proc.on('spawn', () => {
           done(true);
-          try { proc.kill(); } catch { /* already gone */ }
+          try {
+            proc.kill();
+          } catch {
+            /* already gone */
+          }
         });
         // Fallback for runtimes that never emit 'spawn': a clean close still means it ran.
         proc.on('close', () => done(true));
@@ -357,8 +329,12 @@ export class ToolsBase {
             pixelFormat: video.pix_fmt,
             colorSpace: video.color_space,
             colorRange: video.color_range,
-            bitDepth: video.bits_per_raw_sample != null ? Number(video.bits_per_raw_sample) : undefined,
-            fps: typeof video.r_frame_rate === 'string' ? this.parseFrameRate(video.r_frame_rate) : undefined,
+            bitDepth:
+              video.bits_per_raw_sample != null ? Number(video.bits_per_raw_sample) : undefined,
+            fps:
+              typeof video.r_frame_rate === 'string'
+                ? this.parseFrameRate(video.r_frame_rate)
+                : undefined,
           }
         : null,
       audio: audio
@@ -373,20 +349,30 @@ export class ToolsBase {
   }
 
   /** Run ffprobe on one file and return its distilled summary. */
-  protected ffprobeFile(path: string, ffprobe: string): Promise<{ success: boolean; summary?: any; error?: string }> {
+  protected ffprobeFile(
+    path: string,
+    ffprobe: string,
+  ): Promise<{ success: boolean; summary?: any; error?: string }> {
     return new Promise((resolve) => {
       const argv = ['-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', path];
       const proc = spawn(ffprobe, argv);
       let stdout = '';
       let stderr = '';
-      proc.stdout.on('data', (c) => { stdout += c.toString(); });
-      proc.stderr.on('data', (c) => { stderr += c.toString(); });
+      proc.stdout.on('data', (c) => {
+        stdout += c.toString();
+      });
+      proc.stderr.on('data', (c) => {
+        stderr += c.toString();
+      });
       proc.on('error', (err) => resolve({ success: false, error: err.message }));
       proc.on('close', () => {
         try {
           resolve({ success: true, summary: this.buildProbeSummary(JSON.parse(stdout)) });
         } catch {
-          resolve({ success: false, error: stderr.slice(-300) || 'ffprobe returned no parseable metadata' });
+          resolve({
+            success: false,
+            error: stderr.slice(-300) || 'ffprobe returned no parseable metadata',
+          });
         }
       });
     });
@@ -438,6 +424,8 @@ export class ToolsBase {
     try {
       const s = fsSync.statSync(filePath);
       return { size: s.size, mtimeMs: s.mtimeMs };
-    } catch { return null; }
+    } catch {
+      return null;
+    }
   }
 }

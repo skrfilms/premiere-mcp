@@ -12,7 +12,13 @@
  * "changed" versus "codec noise" are testable without spawning anything.
  */
 
-import { ffmpegCmd, probeDimensions, runBinary, binaryAvailable, FFMPEG_INSTALL_GUIDANCE } from './ffmpeg.js';
+import {
+  ffmpegCmd,
+  probeDimensions,
+  runBinary,
+  binaryAvailable,
+  FFMPEG_INSTALL_GUIDANCE,
+} from './ffmpeg.js';
 import type { Known } from './types.js';
 import { UNKNOWN } from './types.js';
 
@@ -118,16 +124,21 @@ export function classifyDifference(
   if (typeof meanAbsDiff !== 'number' || typeof maxAbsDiff !== 'number') {
     return {
       verdict: 'unknown',
-      reason: 'The difference could not be measured, so no verdict is given. Do not read this as "unchanged".',
+      reason:
+        'The difference could not be measured, so no verdict is given. Do not read this as "unchanged".',
     };
   }
   if (meanAbsDiff === 0 && maxAbsDiff === 0) {
     return {
       verdict: 'identical',
-      reason: 'Every luma sample matched (mean and peak difference both 0). These frames are the same picture.',
+      reason:
+        'Every luma sample matched (mean and peak difference both 0). These frames are the same picture.',
     };
   }
-  if (meanAbsDiff < thresholds.nearIdenticalMeanAbsDiff && maxAbsDiff <= thresholds.nearIdenticalMaxAbsDiff) {
+  if (
+    meanAbsDiff < thresholds.nearIdenticalMeanAbsDiff &&
+    maxAbsDiff <= thresholds.nearIdenticalMaxAbsDiff
+  ) {
     return {
       verdict: 'near-identical',
       reason: `Mean difference ${meanAbsDiff.toFixed(4)}/255 with a peak of ${maxAbsDiff}/255: consistent with re-encoding the same picture rather than a change to it.`,
@@ -179,7 +190,9 @@ export async function diffFrames(
 
   const [da, db] = await Promise.all([probeDimensions(aPath), probeDimensions(bPath)]);
   const label = (d: { width: Known<number>; height: Known<number> }) =>
-    (typeof d.width === 'number' && typeof d.height === 'number') ? `${d.width}x${d.height}` : UNKNOWN;
+    typeof d.width === 'number' && typeof d.height === 'number'
+      ? `${d.width}x${d.height}`
+      : UNKNOWN;
   const matched = typeof da.width === 'number' && da.width === db.width && da.height === db.height;
   if (!matched) {
     return {
@@ -191,28 +204,38 @@ export async function diffFrames(
     };
   }
 
-  const statsRes = await runBinary(ffmpeg, [
-    '-hide_banner', '-loglevel', 'error',
-    '-i', aPath, '-i', bPath,
-    '-lavfi', '[0:v][1:v]blend=all_mode=difference,format=gray,signalstats,metadata=print:file=-',
-    '-f', 'null', '-',
-  ], 120_000);
+  const statsRes = await runBinary(
+    ffmpeg,
+    [
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-i',
+      aPath,
+      '-i',
+      bPath,
+      '-lavfi',
+      '[0:v][1:v]blend=all_mode=difference,format=gray,signalstats,metadata=print:file=-',
+      '-f',
+      'null',
+      '-',
+    ],
+    120_000,
+  );
 
   const frames = parseSignalstatsMetadata(statsRes.stdout + statsRes.stderr);
   const first = frames[0];
 
-  const qualityRes = await runBinary(ffmpeg, [
-    '-hide_banner',
-    '-i', aPath, '-i', bPath,
-    '-lavfi', '[0:v][1:v]psnr',
-    '-f', 'null', '-',
-  ], 120_000);
-  const ssimRes = await runBinary(ffmpeg, [
-    '-hide_banner',
-    '-i', aPath, '-i', bPath,
-    '-lavfi', '[0:v][1:v]ssim',
-    '-f', 'null', '-',
-  ], 120_000);
+  const qualityRes = await runBinary(
+    ffmpeg,
+    ['-hide_banner', '-i', aPath, '-i', bPath, '-lavfi', '[0:v][1:v]psnr', '-f', 'null', '-'],
+    120_000,
+  );
+  const ssimRes = await runBinary(
+    ffmpeg,
+    ['-hide_banner', '-i', aPath, '-i', bPath, '-lavfi', '[0:v][1:v]ssim', '-f', 'null', '-'],
+    120_000,
+  );
 
   const metrics: DiffMetrics = {
     meanAbsDiff: first ? first.meanAbsDiff : UNKNOWN,
@@ -224,7 +247,8 @@ export async function diffFrames(
   if (!first) {
     return {
       success: false,
-      error: `ffmpeg produced no difference statistics for these frames (exit ${statsRes.code}). ${statsRes.stderr.slice(-400)}`.trim(),
+      error:
+        `ffmpeg produced no difference statistics for these frames (exit ${statsRes.code}). ${statsRes.stderr.slice(-400)}`.trim(),
       a: aPath,
       b: bPath,
       metrics,
@@ -280,8 +304,12 @@ export function summarizeMotion(pairs: MotionPair[]): MotionSummary {
   const unmeasured = pairs.filter((p) => p.verdict === 'unknown');
   const moving = measured.filter((p) => p.verdict === 'changed');
   const still = measured.filter((p) => p.verdict !== 'changed');
-  const means = measured.map((p) => p.meanAbsDiff).filter((v): v is number => typeof v === 'number');
-  const meanOfMeans = means.length ? Math.round((means.reduce((a, b) => a + b, 0) / means.length) * 10_000) / 10_000 : UNKNOWN;
+  const means = measured
+    .map((p) => p.meanAbsDiff)
+    .filter((v): v is number => typeof v === 'number');
+  const meanOfMeans = means.length
+    ? Math.round((means.reduce((a, b) => a + b, 0) / means.length) * 10_000) / 10_000
+    : UNKNOWN;
 
   let conclusion: string;
   if (pairs.length === 0) {
@@ -299,7 +327,14 @@ export function summarizeMotion(pairs: MotionPair[]): MotionSummary {
     conclusion += ` ${unmeasured.length} pair(s) could not be measured and are excluded from the verdict.`;
   }
 
-  return { moved: moving.length > 0, staticPairs: still, movingPairs: moving, unmeasuredPairs: unmeasured, meanOfMeans, conclusion };
+  return {
+    moved: moving.length > 0,
+    staticPairs: still,
+    movingPairs: moving,
+    unmeasuredPairs: unmeasured,
+    meanOfMeans,
+    conclusion,
+  };
 }
 
 /**
@@ -309,9 +344,19 @@ export function summarizeMotion(pairs: MotionPair[]): MotionSummary {
 export async function analyzeMotion(
   framePaths: string[],
   thresholds: DiffThresholds = DEFAULT_DIFF_THRESHOLDS,
-): Promise<{ success: boolean; summary?: MotionSummary; pairs: MotionPair[]; error?: string; install?: string }> {
+): Promise<{
+  success: boolean;
+  summary?: MotionSummary;
+  pairs: MotionPair[];
+  error?: string;
+  install?: string;
+}> {
   if (framePaths.length < 2) {
-    return { success: false, pairs: [], error: 'At least two frames are needed to say anything about motion.' };
+    return {
+      success: false,
+      pairs: [],
+      error: 'At least two frames are needed to say anything about motion.',
+    };
   }
   const ffmpeg = ffmpegCmd();
   if (!(await binaryAvailable(ffmpeg))) {

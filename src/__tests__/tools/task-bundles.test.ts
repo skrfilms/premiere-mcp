@@ -89,7 +89,8 @@ describe('task bundles exist and are spelled correctly', () => {
       // Bundles use exact names on purpose: a glob makes the size and the measured cost
       // a function of the catalogue instead of a decision.
       for (const pattern of patterns) {
-        if (pattern.endsWith('*')) typos.push(`${name}: glob '${pattern}' is not allowed in a bundle`);
+        if (pattern.endsWith('*'))
+          typos.push(`${name}: glob '${pattern}' is not allowed in a bundle`);
       }
     }
     expect(typos).toEqual([]);
@@ -161,10 +162,20 @@ describe('every bundle is self-sufficient for its task', () => {
     // A bundle that can mutate but not prove anything is the failure mode this whole
     // server is built against, so it is an invariant rather than a review comment.
     const verifiers = [
-      'lint_timeline', 'capture_program_output', 'verify_export', 'verify_color_grade',
-      'verify_effect_rendered', 'verify_clip_visible', 'verify_media_online',
-      'lumetri_report', 'get_effect_properties', 'get_keyframes', 'list_markers',
-      'read_sequence_captions', 'validate_srt', 'assert_clips_unchanged',
+      'lint_timeline',
+      'capture_program_output',
+      'verify_export',
+      'verify_color_grade',
+      'verify_effect_rendered',
+      'verify_clip_visible',
+      'verify_media_online',
+      'lumetri_report',
+      'get_effect_properties',
+      'get_keyframes',
+      'list_markers',
+      'read_sequence_captions',
+      'validate_srt',
+      'assert_clips_unchanged',
       'get_timeline_gaps',
     ];
     for (const name of BUNDLE_NAMES) {
@@ -220,7 +231,8 @@ describe('bundle context cost stays measured', () => {
     const drift: string[] = [];
     for (const [name, budget] of Object.entries(BUNDLE_BUDGETS)) {
       const actual = advertised(name).size;
-      if (actual !== budget.tools) drift.push(`${name}: documented ${budget.tools}, actual ${actual}`);
+      if (actual !== budget.tools)
+        drift.push(`${name}: documented ${budget.tools}, actual ${actual}`);
     }
     // A failure here is not a bug, it is a stale number: re-measure and update
     // BUNDLE_BUDGETS. Publishing an unchecked figure is the drift this project treats as
@@ -261,7 +273,10 @@ describe('bundle context cost stays measured', () => {
     // The doc exists to be read by a human choosing a bundle, which makes a stale figure in
     // it the same class of problem as a stale count in the README: nobody reading it can
     // tell. Parsed rather than eyeballed.
-    const doc = readFileSync(join(__dirname, '..', '..', '..', 'docs', 'AGENT-ERGONOMICS.md'), 'utf8');
+    const doc = readFileSync(
+      join(__dirname, '..', '..', '..', 'docs', 'AGENT-ERGONOMICS.md'),
+      'utf8',
+    );
     const rows = new Map<string, { tools: number; approxTokens: number }>();
     for (const line of doc.split('\n')) {
       const match = /^\|\s*`([a-z-]+)`\s*\|[^|]*\|\s*(\d+)\s*\|\s*(\d+)\s*\|/.exec(line);

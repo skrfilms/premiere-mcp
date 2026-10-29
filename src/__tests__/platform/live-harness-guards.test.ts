@@ -48,7 +48,9 @@ describe('mutating live harnesses are gated on a scratch project', () => {
     // The shared helper specifically — an inline copy is how the doctor scripts drifted apart.
     // Other names may be imported alongside it (live-verify-cleanup also pulls in assertStillScratch),
     // so this pins the source module and the symbol, not the exact shape of the import list.
-    expect(source).toMatch(/import \{[^}]*\brequireScratchProject\b[^}]*\} from '\.\/lib\/require-scratch-project\.mjs'/);
+    expect(source).toMatch(
+      /import \{[^}]*\brequireScratchProject\b[^}]*\} from '\.\/lib\/require-scratch-project\.mjs'/,
+    );
     expect(source).toMatch(/await requireScratchProject\(bridge, /);
   });
 
@@ -66,7 +68,10 @@ describe('the shipped scratch-name pattern', () => {
   const pattern = (() => {
     const source = readFileSync(GUARD, 'utf8');
     const match = source.match(/export const SCRATCH_NAME_PATTERN = (\/.+\/[a-z]*);/);
-    if (!match) throw new Error('SCRATCH_NAME_PATTERN is no longer a plain regex literal in require-scratch-project.mjs');
+    if (!match)
+      throw new Error(
+        'SCRATCH_NAME_PATTERN is no longer a plain regex literal in require-scratch-project.mjs',
+      );
     const body = match[1].slice(1, match[1].lastIndexOf('/'));
     const flags = match[1].slice(match[1].lastIndexOf('/') + 1);
     return new RegExp(body, flags);
@@ -140,13 +145,18 @@ describe('requireScratchProject (run for real against a fake bridge)', () => {
    * sat open alongside it waiting for any tool call that omitted a target.
    */
   it('refuses when a second project is open, even though the ACTIVE one is scratch', () => {
-    const r = runGuard(scratch({
-      count: 2,
-      open: [
-        { name: 'trowel_scratch.prproj', path: IN_REPO_FILE },
-        { name: 'client_feature_v2.prproj', path: '/Users/somebody/cuts/client_feature_v2.prproj' },
-      ],
-    }));
+    const r = runGuard(
+      scratch({
+        count: 2,
+        open: [
+          { name: 'trowel_scratch.prproj', path: IN_REPO_FILE },
+          {
+            name: 'client_feature_v2.prproj',
+            path: '/Users/somebody/cuts/client_feature_v2.prproj',
+          },
+        ],
+      }),
+    );
     expect(r.status).toBe(2);
     expect(r.stderr).toMatch(/2 projects are open/);
     // The refusal has to name the project at risk, or the operator cannot act on it.
@@ -174,7 +184,9 @@ describe('requireScratchProject (run for real against a fake bridge)', () => {
   });
 
   it('refuses a path that does not exist on this machine', () => {
-    const r = runGuard(scratch({ path: path.join(path.dirname(IN_REPO_FILE), 'no_such_scratch.prproj') }));
+    const r = runGuard(
+      scratch({ path: path.join(path.dirname(IN_REPO_FILE), 'no_such_scratch.prproj') }),
+    );
     expect(r.status).toBe(2);
     expect(r.stderr).toMatch(/does not exist/);
   });
@@ -221,7 +233,10 @@ describe('the destructive cleanup harness re-pins before every delete', () => {
    */
   it('calls assertStillScratch inside the delete loop', () => {
     const source = readFileSync(path.join(SCRIPTS, 'live-verify-cleanup.mjs'), 'utf8');
-    const loop = source.slice(source.indexOf('for (const s of doomed)'), source.indexOf("delete_sequence', {"));
+    const loop = source.slice(
+      source.indexOf('for (const s of doomed)'),
+      source.indexOf("delete_sequence', {"),
+    );
     expect(loop).toMatch(/await assertStillScratch\(bridge, pinned, /);
   });
 });

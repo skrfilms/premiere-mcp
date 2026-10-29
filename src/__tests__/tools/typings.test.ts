@@ -13,10 +13,18 @@ import { generateToolTypings, renderType } from '../../tools/typings.js';
 
 /** Parse as a declaration file and return syntactic diagnostics. */
 function syntaxErrors(source: string): string[] {
-  const file = ts.createSourceFile('premiere-mcp-tools.d.ts', source, ts.ScriptTarget.ES2020, true, ts.ScriptKind.TS);
+  const file = ts.createSourceFile(
+    'premiere-mcp-tools.d.ts',
+    source,
+    ts.ScriptTarget.ES2020,
+    true,
+    ts.ScriptKind.TS,
+  );
   // `parseDiagnostics` is internal but is the only way to get syntax errors without a Program.
   const diags = (file as unknown as { parseDiagnostics?: ts.Diagnostic[] }).parseDiagnostics ?? [];
-  return diags.map((d) => `${ts.flattenDiagnosticMessageText(d.messageText, ' ')} @${d.start ?? -1}`);
+  return diags.map(
+    (d) => `${ts.flattenDiagnosticMessageText(d.messageText, ' ')} @${d.start ?? -1}`,
+  );
 }
 
 describe('renderType', () => {
@@ -27,7 +35,9 @@ describe('renderType', () => {
     expect(renderType({ type: 'array', items: { type: 'string' } })).toBe('Array<string>');
     expect(renderType({ enum: ['video', 'audio'] })).toBe('"video" | "audio"');
     expect(renderType({ anyOf: [{ type: 'string' }, { type: 'number' }] })).toBe('string | number');
-    expect(renderType({ type: 'object', additionalProperties: { type: 'string' } })).toBe('Record<string, string>');
+    expect(renderType({ type: 'object', additionalProperties: { type: 'string' } })).toBe(
+      'Record<string, string>',
+    );
   });
 
   it('uses unknown rather than any for shapes it cannot express', () => {
@@ -58,7 +68,15 @@ describe('generateToolTypings', () => {
     // A blank line detaches the JSDoc from the declaration, so every description disappears in an
     // editor — which is most of the value. This regressed once already.
     const out = generateToolTypings([
-      { name: 'add_marker', description: 'Adds a marker.', jsonSchema: { type: 'object', properties: { time: { type: 'number' } }, required: ['time'] } },
+      {
+        name: 'add_marker',
+        description: 'Adds a marker.',
+        jsonSchema: {
+          type: 'object',
+          properties: { time: { type: 'number' } },
+          required: ['time'],
+        },
+      },
     ]);
     expect(out).toContain('/** Adds a marker. */\nexport interface AddMarkerArgs');
   });
@@ -81,7 +99,11 @@ describe('generateToolTypings', () => {
 
   it('produces syntactically valid TypeScript for awkward names and empty schemas', () => {
     const out = generateToolTypings([
-      { name: 'weird-name.with punctuation', description: 'Has */ a comment terminator', jsonSchema: { type: 'object', properties: { 'not-an-identifier': { type: 'string' } } } },
+      {
+        name: 'weird-name.with punctuation',
+        description: 'Has */ a comment terminator',
+        jsonSchema: { type: 'object', properties: { 'not-an-identifier': { type: 'string' } } },
+      },
       { name: 'no_params', jsonSchema: { type: 'object' } },
     ]);
     expect(syntaxErrors(out)).toEqual([]);
@@ -103,7 +125,9 @@ describe('get_tool_typings over the real catalogue', () => {
   it('makes no Premiere request', async () => {
     // Purely local: the stub throws if the bridge is touched at all.
     const tools = new PremiereProTools({
-      executeScript: async () => { throw new Error('get_tool_typings must not touch the host'); },
+      executeScript: async () => {
+        throw new Error('get_tool_typings must not touch the host');
+      },
     } as never);
     const result = await tools.executeTool('get_tool_typings', { only: ['ping'] });
     expect(result.success).toBe(true);
@@ -111,7 +135,9 @@ describe('get_tool_typings over the real catalogue', () => {
 
   it('reports a requested name that is not a tool instead of dropping it', async () => {
     const tools = new PremiereProTools({ executeScript: async () => ({ success: true }) } as never);
-    const result = await tools.executeTool('get_tool_typings', { only: ['add_marker', 'definitely_not_a_tool'] });
+    const result = await tools.executeTool('get_tool_typings', {
+      only: ['add_marker', 'definitely_not_a_tool'],
+    });
     expect(result.unknownToolNames).toEqual(['definitely_not_a_tool']);
     expect(result.toolsDeclared).toBe(1);
   });

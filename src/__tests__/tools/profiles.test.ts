@@ -18,12 +18,23 @@ const ALL = [
   // the agent can still discover what curation removed. The schema-on-demand trio
   // (get_tool_typings / call_tool / activate_tools / deactivate_tools) is kept for the
   // stronger reason that discovery without a call path is just a better-worded refusal.
-  'get_capabilities', 'find_tool', 'get_tool_typings',
-  'call_tool', 'activate_tools', 'deactivate_tools',
-  'get_project_info', 'list_sequences',
-  'add_to_timeline', 'razor_timeline_at_time', 'export_sequence',
-  'color_correct', 'apply_lut', 'adjust_audio_levels', 'setup_ducking',
-  'execute_extendscript', 'evaluate_expression',
+  'get_capabilities',
+  'find_tool',
+  'get_tool_typings',
+  'call_tool',
+  'activate_tools',
+  'deactivate_tools',
+  'get_project_info',
+  'list_sequences',
+  'add_to_timeline',
+  'razor_timeline_at_time',
+  'export_sequence',
+  'color_correct',
+  'apply_lut',
+  'adjust_audio_levels',
+  'setup_ducking',
+  'execute_extendscript',
+  'evaluate_expression',
 ].map((name) => ({ name }));
 
 describe('matchesPattern', () => {
@@ -41,7 +52,10 @@ describe('default (no env)', () => {
   // default could not run there at all. These tests pin the new contract so it cannot
   // drift back silently — the previous versions of them asserted the opposite.
   it('curates by default rather than exposing the whole catalogue', () => {
-    const r = resolveProfile(ALL.map((t) => t.name), {});
+    const r = resolveProfile(
+      ALL.map((t) => t.name),
+      {},
+    );
     expect(r.source).toBe('profile');
     expect(r.profileName).toBe('core');
   });
@@ -50,7 +64,10 @@ describe('default (no env)', () => {
     const out = applyProfile(ALL, { PREMIERE_MCP_PROFILE: 'all' });
     // Same reference: `all` with no excludes is a zero-cost passthrough.
     expect(out).toBe(ALL);
-    const r = resolveProfile(ALL.map((t) => t.name), { PREMIERE_MCP_PROFILE: 'all' });
+    const r = resolveProfile(
+      ALL.map((t) => t.name),
+      { PREMIERE_MCP_PROFILE: 'all' },
+    );
     expect(r.source).toBe('all');
     expect(r.profileName).toBeNull();
     expect(r.selected).toHaveLength(ALL.length);
@@ -77,13 +94,19 @@ describe('named profile', () => {
 
   it('every named profile in PROFILES resolves without throwing', () => {
     for (const name of Object.keys(PROFILES)) {
-      const r = resolveProfile(ALL.map((t) => t.name), { PREMIERE_MCP_PROFILE: name });
+      const r = resolveProfile(
+        ALL.map((t) => t.name),
+        { PREMIERE_MCP_PROFILE: name },
+      );
       expect(Array.isArray(r.selected)).toBe(true);
     }
   });
 
   it('an unknown profile name fails safe to the full catalogue and flags it', () => {
-    const r = resolveProfile(ALL.map((t) => t.name), { PREMIERE_MCP_PROFILE: 'nope' });
+    const r = resolveProfile(
+      ALL.map((t) => t.name),
+      { PREMIERE_MCP_PROFILE: 'nope' },
+    );
     expect(r.source).toBe('all');
     expect(r.selected).toHaveLength(ALL.length);
     expect(r.unknown).toContain('nope');
@@ -92,10 +115,13 @@ describe('named profile', () => {
 
 describe('explicit allowlist (PREMIERE_MCP_TOOLS)', () => {
   it('replaces the profile with an exact set and reports unknown names', () => {
-    const r = resolveProfile(ALL.map((t) => t.name), {
-      PREMIERE_MCP_PROFILE: 'read-only', // should be ignored
-      PREMIERE_MCP_TOOLS: 'add_to_timeline, export_sequence, not_a_tool',
-    });
+    const r = resolveProfile(
+      ALL.map((t) => t.name),
+      {
+        PREMIERE_MCP_PROFILE: 'read-only', // should be ignored
+        PREMIERE_MCP_TOOLS: 'add_to_timeline, export_sequence, not_a_tool',
+      },
+    );
     expect(r.source).toBe('explicit');
     expect(r.selected.sort()).toEqual(['add_to_timeline', 'export_sequence']);
     expect(r.unknown).toContain('not_a_tool');

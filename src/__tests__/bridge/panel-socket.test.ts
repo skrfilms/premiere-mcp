@@ -32,7 +32,11 @@ function panelWithSocket(fsOverrides: Record<string, unknown> = {}) {
   const files: Record<string, string> = {
     '/tmp/bridge/auth-token.json': JSON.stringify({ token: TOKEN }),
     '/tmp/bridge/bridge-endpoint.json': JSON.stringify({
-      port: 51234, token: TOKEN, protocolVersion: '1.0', pid: 99, startedAt: 'now',
+      port: 51234,
+      token: TOKEN,
+      protocolVersion: '1.0',
+      pid: 99,
+      startedAt: 'now',
     }),
   };
   const fs = {
@@ -56,7 +60,11 @@ function panelWithSocket(fsOverrides: Record<string, unknown> = {}) {
   bridge.isProcessing = false;
   bridge.isConnected = true;
   bridge.socketReady = false;
-  bridge.socket = { send: (text: string) => { sent.push(JSON.parse(text)); } };
+  bridge.socket = {
+    send: (text: string) => {
+      sent.push(JSON.parse(text));
+    },
+  };
   return { bridge, sent, files };
 }
 
@@ -88,7 +96,9 @@ describe('routing frames from the server', () => {
     expect(bridge.socketReady).toBe(false);
     // Nothing may be treated as a live push channel before the server has authenticated the
     // connection and accepted the version — that acceptance IS the welcome.
-    bridge.handleSocketMessage(JSON.stringify({ type: 'welcome', protocolVersion: '1.0', sessionId: 's' }));
+    bridge.handleSocketMessage(
+      JSON.stringify({ type: 'welcome', protocolVersion: '1.0', sessionId: 's' }),
+    );
     expect(bridge.socketReady).toBe(true);
   });
 
@@ -109,13 +119,24 @@ describe('routing frames from the server', () => {
       done({ success: true, result: { ok: true }, timestamp: 'now' });
     };
 
-    bridge.handleSocketMessage(JSON.stringify({
-      type: 'command', id: 'cmd-1', commandType: 'extendscript', script: 'return 1;',
-      timeoutMs: 1234, token: TOKEN,
-    }));
+    bridge.handleSocketMessage(
+      JSON.stringify({
+        type: 'command',
+        id: 'cmd-1',
+        commandType: 'extendscript',
+        script: 'return 1;',
+        timeoutMs: 1234,
+        token: TOKEN,
+      }),
+    );
 
     expect(executed).toHaveLength(1);
-    expect(executed[0]).toMatchObject({ id: 'cmd-1', type: 'extendscript', script: 'return 1;', timeoutMs: 1234 });
+    expect(executed[0]).toMatchObject({
+      id: 'cmd-1',
+      type: 'extendscript',
+      script: 'return 1;',
+      timeoutMs: 1234,
+    });
 
     // The response carries the SAME envelope the file path writes to disk, because the server
     // unwraps both by the same rule and every tool was written against that shape.
@@ -135,15 +156,17 @@ describe('routing frames from the server', () => {
     const cases: Array<[number, boolean]> = [
       [4006, false], // SHUTDOWN — the server exited; the file poll carries on
       [4005, false], // SUPERSEDED — another panel took the socket; this one falls back
-      [4002, true],  // AUTH_FAILED — the push channel is misconfigured and needs a human
-      [4003, true],  // PROTOCOL_MISMATCH — likewise
-      [4007, true],  // NOT_LOOPBACK — likewise
+      [4002, true], // AUTH_FAILED — the push channel is misconfigured and needs a human
+      [4003, true], // PROTOCOL_MISMATCH — likewise
+      [4007, true], // NOT_LOOPBACK — likewise
     ];
 
     for (const [code, expectFailure] of cases) {
       const { bridge } = panelWithSocket();
       const levels: string[] = [];
-      bridge.log = (_message: string, level?: string) => { levels.push(level ?? 'info'); };
+      bridge.log = (_message: string, level?: string) => {
+        levels.push(level ?? 'info');
+      };
 
       bridge.handleSocketMessage(JSON.stringify({ type: 'error', code, message: 'because.' }));
 
@@ -159,9 +182,15 @@ describe('routing frames from the server', () => {
       executed.push(command);
       done({ success: true, result: null });
     };
-    bridge.handleSocketMessage(JSON.stringify({
-      type: 'command', id: 'cmd-cep', commandType: 'cep_js', script: 'return 1;', token: TOKEN,
-    }));
+    bridge.handleSocketMessage(
+      JSON.stringify({
+        type: 'command',
+        id: 'cmd-cep',
+        commandType: 'cep_js',
+        script: 'return 1;',
+        token: TOKEN,
+      }),
+    );
     expect(executed[0]).toMatchObject({ type: 'cep_js' });
   });
 });
@@ -170,12 +199,19 @@ describe('authorisation applies to both channels', () => {
   it('refuses a socket command whose token does not match, and answers instead of hanging', () => {
     const { bridge, sent } = panelWithSocket();
     let ran = false;
-    bridge.executeCommand = () => { ran = true; };
+    bridge.executeCommand = () => {
+      ran = true;
+    };
 
-    bridge.handleSocketMessage(JSON.stringify({
-      type: 'command', id: 'cmd-bad', commandType: 'extendscript', script: 'app.project.close();',
-      token: 'd'.repeat(64),
-    }));
+    bridge.handleSocketMessage(
+      JSON.stringify({
+        type: 'command',
+        id: 'cmd-bad',
+        commandType: 'extendscript',
+        script: 'app.project.close();',
+        token: 'd'.repeat(64),
+      }),
+    );
 
     // Never executed, and the caller is told why rather than waiting out a timeout.
     expect(ran).toBe(false);
@@ -189,11 +225,19 @@ describe('authorisation applies to both channels', () => {
     bridge.isProcessing = true;
     bridge.currentCommandId = 'cmd-outstanding';
     let ran = false;
-    bridge.executeCommand = () => { ran = true; };
+    bridge.executeCommand = () => {
+      ran = true;
+    };
 
-    bridge.handleSocketMessage(JSON.stringify({
-      type: 'command', id: 'cmd-second', commandType: 'extendscript', script: 'return 1;', token: TOKEN,
-    }));
+    bridge.handleSocketMessage(
+      JSON.stringify({
+        type: 'command',
+        id: 'cmd-second',
+        commandType: 'extendscript',
+        script: 'return 1;',
+        token: TOKEN,
+      }),
+    );
 
     // An outstanding evalScript cannot be cancelled, and a second command's completion callback
     // would clear the first one's guard. "Nothing was run" is the fact the caller needs, because it
@@ -218,7 +262,9 @@ describe('authorising more than one server at a time', () => {
   function withSecondServer() {
     const harness = panelWithSocket();
     harness.files['/tmp/bridge/auth-session-s2.json'] = JSON.stringify({
-      token: OTHER, sessionId: 's2', pid: 4242,
+      token: OTHER,
+      sessionId: 's2',
+      pid: 4242,
     });
     return harness;
   }
@@ -294,7 +340,9 @@ describe('exactly one channel, enforced at the panel end too', () => {
     // to do — even if the answer is UNAUTHORIZED, which at least says so immediately.
     const { bridge } = panelWithSocket();
     let scans = 0;
-    bridge.watchDirectory = () => { scans += 1; };
+    bridge.watchDirectory = () => {
+      scans += 1;
+    };
     bridge.maintainSocket = () => {};
 
     bridge.socketReady = true;
@@ -313,7 +361,9 @@ describe('exactly one channel, enforced at the panel end too', () => {
     // answered, so a re-scan before then is the one thing that could re-run it.
     const { bridge } = panelWithSocket();
     let scans = 0;
-    bridge.watchDirectory = () => { scans += 1; };
+    bridge.watchDirectory = () => {
+      scans += 1;
+    };
     bridge.maintainSocket = () => {};
 
     bridge.isProcessing = true;
@@ -332,7 +382,11 @@ describe('exactly one channel, enforced at the panel end too', () => {
     // The file heartbeat is the only liveness signal that survives the socket being down, which is
     // exactly when the server needs to know whether the panel is alive.
     const writes: string[] = [];
-    const { bridge } = panelWithSocket({ writeFileSync: (p: string) => { writes.push(p); } });
+    const { bridge } = panelWithSocket({
+      writeFileSync: (p: string) => {
+        writes.push(p);
+      },
+    });
     bridge.watchDirectory = () => {};
     bridge.maintainSocket = () => {};
 
@@ -349,12 +403,16 @@ describe('exactly one channel, enforced at the panel end too', () => {
     // file poll rather than throwing on every tick.
     const { bridge } = panelWithSocket();
     const logged: string[] = [];
-    bridge.log = (message: string) => { logged.push(message); };
+    bridge.log = (message: string) => {
+      logged.push(message);
+    };
     bridge.socket = null;
 
     expect(() => bridge.maintainSocket()).not.toThrow();
     expect(() => bridge.maintainSocket()).not.toThrow();
     expect(bridge.socket).toBeNull();
-    expect(logged.filter((line) => line.indexOf('No WebSocket in this runtime') !== -1)).toHaveLength(1);
+    expect(
+      logged.filter((line) => line.indexOf('No WebSocket in this runtime') !== -1),
+    ).toHaveLength(1);
   });
 });

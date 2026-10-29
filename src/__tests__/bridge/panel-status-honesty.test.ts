@@ -15,8 +15,14 @@
 import { loadPanel } from '../helpers/panel.js';
 
 const STATUS_IDS = [
-  'connectionStatus', 'connectionText', 'serverStatus', 'serverText',
-  'startButton', 'stopButton', 'tempDirectory', 'commandQueue',
+  'connectionStatus',
+  'connectionText',
+  'serverStatus',
+  'serverText',
+  'startButton',
+  'stopButton',
+  'tempDirectory',
+  'commandQueue',
 ];
 
 /** A panel wired to a resolvable DOM, with the temp directory already settled. */
@@ -59,7 +65,10 @@ describe('the Premiere light is earned, not assumed', () => {
   it('turns the light green only once the host actually answers', () => {
     const panel = panelWithDom();
     // Stub the round trip so both outcomes can be driven deterministically.
-    panel.bridge.executeExtendScript = (_script: string, cb: (err: unknown, result: unknown) => void) => {
+    panel.bridge.executeExtendScript = (
+      _script: string,
+      cb: (err: unknown, result: unknown) => void,
+    ) => {
       cb(null, { appVersion: '26.3.2', projectName: 'feature_cut_v2.prproj' });
     };
 

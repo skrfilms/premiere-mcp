@@ -34,7 +34,9 @@ describe('validateCropRect', () => {
 
   it('rejects fractional, negative and degenerate rects instead of letting ffmpeg round them', () => {
     expect(validateCropRect({ x: 0.5, y: 0, width: 100, height: 100 })).toMatch(/whole number/);
-    expect(validateCropRect({ x: -1, y: 0, width: 100, height: 100 })).toMatch(/must not be negative/);
+    expect(validateCropRect({ x: -1, y: 0, width: 100, height: 100 })).toMatch(
+      /must not be negative/,
+    );
     expect(validateCropRect({ x: 0, y: 0, width: 1, height: 100 })).toMatch(/at least 2 pixels/);
   });
 });
@@ -42,13 +44,26 @@ describe('validateCropRect', () => {
 describe('buildScreenInputArgs', () => {
   it('asks avfoundation for bgr0, which is the only format its screen input offers', () => {
     const argv = buildScreenInputArgs(macTarget, 30);
-    expect(argv).toEqual(['-f', 'avfoundation', '-capture_cursor', '0', '-pixel_format', 'bgr0', '-framerate', '30', '-i', '1']);
+    expect(argv).toEqual([
+      '-f',
+      'avfoundation',
+      '-capture_cursor',
+      '0',
+      '-pixel_format',
+      'bgr0',
+      '-framerate',
+      '30',
+      '-i',
+      '1',
+    ]);
   });
 
   it('addresses gdigrab and x11grab by spec rather than index', () => {
     expect(buildScreenInputArgs({ inputFormat: 'gdigrab' }, 25)).toContain('desktop');
     expect(buildScreenInputArgs({ inputFormat: 'x11grab' }, 25)).toContain(':0.0');
-    expect(buildScreenInputArgs({ inputFormat: 'x11grab', displaySpec: ':1.0' }, 25)).toContain(':1.0');
+    expect(buildScreenInputArgs({ inputFormat: 'x11grab', displaySpec: ':1.0' }, 25)).toContain(
+      ':1.0',
+    );
   });
 });
 
@@ -60,15 +75,22 @@ describe('buildScreenStillArgs / buildScreenClipArgs', () => {
     expect(argv).not.toContain('-vf');
   });
 
-  it('crops to the supplied rect in ffmpeg\'s w:h:x:y order', () => {
-    const argv = buildScreenStillArgs({ target: macTarget, outputPath: '/tmp/a.png', crop: { x: 100, y: 50, width: 640, height: 360 } });
+  it("crops to the supplied rect in ffmpeg's w:h:x:y order", () => {
+    const argv = buildScreenStillArgs({
+      target: macTarget,
+      outputPath: '/tmp/a.png',
+      crop: { x: 100, y: 50, width: 640, height: 360 },
+    });
     expect(argv[argv.indexOf('-vf') + 1]).toBe('crop=640:360:100:50');
   });
 
   it('bounds a clip by duration and chains crop before scale', () => {
     const argv = buildScreenClipArgs({
-      target: macTarget, outputPath: '/tmp/a.mp4', durationSeconds: 2.5,
-      crop: { x: 0, y: 0, width: 1280, height: 720 }, scaleWidth: 640,
+      target: macTarget,
+      outputPath: '/tmp/a.mp4',
+      durationSeconds: 2.5,
+      crop: { x: 0, y: 0, width: 1280, height: 720 },
+      scaleWidth: 640,
     });
     expect(argv[argv.indexOf('-t') + 1]).toBe('2.5');
     expect(argv[argv.indexOf('-vf') + 1]).toBe('crop=1280:720:0:0,scale=640:-2');
@@ -79,8 +101,12 @@ describe('buildScreenStillArgs / buildScreenClipArgs', () => {
 describe('buildCalibrationArgs', () => {
   it('draws a grid and labels it when a font is available', () => {
     const argv = buildCalibrationArgs({
-      target: macTarget, outputPath: '/tmp/cal.png', spacing: 500,
-      fontFile: '/System/Library/Fonts/Menlo.ttc', displayWidth: 2560, displayHeight: 1440,
+      target: macTarget,
+      outputPath: '/tmp/cal.png',
+      spacing: 500,
+      fontFile: '/System/Library/Fonts/Menlo.ttc',
+      displayWidth: 2560,
+      displayHeight: 1440,
     });
     const filter = argv[argv.indexOf('-vf') + 1] as string;
     expect(filter).toContain('drawgrid=width=500:height=500');
@@ -91,15 +117,24 @@ describe('buildCalibrationArgs', () => {
   });
 
   it('still draws the grid, unlabelled, when no font exists', () => {
-    const argv = buildCalibrationArgs({ target: macTarget, outputPath: '/tmp/cal.png', fontFile: null });
+    const argv = buildCalibrationArgs({
+      target: macTarget,
+      outputPath: '/tmp/cal.png',
+      fontFile: null,
+    });
     const filter = argv[argv.indexOf('-vf') + 1] as string;
     expect(filter).toContain('drawgrid');
     expect(filter).not.toContain('drawtext');
   });
 
   it('clamps an absurdly fine grid rather than emitting thousands of labels', () => {
-    const argv = buildCalibrationArgs({ target: macTarget, outputPath: '/tmp/cal.png', spacing: 1, fontFile: null });
-    expect((argv[argv.indexOf('-vf') + 1] as string)).toContain('width=50:height=50');
+    const argv = buildCalibrationArgs({
+      target: macTarget,
+      outputPath: '/tmp/cal.png',
+      spacing: 1,
+      fontFile: null,
+    });
+    expect(argv[argv.indexOf('-vf') + 1] as string).toContain('width=50:height=50');
   });
 });
 
@@ -146,22 +181,34 @@ describe('captureScreenStill — input validation before spawning anything', () 
   const ffmpegAvailable = spawnSync('ffmpeg', ['-version']).status === 0;
   const maybe = ffmpegAvailable ? it : it.skip;
 
-  maybe('rejects a bad crop rect without capturing', async () => {
-    const res = await captureScreenStill({
-      target: macTarget,
-      outputPath: join(tmpdir(), 'should-not-exist.png'),
-      crop: { x: 0, y: 0, width: 1, height: 1 },
-    });
-    expect(res.success).toBe(false);
-    expect(res.error).toMatch(/at least 2 pixels/);
-    expect(res.evidence).toBeUndefined();
-  }, 30_000);
+  maybe(
+    'rejects a bad crop rect without capturing',
+    async () => {
+      const res = await captureScreenStill({
+        target: macTarget,
+        outputPath: join(tmpdir(), 'should-not-exist.png'),
+        crop: { x: 0, y: 0, width: 1, height: 1 },
+      });
+      expect(res.success).toBe(false);
+      expect(res.error).toMatch(/at least 2 pixels/);
+      expect(res.evidence).toBeUndefined();
+    },
+    30_000,
+  );
 
-  maybe('rejects a non-positive clip duration', async () => {
-    const res = await captureScreenClip({ target: macTarget, outputPath: join(tmpdir(), 'no.mp4'), durationSeconds: 0 });
-    expect(res.success).toBe(false);
-    expect(res.error).toMatch(/durationSeconds/);
-  }, 30_000);
+  maybe(
+    'rejects a non-positive clip duration',
+    async () => {
+      const res = await captureScreenClip({
+        target: macTarget,
+        outputPath: join(tmpdir(), 'no.mp4'),
+        durationSeconds: 0,
+      });
+      expect(res.success).toBe(false);
+      expect(res.error).toMatch(/durationSeconds/);
+    },
+    30_000,
+  );
 });
 
 /**
@@ -170,27 +217,45 @@ describe('captureScreenStill — input validation before spawning anything', () 
 describe('captureScreenStill / captureScreenClip — live display', () => {
   const optedIn = process.env.PREMIERE_MCP_TEST_SCREEN_GRAB === '1';
   const ffmpegAvailable = spawnSync('ffmpeg', ['-version']).status === 0;
-  const maybe = (optedIn && ffmpegAvailable && process.platform === 'darwin') ? it : it.skip;
+  const maybe = optedIn && ffmpegAvailable && process.platform === 'darwin' ? it : it.skip;
 
-  maybe('returns a screen-grab labelled still that never claims to be composited', async () => {
-    const out = join(await fs.mkdtemp(join(tmpdir(), 'premiere-mcp-live-')), 'still.png');
-    const res = await captureScreenStill({ target: macTarget, outputPath: out, crop: { x: 0, y: 0, width: 640, height: 360 } });
-    expect(res.success).toBe(true);
-    expect(res.evidence?.provenance).toBe('screen-grab');
-    expect(res.evidence?.composited).toBe('unverifiable');
-    expect(res.evidence?.width).toBe(640);
-    expect(res.evidence?.at.timecode).toBe('unknown');
-    await fs.rm(out, { force: true });
-  }, 120_000);
+  maybe(
+    'returns a screen-grab labelled still that never claims to be composited',
+    async () => {
+      const out = join(await fs.mkdtemp(join(tmpdir(), 'premiere-mcp-live-')), 'still.png');
+      const res = await captureScreenStill({
+        target: macTarget,
+        outputPath: out,
+        crop: { x: 0, y: 0, width: 640, height: 360 },
+      });
+      expect(res.success).toBe(true);
+      expect(res.evidence?.provenance).toBe('screen-grab');
+      expect(res.evidence?.composited).toBe('unverifiable');
+      expect(res.evidence?.width).toBe(640);
+      expect(res.evidence?.at.timecode).toBe('unknown');
+      await fs.rm(out, { force: true });
+    },
+    120_000,
+  );
 
-  maybe('captures a short moving clip off the display', async () => {
-    const out = join(await fs.mkdtemp(join(tmpdir(), 'premiere-mcp-live-')), 'clip.mp4');
-    const res = await captureScreenClip({ target: macTarget, outputPath: out, durationSeconds: 1, framerate: 30, scaleWidth: 640 });
-    expect(res.success).toBe(true);
-    expect(res.evidence?.moving).toBe(true);
-    expect(typeof res.frameCount).toBe('number');
-    expect(res.frameCount as number).toBeGreaterThan(1);
-    expect(res.evidence?.caveats.join(' ')).toMatch(/SCREEN CAPTURE, not a composited render/);
-    await fs.rm(out, { force: true });
-  }, 120_000);
+  maybe(
+    'captures a short moving clip off the display',
+    async () => {
+      const out = join(await fs.mkdtemp(join(tmpdir(), 'premiere-mcp-live-')), 'clip.mp4');
+      const res = await captureScreenClip({
+        target: macTarget,
+        outputPath: out,
+        durationSeconds: 1,
+        framerate: 30,
+        scaleWidth: 640,
+      });
+      expect(res.success).toBe(true);
+      expect(res.evidence?.moving).toBe(true);
+      expect(typeof res.frameCount).toBe('number');
+      expect(res.frameCount as number).toBeGreaterThan(1);
+      expect(res.evidence?.caveats.join(' ')).toMatch(/SCREEN CAPTURE, not a composited render/);
+      await fs.rm(out, { force: true });
+    },
+    120_000,
+  );
 });

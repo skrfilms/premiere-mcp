@@ -54,6 +54,11 @@ writeFileSync(join(stage, 'README.txt'), [
   '',
 ].join('\n'));
 
+// The same two signed plugins ship inside the npm package, for `premiere-mcp setup`.
+const npmInstaller = join(root, 'installer');
+mkdirSync(npmInstaller, { recursive: true });
+for (const f of ['MCPBridgeCEP-signed.zxp', 'mcp-uxp-probe.ccx']) copyFileSync(join(stage, f), join(npmInstaller, f));
+
 const zip = join(out, `Premiere-MCP-Installer-v${version}.zip`);
 rmSync(zip, { force: true });
 // ditto keeps the .command's executable bit, which a plain zip may drop.

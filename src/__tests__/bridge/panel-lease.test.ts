@@ -9,7 +9,11 @@ const DIR = '/tmp/bridge';
 const LEASE = `${DIR}/bridge-owner.json`;
 const HB = `${DIR}/bridge-heartbeat.json`;
 
-function instance(files: Record<string, string>, role: 'panel' | 'background', settings: Record<string, unknown> = {}) {
+function instance(
+  files: Record<string, string>,
+  role: 'panel' | 'background',
+  settings: Record<string, unknown> = {},
+) {
   const fs = {
     existsSync: (p: string) => files[p] !== undefined || p.endsWith('.premiere-mcp-bridge'),
     readFileSync: (p: string) => {
@@ -17,9 +21,16 @@ function instance(files: Record<string, string>, role: 'panel' | 'background', s
       if (files[p] === undefined) throw new Error('ENOENT');
       return files[p];
     },
-    writeFileSync: (p: string, data: string) => { files[p] = data; },
-    renameSync: (a: string, b: string) => { files[b] = files[a] as string; delete files[a]; },
-    unlinkSync: (p: string) => { delete files[p]; },
+    writeFileSync: (p: string, data: string) => {
+      files[p] = data;
+    },
+    renameSync: (a: string, b: string) => {
+      files[b] = files[a] as string;
+      delete files[a];
+    },
+    unlinkSync: (p: string) => {
+      delete files[p];
+    },
     mkdirSync: () => {},
     readdirSync: () => [],
   };
@@ -32,14 +43,21 @@ function instance(files: Record<string, string>, role: 'panel' | 'background', s
   bridge.leaseTakenAt = 0;
   bridge.isProcessing = false;
   const started: string[] = [];
-  bridge.startBridge = () => { started.push(role); bridge.isConnected = true; };
+  bridge.startBridge = () => {
+    started.push(role);
+    bridge.isConnected = true;
+  };
   bridge.disconnectSocket = () => {};
   bridge.updateUI = () => {};
   return { bridge, started };
 }
 
 const lease = (files: Record<string, string>) => JSON.parse(files[LEASE] as string);
-const settle = (b: Record<string, any>) => { b.updateRole(); b.leaseTakenAt -= 1000; b.updateRole(); };
+const settle = (b: Record<string, any>) => {
+  b.updateRole();
+  b.leaseTakenAt -= 1000;
+  b.updateRole();
+};
 
 describe('bridge run lease', () => {
   it('a lone panel takes the free lease and starts after confirming it', () => {
@@ -55,7 +73,14 @@ describe('bridge run lease', () => {
   });
 
   it('a panel stands by while the background bridge holds a fresh lease', () => {
-    const files: Record<string, string> = { [LEASE]: JSON.stringify({ id: 'background-9', role: 'background', ts: Date.now(), busy: false }) };
+    const files: Record<string, string> = {
+      [LEASE]: JSON.stringify({
+        id: 'background-9',
+        role: 'background',
+        ts: Date.now(),
+        busy: false,
+      }),
+    };
     const { bridge, started } = instance(files, 'panel');
     settle(bridge);
     expect(bridge.active).toBe(false);
@@ -64,14 +89,23 @@ describe('bridge run lease', () => {
   });
 
   it('the panel takes over once the background lease goes stale', () => {
-    const files: Record<string, string> = { [LEASE]: JSON.stringify({ id: 'background-9', role: 'background', ts: Date.now() - 10_000, busy: false }) };
+    const files: Record<string, string> = {
+      [LEASE]: JSON.stringify({
+        id: 'background-9',
+        role: 'background',
+        ts: Date.now() - 10_000,
+        busy: false,
+      }),
+    };
     const { bridge } = instance(files, 'panel');
     settle(bridge);
     expect(bridge.active).toBe(true);
   });
 
   it('the background bridge takes over from an idle panel when enabled, never from a busy one', () => {
-    const files: Record<string, string> = { [LEASE]: JSON.stringify({ id: 'panel-7', role: 'panel', ts: Date.now(), busy: true }) };
+    const files: Record<string, string> = {
+      [LEASE]: JSON.stringify({ id: 'panel-7', role: 'panel', ts: Date.now(), busy: true }),
+    };
     const { bridge } = instance(files, 'background');
     settle(bridge);
     expect(bridge.active).toBe(false);
@@ -96,7 +130,12 @@ describe('bridge run lease', () => {
   it('the background bridge does nothing, and releases its lease, when the toggle is off', () => {
     const files: Record<string, string> = {};
     const { bridge, started } = instance(files, 'background', { runInBackground: false });
-    files[LEASE] = JSON.stringify({ id: 'background-1', role: 'background', ts: Date.now(), busy: false });
+    files[LEASE] = JSON.stringify({
+      id: 'background-1',
+      role: 'background',
+      ts: Date.now(),
+      busy: false,
+    });
     settle(bridge);
     expect(bridge.active).toBe(false);
     expect(started).toEqual([]);

@@ -197,10 +197,9 @@ Symptoms:
 
 Fix:
 
-1. Open `Window > Extensions > MCP Bridge (CEP)`.
-2. Confirm the temp directory is `/tmp/premiere-mcp-bridge`.
-3. Click `Start Bridge`.
-4. If bridge code changed, right-click the panel and choose `Reload`.
+1. Run `npx -y premiere-mcp@latest doctor`; it says whether Premiere's bridge is beating and where.
+2. If there is no heartbeat, restart Premiere Pro (the bridge starts with it). `Window > Extensions > MCP Bridge (CEP)` shows its status and folder.
+3. The server and the bridge must use the same folder: `/tmp/premiere-mcp-bridge` unless `PREMIERE_TEMP_DIR` or the panel says otherwise.
 
 ### Live verification mutates the active project
 

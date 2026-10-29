@@ -2,11 +2,18 @@
  * The report-dialog guard must never act on anything but the named, OK-only report dialogs, and
  * must cost nothing when it is off or when a call returns quickly.
  */
-import { REPORT_DIALOGS, dialogGuardEnabled, withReportDialogGuard } from '../../bridge/report-dialog-guard.js';
+import {
+  REPORT_DIALOGS,
+  dialogGuardEnabled,
+  withReportDialogGuard,
+} from '../../bridge/report-dialog-guard.js';
 
 describe('report dialog guard', () => {
   const saved = process.env.PREMIERE_MCP_DIALOG_GUARD;
-  afterEach(() => { if (saved === undefined) delete process.env.PREMIERE_MCP_DIALOG_GUARD; else process.env.PREMIERE_MCP_DIALOG_GUARD = saved; });
+  afterEach(() => {
+    if (saved === undefined) delete process.env.PREMIERE_MCP_DIALOG_GUARD;
+    else process.env.PREMIERE_MCP_DIALOG_GUARD = saved;
+  });
 
   it('targets only the measured informational dialogs', () => {
     expect(REPORT_DIALOGS).toEqual(['AAF Export Log', 'Translation Report']);
@@ -24,12 +31,21 @@ describe('report dialog guard', () => {
   });
 
   it('propagates a failure from the guarded call', async () => {
-    await expect(withReportDialogGuard(async () => { throw new Error('boom'); })).rejects.toThrow('boom');
+    await expect(
+      withReportDialogGuard(async () => {
+        throw new Error('boom');
+      }),
+    ).rejects.toThrow('boom');
   });
 
   it('keeps guarding while any call is in flight, not just the first', async () => {
     let releaseA: () => void = () => {};
-    const a = withReportDialogGuard(() => new Promise<string>((res) => { releaseA = () => res('a'); }));
+    const a = withReportDialogGuard(
+      () =>
+        new Promise<string>((res) => {
+          releaseA = () => res('a');
+        }),
+    );
     const b = withReportDialogGuard(async () => 'b');
     await expect(b).resolves.toMatchObject({ result: 'b' });
     releaseA();

@@ -3,6 +3,8 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { nextSteps, printResults, runDoctor, runSetup } from './setup/setup.js';
+import { PACKAGE_VERSION } from './version.js';
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const serverEntry = join(packageRoot, 'dist', 'index.js');
@@ -12,8 +14,13 @@ function printHelp(): void {
 
 Usage:
   premiere-mcp                 Start the MCP stdio server
-  premiere-mcp --install-cep   Install the CEP bridge and configure supported MCP clients
-  premiere-mcp --doctor        Check the local server, CEP bridge, and client configuration
+  premiere-mcp setup           Install the signed Premiere plugins and add this server to every
+                               AI app found (Claude Desktop, Claude Code, Codex, Cursor, VS Code)
+      --dry-run                  show what would change, change nothing
+      --clients a,b              only these apps (claude-desktop, claude-code, codex, cursor, vscode)
+      --skip-plugins / --skip-clients
+      --unsigned                 old route: hand-copy the unsigned panel (turns on CEP debug mode)
+  premiere-mcp doctor          Check Node, the installed bridge, Premiere's heartbeat and each app
   premiere-mcp --version       Print the installed package version
   premiere-mcp --help          Show this help
 `);
@@ -27,7 +34,11 @@ function run(command: string, args: string[]): Promise<number> {
   });
 }
 
-async function runPlatformScript(macScript: string, windowsScript: string, windowsArgs: string[] = []): Promise<void> {
+async function runPlatformScript(
+  macScript: string,
+  windowsScript: string,
+  windowsArgs: string[] = [],
+): Promise<void> {
   let code: number;
   if (process.platform === 'darwin') {
     code = await run('bash', [join(packageRoot, 'scripts', macScript), '--skip-build']);
@@ -71,12 +82,39 @@ async function main(): Promise<void> {
     case '--install-cep':
     case 'install-cep':
     case 'setup':
-      await runPlatformScript('install-macos.sh', 'install-windows.ps1', ['-SkipBuild']);
+    case '--setup': {
+      const flags = process.argv.slice(3);
+      if (flags.includes('--unsigned')) {
+        await runPlatformScript('install-macos.sh', 'install-windows.ps1', ['-SkipBuild']);
+        return;
+      }
+      const clientsAt = flags.indexOf('--clients');
+      const { results } = runSetup(packageRoot, PACKAGE_VERSION, {
+        dryRun: flags.includes('--dry-run'),
+        skipPlugins: flags.includes('--skip-plugins'),
+        skipClients: flags.includes('--skip-clients'),
+        clients:
+          clientsAt >= 0
+            ? String(flags[clientsAt + 1] ?? '')
+                .split(',')
+                .map((c) => c.trim())
+                .filter(Boolean)
+            : undefined,
+      });
+      const ok = printResults(
+        `Premiere MCP ${PACKAGE_VERSION} setup${flags.includes('--dry-run') ? ' (dry run: nothing changed)' : ''}`,
+        results,
+      );
+      console.log(nextSteps(packageRoot));
+      if (!ok) process.exitCode = 1;
       return;
+    }
     case '--doctor':
-    case 'doctor':
-      await runPlatformScript('doctor-macos.sh', 'doctor-windows.ps1');
+    case 'doctor': {
+      const ok = printResults(`Premiere MCP ${PACKAGE_VERSION} doctor`, runDoctor(packageRoot));
+      if (!ok) process.exitCode = 1;
       return;
+    }
     case '--version':
     case '-v': {
       const packageJson = await import('../package.json', { with: { type: 'json' } });

@@ -31,7 +31,12 @@
  * JSON-RPC framing lives there and both transports may run at once.
  */
 
-import { createServer, type IncomingMessage, type Server as NodeHttpServer, type ServerResponse } from 'node:http';
+import {
+  createServer,
+  type IncomingMessage,
+  type Server as NodeHttpServer,
+  type ServerResponse,
+} from 'node:http';
 import { Readable } from 'node:stream';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -54,7 +59,11 @@ import { PremiereProResources } from './resources/index.js';
 import { PremiereProPrompts } from './prompts/index.js';
 import { PremiereProBridge } from './bridge/index.js';
 import { resolveProfile, type ProfileEnv } from './tools/profiles.js';
-import { buildPremiereMcpServer, BRIDGE_BACKED_METHODS, type PremiereMcpSurface } from './server-factory.js';
+import {
+  buildPremiereMcpServer,
+  BRIDGE_BACKED_METHODS,
+  type PremiereMcpSurface,
+} from './server-factory.js';
 import { Logger } from './utils/logger.js';
 import { PACKAGE_VERSION } from './version.js';
 
@@ -138,9 +147,13 @@ function parseList(raw: string | undefined): string[] {
  */
 function profileEnvFrom(env: HttpEnv): ProfileEnv {
   return {
-    ...(env.PREMIERE_MCP_PROFILE === undefined ? {} : { PREMIERE_MCP_PROFILE: env.PREMIERE_MCP_PROFILE }),
+    ...(env.PREMIERE_MCP_PROFILE === undefined
+      ? {}
+      : { PREMIERE_MCP_PROFILE: env.PREMIERE_MCP_PROFILE }),
     ...(env.PREMIERE_MCP_TOOLS === undefined ? {} : { PREMIERE_MCP_TOOLS: env.PREMIERE_MCP_TOOLS }),
-    ...(env.PREMIERE_MCP_EXCLUDE === undefined ? {} : { PREMIERE_MCP_EXCLUDE: env.PREMIERE_MCP_EXCLUDE }),
+    ...(env.PREMIERE_MCP_EXCLUDE === undefined
+      ? {}
+      : { PREMIERE_MCP_EXCLUDE: env.PREMIERE_MCP_EXCLUDE }),
   };
 }
 
@@ -153,13 +166,20 @@ function parsePort(raw: string | undefined, errors: string[]): number {
   if (raw === undefined || raw.trim() === '') return DEFAULT_HTTP_PORT;
   const value = Number(raw);
   if (!Number.isInteger(value) || value < 0 || value > 65535) {
-    errors.push(`--port / PREMIERE_MCP_HTTP_PORT must be 0-65535 (0 = an ephemeral port); got ${JSON.stringify(raw)}.`);
+    errors.push(
+      `--port / PREMIERE_MCP_HTTP_PORT must be 0-65535 (0 = an ephemeral port); got ${JSON.stringify(raw)}.`,
+    );
     return DEFAULT_HTTP_PORT;
   }
   return value;
 }
 
-function parsePositiveInt(raw: string | undefined, fallback: number, label: string, errors: string[]): number {
+function parsePositiveInt(
+  raw: string | undefined,
+  fallback: number,
+  label: string,
+  errors: string[],
+): number {
   if (raw === undefined || raw.trim() === '') return fallback;
   const value = Number(raw);
   if (!Number.isInteger(value) || value <= 0) {
@@ -181,7 +201,10 @@ function parsePositiveInt(raw: string | undefined, fallback: number, label: stri
  *   never from an env var, never as a fallback when a token is missing — so a
  *   no-auth listener cannot happen by accident or by omission.
  */
-export function resolveHttpConfig(env: HttpEnv = process.env, argv: string[] = []): HttpConfigResolution {
+export function resolveHttpConfig(
+  env: HttpEnv = process.env,
+  argv: string[] = [],
+): HttpConfigResolution {
   const warnings: string[] = [];
   const errors: string[] = [];
 
@@ -244,14 +267,18 @@ export function resolveHttpConfig(env: HttpEnv = process.env, argv: string[] = [
   }
 
   const extraHosts = parseList(valueOf('--allow-host') ?? env.PREMIERE_MCP_HTTP_ALLOWED_HOSTS);
-  const extraOrigins = parseList(valueOf('--allow-origin') ?? env.PREMIERE_MCP_HTTP_ALLOWED_ORIGINS);
+  const extraOrigins = parseList(
+    valueOf('--allow-origin') ?? env.PREMIERE_MCP_HTTP_ALLOWED_ORIGINS,
+  );
   const allowedHosts = [...localhostAllowedHostnames(), ...extraHosts];
   const allowedOrigins = [...localhostAllowedOrigins(), ...extraOrigins];
   if (extraHosts.length) {
     warnings.push(`Host header allowlist widened with: ${extraHosts.join(', ')}.`);
   }
   if (extraOrigins.length) {
-    warnings.push(`Origin allowlist widened with: ${extraOrigins.join(', ')} — browser pages served from those origins may call this server.`);
+    warnings.push(
+      `Origin allowlist widened with: ${extraOrigins.join(', ')} — browser pages served from those origins may call this server.`,
+    );
   }
   if (!loopback.has(host) && extraHosts.length === 0) {
     warnings.push(
@@ -369,7 +396,10 @@ export type BridgeProbe = () => Promise<BridgeStatus>;
  * names the shared directory — otherwise the bridge uses a per-session random path this
  * probe has no way to know, and the honest answer is 'unobservable' rather than a guess.
  */
-export function heartbeatBridgeProbe(env: HttpEnv = process.env, now: () => number = Date.now): BridgeProbe {
+export function heartbeatBridgeProbe(
+  env: HttpEnv = process.env,
+  now: () => number = Date.now,
+): BridgeProbe {
   return async (): Promise<BridgeStatus> => {
     const dir = env.PREMIERE_TEMP_DIR?.replace(/\/$/, '');
     if (!dir) {
@@ -404,16 +434,23 @@ export function heartbeatBridgeProbe(env: HttpEnv = process.env, now: () => numb
       return {
         state: 'no-heartbeat',
         checked: true,
-        reason: 'The heartbeat file is not valid JSON — most likely a torn write; retry in a moment.',
+        reason:
+          'The heartbeat file is not valid JSON — most likely a torn write; retry in a moment.',
       };
     }
 
-    const hb = parsed as { ts?: unknown; connected?: unknown; isProcessing?: unknown; queueLength?: unknown };
+    const hb = parsed as {
+      ts?: unknown;
+      connected?: unknown;
+      isProcessing?: unknown;
+      queueLength?: unknown;
+    };
     if (typeof hb.ts !== 'number') {
       return {
         state: 'no-heartbeat',
         checked: true,
-        reason: 'The heartbeat file has no numeric `ts`, so its age cannot be judged (an older panel build writes this shape).',
+        reason:
+          'The heartbeat file has no numeric `ts`, so its age cannot be judged (an older panel build writes this shape).',
       };
     }
 
@@ -436,7 +473,8 @@ export function heartbeatBridgeProbe(env: HttpEnv = process.env, now: () => numb
       return {
         state: 'not-started',
         checked: true,
-        reason: 'The panel is open and beating but reports connected=false. Click Start Bridge in the MCP Bridge (CEP) panel.',
+        reason:
+          'The panel is open and beating but reports connected=false. Click Start Bridge in the MCP Bridge (CEP) panel.',
         heartbeatAgeMs: ageMs,
         queueLength,
         busy,
@@ -518,7 +556,10 @@ export class RequestLimiter {
 
   get stats(): { inFlight: number; arrivalsLastMinute: number } {
     const t = this.now();
-    return { inFlight: this.inFlight, arrivalsLastMinute: this.arrivals.filter((at) => t - at < 60_000).length };
+    return {
+      inFlight: this.inFlight,
+      arrivalsLastMinute: this.arrivals.filter((at) => t - at < 60_000).length,
+    };
   }
 }
 
@@ -526,7 +567,11 @@ export class RequestLimiter {
 // The gate
 // ---------------------------------------------------------------------------
 
-function jsonResponse(status: number, body: unknown, headers: Record<string, string> = {}): Response {
+function jsonResponse(
+  status: number,
+  body: unknown,
+  headers: Record<string, string> = {},
+): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { 'content-type': 'application/json', ...headers },
@@ -534,7 +579,12 @@ function jsonResponse(status: number, body: unknown, headers: Record<string, str
 }
 
 /** JSON-RPC-shaped refusal, so an MCP client surfaces the reason instead of a bare status. */
-function rpcError(status: number, code: number, message: string, headers: Record<string, string> = {}): Response {
+function rpcError(
+  status: number,
+  code: number,
+  message: string,
+  headers: Record<string, string> = {},
+): Response {
   return jsonResponse(status, { jsonrpc: '2.0', error: { code, message }, id: null }, headers);
 }
 
@@ -547,8 +597,20 @@ export interface HealthReport {
   auth: 'bearer-token' | 'disabled';
   endpoint: string;
   profile: { source: string; name: string | null; exposedTools: number; implementedTools: number };
-  catalogue: { exposedTools: number; implementedTools: number; resources: number; prompts: number; approxTokens?: number };
-  limits: { maxBodyBytes: number; maxConcurrent: number; maxPerMinute: number; inFlight: number; arrivalsLastMinute: number };
+  catalogue: {
+    exposedTools: number;
+    implementedTools: number;
+    resources: number;
+    prompts: number;
+    approxTokens?: number;
+  };
+  limits: {
+    maxBodyBytes: number;
+    maxConcurrent: number;
+    maxPerMinute: number;
+    inFlight: number;
+    arrivalsLastMinute: number;
+  };
   bridge: BridgeStatus;
   /**
    * Deliberately always null. Nothing on this path executes a script in Premiere, so no
@@ -600,12 +662,18 @@ export function createHttpGate(deps: GateDeps): HttpGate {
   const logger = deps.logger ?? new Logger('PremiereHttp');
   const limiter = deps.limiter ?? new RequestLimiter(config.maxConcurrent, config.maxPerMinute);
   const version = deps.version ?? PACKAGE_VERSION;
-  const authGate = config.token !== null ? requireBearerAuth({ verifier: staticTokenVerifier(config.token) }) : null;
+  const authGate =
+    config.token !== null
+      ? requireBearerAuth({ verifier: staticTokenVerifier(config.token) })
+      : null;
 
   const health = async (): Promise<HealthReport> => {
     const exposed = surface.tools.getAvailableTools();
     const implemented = surface.tools.getRegisteredTools();
-    const resolution = resolveProfile(implemented.map((tool) => tool.name), profileEnvFrom(deps.env ?? process.env));
+    const resolution = resolveProfile(
+      implemented.map((tool) => tool.name),
+      profileEnvFrom(deps.env ?? process.env),
+    );
     let approxTokens: number | undefined;
     try {
       approxTokens = surface.tools.measureCatalogueCost(exposed).approxTokens;
@@ -668,7 +736,9 @@ export function createHttpGate(deps: GateDeps): HttpGate {
     if (authGate) {
       const result = await authGate(request);
       if (result instanceof Response) {
-        logger.warn(`Refused ${request.method} ${new URL(request.url).pathname}: bearer auth (${result.status}).`);
+        logger.warn(
+          `Refused ${request.method} ${new URL(request.url).pathname}: bearer auth (${result.status}).`,
+        );
         return result;
       }
       authInfo = result;
@@ -689,7 +759,11 @@ export function createHttpGate(deps: GateDeps): HttpGate {
     }
 
     if (url.pathname !== HTTP_MCP_PATH && url.pathname !== '/') {
-      return rpcError(404, -32601, `No such endpoint: ${url.pathname}. MCP is served at ${HTTP_MCP_PATH}; health at ${HTTP_HEALTH_PATH}.`);
+      return rpcError(
+        404,
+        -32601,
+        `No such endpoint: ${url.pathname}. MCP is served at ${HTTP_MCP_PATH}; health at ${HTTP_HEALTH_PATH}.`,
+      );
     }
 
     // 4: body cap. The declared length is checked first so an oversized POST is refused
@@ -760,10 +834,16 @@ export function createHttpGate(deps: GateDeps): HttpGate {
       }
 
       // 7: the SDK serves the protocol. parsedBody is handed over so the body is read once.
-      const options = parsedBody === undefined
-        ? (authInfo === undefined ? {} : { authInfo })
-        : (authInfo === undefined ? { parsedBody } : { authInfo, parsedBody });
-      const requestForHandler = request.method === 'POST' ? cloneWithBody(request, bodyText) : request;
+      const options =
+        parsedBody === undefined
+          ? authInfo === undefined
+            ? {}
+            : { authInfo }
+          : authInfo === undefined
+            ? { parsedBody }
+            : { authInfo, parsedBody };
+      const requestForHandler =
+        request.method === 'POST' ? cloneWithBody(request, bodyText) : request;
       return await handler.fetch(requestForHandler, options);
     } finally {
       slot.release();
@@ -781,7 +861,11 @@ function cloneWithBody(request: Request, bodyText: string): Request {
   if (bodyText.length === 0) {
     return new Request(request.url, { method: request.method, headers: request.headers });
   }
-  return new Request(request.url, { method: request.method, headers: request.headers, body: bodyText });
+  return new Request(request.url, {
+    method: request.method,
+    headers: request.headers,
+    body: bodyText,
+  });
 }
 
 /** Every JSON-RPC method named in a body — one object, or a legacy batch array. */
@@ -814,7 +898,10 @@ export function jsonRpcMethods(body: unknown): string[] {
  * The read is capped at maxBodyBytes + 1 so an attempt to send a gigabyte cannot be
  * buffered into memory on the way to its 413.
  */
-export async function nodeRequestToWeb(req: IncomingMessage, maxBodyBytes: number): Promise<Request> {
+export async function nodeRequestToWeb(
+  req: IncomingMessage,
+  maxBodyBytes: number,
+): Promise<Request> {
   const host = req.headers.host ?? '127.0.0.1';
   const url = new URL(req.url ?? '/', `http://${host}`);
   const headers = new Headers();
@@ -847,7 +934,11 @@ export async function nodeRequestToWeb(req: IncomingMessage, maxBodyBytes: numbe
     }
   }
   const body = Buffer.concat(chunks).subarray(0, cap);
-  return new Request(url, { method: req.method ?? 'POST', headers, body: body.length ? body : null });
+  return new Request(url, {
+    method: req.method ?? 'POST',
+    headers,
+    body: body.length ? body : null,
+  });
 }
 
 export async function writeWebResponse(response: Response, res: ServerResponse): Promise<void> {
@@ -965,7 +1056,13 @@ export async function startHttpTransport(options: StartOptions = {}): Promise<Ht
         if (!res.headersSent) {
           res.writeHead(500, { 'content-type': 'application/json' });
         }
-        res.end(JSON.stringify({ jsonrpc: '2.0', error: { code: -32603, message: `Transport failure: ${message}` }, id: null }));
+        res.end(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            error: { code: -32603, message: `Transport failure: ${message}` },
+            id: null,
+          }),
+        );
       }
     })();
   });
@@ -1007,15 +1104,16 @@ export async function startHttpTransport(options: StartOptions = {}): Promise<Ht
  * `--doctor` for the HTTP transport: report what can be established without starting a
  * listener and without touching Premiere. Returns the same honest shape /health serves.
  */
-export async function httpDoctor(options: StartOptions = {}): Promise<{ report: HealthReport; warnings: string[]; errors: string[] }> {
+export async function httpDoctor(
+  options: StartOptions = {},
+): Promise<{ report: HealthReport; warnings: string[]; errors: string[] }> {
   const env = options.env ?? process.env;
   const { config, warnings, errors } = resolveHttpConfig(env, options.argv ?? []);
-  const surface: PremiereMcpSurface =
-    options.surface ?? {
-      tools: new PremiereProTools(options.bridge ?? new PremiereProBridge()),
-      resources: new PremiereProResources(options.bridge ?? new PremiereProBridge()),
-      prompts: new PremiereProPrompts(),
-    };
+  const surface: PremiereMcpSurface = options.surface ?? {
+    tools: new PremiereProTools(options.bridge ?? new PremiereProBridge()),
+    resources: new PremiereProResources(options.bridge ?? new PremiereProBridge()),
+    prompts: new PremiereProPrompts(),
+  };
 
   const gate = createHttpGate({
     config,

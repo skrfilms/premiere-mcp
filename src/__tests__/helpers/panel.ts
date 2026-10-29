@@ -70,9 +70,14 @@ function fakeElement(): FakeElement {
 function nodeStub(name: string, options: LoadPanelOptions): unknown {
   if (name === 'fs') {
     const base = {
-      existsSync: () => false, mkdirSync: () => {}, readdirSync: () => [],
-      readFileSync: () => '', writeFileSync: () => {}, unlinkSync: () => {},
-      renameSync: () => {}, statSync: () => ({ isDirectory: () => false }),
+      existsSync: () => false,
+      mkdirSync: () => {},
+      readdirSync: () => [],
+      readFileSync: () => '',
+      writeFileSync: () => {},
+      unlinkSync: () => {},
+      renameSync: () => {},
+      statSync: () => ({ isDirectory: () => false }),
     };
     return options.fs ? { ...base, ...options.fs } : base;
   }
@@ -111,7 +116,10 @@ export function loadPanel(options: LoadPanelOptions = {}): LoadedPanel {
     CSInterface: function () {
       return {
         getHostEnvironment: () => ({ appName: 'PPRO', appVersion: '26.0.0' }),
-        evalScript: (script: string) => { handed = script; evalCalls += 1; },
+        evalScript: (script: string) => {
+          handed = script;
+          evalCalls += 1;
+        },
         addEventListener() {},
       };
     },
@@ -123,7 +131,10 @@ export function loadPanel(options: LoadPanelOptions = {}): LoadedPanel {
   if (typeof Bridge !== 'function') throw new Error('panel did not export MCPPremiereBridge');
 
   // Prototype only: running the constructor would start timers and touch disk.
-  const bridge = Object.create((Bridge as unknown as { prototype: object }).prototype) as Record<string, any>;
+  const bridge = Object.create((Bridge as unknown as { prototype: object }).prototype) as Record<
+    string,
+    any
+  >;
   // No constructor runs, so give the instance what the constructor would: a panel-role identity,
   // already holding the run lease. Tests about the lease itself reset these explicitly.
   bridge.role = 'panel';

@@ -65,7 +65,9 @@ if (process.env['PREMIERE_MCP_TOOL_COVERAGE'] === '1') {
         // attributed to the file that actually made the call.
         let testFile = 'unknown';
         try {
-          const state = (expect as unknown as { getState?: () => { testPath?: string } }).getState?.();
+          const state = (
+            expect as unknown as { getState?: () => { testPath?: string } }
+          ).getState?.();
           if (state?.testPath) testFile = state.testPath;
         } catch {
           testFile = 'unknown';

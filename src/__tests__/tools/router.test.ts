@@ -37,7 +37,10 @@ const noBridge = {
 } as any;
 
 /** Run a body with a temporary env, restoring exactly what was there before. */
-async function withEnv<T>(env: Record<string, string | undefined>, body: () => Promise<T> | T): Promise<T> {
+async function withEnv<T>(
+  env: Record<string, string | undefined>,
+  body: () => Promise<T> | T,
+): Promise<T> {
   const previous: Record<string, string | undefined> = {};
   for (const key of Object.keys(env)) {
     previous[key] = process.env[key];
@@ -54,7 +57,15 @@ async function withEnv<T>(env: Record<string, string | undefined>, body: () => P
   }
 }
 
-const NAMES = ['get_capabilities', 'find_tool', 'call_tool', 'get_project_info', 'read_srt', 'add_marker', 'delete_sequence'];
+const NAMES = [
+  'get_capabilities',
+  'find_tool',
+  'call_tool',
+  'get_project_info',
+  'read_srt',
+  'add_marker',
+  'delete_sequence',
+];
 
 function verdictFor(name: string, env: Record<string, string>, exposed: string[]) {
   return routerVerdict({
@@ -68,18 +79,28 @@ function verdictFor(name: string, env: Record<string, string>, exposed: string[]
 describe('classifySelection', () => {
   it('treats a menu-size profile as a cost decision', () => {
     expect(classifySelection(resolveProfile(NAMES, { PREMIERE_MCP_PROFILE: 'core' }))).toBe('cost');
-    expect(classifySelection(resolveProfile(NAMES, { PREMIERE_MCP_PROFILE: 'audio' }))).toBe('cost');
+    expect(classifySelection(resolveProfile(NAMES, { PREMIERE_MCP_PROFILE: 'audio' }))).toBe(
+      'cost',
+    );
   });
 
   it('treats read-only and an explicit allowlist as authority boundaries', () => {
-    expect(classifySelection(resolveProfile(NAMES, { PREMIERE_MCP_PROFILE: 'read-only' }))).toBe('authority');
-    expect(classifySelection(resolveProfile(NAMES, { PREMIERE_MCP_TOOLS: 'get_project_info find_tool' }))).toBe('authority');
+    expect(classifySelection(resolveProfile(NAMES, { PREMIERE_MCP_PROFILE: 'read-only' }))).toBe(
+      'authority',
+    );
+    expect(
+      classifySelection(
+        resolveProfile(NAMES, { PREMIERE_MCP_TOOLS: 'get_project_info find_tool' }),
+      ),
+    ).toBe('authority');
   });
 });
 
 describe('routerVerdict', () => {
   it('allows an already-advertised tool without claiming it reached past anything', () => {
-    const v = verdictFor('get_project_info', { PREMIERE_MCP_PROFILE: 'core' }, ['get_project_info']);
+    const v = verdictFor('get_project_info', { PREMIERE_MCP_PROFILE: 'core' }, [
+      'get_project_info',
+    ]);
     expect(v.allowed).toBe(true);
     expect(v.reachedPastProfile).toBe(false);
   });
@@ -91,14 +112,19 @@ describe('routerVerdict', () => {
   });
 
   it('refuses to reach past an authority profile and names the setting', () => {
-    const v = verdictFor('add_marker', { PREMIERE_MCP_PROFILE: 'read-only' }, ['get_project_info', 'find_tool']);
+    const v = verdictFor('add_marker', { PREMIERE_MCP_PROFILE: 'read-only' }, [
+      'get_project_info',
+      'find_tool',
+    ]);
     expect(v.allowed).toBe(false);
     expect(v.code).toBe('AUTHORITY_PROFILE');
     expect(v.reason).toContain('read-only');
   });
 
   it('refuses to reach past an explicit allowlist', () => {
-    const v = verdictFor('add_marker', { PREMIERE_MCP_TOOLS: 'get_project_info' }, ['get_project_info']);
+    const v = verdictFor('add_marker', { PREMIERE_MCP_TOOLS: 'get_project_info' }, [
+      'get_project_info',
+    ]);
     expect(v.allowed).toBe(false);
     expect(v.code).toBe('AUTHORITY_PROFILE');
     expect(v.reason).toContain('PREMIERE_MCP_TOOLS');
@@ -107,14 +133,22 @@ describe('routerVerdict', () => {
   it('honours an exclusion veto even under a cost profile', () => {
     // The important asymmetry: `core` is routable, but a name the operator excluded is
     // not — otherwise PREMIERE_MCP_EXCLUDE would mean different things per profile.
-    const v = verdictFor('read_srt', { PREMIERE_MCP_PROFILE: 'core', PREMIERE_MCP_EXCLUDE: 'read_srt' }, ['get_project_info']);
+    const v = verdictFor(
+      'read_srt',
+      { PREMIERE_MCP_PROFILE: 'core', PREMIERE_MCP_EXCLUDE: 'read_srt' },
+      ['get_project_info'],
+    );
     expect(v.allowed).toBe(false);
     expect(v.code).toBe('EXCLUDED_BY_OPERATOR');
     expect(v.reason).toContain('PREMIERE_MCP_EXCLUDE');
   });
 
   it('honours an exclusion glob', () => {
-    const v = verdictFor('read_srt', { PREMIERE_MCP_PROFILE: 'core', PREMIERE_MCP_EXCLUDE: 'read_*' }, ['get_project_info']);
+    const v = verdictFor(
+      'read_srt',
+      { PREMIERE_MCP_PROFILE: 'core', PREMIERE_MCP_EXCLUDE: 'read_*' },
+      ['get_project_info'],
+    );
     expect(v.code).toBe('EXCLUDED_BY_OPERATOR');
   });
 
@@ -153,7 +187,11 @@ describe('call_tool against the real catalogue', () => {
       const result = await tools.executeTool('call_tool', { name: 'read_srt', args: { srtPath } });
       expect(result.success).toBe(true);
       expect(result.cues[0].text).toBe('Hello');
-      expect(result.routed).toEqual({ requested: 'read_srt', invoked: true, reachedPastProfile: true });
+      expect(result.routed).toEqual({
+        requested: 'read_srt',
+        invoked: true,
+        reachedPastProfile: true,
+      });
     });
   });
 
@@ -161,7 +199,11 @@ describe('call_tool against the real catalogue', () => {
     await withEnv({ PREMIERE_MCP_PROFILE: 'core' }, async () => {
       const tools = new PremiereProTools(noBridge);
 
-      const missing = await tools.executeTool('call_tool', { name: 'read_srt', args: {}, dryRun: true });
+      const missing = await tools.executeTool('call_tool', {
+        name: 'read_srt',
+        args: {},
+        dryRun: true,
+      });
       expect(missing.invoked).toBe(false);
       expect(missing.argumentsValid).toBe(false);
       expect(missing.validationError).toBeDefined();
@@ -200,7 +242,9 @@ describe('call_tool against the real catalogue', () => {
   });
 
   it('hands back a ranked shortlist for a typo instead of a bare refusal', async () => {
-    const result = await new PremiereProTools(noBridge).executeTool('call_tool', { name: 'splitt_clip' });
+    const result = await new PremiereProTools(noBridge).executeTool('call_tool', {
+      name: 'splitt_clip',
+    });
     expect(result.refusedBy).toBe('UNKNOWN_TOOL');
     expect(result.didYouMean.map((match: any) => match.name)).toContain('split_clip');
   });
@@ -241,18 +285,24 @@ describe('excluding the router actually removes it', () => {
       expect(names).toContain('find_tool');
       expect(names).toContain('get_capabilities');
 
-      const result = await tools.executeTool('call_tool', { name: 'read_srt', args: { srtPath: '/tmp/x.srt' } });
+      const result = await tools.executeTool('call_tool', {
+        name: 'read_srt',
+        args: { srtPath: '/tmp/x.srt' },
+      });
       expect(result.success).toBe(false);
       expect(result.existsButHiddenByProfile).toBe(true);
     });
   });
 
   it('drops the activation pair too', async () => {
-    await withEnv({ PREMIERE_MCP_PROFILE: 'core', PREMIERE_MCP_EXCLUDE: 'activate_tools deactivate_tools' }, () => {
-      const names = new PremiereProTools(noBridge).getAvailableTools().map((tool) => tool.name);
-      expect(names).not.toContain('activate_tools');
-      expect(names).not.toContain('deactivate_tools');
-    });
+    await withEnv(
+      { PREMIERE_MCP_PROFILE: 'core', PREMIERE_MCP_EXCLUDE: 'activate_tools deactivate_tools' },
+      () => {
+        const names = new PremiereProTools(noBridge).getAvailableTools().map((tool) => tool.name);
+        expect(names).not.toContain('activate_tools');
+        expect(names).not.toContain('deactivate_tools');
+      },
+    );
   });
 });
 
@@ -279,7 +329,9 @@ describe('activate_tools / deactivate_tools', () => {
 
   it('names the bundles when asked for one that does not exist', async () => {
     await withEnv({ PREMIERE_MCP_PROFILE: 'core' }, async () => {
-      const r = await new PremiereProTools(noBridge).executeTool('activate_tools', { bundle: 'sound design' });
+      const r = await new PremiereProTools(noBridge).executeTool('activate_tools', {
+        bundle: 'sound design',
+      });
       expect(r.success).toBe(false);
       expect(r.bundles.map((b: any) => b.name)).toContain('task-grade');
     });
@@ -289,10 +341,14 @@ describe('activate_tools / deactivate_tools', () => {
     await withEnv({ PREMIERE_MCP_PROFILE: 'core' }, async () => {
       const tools = new PremiereProTools(noBridge);
       let notifications = 0;
-      tools.onExposureChanged(() => { notifications += 1; });
+      tools.onExposureChanged(() => {
+        notifications += 1;
+      });
 
       const before = tools.getAvailableTools().length;
-      const result = await tools.executeTool('activate_tools', { names: ['read_srt', 'validate_srt'] });
+      const result = await tools.executeTool('activate_tools', {
+        names: ['read_srt', 'validate_srt'],
+      });
 
       expect(result.activated).toEqual(['read_srt', 'validate_srt']);
       expect(result.toolsNowAdvertised).toBe(before + 2);
@@ -321,7 +377,9 @@ describe('activate_tools / deactivate_tools', () => {
     await withEnv({ PREMIERE_MCP_PROFILE: 'core' }, async () => {
       const tools = new PremiereProTools(noBridge);
       let notifications = 0;
-      tools.onExposureChanged(() => { notifications += 1; });
+      tools.onExposureChanged(() => {
+        notifications += 1;
+      });
 
       const result = await tools.executeTool('activate_tools', { names: ['get_project_info'] });
       expect(result.alreadyExposed).toEqual(['get_project_info']);

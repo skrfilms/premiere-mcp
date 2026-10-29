@@ -17,7 +17,16 @@
  * other's commands, and to make the trust boundary explicit. Protection from OTHER users comes from
  * the 0700 directory and the ownership check.
  */
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, statSync, mkdirSync, rmSync, readdirSync } from 'node:fs';
+import {
+  mkdtempSync,
+  writeFileSync,
+  readFileSync,
+  existsSync,
+  statSync,
+  mkdirSync,
+  rmSync,
+  readdirSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PremiereProBridge } from '../../bridge/index.js';
@@ -33,7 +42,11 @@ beforeEach(() => {
 afterEach(() => {
   if (originalEnv === undefined) delete process.env.PREMIERE_TEMP_DIR;
   else process.env.PREMIERE_TEMP_DIR = originalEnv;
-  try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+  try {
+    rmSync(dir, { recursive: true, force: true });
+  } catch {
+    /* best effort */
+  }
 });
 
 /**
@@ -265,14 +278,20 @@ describe('every command carries the token', () => {
 
     // No panel is running, so the call will time out. The command file it publishes is the artifact
     // under test, so capture it from disk while the call is still in flight.
-    const inFlight = bridge.executeScript('(function(){ return "1"; })();', 2500).catch(() => undefined);
+    const inFlight = bridge
+      .executeScript('(function(){ return "1"; })();', 2500)
+      .catch(() => undefined);
     let captured: any = null;
     const deadline = Date.now() + 2000;
     while (Date.now() < deadline && !captured) {
       const { readdirSync } = await import('node:fs');
       const file = readdirSync(dir).find((n) => n.startsWith('command-') && n.endsWith('.json'));
       if (file) {
-        try { captured = JSON.parse(readFileSync(join(dir, file), 'utf8')); } catch { /* mid-write */ }
+        try {
+          captured = JSON.parse(readFileSync(join(dir, file), 'utf8'));
+        } catch {
+          /* mid-write */
+        }
       }
       if (!captured) await new Promise((r) => setTimeout(r, 25));
     }

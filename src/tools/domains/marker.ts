@@ -6,12 +6,20 @@
  */
 import { KeyframeTools } from './keyframe.js';
 // Synchronous fs/path/os bindings for the Node-side (non-ExtendScript) tools.
-// Kept separate from the `promises as fs` import above, which is the async API.
+// The async API is the separate `promises as fs` import.
 import * as fsSync from 'node:fs';
 import { MARKER_COLOR_NAMES } from '../catalogue-schemas.js';
 
 export class MarkerTools extends KeyframeTools {
-  protected async createMarker(timeSecs: number, name?: string, comment?: string, type?: string, colorIndex?: number, durationSecs?: number, sequenceId?: string): Promise<any> {
+  protected async createMarker(
+    timeSecs: number,
+    name?: string,
+    comment?: string,
+    type?: string,
+    colorIndex?: number,
+    durationSecs?: number,
+    sequenceId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No sequence'});
@@ -53,22 +61,51 @@ export class MarkerTools extends KeyframeTools {
     `);
     if (!result.success) return result;
     const fs = fsSync;
-    const lines = ['time,name,comment,type,color', ...result.rows.map((r: any) => `${r.time},${JSON.stringify(r.name)},${JSON.stringify(r.comment)},${r.type},${r.color}`)];
+    const lines = [
+      'time,name,comment,type,color',
+      ...result.rows.map(
+        (r: any) =>
+          `${r.time},${JSON.stringify(r.name)},${JSON.stringify(r.comment)},${r.type},${r.color}`,
+      ),
+    ];
     fs.writeFileSync(outputPath, lines.join('\n'));
-    return { success: true, outputPath, markerCount: result.count, verified: fsSync.existsSync(outputPath) };
+    return {
+      success: true,
+      outputPath,
+      markerCount: result.count,
+      verified: fsSync.existsSync(outputPath),
+    };
   }
 
   protected async markersFromCsv(csvPath: string, sequenceId?: string): Promise<any> {
     const fs = fsSync;
     if (!fs.existsSync(csvPath)) return { success: false, error: 'CSV file not found: ' + csvPath };
-    const lines = fs.readFileSync(csvPath, 'utf8').split('\n').filter((l: string) => l.trim() && !l.startsWith('time'));
-    const markers: Array<{time: number, name: string, comment: string, type: string}> = lines.map((line: string) => {
-      const parts = line.split(',');
-      return { time: parseFloat(parts[0] ?? '0'), name: (parts[1] ?? '').replace(/^"|"$/g, ''), comment: (parts[2] ?? '').replace(/^"|"$/g, ''), type: (parts[3] ?? 'Comment').trim() };
-    });
+    const lines = fs
+      .readFileSync(csvPath, 'utf8')
+      .split('\n')
+      .filter((l: string) => l.trim() && !l.startsWith('time'));
+    const markers: Array<{ time: number; name: string; comment: string; type: string }> = lines.map(
+      (line: string) => {
+        const parts = line.split(',');
+        return {
+          time: parseFloat(parts[0] ?? '0'),
+          name: (parts[1] ?? '').replace(/^"|"$/g, ''),
+          comment: (parts[2] ?? '').replace(/^"|"$/g, ''),
+          type: (parts[3] ?? 'Comment').trim(),
+        };
+      },
+    );
     let created = 0;
     for (const m of markers) {
-      const r = await this.createMarker(m.time, m.name, m.comment, m.type, undefined, undefined, sequenceId);
+      const r = await this.createMarker(
+        m.time,
+        m.name,
+        m.comment,
+        m.type,
+        undefined,
+        undefined,
+        sequenceId,
+      );
       if (r.success) created++;
     }
     return { success: true, created, total: markers.length };
@@ -85,11 +122,18 @@ export class MarkerTools extends KeyframeTools {
     if (typeof color === 'number') return color;
     const value = String(color).trim().toLowerCase();
     if (/^[0-7]$/.test(value)) return Number(value);
-    const index = MARKER_COLOR_NAMES.indexOf(value as typeof MARKER_COLOR_NAMES[number]);
+    const index = MARKER_COLOR_NAMES.indexOf(value as (typeof MARKER_COLOR_NAMES)[number]);
     return index === -1 ? null : index;
   }
 
-  protected async addMarker(sequenceId: string, time: number, name: string, comment?: string, color?: string, duration?: number): Promise<any> {
+  protected async addMarker(
+    sequenceId: string,
+    time: number,
+    name: string,
+    comment?: string,
+    color?: string,
+    duration?: number,
+  ): Promise<any> {
     const colorIndex = MarkerTools.resolveMarkerColor(color);
     const script = `
       try {
@@ -243,7 +287,14 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(script);
   }
 
-  protected async durationMarkerAdd(startSecs: number, durationSecs: number, name?: string, comment?: string, type?: string, seqId?: string): Promise<any> {
+  protected async durationMarkerAdd(
+    startSecs: number,
+    durationSecs: number,
+    name?: string,
+    comment?: string,
+    type?: string,
+    seqId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq=${this.buildSeqRes(seqId)};
@@ -258,10 +309,10 @@ ${this.buildSequenceResolver(sequenceId)}
         // was indistinguishable from a duration marker. Read the end back and compare.
         var endError=null;
         // Marker.end takes a number of seconds; a Time object is rejected on 26.5.2.
-        try{m.end=${Number(startSecs)+Number(durationSecs)};}catch(ee){endError=ee.toString();}
+        try{m.end=${Number(startSecs) + Number(durationSecs)};}catch(ee){endError=ee.toString();}
         var endBack=null; try{ endBack=Number(m.end.seconds); }catch(eE){}
         var startBack=null; try{ startBack=Number(m.start.seconds); }catch(eS){}
-        var wantEnd=${startSecs+durationSecs};
+        var wantEnd=${startSecs + durationSecs};
         var base={startSecs:${startSecs},durationSecs:${durationSecs},name:String(m.name),type:String(m.type),startReadback:startBack,endReadback:endBack};
         if(endBack===null){
           return JSON.stringify({success:true,verified:false,markerCreated:true,startSecs:base.startSecs,durationSecs:base.durationSecs,name:base.name,type:base.type,startReadback:base.startReadback,
@@ -276,7 +327,12 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  protected async setMarkerType(timeSecs: number, type: string, toleranceSecs: number, seqId?: string): Promise<any> {
+  protected async setMarkerType(
+    timeSecs: number,
+    type: string,
+    toleranceSecs: number,
+    seqId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq=${this.buildSeqRes(seqId)};
@@ -381,7 +437,11 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  protected async markerToSubclip(markerName: string, projectItemId: string, seqId?: string): Promise<any> {
+  protected async markerToSubclip(
+    markerName: string,
+    projectItemId: string,
+    seqId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq=${this.buildSeqRes(seqId)};
@@ -413,21 +473,33 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  protected async frameIoNotesToMarkers(jsonPath: string, sequenceId?: string, markerColor = 1): Promise<any> {
+  protected async frameIoNotesToMarkers(
+    jsonPath: string,
+    sequenceId?: string,
+    markerColor = 1,
+  ): Promise<any> {
     const fs = fsSync;
     try {
       const raw = fs.readFileSync(jsonPath, 'utf8');
       const data = JSON.parse(raw);
       // Frame.io comment export format: array of {timestamp, text, author, ...} or nested structure
-      const comments: Array<{time: number, text: string, author?: string}> = [];
-      const items = Array.isArray(data) ? data : (data.comments || data.annotations || data.items || []);
+      const comments: Array<{ time: number; text: string; author?: string }> = [];
+      const items = Array.isArray(data)
+        ? data
+        : data.comments || data.annotations || data.items || [];
       for (const item of items) {
         const timeSecs = item.timestamp ?? item.time ?? item.timecode_in ?? 0;
         const text = item.text ?? item.comment ?? item.content ?? '';
         const author = item.author?.name ?? item.user?.name ?? item.created_by ?? '';
-        if (text) comments.push({ time: typeof timeSecs === 'string' ? parseFloat(timeSecs) : timeSecs, text, author });
+        if (text)
+          comments.push({
+            time: typeof timeSecs === 'string' ? parseFloat(timeSecs) : timeSecs,
+            text,
+            author,
+          });
       }
-      if (!comments.length) return { success: false, error: 'No comments found in Frame.io export', path: jsonPath };
+      if (!comments.length)
+        return { success: false, error: 'No comments found in Frame.io export', path: jsonPath };
 
       const markerScript = `
         try {
@@ -467,7 +539,12 @@ ${this.buildSequenceResolver(sequenceId)}
    * The in/out points are now captured up front and restored with setInPoint/setOutPoint,
    * and every output is stat'ed so `verified` reflects files that are actually on disk.
    */
-  protected async exportPerMarkerRange(outputDir: string, presetPath?: string, markerPattern?: string, seqId?: string): Promise<any> {
+  protected async exportPerMarkerRange(
+    outputDir: string,
+    presetPath?: string,
+    markerPattern?: string,
+    seqId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(seqId)};

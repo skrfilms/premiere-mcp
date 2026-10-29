@@ -21,7 +21,7 @@ describe('PremiereProPrompts', () => {
 
     it('should return all expected prompts', () => {
       const availablePrompts = prompts.getAvailablePrompts();
-      const promptNames = availablePrompts.map(p => p.name);
+      const promptNames = availablePrompts.map((p) => p.name);
 
       expect(promptNames).toContain('create_video_project');
       expect(promptNames).toContain('edit_music_video');
@@ -38,7 +38,7 @@ describe('PremiereProPrompts', () => {
     it('should have valid prompt structure', () => {
       const availablePrompts = prompts.getAvailablePrompts();
 
-      availablePrompts.forEach(prompt => {
+      availablePrompts.forEach((prompt) => {
         expect(prompt).toHaveProperty('name');
         expect(prompt).toHaveProperty('description');
         expect(typeof prompt.name).toBe('string');
@@ -46,7 +46,7 @@ describe('PremiereProPrompts', () => {
 
         if (prompt.arguments) {
           expect(Array.isArray(prompt.arguments)).toBe(true);
-          prompt.arguments.forEach(arg => {
+          prompt.arguments.forEach((arg) => {
             expect(arg).toHaveProperty('name');
             expect(arg).toHaveProperty('description');
             expect(typeof arg.name).toBe('string');
@@ -59,26 +59,27 @@ describe('PremiereProPrompts', () => {
     it('should include argument definitions for prompts', () => {
       const availablePrompts = prompts.getAvailablePrompts();
 
-      const createProject = availablePrompts.find(p => p.name === 'create_video_project');
+      const createProject = availablePrompts.find((p) => p.name === 'create_video_project');
       expect(createProject?.arguments).toBeDefined();
       expect(createProject?.arguments?.length).toBeGreaterThan(0);
 
-      const musicVideo = availablePrompts.find(p => p.name === 'edit_music_video');
+      const musicVideo = availablePrompts.find((p) => p.name === 'edit_music_video');
       expect(musicVideo?.arguments).toBeDefined();
-      expect(musicVideo?.arguments?.some(a => a.name === 'music_file')).toBe(true);
+      expect(musicVideo?.arguments?.some((a) => a.name === 'music_file')).toBe(true);
     });
   });
 
   describe('getPrompt()', () => {
     it('should throw error for unknown prompt', async () => {
-      await expect(prompts.getPrompt('unknown_prompt', {}))
-        .rejects.toThrow("Prompt 'unknown_prompt' not found");
+      await expect(prompts.getPrompt('unknown_prompt', {})).rejects.toThrow(
+        "Prompt 'unknown_prompt' not found",
+      );
     });
 
     describe('create_video_project', () => {
       it('should generate prompt with required arguments', async () => {
         const result = await prompts.getPrompt('create_video_project', {
-          project_type: 'documentary'
+          project_type: 'documentary',
         });
 
         expect(result).toHaveProperty('description');
@@ -90,19 +91,19 @@ describe('PremiereProPrompts', () => {
       it('should include project type in messages', async () => {
         const result = await prompts.getPrompt('create_video_project', {
           project_type: 'commercial',
-          duration: '30 seconds'
+          duration: '30 seconds',
         });
 
-        const messagesText = result.messages.map(m => m.content.text).join(' ');
+        const messagesText = result.messages.map((m) => m.content.text).join(' ');
         expect(messagesText).toContain('commercial');
       });
 
       it('should have valid message structure', async () => {
         const result = await prompts.getPrompt('create_video_project', {
-          project_type: 'social media'
+          project_type: 'social media',
         });
 
-        result.messages.forEach(message => {
+        result.messages.forEach((message) => {
           expect(message).toHaveProperty('role');
           expect(['system', 'user', 'assistant']).toContain(message.role);
           expect(message).toHaveProperty('content');
@@ -118,7 +119,7 @@ describe('PremiereProPrompts', () => {
       it('should generate music video editing prompt', async () => {
         const result = await prompts.getPrompt('edit_music_video', {
           music_file: '/path/to/song.mp3',
-          video_clips: ['/clip1.mp4', '/clip2.mp4']
+          video_clips: ['/clip1.mp4', '/clip2.mp4'],
         });
 
         expect(result.description).toBeDefined();
@@ -128,10 +129,10 @@ describe('PremiereProPrompts', () => {
       it('should include music file reference', async () => {
         const result = await prompts.getPrompt('edit_music_video', {
           music_file: '/path/to/song.mp3',
-          video_clips: []
+          video_clips: [],
         });
 
-        const messagesText = result.messages.map(m => m.content.text).join(' ');
+        const messagesText = result.messages.map((m) => m.content.text).join(' ');
         expect(messagesText.length).toBeGreaterThan(0);
       });
     });
@@ -140,7 +141,7 @@ describe('PremiereProPrompts', () => {
       it('should generate color grading prompt', async () => {
         const result = await prompts.getPrompt('color_grade_footage', {
           footage_type: 'log',
-          target_mood: 'cinematic'
+          target_mood: 'cinematic',
         });
 
         expect(result.description).toBeDefined();
@@ -149,7 +150,7 @@ describe('PremiereProPrompts', () => {
 
       it('should include footage type in guidance', async () => {
         const result = await prompts.getPrompt('color_grade_footage', {
-          footage_type: 'raw'
+          footage_type: 'raw',
         });
 
         expect(result.messages.length).toBeGreaterThan(0);
@@ -160,7 +161,7 @@ describe('PremiereProPrompts', () => {
       it('should generate multicam editing prompt', async () => {
         const result = await prompts.getPrompt('multicam_editing', {
           camera_count: '3',
-          sync_method: 'audio'
+          sync_method: 'audio',
         });
 
         expect(result.description).toBeDefined();
@@ -172,7 +173,7 @@ describe('PremiereProPrompts', () => {
       it('should generate podcast editing prompt', async () => {
         const result = await prompts.getPrompt('podcast_editing', {
           participant_count: '2',
-          episode_length: '45 minutes'
+          episode_length: '45 minutes',
         });
 
         expect(result.description).toBeDefined();
@@ -184,7 +185,7 @@ describe('PremiereProPrompts', () => {
       it('should generate social media content prompt', async () => {
         const result = await prompts.getPrompt('social_media_content', {
           platform: 'Instagram',
-          content_type: 'reel'
+          content_type: 'reel',
         });
 
         expect(result.description).toBeDefined();
@@ -194,7 +195,7 @@ describe('PremiereProPrompts', () => {
       it('should include platform-specific guidance', async () => {
         const result = await prompts.getPrompt('social_media_content', {
           platform: 'TikTok',
-          content_type: 'video'
+          content_type: 'video',
         });
 
         expect(result.messages.length).toBeGreaterThan(0);
@@ -205,7 +206,7 @@ describe('PremiereProPrompts', () => {
       it('should generate documentary editing prompt', async () => {
         const result = await prompts.getPrompt('documentary_editing', {
           interview_count: '5',
-          narrative_structure: 'thematic'
+          narrative_structure: 'thematic',
         });
 
         expect(result.description).toBeDefined();
@@ -217,7 +218,7 @@ describe('PremiereProPrompts', () => {
       it('should generate commercial editing prompt', async () => {
         const result = await prompts.getPrompt('commercial_editing', {
           commercial_type: 'product',
-          duration: '30 seconds'
+          duration: '30 seconds',
         });
 
         expect(result.description).toBeDefined();
@@ -229,7 +230,7 @@ describe('PremiereProPrompts', () => {
       it('should generate workflow optimization prompt', async () => {
         const result = await prompts.getPrompt('optimize_workflow', {
           workflow_type: 'editing',
-          hardware_specs: '16GB RAM, i7 processor'
+          hardware_specs: '16GB RAM, i7 processor',
         });
 
         expect(result.description).toBeDefined();
@@ -241,7 +242,7 @@ describe('PremiereProPrompts', () => {
       it('should generate audio cleanup prompt', async () => {
         const result = await prompts.getPrompt('audio_cleanup', {
           audio_issues: 'background noise, echo',
-          audio_source: 'microphone'
+          audio_source: 'microphone',
         });
 
         expect(result.description).toBeDefined();
@@ -253,7 +254,7 @@ describe('PremiereProPrompts', () => {
   describe('Prompt Message Structure', () => {
     it('should open with a role and a named tool chain', async () => {
       const result = await prompts.getPrompt('create_video_project', {
-        project_type: 'documentary'
+        project_type: 'documentary',
       });
 
       expect(result.messages[0].role).toBe('user');
@@ -268,38 +269,38 @@ describe('PremiereProPrompts', () => {
 
     it('should include user message for query', async () => {
       const result = await prompts.getPrompt('create_video_project', {
-        project_type: 'documentary'
+        project_type: 'documentary',
       });
 
-      const userMessages = result.messages.filter(m => m.role === 'user');
+      const userMessages = result.messages.filter((m) => m.role === 'user');
       expect(userMessages.length).toBeGreaterThan(0);
     });
 
     it('should not pre-write the assistant turn', async () => {
       const result = await prompts.getPrompt('create_video_project', {
-        project_type: 'documentary'
+        project_type: 'documentary',
       });
 
       // A prompt template that supplies the assistant's answer teaches the model that
       // prose is the correct response, which is the opposite of what an MCP prompt is
       // for. The template now states the task and stops.
-      const assistantMessages = result.messages.filter(m => m.role === 'assistant');
+      const assistantMessages = result.messages.filter((m) => m.role === 'assistant');
       expect(assistantMessages).toHaveLength(0);
     });
 
     it('should state the verification discipline', async () => {
       const result = await prompts.getPrompt('create_video_project', {
-        project_type: 'documentary'
+        project_type: 'documentary',
       });
 
-      const text = result.messages.map(m => m.content.text).join('\n');
+      const text = result.messages.map((m) => m.content.text).join('\n');
       expect(text).toContain('verified');
       expect(text).toContain('do not report success');
     });
 
     it('should recommend attaching the operating instructions resource', async () => {
       const result = await prompts.getPrompt('create_video_project', {
-        project_type: 'documentary'
+        project_type: 'documentary',
       });
 
       expect(result.messages[0].content.text).toContain('premiere://config/get_instructions');
@@ -309,7 +310,7 @@ describe('PremiereProPrompts', () => {
   describe('Argument Handling', () => {
     it('should use default values for missing optional arguments', async () => {
       const result = await prompts.getPrompt('create_video_project', {
-        project_type: 'vlog'
+        project_type: 'vlog',
         // duration omitted
       });
 

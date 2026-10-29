@@ -24,7 +24,10 @@ import { normalize, isAbsolute, resolve, posix as pathPosix, win32 as pathWin32 
 /**
  * Validates file paths to prevent path traversal attacks
  */
-export function validateFilePath(filePath: string, allowedDirs?: string[]): { valid: boolean; normalized?: string; error?: string } {
+export function validateFilePath(
+  filePath: string,
+  allowedDirs?: string[],
+): { valid: boolean; normalized?: string; error?: string } {
   try {
     if (!filePath || typeof filePath !== 'string') {
       return { valid: false, error: 'Path must be a non-empty string' };
@@ -43,7 +46,7 @@ export function validateFilePath(filePath: string, allowedDirs?: string[]): { va
 
     // If allowed directories specified, check if path is within them
     if (allowedDirs && allowedDirs.length > 0) {
-      const isAllowed = allowedDirs.some(allowedDir => {
+      const isAllowed = allowedDirs.some((allowedDir) => {
         const normalizedAllowed = normalize(resolve(allowedDir));
         return normalizedPath.startsWith(normalizedAllowed);
       });
@@ -73,7 +76,10 @@ export function validateFilePath(filePath: string, allowedDirs?: string[]): { va
 
     return { valid: true, normalized: normalizedPath };
   } catch (error) {
-    return { valid: false, error: `Path validation error: ${error instanceof Error ? error.message : String(error)}` };
+    return {
+      valid: false,
+      error: `Path validation error: ${error instanceof Error ? error.message : String(error)}`,
+    };
   }
 }
 

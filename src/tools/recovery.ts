@@ -96,9 +96,7 @@ export interface CheckpointEnv {
  * Whether to snapshot before a destructive operation. Off by default; a user
  * turns it on with PREMIERE_MCP_AUTO_CHECKPOINT=1 (or true/on/yes).
  */
-export function autoCheckpointEnabled(
-  env: CheckpointEnv = process.env as CheckpointEnv,
-): boolean {
+export function autoCheckpointEnabled(env: CheckpointEnv = process.env as CheckpointEnv): boolean {
   const value = (env.PREMIERE_MCP_AUTO_CHECKPOINT || '').trim().toLowerCase();
   return value === '1' || value === 'true' || value === 'on' || value === 'yes';
 }

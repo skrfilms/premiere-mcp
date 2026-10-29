@@ -5,11 +5,7 @@
  * had grown to 19k lines; the method bodies are unchanged.
  */
 import { InterchangeTools } from './interchange.js';
-import {
-  type EaseKeyframe,
-  type EaseSampleOptions,
-  sampleEaseKeyframes,
-} from '../easing.js';
+import { type EaseKeyframe, type EaseSampleOptions, sampleEaseKeyframes } from '../easing.js';
 
 export class KeyframeTools extends InterchangeTools {
   /**
@@ -93,7 +89,12 @@ export class KeyframeTools extends InterchangeTools {
     `;
   }
 
-  protected async setTimeInterpolationType(trackIndex: number, clipIndex: number, type: number, sequenceId?: string): Promise<any> {
+  protected async setTimeInterpolationType(
+    trackIndex: number,
+    clipIndex: number,
+    type: number,
+    sequenceId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       app.enableQE(); ${this.qeClipScript(trackIndex, clipIndex, sequenceId)}
       if (!__clip) return JSON.stringify({success:false,error:'Clip not found'});
@@ -102,7 +103,13 @@ export class KeyframeTools extends InterchangeTools {
     `);
   }
 
-  protected async keyframeZoom(trackIndex: number, clipIndex: number, startScale: number, endScale: number, seqId?: string): Promise<any> {
+  protected async keyframeZoom(
+    trackIndex: number,
+    clipIndex: number,
+    startScale: number,
+    endScale: number,
+    seqId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         ${this.keyframeVerifyFragment()}
@@ -144,7 +151,14 @@ export class KeyframeTools extends InterchangeTools {
     `);
   }
 
-  protected async findKeyframeNearTime(trackIndex: number, clipIndex: number, componentIndex: number, paramIndex: number, timeSeconds: number, seqId?: string): Promise<any> {
+  protected async findKeyframeNearTime(
+    trackIndex: number,
+    clipIndex: number,
+    componentIndex: number,
+    paramIndex: number,
+    timeSeconds: number,
+    seqId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(seqId)};
@@ -173,7 +187,13 @@ export class KeyframeTools extends InterchangeTools {
   }
 
   // Keyframe Implementation
-  protected async addKeyframe(clipId: string, componentName: string, paramName: string, time: number, value: number): Promise<any> {
+  protected async addKeyframe(
+    clipId: string,
+    componentName: string,
+    paramName: string,
+    time: number,
+    value: number,
+  ): Promise<any> {
     const script = `
       try {
         var info = __findClip(${JSON.stringify(clipId)});
@@ -225,7 +245,12 @@ export class KeyframeTools extends InterchangeTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async removeKeyframe(clipId: string, componentName: string, paramName: string, time: number): Promise<any> {
+  protected async removeKeyframe(
+    clipId: string,
+    componentName: string,
+    paramName: string,
+    time: number,
+  ): Promise<any> {
     const script = `
       try {
         var info = __findClip(${JSON.stringify(clipId)});
@@ -272,7 +297,11 @@ export class KeyframeTools extends InterchangeTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async getKeyframes(clipId: string, componentName: string, paramName: string): Promise<any> {
+  protected async getKeyframes(
+    clipId: string,
+    componentName: string,
+    paramName: string,
+  ): Promise<any> {
     const script = `
       try {
         var info = __findClip(${JSON.stringify(clipId)});
@@ -409,7 +438,8 @@ export class KeyframeTools extends InterchangeTools {
 
     // Verify-after-write: every written value must read back within tolerance.
     const readback: unknown[] = Array.isArray(res.readback) ? res.readback : [];
-    const mismatches: Array<{ index: number; time: number; expected: number; actual: unknown }> = [];
+    const mismatches: Array<{ index: number; time: number; expected: number; actual: unknown }> =
+      [];
     for (let i = 0; i < values.length; i++) {
       const expected = values[i] as number;
       const actual = readback[i];

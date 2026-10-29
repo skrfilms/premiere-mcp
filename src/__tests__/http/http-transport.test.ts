@@ -76,10 +76,14 @@ function makeGate(overrides: GateOverrides = {}) {
     handler: {
       fetch:
         overrides.handlerFetch ??
-        (async () => new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { reached: 'sdk-handler' } }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        })),
+        (async () =>
+          new Response(
+            JSON.stringify({ jsonrpc: '2.0', id: 1, result: { reached: 'sdk-handler' } }),
+            {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            },
+          )),
     },
     bridgeProbe: overrides.probe ?? connectedProbe,
     ...(overrides.limiter ? { limiter: overrides.limiter } : {}),
@@ -146,7 +150,10 @@ describe('resolveHttpConfig', () => {
   });
 
   it('has no env var for disabling auth — only the explicit flag', () => {
-    const viaEnv = resolveHttpConfig({ PREMIERE_MCP_HTTP_ALLOWED_HOSTS: 'x', PREMIERE_MCP_HTTP_TOKEN: TOKEN }, []);
+    const viaEnv = resolveHttpConfig(
+      { PREMIERE_MCP_HTTP_ALLOWED_HOSTS: 'x', PREMIERE_MCP_HTTP_TOKEN: TOKEN },
+      [],
+    );
     expect(viaEnv.config.authDisabled).toBe(false);
 
     const viaFlag = resolveHttpConfig({}, ['--allow-no-auth']);
@@ -159,14 +166,20 @@ describe('resolveHttpConfig', () => {
   });
 
   it('warns loudly when told to bind off loopback', () => {
-    const { config, warnings } = resolveHttpConfig({ PREMIERE_MCP_HTTP_TOKEN: TOKEN }, ['--host', '0.0.0.0']);
+    const { config, warnings } = resolveHttpConfig({ PREMIERE_MCP_HTTP_TOKEN: TOKEN }, [
+      '--host',
+      '0.0.0.0',
+    ]);
     expect(config.host).toBe('0.0.0.0');
     expect(warnings.join(' ')).toMatch(/NOT loopback/);
     expect(warnings.join(' ')).toMatch(/cleartext/);
   });
 
   it('reports a bad numeric limit as a fatal error rather than silently defaulting', () => {
-    const { errors } = resolveHttpConfig({ PREMIERE_MCP_HTTP_TOKEN: TOKEN, PREMIERE_MCP_HTTP_MAX_CONCURRENT: '0' }, []);
+    const { errors } = resolveHttpConfig(
+      { PREMIERE_MCP_HTTP_TOKEN: TOKEN, PREMIERE_MCP_HTTP_MAX_CONCURRENT: '0' },
+      [],
+    );
     expect(errors.join(' ')).toMatch(/positive integer/);
   });
 });
@@ -185,7 +198,9 @@ describe('bearer auth', () => {
 
   it('refuses a wrong token', async () => {
     const gate = makeGate();
-    const response = await gate.fetch(get(HTTP_HEALTH_PATH, { authorization: 'Bearer not-the-token-xxxxxxxx' }));
+    const response = await gate.fetch(
+      get(HTTP_HEALTH_PATH, { authorization: 'Bearer not-the-token-xxxxxxxx' }),
+    );
     expect(response.status).toBe(401);
   });
 
@@ -249,7 +264,10 @@ describe('host and origin validation', () => {
 describe('body size cap', () => {
   it('answers 413 on a declared oversized body without reading it', async () => {
     const gate = makeGate({ config: { maxBodyBytes: 64 } });
-    const request = post({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, { 'content-length': '999999' });
+    const request = post(
+      { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+      { 'content-length': '999999' },
+    );
     const response = await gate.fetch(request);
     expect(response.status).toBe(413);
     expect((await response.json()).error.message).toMatch(/cap is 64/);
@@ -315,16 +333,25 @@ describe('rate and concurrency caps', () => {
         throw new Error('handler exploded');
       },
     });
-    await expect(gate.fetch(post({ jsonrpc: '2.0', id: 1, method: 'tools/list' }))).rejects.toThrow('handler exploded');
+    await expect(gate.fetch(post({ jsonrpc: '2.0', id: 1, method: 'tools/list' }))).rejects.toThrow(
+      'handler exploded',
+    );
     expect(limiter.stats.inFlight).toBe(0);
   });
 });
 
 describe('bridge refusal', () => {
   it('answers 503 for tools/call when the bridge is not observably up, naming the cause', async () => {
-    const gate = makeGate({ probe: downProbe('no-heartbeat', 'No readable heartbeat; click Start Bridge.') });
+    const gate = makeGate({
+      probe: downProbe('no-heartbeat', 'No readable heartbeat; click Start Bridge.'),
+    });
     const response = await gate.fetch(
-      post({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'find_tool', arguments: { query: 'marker' } } }),
+      post({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name: 'find_tool', arguments: { query: 'marker' } },
+      }),
     );
     expect(response.status).toBe(503);
     expect(response.headers.get('retry-after')).toBe('5');
@@ -337,7 +364,14 @@ describe('bridge refusal', () => {
 
   it('answers 503 for resources/read too, and 503 when the bridge is merely unobservable', async () => {
     const gate = makeGate({ probe: downProbe('unobservable', 'PREMIERE_TEMP_DIR is not set.') });
-    const response = await gate.fetch(post({ jsonrpc: '2.0', id: 1, method: 'resources/read', params: { uri: 'premiere://project/info' } }));
+    const response = await gate.fetch(
+      post({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'resources/read',
+        params: { uri: 'premiere://project/info' },
+      }),
+    );
     expect(response.status).toBe(503);
     expect((await response.json()).error.data.bridge.checked).toBe(false);
   });
@@ -353,21 +387,37 @@ describe('bridge refusal', () => {
   it('serves tools/call when the bridge is connected', async () => {
     const gate = makeGate({ probe: connectedProbe });
     const response = await gate.fetch(
-      post({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'find_tool', arguments: { query: 'marker' } } }),
+      post({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name: 'find_tool', arguments: { query: 'marker' } },
+      }),
     );
     expect(response.status).toBe(200);
   });
 
   it('can be told to stop refusing, and then does not', async () => {
-    const gate = makeGate({ config: { refuseWhenBridgeDown: false }, probe: downProbe('no-heartbeat', 'panel closed') });
+    const gate = makeGate({
+      config: { refuseWhenBridgeDown: false },
+      probe: downProbe('no-heartbeat', 'panel closed'),
+    });
     const response = await gate.fetch(
-      post({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'find_tool', arguments: {} } }),
+      post({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name: 'find_tool', arguments: {} },
+      }),
     );
     expect(response.status).toBe(200);
   });
 
   it('finds the method in a legacy batch array', () => {
-    expect(jsonRpcMethods([{ method: 'tools/list' }, { method: 'tools/call' }])).toEqual(['tools/list', 'tools/call']);
+    expect(jsonRpcMethods([{ method: 'tools/list' }, { method: 'tools/call' }])).toEqual([
+      'tools/list',
+      'tools/call',
+    ]);
     expect(jsonRpcMethods({ method: 'tools/call' })).toEqual(['tools/call']);
     expect(jsonRpcMethods({ id: 1, result: {} })).toEqual([]);
   });
@@ -393,7 +443,9 @@ describe('/health honesty', () => {
   });
 
   it('passes the bridge failure through verbatim instead of flattening it to "down"', async () => {
-    const gate = makeGate({ probe: downProbe('not-started', 'Click Start Bridge in the MCP Bridge (CEP) panel.') });
+    const gate = makeGate({
+      probe: downProbe('not-started', 'Click Start Bridge in the MCP Bridge (CEP) panel.'),
+    });
     const report = await (await gate.fetch(get(HTTP_HEALTH_PATH))).json();
     expect(report.bridge.state).toBe('not-started');
     expect(report.bridge.reason).toMatch(/Start Bridge/);
@@ -440,7 +492,10 @@ describe('heartbeatBridgeProbe', () => {
 
   it('reports connected for a fresh started heartbeat', async () => {
     const now = 1_000_000;
-    await writeFile(join(dir, 'bridge-heartbeat.json'), JSON.stringify({ ts: now - 200, connected: true, queueLength: 0 }));
+    await writeFile(
+      join(dir, 'bridge-heartbeat.json'),
+      JSON.stringify({ ts: now - 200, connected: true, queueLength: 0 }),
+    );
     const status = await heartbeatBridgeProbe({ PREMIERE_TEMP_DIR: dir }, () => now)();
     expect(status.state).toBe('connected');
     expect(status.heartbeatAgeMs).toBe(200);
@@ -448,14 +503,20 @@ describe('heartbeatBridgeProbe', () => {
 
   it('reports not-started when the panel beats but the bridge is off', async () => {
     const now = 1_000_000;
-    await writeFile(join(dir, 'bridge-heartbeat.json'), JSON.stringify({ ts: now - 200, connected: false }));
+    await writeFile(
+      join(dir, 'bridge-heartbeat.json'),
+      JSON.stringify({ ts: now - 200, connected: false }),
+    );
     const status = await heartbeatBridgeProbe({ PREMIERE_TEMP_DIR: dir }, () => now)();
     expect(status.state).toBe('not-started');
   });
 
   it('reports no-heartbeat when the beat has gone stale', async () => {
     const now = 1_000_000;
-    await writeFile(join(dir, 'bridge-heartbeat.json'), JSON.stringify({ ts: now - 30_000, connected: true }));
+    await writeFile(
+      join(dir, 'bridge-heartbeat.json'),
+      JSON.stringify({ ts: now - 30_000, connected: true }),
+    );
     const status = await heartbeatBridgeProbe({ PREMIERE_TEMP_DIR: dir }, () => now)();
     expect(status.state).toBe('no-heartbeat');
     expect(status.reason).toMatch(/stale/);
@@ -475,7 +536,10 @@ describe('same catalogue over HTTP as over stdio', () => {
     const clientToServer = new PassThrough();
     const serverToClient = new PassThrough();
     const transport = new StdioServerTransport(clientToServer, serverToClient);
-    const handle = serveStdio(() => buildPremiereMcpServer(surface, { wireExposureNotifications: true }), { transport });
+    const handle = serveStdio(
+      () => buildPremiereMcpServer(surface, { wireExposureNotifications: true }),
+      { transport },
+    );
 
     const received: any[] = [];
     let buffer = '';
@@ -508,7 +572,11 @@ describe('same catalogue over HTTP as over stdio', () => {
       jsonrpc: '2.0',
       id: 1,
       method: 'initialize',
-      params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } },
+      params: {
+        protocolVersion: '2025-06-18',
+        capabilities: {},
+        clientInfo: { name: 'test', version: '1' },
+      },
     };
     const toolCall = {
       jsonrpc: '2.0',
@@ -521,7 +589,9 @@ describe('same catalogue over HTTP as over stdio', () => {
     const stdioResult = stdioMessages.find((message) => message.id === 2);
     expect(stdioResult?.result).toBeDefined();
 
-    const handler = createMcpHandler(() => buildPremiereMcpServer(surface, { wireExposureNotifications: false }));
+    const handler = createMcpHandler(() =>
+      buildPremiereMcpServer(surface, { wireExposureNotifications: false }),
+    );
     const { config } = resolveHttpConfig({ PREMIERE_MCP_HTTP_TOKEN: TOKEN }, []);
     const gate = createHttpGate({
       config,
@@ -548,19 +618,33 @@ describe('same catalogue over HTTP as over stdio', () => {
 
   it('lists the same tools over HTTP as the shared surface exposes', async () => {
     const surface = makeSurface();
-    const handler = createMcpHandler(() => buildPremiereMcpServer(surface, { wireExposureNotifications: false }));
+    const handler = createMcpHandler(() =>
+      buildPremiereMcpServer(surface, { wireExposureNotifications: false }),
+    );
     const { config } = resolveHttpConfig({ PREMIERE_MCP_HTTP_TOKEN: TOKEN }, []);
-    const gate = createHttpGate({ config, surface, handler, bridgeProbe: connectedProbe, env: { PREMIERE_MCP_PROFILE: 'all' } });
+    const gate = createHttpGate({
+      config,
+      surface,
+      handler,
+      bridgeProbe: connectedProbe,
+      env: { PREMIERE_MCP_PROFILE: 'all' },
+    });
 
     await gate.fetch(
       post({
         jsonrpc: '2.0',
         id: 1,
         method: 'initialize',
-        params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'test', version: '1' } },
+        params: {
+          protocolVersion: '2025-06-18',
+          capabilities: {},
+          clientInfo: { name: 'test', version: '1' },
+        },
       }),
     );
-    const listed = await readRpc(await gate.fetch(post({ jsonrpc: '2.0', id: 2, method: 'tools/list' })));
+    const listed = await readRpc(
+      await gate.fetch(post({ jsonrpc: '2.0', id: 2, method: 'tools/list' })),
+    );
     expect(listed.result.tools.length).toBe(surface.tools.getAvailableTools().length);
 
     await handler.close();

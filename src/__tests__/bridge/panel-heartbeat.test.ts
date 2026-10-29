@@ -16,8 +16,12 @@ describe('panel writeHeartbeat', () => {
     const writes: Array<[string, string]> = [];
     const renames: Array<[string, string]> = [];
     const fs = {
-      writeFileSync: (p: string, data: string) => { writes.push([p, data]); },
-      renameSync: (from: string, to: string) => { renames.push([from, to]); },
+      writeFileSync: (p: string, data: string) => {
+        writes.push([p, data]);
+      },
+      renameSync: (from: string, to: string) => {
+        renames.push([from, to]);
+      },
       ...fsOverrides,
     };
     const { bridge } = loadPanel({ fs });
@@ -80,7 +84,9 @@ describe('panel writeHeartbeat', () => {
 
   it('never throws when the write fails', () => {
     const { bridge } = setup({
-      writeFileSync: () => { throw new Error('ENOSPC'); },
+      writeFileSync: () => {
+        throw new Error('ENOSPC');
+      },
     });
     expect(() => bridge.writeHeartbeat()).not.toThrow();
   });

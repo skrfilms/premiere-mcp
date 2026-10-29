@@ -147,7 +147,10 @@ export function attachImageForResult(
 
   try {
     const data = fsSync.readFileSync(sourcePath).toString('base64');
-    return { attachment: { block: { type: 'image', data, mimeType }, sourcePath, bytes }, reason: null };
+    return {
+      attachment: { block: { type: 'image', data, mimeType }, sourcePath, bytes },
+      reason: null,
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return { attachment: null, reason: `Could not read ${sourcePath} for inlining: ${message}` };

@@ -98,7 +98,10 @@ export class PlaybackTools extends SequenceTrackTools {
     `);
   }
 
-  protected async setSequenceSelection(clips: Array<{trackIndex: number, clipIndex: number}>, sequenceId?: string): Promise<any> {
+  protected async setSequenceSelection(
+    clips: Array<{ trackIndex: number; clipIndex: number }>,
+    sequenceId?: string,
+  ): Promise<any> {
     const clipsJson = JSON.stringify(clips);
     return await this.bridge.executeScript(`
       var seq = ${this.buildSeqRes(sequenceId)};
@@ -216,7 +219,12 @@ export class PlaybackTools extends SequenceTrackTools {
     `);
   }
 
-  protected async selectClipsInTimeRange(startSecs: number, endSecs: number, trackIndices?: number[], seqId?: string): Promise<any> {
+  protected async selectClipsInTimeRange(
+    startSecs: number,
+    endSecs: number,
+    trackIndices?: number[],
+    seqId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq=${this.buildSeqRes(seqId)};
@@ -280,7 +288,16 @@ export class PlaybackTools extends SequenceTrackTools {
   }
 
   protected async getPanelVisibility(panels?: string[]): Promise<any> {
-    const checkPanels = panels ?? ['Timeline','Source Monitor','Program Monitor','Effects','Lumetri Color','Effect Controls','Project','Audio Track Mixer'];
+    const checkPanels = panels ?? [
+      'Timeline',
+      'Source Monitor',
+      'Program Monitor',
+      'Effects',
+      'Lumetri Color',
+      'Effect Controls',
+      'Project',
+      'Audio Track Mixer',
+    ];
     const checksJson = JSON.stringify(checkPanels);
     return await this.bridge.executeScript(`
       try {
@@ -350,14 +367,18 @@ export class PlaybackTools extends SequenceTrackTools {
   // Work Area Implementation
   protected async setWorkArea(sequenceId: string, inPoint: number, outPoint: number): Promise<any> {
     if (!(Number(outPoint) > Number(inPoint))) {
-      return { success: false, error: `outPoint (${outPoint}s) must be after inPoint (${inPoint}s). Nothing was changed.` };
+      return {
+        success: false,
+        error: `outPoint (${outPoint}s) must be after inPoint (${inPoint}s). Nothing was changed.`,
+      };
     }
     // UXP first: WorkAreaUtils.setWorkAreaInOutPoints moves the work area on every sequence,
     // while the ExtendScript setters below are inert on most (measured on 26.5.2: they took
     // only on a sequence UXP had already set). The readback is ExtendScript's, so the UXP
     // claim is checked by the other API rather than by itself.
     if (uxpAvailable()) {
-      const u = await runUxp(`
+      const u = await runUxp(
+        `
         const p = await ppro.Project.getActiveProject();
         const seqs = await p.getSequences();
         const want = ${JSON.stringify(String(sequenceId ?? ''))};
@@ -365,7 +386,10 @@ export class PlaybackTools extends SequenceTrackTools {
         if (!s) return { found: false };
         const r = ppro.WorkAreaUtils.setWorkAreaInOutPoints(s, ppro.TickTime.createWithSeconds(${Number(inPoint)}), ppro.TickTime.createWithSeconds(${Number(outPoint)}));
         return { found: true, set: r && r.then ? await r : r, guid: String(s.guid) };
-      `, 20000, 'Set work area');
+      `,
+        20000,
+        'Set work area',
+      );
       if (u.ok && u.result?.found) {
         const rb: any = await this.bridge.executeScript(`
           try {
@@ -376,10 +400,24 @@ export class PlaybackTools extends SequenceTrackTools {
         const okIn = rb?.success && Math.abs(Number(rb.inPoint) - Number(inPoint)) <= 0.04;
         const okOut = rb?.success && Math.abs(Number(rb.outPoint) - Number(outPoint)) <= 0.04;
         if (okIn && okOut) {
-          return { success: true, verified: true, verifiedBy: 'set through UXP WorkAreaUtils, read back through ExtendScript', via: 'uxp',
-            message: 'Work area set', inPoint, outPoint, actual: { inPoint: rb.inPoint, outPoint: rb.outPoint } };
+          return {
+            success: true,
+            verified: true,
+            verifiedBy: 'set through UXP WorkAreaUtils, read back through ExtendScript',
+            via: 'uxp',
+            message: 'Work area set',
+            inPoint,
+            outPoint,
+            actual: { inPoint: rb.inPoint, outPoint: rb.outPoint },
+          };
         }
-        return { success: false, verified: true, via: 'uxp', error: `UXP set the work area but ExtendScript reads it back as ${rb?.inPoint}s-${rb?.outPoint}s.`, requested: { inPoint, outPoint } };
+        return {
+          success: false,
+          verified: true,
+          via: 'uxp',
+          error: `UXP set the work area but ExtendScript reads it back as ${rb?.inPoint}s-${rb?.outPoint}s.`,
+          requested: { inPoint, outPoint },
+        };
       }
     }
     const script = `
@@ -444,7 +482,12 @@ export class PlaybackTools extends SequenceTrackTools {
   }
 
   // Clip Lookup Implementation
-  protected async getClipAtPosition(sequenceId: string, trackType: string, trackIndex: number, time: number): Promise<any> {
+  protected async getClipAtPosition(
+    sequenceId: string,
+    trackType: string,
+    trackIndex: number,
+    time: number,
+  ): Promise<any> {
     const script = `
       try {
         var sequence = __findSequence(${JSON.stringify(sequenceId)});
@@ -485,7 +528,12 @@ export class PlaybackTools extends SequenceTrackTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async selectAllOnTrack(trackIndex: number, startSecs?: number, endSecs?: number, seqId?: string): Promise<any> {
+  protected async selectAllOnTrack(
+    trackIndex: number,
+    startSecs?: number,
+    endSecs?: number,
+    seqId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(seqId)};

@@ -10,7 +10,13 @@
  * transports may be running against the same Premiere.
  */
 
-import { startHttpTransport, httpDoctor, DEFAULT_HTTP_PORT, HTTP_MCP_PATH, HTTP_HEALTH_PATH } from './http-server.js';
+import {
+  startHttpTransport,
+  httpDoctor,
+  DEFAULT_HTTP_PORT,
+  HTTP_MCP_PATH,
+  HTTP_HEALTH_PATH,
+} from './http-server.js';
 
 function printHelp(): void {
   process.stderr.write(`Premiere MCP — HTTP transport
@@ -73,7 +79,8 @@ async function main(): Promise<void> {
 
   if (argv.includes('--doctor')) {
     const { report, warnings, errors } = await httpDoctor({ argv });
-    for (const warning of warnings) process.stderr.write(`[premiere-mcp-http] WARNING: ${warning}\n`);
+    for (const warning of warnings)
+      process.stderr.write(`[premiere-mcp-http] WARNING: ${warning}\n`);
     for (const error of errors) process.stderr.write(`[premiere-mcp-http] ERROR: ${error}\n`);
     process.stderr.write(`${JSON.stringify(report, null, 2)}\n`);
     // A doctor run that could not observe the bridge is not a healthy result, and saying
@@ -95,6 +102,8 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-  process.stderr.write(`[premiere-mcp-http] failed to start: ${error instanceof Error ? error.message : String(error)}\n`);
+  process.stderr.write(
+    `[premiere-mcp-http] failed to start: ${error instanceof Error ? error.message : String(error)}\n`,
+  );
   process.exitCode = 1;
 });

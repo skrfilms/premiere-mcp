@@ -41,7 +41,11 @@ function writePng(name: string, contents: Buffer = ONE_PIXEL_PNG): string {
 describe('findImagePath', () => {
   it('finds the purpose-built field ahead of the generic one', () => {
     // generate_scope returns scopePath; a result carrying both must not pick outputPath.
-    const path = findImagePath({ success: true, scopePath: '/a/scope.png', outputPath: '/a/other.png' });
+    const path = findImagePath({
+      success: true,
+      scopePath: '/a/scope.png',
+      outputPath: '/a/other.png',
+    });
     expect(path).toBe('/a/scope.png');
   });
 
@@ -98,7 +102,10 @@ describe('attachImageForResult', () => {
   });
 
   it('reports a missing file rather than omitting the image silently', () => {
-    const outcome = attachImageForResult({ success: true, outputPath: join(dir, 'never-written.png') });
+    const outcome = attachImageForResult({
+      success: true,
+      outputPath: join(dir, 'never-written.png'),
+    });
     expect(outcome.attachment).toBeNull();
     expect(outcome.reason).toContain('could not be read back');
     // The point of the message: the write itself is now suspect.

@@ -17,10 +17,15 @@ import { promises as fs } from 'fs';
 
 jest.mock('fs', () => ({
   promises: {
-    mkdir: jest.fn(), access: jest.fn(), readdir: jest.fn(),
-    writeFile: jest.fn(), readFile: jest.fn(), unlink: jest.fn(),
-    rename: jest.fn(), rm: jest.fn(),
-  }
+    mkdir: jest.fn(),
+    access: jest.fn(),
+    readdir: jest.fn(),
+    writeFile: jest.fn(),
+    readFile: jest.fn(),
+    unlink: jest.fn(),
+    rename: jest.fn(),
+    rm: jest.fn(),
+  },
 }));
 jest.mock('node:crypto', () => ({
   randomUUID: jest.fn(() => 'test-uuid-1234'),
@@ -47,7 +52,9 @@ describe('ExtendScript injection', () => {
     mockFs.unlink.mockResolvedValue(undefined);
     mockFs.readFile.mockResolvedValue(JSON.stringify({ result: { ok: true } }));
   });
-  afterEach(() => { delete process.env.PREMIERE_TEMP_DIR; });
+  afterEach(() => {
+    delete process.env.PREMIERE_TEMP_DIR;
+  });
 
   const emittedFor = async (sequenceId: string, projectItemId = 'item'): Promise<string> => {
     const bridge = new PremiereProBridge();
@@ -76,7 +83,15 @@ describe('ExtendScript injection', () => {
    */
   const runAgainstMockHost = (script: string, withSequence = false) => {
     const sequences: Record<string, unknown> = withSequence
-      ? { numSequences: 1, 0: { sequenceID: 'seq', name: 'Mock', videoTracks: { numTracks: 0 }, audioTracks: { numTracks: 0 } } }
+      ? {
+          numSequences: 1,
+          0: {
+            sequenceID: 'seq',
+            name: 'Mock',
+            videoTracks: { numTracks: 0 },
+            audioTracks: { numTracks: 0 },
+          },
+        }
       : { numSequences: 0 };
     const sandbox: Record<string, unknown> = {
       __OWNED: false,
@@ -84,7 +99,9 @@ describe('ExtendScript injection', () => {
         project: {
           sequences,
           rootItem: { nodeId: 'root', children: { numItems: 0 } },
-          saveAs: () => { (sandbox as { __SAVED?: boolean }).__SAVED = true; },
+          saveAs: () => {
+            (sandbox as { __SAVED?: boolean }).__SAVED = true;
+          },
         },
       },
       qe: undefined,
