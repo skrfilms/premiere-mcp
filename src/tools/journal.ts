@@ -27,6 +27,8 @@ export interface JournalEntry {
   argsDigest: string;
   readOnly: boolean;
   startedAt: string;
+  /** Strictly increasing within a process, so calls started in the same millisecond keep their order. */
+  order?: number;
   finishedAt?: string;
   status: 'running' | 'ok' | 'failed';
   summary?: string;
@@ -68,9 +70,13 @@ let appendsSinceCompact = 0;
 function compactIfLarge(): void {
   if (++appendsSinceCompact < 200) return;
   appendsSinceCompact = 0;
-  const kept = readAll().sort((a, b) => a.startedAt.localeCompare(b.startedAt)).slice(-MAX_ENTRIES);
+  const kept = readAll().sort((a, b) => byNewest(b, a)).slice(-MAX_ENTRIES);
   writeFileSync(file(), kept.map((e) => JSON.stringify(e)).join('\n') + '\n', { mode: 0o600 });
 }
+
+let lastOrder = 0;
+const nextOrder = (): number => (lastOrder = Math.max(Date.now() * 1000, lastOrder + 1));
+const byNewest = (a: JournalEntry, b: JournalEntry): number => (b.order ?? Date.parse(b.startedAt) * 1000) - (a.order ?? Date.parse(a.startedAt) * 1000);
 
 const digest = (args: unknown): string => createHash('sha1').update(JSON.stringify(args ?? {})).digest('hex').slice(0, 12);
 
@@ -82,6 +88,7 @@ export function begin(tool: string, args: Record<string, unknown>, readOnly: boo
     argsDigest: digest(args),
     readOnly,
     startedAt: new Date().toISOString(),
+    order: nextOrder(),
     status: 'running',
     ...(typeof args?.requestId === 'string' && args.requestId ? { requestId: String(args.requestId) } : {}),
   };
@@ -107,7 +114,7 @@ export function failThrown(e: JournalEntry, message: string): void {
 
 /** The most recent entry carrying this requestId, if any. */
 export function byRequestId(requestId: string): JournalEntry | undefined {
-  return readAll().filter((x) => x.requestId === requestId).sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
+  return readAll().filter((x) => x.requestId === requestId).sort(byNewest)[0];
 }
 
 export function recent(opts: { limit?: number; mutatingOnly?: boolean; sinceSeconds?: number } = {}): JournalEntry[] {
@@ -115,7 +122,7 @@ export function recent(opts: { limit?: number; mutatingOnly?: boolean; sinceSeco
   return readAll()
     // Not itself: the get_recent_calls call asking the question is always the newest entry.
     .filter((x) => x.tool !== 'get_recent_calls' && (!opts.mutatingOnly || !x.readOnly) && (!since || Date.parse(x.startedAt) >= since))
-    .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+    .sort(byNewest)
     .slice(0, Math.max(1, Math.min(opts.limit ?? 10, 100)))
     .map(({ result: _r, ...rest }) => rest);
 }
