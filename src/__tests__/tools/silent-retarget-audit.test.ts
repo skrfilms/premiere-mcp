@@ -63,7 +63,17 @@ function domainMethods(): Method[] {
       out.push({
         file,
         name,
-        signature: lines[i]!,
+        // The whole parameter list, which a formatter may wrap over several lines: up to the
+        // line that opens the body.
+        signature: lines
+          .slice(
+            i,
+            Math.min(
+              end,
+              i + 1 + lines.slice(i, end).findIndex((l) => /\)\s*(?::[^{]*)?\{\s*$/.test(l)),
+            ),
+          )
+          .join(' '),
         body: lines.slice(i, end).join('\n'),
         line: i + 1,
       });

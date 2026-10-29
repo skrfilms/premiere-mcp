@@ -1312,7 +1312,7 @@ export class EffectsTools extends AssemblyTools {
   }
 
   protected async verifyEffectRendered(
-    _seqId: string | undefined,
+    seqId: string | undefined,
     trackIndex: number,
     clipIndex: number,
     effectName: string,
@@ -1329,7 +1329,7 @@ export class EffectsTools extends AssemblyTools {
 
     const mediaInfo: any = await this.bridge.executeScript(`
       try {
-        var seq = app.project.activeSequence;
+        var seq = ${this.buildSeqRes(seqId)};
         var track = seq.videoTracks[${trackIndex}];
         var clip = track && track.clips[${clipIndex}];
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
@@ -1369,10 +1369,10 @@ export class EffectsTools extends AssemblyTools {
     const applyResult: any = await this.bridge.executeScript(`
       try {
         app.enableQE();
-        var seq = qe.project.getActiveSequence();
+        var seq = ${this.buildQSeqResolver(seqId)};
         var clip = __qeClipByIndex(seq, 'video', ${trackIndex}, ${clipIndex});
         if (!clip) return JSON.stringify({success:false,error:'QE clip not found'});
-        var domClip = app.project.activeSequence.videoTracks[${trackIndex}].clips[${clipIndex}];
+        var domClip = ${this.buildSeqRes(seqId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
         var before = domClip.components.numItems;
         var eff = qe.project.getVideoEffectByName(${JSON.stringify(effectName)});
         if (!eff) return JSON.stringify({success:false,error:'Effect not found: '+${JSON.stringify(effectName)}});
@@ -1383,7 +1383,7 @@ export class EffectsTools extends AssemblyTools {
           effectParam && effectParamValue
             ? `
         if (added) {
-          var newComp = app.project.activeSequence.videoTracks[${trackIndex}].clips[${clipIndex}].getComponentAt ? null : null;
+          var newComp = ${this.buildSeqRes(seqId)}.videoTracks[${trackIndex}].clips[${clipIndex}].getComponentAt ? null : null;
           var qeComp = clip.getComponentAt(after - 1);
           if (qeComp) { try { qeComp.setParamValue(${JSON.stringify(effectParam)}, ${JSON.stringify(effectParamValue)}); } catch(ep) {} }
         }`
