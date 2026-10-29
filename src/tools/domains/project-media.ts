@@ -18,7 +18,40 @@ import type { ProjectFileEditArgs, ProjectFileInspectArgs } from './shared.js';
 
 export class ProjectMediaTools extends CaptionTools {
   // Discovery Tools Implementation
-  protected async listProjectItems(includeBins = true, _includeMetadata = false): Promise<any> {
+  /**
+   * A show project holds thousands of items, and the whole list in one reply would fill an
+   * assistant's context. Filtered and paged here (the walk itself stays in ExtendScript): a page
+   * of `limit` items from `offset`, optionally by name, type or bin, with nextOffset to go on.
+   */
+  protected async listProjectItems(includeBins = true, _includeMetadata = false, page: { limit?: number; offset?: number; nameContains?: string; type?: string; binPath?: string } = {}): Promise<any> {
+    const all: any = await this.listAllProjectItems(includeBins);
+    if (!all?.success) return all;
+    const needle = (page.nameContains ?? '').toLowerCase();
+    const bin = (page.binPath ?? '').replace(/^[\\/]+/, '').toLowerCase();
+    const keep = (it: any) => (!needle || String(it.name).toLowerCase().includes(needle))
+      && (!page.type || it.type === page.type)
+      && (!bin || String(it.treePath ?? '').replace(/\\/g, '/').toLowerCase().includes(`/${bin}/`));
+    const items = (all.items as any[]).filter(keep);
+    const limit = Math.min(Math.max(Number(page.limit) || 200, 1), 2000);
+    const offset = Math.max(Number(page.offset) || 0, 0);
+    const slice = items.slice(offset, offset + limit);
+    const more = offset + slice.length < items.length;
+    const bins = includeBins ? (all.bins as any[]).filter((b) => !needle || String(b.name).toLowerCase().includes(needle)) : [];
+    return {
+      success: true,
+      items: slice,
+      bins: bins.slice(0, 500),
+      totalItems: all.totalItems,
+      totalBins: all.totalBins,
+      matchingItems: items.length,
+      offset,
+      returned: slice.length,
+      hasMore: more,
+      ...(more ? { nextOffset: offset + slice.length, note: `Showing ${slice.length} of ${items.length}. Pass offset ${offset + slice.length} for the next page, or narrow with nameContains, type or binPath.` } : {}),
+    };
+  }
+
+  private async listAllProjectItems(includeBins: boolean): Promise<any> {
     const script = `
       try {
         function walkItems(parent, results, bins) {

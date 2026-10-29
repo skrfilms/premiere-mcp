@@ -28,7 +28,24 @@ All notable changes are documented here. Releases use semantic versioning.
 - **Switch task menu mid-session.** `activate_tools({ bundle: "task-grade" })` (or just
   "grade" / "grading") loads a whole task menu with real schemas; `deactivate_tools({ bundle })`
   drops it. Past ~50 advertised tools the reply warns and says what to drop.
-- `scripts/workflow-tests.mjs` W5–W8 run these end to end against live Premiere.
+- **Undo a whole call.** `revert_last_call` takes back the last edit made through the server
+  however many Premiere steps it took: it undoes until the sequence matches the state recorded
+  before the call, and if it never does, redoes back to where it started (by state, not by
+  count). It refuses when the sequence changed after that call. Script-added markers are not on
+  Premiere's undo stack, so marker-only edits are refused cleanly.
+- **Hand edits are noticed.** The next edit after a change made by hand in Premiere says so
+  (`changedOutsideThisServer`), and `what_changed` lists clips added, removed, moved, trimmed
+  or renamed since the server last looked.
+- **Replies sized to fit.** Every result is capped (40,000 characters by default; `maxResultChars`
+  per call or `PREMIERE_MCP_MAX_RESULT_CHARS`) by halving its longest lists, and says what was
+  cut. `list_project_items` pages (200 by default) and filters by name, type and bin. Results
+  are sent as compact JSON.
+- **Project notes.** `add_project_note` / `get_project_notes` keep conventions (naming, where
+  renders land, delivery) in a Markdown file next to the `.prproj`; `get_project_info`
+  includes them, so each session starts knowing them.
+- **Declared result shapes** (`outputSchema`) for the 15 most-called tools. All fields are
+  optional and extra fields are allowed, so failures still fit; W9 checks live results.
+- `scripts/workflow-tests.mjs` W5–W9 run these end to end against live Premiere.
 
 The timeout-safety tools are in `core` and named in the server instructions; under a task
 bundle they are reached through `call_tool`, which keeps every bundle at or under 50 tools.

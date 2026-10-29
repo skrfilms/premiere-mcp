@@ -13,13 +13,13 @@ Two independent axes, kept apart on purpose:
 
 ## Headline
 
-Catalogue: **659** tools.
+Catalogue: **663** tools.
 
 | standing | tools | share of catalogue |
 | --- | --- | --- |
 | **nothing has ever run it** | **0** | **0.0%** |
-| run by the suite and live | 556 | 84.4% |
-| run by the suite only (mock host) | 103 | 15.6% |
+| run by the suite and live | 556 | 83.9% |
+| run by the suite only (mock host) | 107 | 16.1% |
 | run live only | 0 | 0.0% |
 
 A tool in the first row is shipped on the strength of a code review and a schema. It may
@@ -27,8 +27,8 @@ well work; nothing here is evidence that it does.
 
 ## The measured run
 
-- commit: `6c4a6b6cb9652f69d4eec5df6890d5379c3f0cde` **with uncommitted changes in the tree**
-- catalogue at measurement: 659
+- commit: `8666aa79493bcb672bd5296a62da80182fa1ce4c` **with uncommitted changes in the tree**
+- catalogue at measurement: 663
 - test files that dispatched at least one tool: 37
 
 Measured by instrumenting the dispatcher, not by grepping test files for tool names:
@@ -74,6 +74,7 @@ __OWNED = true;
 | `add_marker` | yes (6) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/index.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `add_marker_to_project_item` | yes (4) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `add_metadata_schema_field` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
+| `add_project_note` | yes (5) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `add_text_overlay` | yes (6) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/index.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `add_to_render_queue` | yes (6) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/index.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `add_to_timeline` | yes (7) | yes | `src/__tests__/bridge/unconfirmed-placement.test.ts`, `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/index.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
@@ -335,6 +336,7 @@ __OWNED = true;
 | `get_project_info` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `get_project_item_info` | yes (4) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `get_project_item_info_extended` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
+| `get_project_notes` | yes (5) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `get_project_panel_columns` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `get_project_panel_metadata` | yes (4) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `get_project_panel_selection` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
@@ -540,6 +542,7 @@ __OWNED = true;
 | `resolve_conflict` | yes (5) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `restore_recovery_checkpoint` | yes (6) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/recovery.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `reverse_clip` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
+| `revert_last_call` | yes (5) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `ripple_delete` | yes (4) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `ripple_trim_in` | yes (6) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/trim-semantics.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `ripple_trim_out` | yes (6) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/trim-semantics.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
@@ -721,6 +724,7 @@ __OWNED = true;
 | `version_up_shots` | yes (5) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `vfx_pull_list` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `watermark_apply` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
+| `what_changed` | yes (5) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `where_used` | yes (5) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `write_clipboard` | yes (5) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `write_sidecar_file` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |

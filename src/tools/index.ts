@@ -60,6 +60,8 @@ import { getJob, listJobs, startJob } from './jobs.js';
 import { planSilenceCuts, toTimecode } from './silence.js';
 import { findQuote, planStringout, wordsFromSrt, wordsFromWhisperJson } from './stringout.js';
 import { decodeAudio, findOffset, SYNC_RATE } from './audio-sync.js';
+import { captureScript, describeDiff, diffStates, revertScript, type TimelineState } from './timeline-state.js';
+import { addNote, notesPathFor } from './project-notes.js';
 import { folderOf, listCandidateFiles, parseVersioned, planVersionUp, type ProjectMedia } from './version-up.js';
 
 // The header declarations and pure helpers moved to ./domains/shared.ts when this file was
@@ -67,6 +69,9 @@ import { folderOf, listCandidateFiles, parseVersioned, planVersionUp, type Proje
 // public surface before the split and the tests import them from it.
 export { findNulByteArgument, evaluateTextInjectionResult, summarizeBatch } from './domains/shared.js';
 export type { BatchVerdict } from './domains/shared.js';
+
+/** Calls that are not edits of a sequence, or are about the tracking itself. */
+const UNTRACKED_TOOLS = new Set(['revert_last_call', 'what_changed', 'undo', 'start_job', 'get_job', 'list_jobs', 'get_recent_calls', 'find_tool', 'activate_tools', 'deactivate_tools', 'get_project_notes', 'add_project_note', 'get_tool_typings']);
 
 /** Advertised-tool count past which activate_tools warns (published selection guidance). */
 const MENU_WARN_AT = 50;
@@ -650,13 +655,17 @@ export class PremiereProTools extends TrimmingTools {
       switch (name) {
         // Discovery Tools
         case 'list_project_items':
-          return await this.listProjectItems(args.includeBins, args.includeMetadata);
+          return await this.listProjectItems(args.includeBins, args.includeMetadata, { limit: args.limit, offset: args.offset, nameContains: args.nameContains, type: args.type, binPath: args.binPath });
         case 'list_sequences':
           return await this.listSequences();
         case 'list_sequence_tracks':
           return await this.listSequenceTracks(args.sequenceId);
         case 'get_project_info':
-          return await this.getProjectInfo();
+          return this.withProjectNotes(await this.getProjectInfo());
+        case 'what_changed': return await this.whatChanged(args);
+        case 'revert_last_call': return await this.revertLastCall(args);
+        case 'get_project_notes': return await this.getProjectNotes();
+        case 'add_project_note': return await this.addProjectNote(args);
         case 'verify_premiere_connection':
           return await this.verifyPremiereConnection();
         case 'get_capabilities':
@@ -2151,6 +2160,128 @@ export class PremiereProTools extends TrimmingTools {
     else runFf('ffmpeg', ['-v', 'error', '-y', ...inputs, '-filter_complex', `${frames.map((_, i) => `[${i}:v]`).join('')}xstack=inputs=${frames.length}:layout=${frames.map((_, i) => `${(i % cols) === 0 ? '0' : Array.from({ length: i % cols }, () => 'w0').join('+')}_${Math.floor(i / cols) === 0 ? '0' : Array.from({ length: Math.floor(i / cols) }, () => 'h0').join('+')}`).join('|')}:fill=black`, '-q:v', '4', sheet], { timeoutMs: 60000 });
     if (!fsSync.existsSync(sheet)) return { success: false, error: 'ffmpeg did not write the contact sheet.' };
     return { success: true, outputPath: sheet, sequence: shots.name, frames: picks.map((p) => ({ timeSecs: Math.round(p.t * 1000) / 1000, shot: p.name || undefined })), grid: `${cols}x${rows}` };
+  }
+
+  // ---- Timeline state around edits: revert_last_call and what_changed (see timeline-state.ts)
+
+  private callStates: Array<{ tool: string; at: string; before: TimelineState; after: TimelineState }> = [];
+  private lastSeen = new Map<string, TimelineState>();
+  private captureDownUntil = 0;
+
+  /** The state of a sequence (or the active one), or null when Premiere cannot say. Never throws. */
+  async captureTimelineState(sequenceId?: string): Promise<TimelineState | null> {
+    if (Date.now() < this.captureDownUntil) return null;
+    try {
+      const r: any = await this.bridge.executeScript(captureScript(sequenceId), 8000);
+      if (!r?.success || typeof r.hash !== 'string') return null;
+      return { sequenceId: r.sequenceId, sequenceName: r.sequenceName, hash: r.hash, tracks: r.tracks, clips: r.clips ?? [], markers: r.markers ?? 0, project: r.project, capturedAt: new Date().toISOString() };
+    } catch {
+      // A dead bridge would make every edit wait twice more; stop asking for a while.
+      this.captureDownUntil = Date.now() + 30_000;
+      return null;
+    }
+  }
+
+  /**
+   * Run an editing call with the sequence's state read before and after. Records the pair for
+   * revert_last_call, and flags a change made outside this server since its last edit (a hand
+   * edit in Premiere), since clip ids the assistant is holding may now be stale.
+   */
+  async runTracked(name: string, args: Record<string, any>, run: () => Promise<any>): Promise<any> {
+    if (UNTRACKED_TOOLS.has(name) || process.env.PREMIERE_MCP_TRACK_STATE === '0') return run();
+    const seqArg = typeof args?.sequenceId === 'string' ? args.sequenceId : typeof args?.args?.sequenceId === 'string' ? args.args.sequenceId : undefined;
+    const before = await this.captureTimelineState(seqArg);
+    const result = await run();
+    if (!before) return result;
+    const after = await this.captureTimelineState(before.sequenceId);
+    const seen = this.lastSeen.get(before.sequenceId);
+    const outside = seen && seen.hash !== before.hash ? diffStates(seen, before) : null;
+    if (after) {
+      this.lastSeen.set(after.sequenceId, after);
+      if (after.hash !== before.hash) {
+        this.callStates.push({ tool: name, at: new Date().toISOString(), before, after });
+        if (this.callStates.length > 20) this.callStates.shift();
+      }
+    }
+    if (outside && result && typeof result === 'object' && !Array.isArray(result)) {
+      return { ...result, changedOutsideThisServer: { summary: describeDiff(outside), note: `"${before.sequenceName}" changed since the last edit made through this server, probably by hand in Premiere. Clip ids from earlier replies may be stale.` } };
+    }
+    return result;
+  }
+
+  private async whatChanged(args: any): Promise<any> {
+    const now = await this.captureTimelineState(typeof args.sequenceId === 'string' ? args.sequenceId : undefined);
+    if (!now) return { success: false, error: 'Could not read the sequence from Premiere.' };
+    const base = this.lastSeen.get(now.sequenceId);
+    this.lastSeen.set(now.sequenceId, now);
+    if (!base) return { success: true, baselineRecorded: true, sequence: now.sequenceName, clips: now.clips.length, note: 'No earlier state of this sequence in this session; recorded one now. Call again later to see what changed since.' };
+    const d = diffStates(base, now);
+    const cap = <T,>(a: T[]) => a.slice(0, 50);
+    return { success: true, sequence: now.sequenceName, sequenceId: now.sequenceId, since: base.capturedAt, changed: d.changed, summary: describeDiff(d),
+      added: cap(d.added), removed: cap(d.removed), moved: cap(d.moved), renamed: cap(d.renamed), tracks: d.tracks, markers: d.markers, project: d.project };
+  }
+
+  private async revertLastCall(args: any): Promise<any> {
+    const wanted = typeof args.sequenceId === 'string' ? args.sequenceId : null;
+    const idx = this.callStates.map((c, i) => [c, i] as const).filter(([c]) => !wanted || c.before.sequenceId === wanted).pop()?.[1];
+    if (idx === undefined) return { success: false, error: 'No edit made through this server in this session changed a sequence, so there is nothing to revert. (Only calls made since the server started are tracked.)' };
+    const last = this.callStates[idx]!;
+    const now = await this.captureTimelineState(last.before.sequenceId);
+    if (!now) return { success: false, error: 'Could not read the sequence from Premiere.' };
+    if (now.hash === last.before.hash) { this.callStates.splice(idx, 1); return { success: true, alreadyReverted: true, tool: last.tool, note: 'The sequence is already as it was before that call.' }; }
+    if (now.hash !== last.after.hash && args.force !== true) {
+      // Premiere has one undo stack: whatever happened since would be undone first.
+      return { success: false, tool: last.tool, changedSince: describeDiff(diffStates(last.after, now)),
+        error: `"${last.before.sequenceName}" changed after ${last.tool} ran, so undoing back to before it would also undo those later changes. Nothing was undone. Pass force:true to undo them too.` };
+    }
+    const r: any = await this.bridge.executeScript(revertScript(last.before.sequenceId, last.before.hash, Number(args.maxSteps) > 0 ? Math.min(Number(args.maxSteps), 200) : 40), 120000);
+    if (!r?.success && r?.restored === false) {
+      return { success: false, tool: last.tool, undoSteps: r?.undoSteps, redoneSteps: r?.redoneSteps, restoredToAfter: false,
+        error: `Undoing never matched the state before ${last.tool}, and redoing did not get all the way back either: the sequence is NOT as it was before this revert. Check it with what_changed, and use Premiere's Edit > Redo if needed.` };
+    }
+    if (!r?.success) {
+      return { success: false, tool: last.tool, undoSteps: r?.undoSteps, error: r?.error ?? `Undoing ${r?.undoSteps} steps never got back to the state before ${last.tool}, so it redid its way back and the sequence is as it was. Some script edits never reach Premiere's undo stack (markers are one); undo those by hand, or pass a larger maxSteps if the call made many steps.`, restoredToAfter: r?.restored === true || r?.restoredToAfter === now.hash };
+    }
+    this.callStates.splice(idx, 1);
+    const back = await this.captureTimelineState(last.before.sequenceId);
+    if (back) this.lastSeen.set(back.sequenceId, back);
+    return { success: true, verified: back?.hash === last.before.hash, verifiedBy: 'sequence state hash equals the one recorded before the call', reverted: last.tool, ranAt: last.at, sequence: last.before.sequenceName, undoSteps: r.undoSteps };
+  }
+
+  // ---- Project notes: conventions that should not be re-learned every session
+
+  private async projectPath(): Promise<string | null> {
+    const r: any = await this.bridge.executeScript('try { return JSON.stringify({ success: true, path: String(app.project.path || "") }); } catch (e) { return JSON.stringify({ success: false }); }');
+    return r?.success && r.path ? String(r.path) : null;
+  }
+
+  private withProjectNotes(info: any): any {
+    if (!info?.success || !info.path) return info;
+    const file = notesPathFor(String(info.path));
+    let text = '';
+    try { text = fsSync.readFileSync(file, 'utf8'); } catch { return { ...info, projectNotesPath: file, projectNotes: null, projectNotesHint: 'No notes for this project yet. add_project_note records a convention (naming, bins, export settings) so the next session starts knowing it.' }; }
+    return { ...info, projectNotesPath: file, projectNotes: text.length > 4000 ? `${text.slice(0, 4000)}… (get_project_notes for the rest)` : text };
+  }
+
+  private async getProjectNotes(): Promise<any> {
+    const p = await this.projectPath();
+    if (!p) return { success: false, error: 'No saved project is open (notes live next to the .prproj).' };
+    const file = notesPathFor(p);
+    try { return { success: true, path: file, notes: fsSync.readFileSync(file, 'utf8') }; } catch { return { success: true, path: file, notes: null, note: 'No notes yet.' }; }
+  }
+
+  private async addProjectNote(args: any): Promise<any> {
+    const note = String(args.note ?? '').trim();
+    if (!note) return { success: false, error: 'note is required.' };
+    const p = await this.projectPath();
+    if (!p) return { success: false, error: 'No saved project is open (notes live next to the .prproj).' };
+    const file = notesPathFor(p);
+    let text = '';
+    try { text = fsSync.readFileSync(file, 'utf8'); } catch { /* new file */ }
+    const next = addNote(text, note, typeof args.section === 'string' && args.section.trim() ? args.section.trim() : 'Conventions', new Date());
+    fsSync.writeFileSync(file, next, 'utf8');
+    const back = fsSync.readFileSync(file, 'utf8');
+    return { success: back.includes(note), verified: back.includes(note), path: file, notes: back };
   }
 
   private async stringoutFromTranscript(args: any): Promise<any> {

@@ -98,6 +98,16 @@
       ]
     },
     {
+      "name": "add_project_note",
+      "testFiles": [
+        "src/__tests__/tools/es3-absent-methods.test.ts",
+        "src/__tests__/tools/generated-script-syntax.test.ts",
+        "src/__tests__/tools/injection-guard.test.ts",
+        "src/__tests__/tools/schema-args.test.ts",
+        "src/__tests__/tools/undefined-identifiers.test.ts"
+      ]
+    },
+    {
       "name": "add_text_overlay",
       "testFiles": [
         "src/__tests__/tools/es3-absent-methods.test.ts",
@@ -2720,6 +2730,16 @@
       ]
     },
     {
+      "name": "get_project_notes",
+      "testFiles": [
+        "src/__tests__/tools/es3-absent-methods.test.ts",
+        "src/__tests__/tools/generated-script-syntax.test.ts",
+        "src/__tests__/tools/injection-guard.test.ts",
+        "src/__tests__/tools/schema-args.test.ts",
+        "src/__tests__/tools/undefined-identifiers.test.ts"
+      ]
+    },
+    {
       "name": "get_project_panel_columns",
       "testFiles": [
         "src/__tests__/tools/es3-absent-methods.test.ts",
@@ -4758,6 +4778,16 @@
       ]
     },
     {
+      "name": "revert_last_call",
+      "testFiles": [
+        "src/__tests__/tools/es3-absent-methods.test.ts",
+        "src/__tests__/tools/generated-script-syntax.test.ts",
+        "src/__tests__/tools/injection-guard.test.ts",
+        "src/__tests__/tools/schema-args.test.ts",
+        "src/__tests__/tools/undefined-identifiers.test.ts"
+      ]
+    },
+    {
       "name": "ripple_delete",
       "testFiles": [
         "src/__tests__/tools/es3-absent-methods.test.ts",
@@ -6542,6 +6572,16 @@
       ]
     },
     {
+      "name": "what_changed",
+      "testFiles": [
+        "src/__tests__/tools/es3-absent-methods.test.ts",
+        "src/__tests__/tools/generated-script-syntax.test.ts",
+        "src/__tests__/tools/injection-guard.test.ts",
+        "src/__tests__/tools/schema-args.test.ts",
+        "src/__tests__/tools/undefined-identifiers.test.ts"
+      ]
+    },
+    {
       "name": "where_used",
       "testFiles": [
         "src/__tests__/tools/es3-absent-methods.test.ts",
@@ -6627,8 +6667,8 @@
       ]
     }
   ],
-  "catalogueSize": 659,
-  "gitSha": "6c4a6b6cb9652f69d4eec5df6890d5379c3f0cde",
+  "catalogueSize": 663,
+  "gitSha": "8666aa79493bcb672bd5296a62da80182fa1ce4c",
   "gitDirty": true,
   "testFileCount": 37
 }

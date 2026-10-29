@@ -170,12 +170,17 @@ if (run('W1b')) try {
   let st = await v1(seq);
   const shot = st.clips.find((c) => /SH020/.test(c.media));
   must('SH020 is on V1', !!shot, st.clips.map((c) => c.media));
+  // The item behind the clip, whatever an earlier run renamed or relinked it to; start from v001.
+  const item = (await host(`(function(){ var s=__findSequence(${q(seq)}); var t=s.videoTracks[0]; for(var i=0;i<t.clips.numItems;i++) if(String(t.clips[i].nodeId)===${q(shot.id)}) return JSON.stringify({ id: String(t.clips[i].projectItem.nodeId) }); return '{}'; })();`)).id;
+  if (shot.media !== 'SH020_comp_v001.mp4') {
+    const reset = await tool('replace_clip_media', { projectItemId: item, newFilePath: join(MEDIA, 'SH020_comp_v001.mp4') });
+    must('reset SH020 to v001 (left over from an earlier run)', reset?.success !== false, reset?.error);
+  }
   await tool('trim_clip', { clipId: shot.id, inPoint: 1, outPoint: 3 });
   await tool('color_correct', { clipId: shot.id, exposure: 0.7 });
   await tool('set_clip_scale', { clipId: shot.id, value: 130, sequenceId: seq });
   st = await v1(seq);
   const before = st.clips.find((c) => c.id === shot.id);
-  const item = await itemByName('SH020_comp_v001.mp4');
   const r = await tool('replace_clip_media', { projectItemId: item, newFilePath: join(MEDIA, 'SH020_comp_v002.mp4') });
   check('relink SH020 to v002', r?.success !== false, r?.error);
   check('the bin item is renamed to the new file', r?.item === 'SH020_comp_v002.mp4', r?.item);
@@ -390,6 +395,95 @@ if (run('W8')) try {
     const look = await tool('look_at_cut', { sequenceId: r.sequenceId, outputPath: join(OUT, 'w8-look.jpg') });
     check('look_at_cut shows one frame per line', look?.success !== false && look?.frames?.length === 2 && existsSync(join(OUT, 'w8-look.jpg')), look?.error || look?.frames);
   }
+} catch (e) { stopped(e); }
+
+// ------------------------------------------------------------------- W9: through the MCP server
+// These need the server around the tools (state tracking, result cap), so they go through a
+// real MCP handler in this process rather than calling tools directly.
+async function mcpClient() {
+  const { createMcpHandler } = await import('@modelcontextprotocol/server');
+  const { buildPremiereMcpServer } = await import('../dist/server-factory.js');
+  const { PremiereProResources } = await import('../dist/resources/index.js');
+  const { PremiereProPrompts } = await import('../dist/prompts/index.js');
+  const surface = { tools, resources: new PremiereProResources(bridge), prompts: new PremiereProPrompts() };
+  const handler = createMcpHandler(() => buildPremiereMcpServer(surface, { wireExposureNotifications: false }));
+  let id = 0;
+  const rpc = async (method, params) => {
+    const res = await handler.fetch(new Request('http://127.0.0.1/mcp', { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' }, body: JSON.stringify({ jsonrpc: '2.0', id: ++id, method, params }) }));
+    const text = await res.text();
+    const line = text.split(/\r?\n/).find((l) => l.startsWith('data:'));
+    return JSON.parse(line ? line.slice(5) : text);
+  };
+  await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'workflow-tests', version: '1' } });
+  return async (name, args) => { const r = await rpc('tools/call', { name, arguments: args }); return r.result ? JSON.parse(r.result.content[0].text) : { success: false, error: r.error?.message }; };
+}
+
+if (run('W9')) try {
+  workflow('W9  the assistant keeps an accurate picture: undo a whole edit, notice hand edits, short replies, project notes');
+  const mcp = await mcpClient();
+  const r0 = await tool('import_media', { filePath: join(MEDIA, 'talk_with_pauses.mp4'), binName: 'wf_w9' });
+  must('the interview is in the project', imported(r0), r0?.error);
+  const talk = await itemByName('talk_with_pauses.mp4');
+  const sr = await tool('create_sequence_from_clips', { projectItemIds: [talk], name: 'wf_w9' });
+  const seq = sr?.sequenceId || await seqByName('wf_w9');
+  must('build the edit', !!seq, sr?.error);
+  await tool('set_active_sequence', { sequenceId: seq });
+  const span = async () => (await v1(seq)).clips.map((c) => [c.start, c.end, c.inPoint].map((n) => Math.round(n * 1000) / 1000).join('-')).join(' ');
+  const original = await span();
+  const clip = (await v1(seq)).clips[0];
+
+  const cut = await mcp('remove_silence', { clipId: clip.id, confirm: true });
+  check('remove_silence cut the pauses (many Premiere steps)', cut?.cutsApplied === 2, cut?.error || cut);
+  const rv = await mcp('revert_last_call', {});
+  check('revert_last_call undid the whole call, verified', rv?.success === true && rv?.verified === true && rv?.reverted === 'remove_silence', rv);
+  check('the cut is exactly back to the original', await span() === original, { now: await span(), original });
+
+  // A hand edit: made straight in Premiere, not through the server.
+  // Hand edits: made straight in Premiere on this sequence, not through the server.
+  const handRazor = (tc) => host(`(function(){ app.project.openSequence(${q(seq)}); app.enableQE(); qe.project.getActiveSequence().razor('${tc}'); return '{}'; })();`);
+  await handRazor('00:00:03:00');
+  const mk = await mcp('razor_timeline_at_time', { sequenceId: seq, time: 5 });
+  check('the next edit says the sequence changed by hand first', !!mk?.changedOutsideThisServer, mk?.changedOutsideThisServer || mk);
+  const rv2 = await mcp('revert_last_call', {});
+  check('reverting that edit takes back only its own cut, the hand edit stays', rv2?.success === true && (await v1(seq)).clips.length === 2, rv2);
+  check('the active sequence is still this one', (await host('(function(){ return JSON.stringify({ id: String(app.project.activeSequence.sequenceID) }); })();')).id === seq);
+  const mko = await mcp('add_marker', { sequenceId: seq, time: 0.5, name: 'w9 note' });
+  const rvm = await mcp('revert_last_call', {});
+  const afterM = (await v1(seq)).clips.length;
+  check('a marker edit (not on the undo stack) is refused cleanly and the cut is untouched', rvm?.success === false && /markers/.test(rvm?.error ?? '') && rvm?.restoredToAfter === true && afterM === 2, { v1Clips: afterM, restored: rvm?.restoredToAfter, error: rvm?.error });
+  void mko;
+
+  await handRazor('00:00:01:12');
+  const wc = await mcp('what_changed', { sequenceId: seq });
+  check('what_changed sees the second hand edit', wc?.changed === true && wc.added.length + wc.moved.length > 0, wc?.summary || wc);
+  await mcp('razor_timeline_at_time', { sequenceId: seq, time: 5 });
+  await handRazor('00:00:00:12');
+  const rv3 = await mcp('revert_last_call', {});
+  check('revert refuses when something happened after the call, and changes nothing', rv3?.success === false && !!rv3?.changedSince, rv3);
+
+  const page = await mcp('list_project_items', { limit: 2 });
+  check('project items come a page at a time', page?.returned === 2 && page?.hasMore === true && page?.nextOffset === 2, page && { returned: page.returned, hasMore: page.hasMore });
+  const named = await mcp('list_project_items', { nameContains: 'talk_with' });
+  check('and can be filtered by name', named?.items?.length >= 1 && named.items.every((i) => /talk_with/.test(i.name)), named?.items?.map((i) => i.name));
+  const big = await mcp('execute_extendscript', { script: 'var s=""; for (var i=0;i<6000;i++) s+="clip_"+i+","; return JSON.stringify({ success: true, list: s.split(",") });' });
+  check('a huge reply is cut to fit and says how to get the rest', !!big?.resultTruncated && JSON.stringify(big).length < 45000, big?.resultTruncated || big?.error);
+
+  // Declared result shapes: every live result of those tools must fit its schema.
+  const { OUTPUT_SCHEMAS } = await import('../dist/tools/output-schemas.js');
+  const bad = [];
+  for (const [name, schema] of Object.entries(OUTPUT_SCHEMAS)) {
+    const args = { find_tool: { query: 'marker' }, get_job: { jobId: 'nope' }, revert_last_call: { sequenceId: 'nope' }, list_sequence_tracks: { sequenceId: seq } }[name] ?? {};
+    const out = await mcp(name, args);
+    const p = schema.safeParse(out);
+    if (!p.success) bad.push({ name, issue: String(p.error).slice(0, 200) });
+  }
+  check(`results fit their declared shapes (${Object.keys(OUTPUT_SCHEMAS).length} tools, failures included)`, bad.length === 0, bad);
+
+  const note = `Shots are SH<nnn>_comp_v<nnn> (workflow test ${Date.now()})`;
+  const an = await mcp('add_project_note', { note });
+  check('a project convention is recorded next to the project', an?.verified === true, an?.error || an?.path);
+  const info = await mcp('get_project_info', {});
+  check('and get_project_info hands it to the next session', String(info?.projectNotes ?? '').includes(note), info?.projectNotesPath);
 } catch (e) { stopped(e); }
 
 // ------------------------------------------------------------------- summary

@@ -28,6 +28,8 @@ import { z, type ZodTypeAny } from 'zod';
 import type { PremiereProTools } from './tools/index.js';
 import { annotationsFor } from './tools/annotations.js';
 import * as journal from './tools/journal.js';
+import { capResult, maxResultChars } from './tools/result-size.js';
+import { outputJsonSchema } from './tools/output-schemas.js';
 import { cursorFromParams, paginate, resolvePageSize } from './tools/router.js';
 import { attachImageForResult } from './tools/image-content.js';
 import type { PremiereProResources } from './resources/index.js';
@@ -121,6 +123,7 @@ export function buildPremiereMcpServer(
       description: tool.description,
       inputSchema: inputSchemaToJsonSchema(tool.inputSchema as ZodTypeAny),
       annotations: annotationsFor(tool.name),
+      ...(outputJsonSchema(tool.name) ? { outputSchema: outputJsonSchema(tool.name) } : {}),
     }));
 
     const pageSize = resolvePageSize();
@@ -166,10 +169,15 @@ export function buildPremiereMcpServer(
           void ctx.mcpReq.notify({ method: 'notifications/progress', params: { progressToken, progress: secs, message: `${name} still running (${secs}s)` } }).catch(() => {});
         }, 5000)
       : undefined;
-    const entry = journal.begin(name, callArgs, annotationsFor(name).readOnlyHint === true || /^get_(recent_calls|job)$|^list_jobs$/.test(name));
+    const readOnly = annotationsFor(name).readOnlyHint === true || /^get_(recent_calls|job|project_notes)$|^list_jobs$|^what_changed$/.test(name);
+    const entry = journal.begin(name, callArgs, readOnly);
+    // Edits run with the sequence state read around them (revert_last_call, what_changed).
+    const exec = (a: Record<string, unknown>) => readOnly || typeof tools.runTracked !== 'function'
+      ? tools.executeTool(name, a)
+      : tools.runTracked(name, a, () => tools.executeTool(name, a));
 
     try {
-      let result = await tools.executeTool(name, callArgs);
+      let result = await exec(callArgs);
       // A tool that needs a yes (a delete of media still on a timeline, a raw script that deletes
       // or closes things) returns needsConfirmation. When the client can ask the user mid-call
       // (MCP elicitation), ask, and on yes run it once more with confirm:true. Otherwise the result
@@ -185,7 +193,7 @@ export function buildPremiereMcpServer(
           } as never);
           const yes = answer?.action === 'accept' && (answer.content as { confirm?: unknown } | undefined)?.confirm === true;
           result = yes
-            ? await tools.executeTool(name, { ...callArgs, confirm: true })
+            ? await exec({ ...callArgs, confirm: true })
             : { ...(result as Record<string, unknown>), userDeclined: answer?.action !== 'accept' || !yes, note: 'The user was asked and did not confirm. Nothing was changed.' };
         } catch { /* elicitation unavailable on this connection: fall through with the needsConfirmation result */ }
       }
@@ -207,17 +215,24 @@ export function buildPremiereMcpServer(
             }
           : (result as Record<string, unknown>);
 
+      // Cap the size so one call cannot fill the assistant's context; say what was cut.
+      const capped = capResult(enriched, maxResultChars(callArgs.maxResultChars));
+      const sent: Record<string, unknown> = capped.cuts
+        ? { ...(capped.value as Record<string, unknown>), resultTruncated: { originalChars: capped.originalChars, cuts: capped.cuts, how: 'Ask for less (most list tools take limit/offset or a filter), or pass maxResultChars (up to 400000) on the call to raise the cap.' } }
+        : (capped.value as Record<string, unknown>);
+
       const content: CallToolResult['content'] = [
         {
           type: 'text' as const,
-          text: JSON.stringify(enriched, null, 2),
+          // Compact: indentation alone costs a quarter more tokens on a large result.
+          text: JSON.stringify(sent),
         },
       ];
       if (image.attachment) content.push(image.attachment.block);
 
       const toolResult: CallToolResult = {
         content,
-        structuredContent: enriched,
+        structuredContent: sent,
         isError: result.success === false,
       };
       return server.projectCallToolResult(toolResult, undefined);

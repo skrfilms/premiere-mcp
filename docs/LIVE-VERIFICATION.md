@@ -17,25 +17,25 @@ wrote a file. Tools nobody has executed live are counted and named, not omitted.
 
 ## Coverage
 
-Catalogue: **659** tools. Sweeps on record: **15**.
+Catalogue: **663** tools. Sweeps on record: **15**.
 
 | standing | tools | share of catalogue |
 | --- | --- | --- |
-| **executed live** | **556** | **84.4%** |
-| **never executed live** | **103** | **15.6%** |
+| **executed live** | **556** | **83.9%** |
+| **never executed live** | **107** | **16.1%** |
 
 Broken down. Only the first two rows are evidence about a tool; the rest record that we
 looked and did not run it, and why.
 
 | standing | tools | share of catalogue |
 | --- | --- | --- |
-| executed live, reported success | 521 | 79.1% |
+| executed live, reported success | 521 | 78.6% |
 | executed live, FAILED | 35 | 5.3% |
 | not executed — harness could not build arguments | 4 | 0.6% |
-| not executed — unsafe for an unattended sweep | 88 | 13.4% |
+| not executed — unsafe for an unattended sweep | 88 | 13.3% |
 | not executed — panel was wedged by an earlier tool | 1 | 0.2% |
 | not executed — mutating, sweep was read-only | 0 | 0.0% |
-| absent from every sweep | 10 | 1.5% |
+| absent from every sweep | 14 | 2.1% |
 
 Of the 521 tools that passed, **16** returned `verified:false` —
 the call succeeded and the effect was not confirmed, so they are not evidence of an effect:
@@ -109,6 +109,7 @@ the call succeeded and the effect was not confirmed, so they are not evidence of
 | `add_marker` | executed live, reported success | 2026-10-28T17:13:03Z | `live-smoke-sweep` |  |
 | `add_marker_to_project_item` | executed live, reported success | 2026-10-28T17:13:03Z | `live-smoke-sweep` |  |
 | `add_metadata_schema_field` | executed live, reported success | 2026-10-28T17:13:03Z | `live-smoke-sweep` |  |
+| `add_project_note` | absent from every sweep | — | — | |
 | `add_text_overlay` | executed live, reported success | 2026-10-28T17:13:03Z | `live-smoke-sweep` |  |
 | `add_to_render_queue` | not executed — unsafe for an unattended sweep | 2026-10-28T17:13:03Z | `live-smoke-sweep` | launches AME |
 | `add_to_timeline` | executed live, reported success | 2026-10-28T17:13:03Z | `live-smoke-sweep` |  |
@@ -370,6 +371,7 @@ the call succeeded and the effect was not confirmed, so they are not evidence of
 | `get_project_info` | executed live, reported success | 2026-10-28T17:13:03Z | `live-smoke-sweep` |  |
 | `get_project_item_info` | executed live, reported success | 2026-10-28T17:13:03Z | `live-smoke-sweep` |  |
 | `get_project_item_info_extended` | executed live, reported success | 2026-10-28T17:13:03Z | `live-smoke-sweep` |  |
+| `get_project_notes` | absent from every sweep | — | — | |
 | `get_project_panel_columns` | executed live, reported success | 2026-10-28T17:13:03Z | `live-smoke-sweep` |  |
 | `get_project_panel_metadata` | executed live, reported success | 2026-10-28T17:13:03Z | `live-smoke-sweep` |  |
 | `get_project_panel_selection` | executed live, reported success | 2026-10-28T17:13:03Z | `live-smoke-sweep` |  |
@@ -575,6 +577,7 @@ the call succeeded and the effect was not confirmed, so they are not evidence of
 | `resolve_conflict` | not executed — unsafe for an unattended sweep | 2026-10-28T17:13:03Z | `live-smoke-sweep` | mutates shared production |
 | `restore_recovery_checkpoint` | not executed — unsafe for an unattended sweep | 2026-10-28T17:13:03Z | `live-smoke-sweep` | replaces sequence state |
 | `reverse_clip` | executed live, reported success (verified:true) | 2026-10-28T17:13:03Z | `live-smoke-sweep` |  |
+| `revert_last_call` | absent from every sweep | — | — | |
 | `ripple_delete` | not executed — unsafe for an unattended sweep | 2026-10-28T17:13:03Z | `live-smoke-sweep` | destructive |
 | `ripple_trim_in` | executed live, reported success (verified:true) | 2026-10-28T17:13:03Z | `live-smoke-sweep` |  |
 | `ripple_trim_out` | executed live, FAILED | 2026-10-28T17:13:03Z | `live-smoke-sweep` | A ripple from 3.91666666666667s back to 2.08333333333333s would land later clips on V2 "fixture_c.mp4" at 0s, A2 "fixtur |
@@ -756,6 +759,7 @@ the call succeeded and the effect was not confirmed, so they are not evidence of
 | `version_up_shots` | absent from every sweep | — | — | |
 | `vfx_pull_list` | executed live, reported success | 2026-10-28T17:13:03Z | `live-smoke-sweep` |  |
 | `watermark_apply` | executed live, reported success | 2026-10-28T17:13:03Z | `live-smoke-sweep` |  |
+| `what_changed` | absent from every sweep | — | — | |
 | `where_used` | absent from every sweep | — | — | |
 | `write_clipboard` | not executed — unsafe for an unattended sweep | 2026-10-28T17:13:03Z | `live-smoke-sweep` | overwrites the user's system clipboard |
 | `write_sidecar_file` | executed live, reported success | 2026-10-28T17:13:03Z | `live-smoke-sweep` |  |
