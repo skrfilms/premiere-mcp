@@ -1393,10 +1393,10 @@ export class PremiereProResources {
       'render_sequence_previews triggers renderPreview() — async, check status after.',
       '',
       '## Bridge setup (if tools time out)',
-      '1. In Premiere: Window > Extensions > MCP Bridge (CEP)',
-      `2. Set Temp Directory to ${DEFAULT_BRIDGE_TEMP_DIR}`,
-      '3. Click Start Bridge',
-      '4. Confirm with ping or verify_premiere_connection',
+      '1. Premiere must be running: the bridge starts with it in the background (no panel needed).',
+      '2. `npx -y premiere-mcp@latest doctor` names what is wrong; `setup` installs anything missing.',
+      `3. Window > Extensions > MCP Bridge (CEP) shows its status; its folder must be ${DEFAULT_BRIDGE_TEMP_DIR}.`,
+      '4. Confirm with verify_premiere_connection.',
     ].join('\n');
   }
 }

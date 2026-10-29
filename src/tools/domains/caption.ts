@@ -7,7 +7,7 @@
 import { AudioTools } from './audio.js';
 import { spawn } from 'child_process';
 // Synchronous fs/path/os bindings for the Node-side (non-ExtendScript) tools.
-// Kept separate from the `promises as fs` import above, which is the async API.
+// The async API is the separate `promises as fs` import.
 import * as fsSync from 'node:fs';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import { basename, dirname, extname, isAbsolute, join } from 'node:path';
