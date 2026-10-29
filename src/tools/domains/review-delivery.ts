@@ -10,7 +10,11 @@ import { MulticamTools } from './multicam.js';
 import * as fsSync from 'node:fs';
 
 export class ReviewDeliveryTools extends MulticamTools {
-  protected async assembleReviewReel(sequenceIds: string[], reelName: string, handles: number): Promise<any> {
+  protected async assembleReviewReel(
+    sequenceIds: string[],
+    reelName: string,
+    handles: number,
+  ): Promise<any> {
     const idsJson = JSON.stringify(sequenceIds);
     return await this.bridge.executeScript(`
       try {
@@ -151,30 +155,55 @@ export class ReviewDeliveryTools extends MulticamTools {
     `);
   }
 
-  protected async notesToMarkers(notesPath: string, sequenceId?: string, markerType = 'Comment', colorIndex?: number): Promise<any> {
+  protected async notesToMarkers(
+    notesPath: string,
+    sequenceId?: string,
+    markerType = 'Comment',
+    colorIndex?: number,
+  ): Promise<any> {
     const fs = fsSync;
-    if (!fs.existsSync(notesPath)) return { success: false, error: 'Notes file not found: ' + notesPath };
-    const lines = fs.readFileSync(notesPath, 'utf8').split('\n').filter((l: string) => l.trim());
+    if (!fs.existsSync(notesPath))
+      return { success: false, error: 'Notes file not found: ' + notesPath };
+    const lines = fs
+      .readFileSync(notesPath, 'utf8')
+      .split('\n')
+      .filter((l: string) => l.trim());
     let created = 0;
     for (const line of lines) {
       // Format: "HH:MM:SS:FF Note" or "SS.ms Note" or "MM:SS Note"
       const match = line.match(/^(\d+:\d+:\d+:\d+|\d+:\d+:\d+|\d+:\d+|\d+\.?\d*)\s+(.*)/);
       if (!match) continue;
-      const tcStr = match[1] ?? ''; const note = (match[2] ?? '').trim();
+      const tcStr = match[1] ?? '';
+      const note = (match[2] ?? '').trim();
       // Parse TC to seconds
       let secs = 0;
-      const parts = tcStr.split(':'); const P = (n: number) => parts[n] ?? '0';
-      if (parts.length === 4) secs = parseInt(P(0)) * 3600 + parseInt(P(1)) * 60 + parseInt(P(2)) + parseInt(P(3)) / 24;
-      else if (parts.length === 3) secs = parseInt(P(0)) * 3600 + parseInt(P(1)) * 60 + parseFloat(P(2));
+      const parts = tcStr.split(':');
+      const P = (n: number) => parts[n] ?? '0';
+      if (parts.length === 4)
+        secs = parseInt(P(0)) * 3600 + parseInt(P(1)) * 60 + parseInt(P(2)) + parseInt(P(3)) / 24;
+      else if (parts.length === 3)
+        secs = parseInt(P(0)) * 3600 + parseInt(P(1)) * 60 + parseFloat(P(2));
       else if (parts.length === 2) secs = parseInt(P(0)) * 60 + parseFloat(P(1));
       else secs = parseFloat(tcStr);
-      const r = await this.createMarker(secs, note, '', markerType, colorIndex, undefined, sequenceId);
+      const r = await this.createMarker(
+        secs,
+        note,
+        '',
+        markerType,
+        colorIndex,
+        undefined,
+        sequenceId,
+      );
       if (r.success) created++;
     }
     return { success: true, created, total: lines.length };
   }
 
-  protected async markersToNotes(outputPath: string, sequenceId?: string, format = 'text'): Promise<any> {
+  protected async markersToNotes(
+    outputPath: string,
+    sequenceId?: string,
+    format = 'text',
+  ): Promise<any> {
     const result = await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(sequenceId)};
@@ -194,13 +223,23 @@ export class ReviewDeliveryTools extends MulticamTools {
     if (format === 'json') {
       content = JSON.stringify(result.rows, null, 2);
     } else if (format === 'csv') {
-      content = ['time,name,comment,type', ...result.rows.map((r: any) => `${r.time},${JSON.stringify(r.name)},${JSON.stringify(r.comment)},${r.type}`)].join('\n');
+      content = [
+        'time,name,comment,type',
+        ...result.rows.map(
+          (r: any) => `${r.time},${JSON.stringify(r.name)},${JSON.stringify(r.comment)},${r.type}`,
+        ),
+      ].join('\n');
     } else {
-      content = result.rows.map((r: any) => {
-        const t = r.time; const h = Math.floor(t/3600); const m = Math.floor((t%3600)/60); const s = Math.floor(t%60);
-        const tc = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
-        return `${tc}  ${r.name}${r.comment ? '  — ' + r.comment : ''}`;
-      }).join('\n');
+      content = result.rows
+        .map((r: any) => {
+          const t = r.time;
+          const h = Math.floor(t / 3600);
+          const m = Math.floor((t % 3600) / 60);
+          const s = Math.floor(t % 60);
+          const tc = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+          return `${tc}  ${r.name}${r.comment ? '  — ' + r.comment : ''}`;
+        })
+        .join('\n');
     }
     fs.writeFileSync(outputPath, content);
     return { success: true, outputPath, markerCount: result.rows.length, format };
@@ -253,22 +292,49 @@ export class ReviewDeliveryTools extends MulticamTools {
     `);
   }
 
-  protected async shotgridStatusSync(csvPath: string, statusToColor?: Record<string, number>): Promise<any> {
+  protected async shotgridStatusSync(
+    csvPath: string,
+    statusToColor?: Record<string, number>,
+  ): Promise<any> {
     const fs = fsSync;
-    const defaultMap: Record<string, number> = { wtg: 0, ip: 3, fin: 2, na: 7, hld: 6, rev: 4, cmpt: 2 };
+    const defaultMap: Record<string, number> = {
+      wtg: 0,
+      ip: 3,
+      fin: 2,
+      na: 7,
+      hld: 6,
+      rev: 4,
+      cmpt: 2,
+    };
     const colorMap = statusToColor ?? defaultMap;
     try {
       const lines = fs.readFileSync(csvPath, 'utf8').split('\n').filter(Boolean);
-      const header = (lines[0] ?? '').toLowerCase().split(',').map((h: string) => h.trim().replace(/"/g,''));
-      const nameIdx = header.indexOf('shot_name') >= 0 ? header.indexOf('shot_name') : header.indexOf('name');
-      const statusIdx = header.indexOf('status') >= 0 ? header.indexOf('status') : header.indexOf('sg_status_list');
-      const assigneeIdx = header.indexOf('assignee') >= 0 ? header.indexOf('assignee') : header.indexOf('task_assignees');
-      if (nameIdx < 0 || statusIdx < 0) return { success: false, error: 'CSV must have shot_name and status columns' };
+      const header = (lines[0] ?? '')
+        .toLowerCase()
+        .split(',')
+        .map((h: string) => h.trim().replace(/"/g, ''));
+      const nameIdx =
+        header.indexOf('shot_name') >= 0 ? header.indexOf('shot_name') : header.indexOf('name');
+      const statusIdx =
+        header.indexOf('status') >= 0 ? header.indexOf('status') : header.indexOf('sg_status_list');
+      const assigneeIdx =
+        header.indexOf('assignee') >= 0
+          ? header.indexOf('assignee')
+          : header.indexOf('task_assignees');
+      if (nameIdx < 0 || statusIdx < 0)
+        return { success: false, error: 'CSV must have shot_name and status columns' };
 
-      const shots = lines.slice(1).map((line: string) => {
-        const cols = line.split(',').map((c: string) => c.trim().replace(/"/g,''));
-        return { name: cols[nameIdx], status: cols[statusIdx]?.toLowerCase(), assignee: assigneeIdx >= 0 ? cols[assigneeIdx] : '' };
-      }).filter((s: any) => s.name && s.status);
+      const shots = lines
+        .slice(1)
+        .map((line: string) => {
+          const cols = line.split(',').map((c: string) => c.trim().replace(/"/g, ''));
+          return {
+            name: cols[nameIdx],
+            status: cols[statusIdx]?.toLowerCase(),
+            assignee: assigneeIdx >= 0 ? cols[assigneeIdx] : '',
+          };
+        })
+        .filter((s: any) => s.name && s.status);
 
       const script = `
         try {

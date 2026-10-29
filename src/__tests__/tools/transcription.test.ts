@@ -17,8 +17,16 @@ const noBridge = { executeScript: async () => ({ success: true }) } as never;
 
 describe('transcribe_to_srt', () => {
   let scratch: string;
-  beforeAll(() => { scratch = mkdtempSync(join(tmpdir(), 'skry-transcribe-')); });
-  afterAll(() => { try { rmSync(scratch, { recursive: true, force: true }); } catch { /* best effort */ } });
+  beforeAll(() => {
+    scratch = mkdtempSync(join(tmpdir(), 'skry-transcribe-'));
+  });
+  afterAll(() => {
+    try {
+      rmSync(scratch, { recursive: true, force: true });
+    } catch {
+      /* best effort */
+    }
+  });
 
   it('rejects a call with neither mediaPath nor projectItemId', async () => {
     const tools = new PremiereProTools(noBridge);

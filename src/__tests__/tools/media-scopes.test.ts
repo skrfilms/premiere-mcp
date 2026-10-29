@@ -19,8 +19,16 @@ const noBridge = { executeScript: async () => ({ success: true }) } as never;
 
 describe('probe_media', () => {
   let scratch: string;
-  beforeAll(() => { scratch = mkdtempSync(join(tmpdir(), 'skry-probe-')); });
-  afterAll(() => { try { rmSync(scratch, { recursive: true, force: true }); } catch { /* best effort */ } });
+  beforeAll(() => {
+    scratch = mkdtempSync(join(tmpdir(), 'skry-probe-'));
+  });
+  afterAll(() => {
+    try {
+      rmSync(scratch, { recursive: true, force: true });
+    } catch {
+      /* best effort */
+    }
+  });
 
   it('rejects a call with neither mediaPath nor projectItemId', async () => {
     const tools = new PremiereProTools(noBridge);
@@ -61,8 +69,16 @@ describe('probe_media', () => {
 
 describe('generate_scope', () => {
   let scratch: string;
-  beforeAll(() => { scratch = mkdtempSync(join(tmpdir(), 'skry-scope-')); });
-  afterAll(() => { try { rmSync(scratch, { recursive: true, force: true }); } catch { /* best effort */ } });
+  beforeAll(() => {
+    scratch = mkdtempSync(join(tmpdir(), 'skry-scope-'));
+  });
+  afterAll(() => {
+    try {
+      rmSync(scratch, { recursive: true, force: true });
+    } catch {
+      /* best effort */
+    }
+  });
 
   it('rejects a call with neither mediaPath nor projectItemId', async () => {
     const tools = new PremiereProTools(noBridge);
@@ -88,7 +104,10 @@ describe('generate_scope', () => {
     process.env.PREMIERE_MCP_FFMPEG_CMD = 'skry-ffmpeg-does-not-exist-xyz';
     try {
       const tools = new PremiereProTools(noBridge);
-      const result = await tools.executeTool('generate_scope', { mediaPath: media, scope: 'histogram' });
+      const result = await tools.executeTool('generate_scope', {
+        mediaPath: media,
+        scope: 'histogram',
+      });
       expect(result.success).toBe(false);
       expect(result.error).toMatch(/not found on PATH/i);
       expect(result.error).toMatch(/brew install ffmpeg/);

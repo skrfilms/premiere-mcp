@@ -154,7 +154,7 @@ export interface TextInjectionEntry {
  */
 export function findNulByteArgument(value: any, path = ''): string | null {
   if (typeof value === 'string') {
-    return value.indexOf('\u0000') === -1 ? null : (path || 'argument');
+    return value.indexOf('\u0000') === -1 ? null : path || 'argument';
   }
 
   if (Array.isArray(value)) {
@@ -183,13 +183,13 @@ export function evaluateTextInjectionResult(result: any): any {
     return {
       ...result,
       textInjectionStatus: 'not_requested',
-      textInjectionSummary: { requested: 0, succeeded: 0, failed: 0 }
+      textInjectionSummary: { requested: 0, succeeded: 0, failed: 0 },
     };
   }
 
   const attempts = Array.isArray(result.textInjectionResults)
     ? result.textInjectionResults.filter(
-        (entry: TextInjectionEntry) => typeof entry.textIndex === 'number'
+        (entry: TextInjectionEntry) => typeof entry.textIndex === 'number',
       )
     : [];
   const succeededCount = attempts.filter((entry: TextInjectionEntry) => entry.ok === true).length;
@@ -197,7 +197,7 @@ export function evaluateTextInjectionResult(result: any): any {
   const summary = {
     requested: requestedCount,
     succeeded: succeededCount,
-    failed: failedCount
+    failed: failedCount,
   };
 
   if (succeededCount === 0) {
@@ -211,7 +211,7 @@ export function evaluateTextInjectionResult(result: any): any {
         `Text injection failed for all ${requestedCount} requested field(s) in ` +
         `Premiere Pro ${version}${build}.`,
       textInjectionStatus: 'failed',
-      textInjectionSummary: summary
+      textInjectionSummary: summary,
     };
   }
 
@@ -222,7 +222,7 @@ export function evaluateTextInjectionResult(result: any): any {
       message: 'MOGRT imported; some requested text was written and read back',
       warning: `${failedCount} of ${requestedCount} requested text field(s) could not be written`,
       textInjectionStatus: 'partial',
-      textInjectionSummary: summary
+      textInjectionSummary: summary,
     };
   }
 
@@ -231,7 +231,7 @@ export function evaluateTextInjectionResult(result: any): any {
     success: true,
     message: 'MOGRT imported; all requested text was written and read back',
     textInjectionStatus: 'complete',
-    textInjectionSummary: summary
+    textInjectionSummary: summary,
   };
 }
 

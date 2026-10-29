@@ -25,14 +25,14 @@ export class GraphicsTools extends SpeedTimeTools {
           error: result.error || `Failed to import asset ${asset.name}`,
           assetDir,
           assets,
-          imported
+          imported,
         };
       }
     }
 
     const createdSequence = await this.createSequenceFromProjectItems(
       sequenceName,
-      imported.map((item: any) => item.id)
+      imported.map((item: any) => item.id),
     );
     if (!createdSequence.success || !createdSequence.id) {
       return {
@@ -40,13 +40,18 @@ export class GraphicsTools extends SpeedTimeTools {
         error: createdSequence.error || 'Failed to create demo sequence from imported assets',
         assetDir,
         assets,
-        imported
+        imported,
       };
     }
 
     const placements = [];
     for (let index = 0; index < imported.length; index++) {
-      const placement = await this.addToTimeline(createdSequence.id, imported[index].id, 0, index * 5);
+      const placement = await this.addToTimeline(
+        createdSequence.id,
+        imported[index].id,
+        0,
+        index * 5,
+      );
       placements.push(placement);
       if (!placement.success) {
         return {
@@ -56,7 +61,7 @@ export class GraphicsTools extends SpeedTimeTools {
           assets,
           createdSequence,
           imported,
-          placements
+          placements,
         };
       }
     }
@@ -81,7 +86,9 @@ export class GraphicsTools extends SpeedTimeTools {
       if (!frame) {
         continue;
       }
-      animations.push(await this.addKeyframe(clips[index], 'Motion', 'Scale', frame.start, frame.from));
+      animations.push(
+        await this.addKeyframe(clips[index], 'Motion', 'Scale', frame.start, frame.from),
+      );
       animations.push(await this.addKeyframe(clips[index], 'Motion', 'Scale', frame.end, frame.to));
     }
 
@@ -97,11 +104,17 @@ export class GraphicsTools extends SpeedTimeTools {
       placements,
       transitions,
       animations,
-      tracks
+      tracks,
     };
   }
 
-  protected async setMogrtText(sequenceId: string | undefined, ti: number, ci: number, paramName: string, text: string): Promise<any> {
+  protected async setMogrtText(
+    sequenceId: string | undefined,
+    ti: number,
+    ci: number,
+    paramName: string,
+    text: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(sequenceId)};
@@ -125,7 +138,13 @@ export class GraphicsTools extends SpeedTimeTools {
     `);
   }
 
-  protected async setMogrtParam(sequenceId: string | undefined, ti: number, ci: number, paramName: string, value: any): Promise<any> {
+  protected async setMogrtParam(
+    sequenceId: string | undefined,
+    ti: number,
+    ci: number,
+    paramName: string,
+    value: any,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(sequenceId)};
@@ -147,7 +166,11 @@ export class GraphicsTools extends SpeedTimeTools {
     `);
   }
 
-  protected async mogrtParamsReport(sequenceId: string | undefined, ti: number, ci: number): Promise<any> {
+  protected async mogrtParamsReport(
+    sequenceId: string | undefined,
+    ti: number,
+    ci: number,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(sequenceId)};
@@ -167,7 +190,11 @@ export class GraphicsTools extends SpeedTimeTools {
     `);
   }
 
-  protected async timecodeBurnIn(sequenceId: string | undefined, ti: number, ci: number): Promise<any> {
+  protected async timecodeBurnIn(
+    sequenceId: string | undefined,
+    ti: number,
+    ci: number,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -211,9 +238,8 @@ export class GraphicsTools extends SpeedTimeTools {
       // When set, the script restricts the write to the property whose displayName matches
       // (instead of running the auto-detect). text2/text3/text4 are ignored in override mode
       // — the override targets a single field by name.
-      const textPropNameJson = args.textPropertyName !== undefined
-        ? JSON.stringify(args.textPropertyName)
-        : 'null';
+      const textPropNameJson =
+        args.textPropertyName !== undefined ? JSON.stringify(args.textPropertyName) : 'null';
       const script = `
         try {
           var sequence = __findSequence(${JSON.stringify(args.sequenceId)});
@@ -554,19 +580,19 @@ export class GraphicsTools extends SpeedTimeTools {
             ...failureResult,
             error: `${evaluatedResult.error} The imported timeline Graphic was removed.`,
             removedClipId,
-            rollback
+            rollback,
           };
         }
         return {
           ...evaluatedResult,
           error: `${evaluatedResult.error} Rollback of the imported timeline Graphic also failed.`,
-          rollback
+          rollback,
         };
       }
       if (evaluatedResult?.textInjectionStatus === 'failed') {
         return {
           ...evaluatedResult,
-          error: `${evaluatedResult.error} The imported Graphic remains on the timeline.`
+          error: `${evaluatedResult.error} The imported Graphic remains on the timeline.`,
         };
       }
       return evaluatedResult;
@@ -590,7 +616,13 @@ export class GraphicsTools extends SpeedTimeTools {
   }
 
   // Import MOGRT Implementation
-  protected async importMogrt(sequenceId: string, mogrtPath: string, time: number, videoTrackIndex?: number, audioTrackIndex?: number): Promise<any> {
+  protected async importMogrt(
+    sequenceId: string,
+    mogrtPath: string,
+    time: number,
+    videoTrackIndex?: number,
+    audioTrackIndex?: number,
+  ): Promise<any> {
     const vidTrack = videoTrackIndex || 0;
     const audTrack = audioTrackIndex || 0;
     const script = `
@@ -614,7 +646,14 @@ export class GraphicsTools extends SpeedTimeTools {
   }
 
   // Import MOGRT From Library Implementation
-  protected async importMogrtFromLibrary(sequenceId: string, libraryName: string, mogrtName: string, time: number, videoTrackIndex?: number, audioTrackIndex?: number): Promise<any> {
+  protected async importMogrtFromLibrary(
+    sequenceId: string,
+    libraryName: string,
+    mogrtName: string,
+    time: number,
+    videoTrackIndex?: number,
+    audioTrackIndex?: number,
+  ): Promise<any> {
     const vidTrack = videoTrackIndex || 0;
     const audTrack = audioTrackIndex || 0;
     const script = `
@@ -637,7 +676,12 @@ export class GraphicsTools extends SpeedTimeTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async watermarkApply(logoPath: string, opacity: number, corner: string, seqId?: string): Promise<any> {
+  protected async watermarkApply(
+    logoPath: string,
+    opacity: number,
+    corner: string,
+    seqId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(seqId)};
@@ -690,7 +734,11 @@ export class GraphicsTools extends SpeedTimeTools {
     `);
   }
 
-  protected async removeMogrtClip(seqId: string|undefined, trackIndex: number, clipIndex: number): Promise<any> {
+  protected async removeMogrtClip(
+    seqId: string | undefined,
+    trackIndex: number,
+    clipIndex: number,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(seqId)};
@@ -721,7 +769,12 @@ export class GraphicsTools extends SpeedTimeTools {
     `);
   }
 
-  protected async createAdjustmentLayerAt(startTimeSecs: number, durationSecs: number, trackIndex?: number, seqId?: string): Promise<any> {
+  protected async createAdjustmentLayerAt(
+    startTimeSecs: number,
+    durationSecs: number,
+    trackIndex?: number,
+    seqId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(seqId)};

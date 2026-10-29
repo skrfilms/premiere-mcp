@@ -40,7 +40,8 @@ function run(body: string): any {
 }
 
 describe('recoveryRefusal: when Escape and restart are forbidden', () => {
-  const refusal = (verdict: unknown, owned: string[] | null) => run(`
+  const refusal = (verdict: unknown, owned: string[] | null) =>
+    run(`
     const owned = ${JSON.stringify(owned)};
     return recovery.recoveryRefusal(${JSON.stringify(verdict)}, owned ? (id) => owned.includes(id) : undefined);
   `);
@@ -55,7 +56,7 @@ describe('recoveryRefusal: when Escape and restart are forbidden', () => {
     expect(refusal({ state: 'BUSY' }, ['mine'])).toMatch(/Refusing/);
   });
 
-  it('allows BUSY on the caller\'s own command, which is the modal case Escape exists for', () => {
+  it("allows BUSY on the caller's own command, which is the modal case Escape exists for", () => {
     expect(refusal({ state: 'BUSY', busyWith: 'mine' }, ['mine'])).toBeNull();
   });
 
@@ -71,10 +72,13 @@ describe('recoveryRefusal: when Escape and restart are forbidden', () => {
     expect(refusal({ state: 'ENGINE_DEAD' }, null)).toBeNull();
   });
 
-  it.each(['SENTINEL_ERROR', 'SOMETHING_NEW'])('fails closed on %s, where health is unknown rather than dead', (state) => {
-    // SENTINEL_ERROR used to fall through to Escape and then a SIGKILL of a host nobody showed was broken.
-    expect(refusal({ state }, null)).toMatch(/health is unknown/);
-  });
+  it.each(['SENTINEL_ERROR', 'SOMETHING_NEW'])(
+    'fails closed on %s, where health is unknown rather than dead',
+    (state) => {
+      // SENTINEL_ERROR used to fall through to Escape and then a SIGKILL of a host nobody showed was broken.
+      expect(refusal({ state }, null)).toMatch(/health is unknown/);
+    },
+  );
 });
 
 describe('trackOwnCommands', () => {
@@ -86,7 +90,12 @@ describe('trackOwnCommands', () => {
       const ret = bridge.publishCommand('cmd-1', 'extendscript');
       return { ret, calls, owns1: owns('cmd-1'), owns2: owns('cmd-2') };
     `);
-    expect(r).toEqual({ ret: 'sent:cmd-1', calls: [[true, 'cmd-1', 'extendscript']], owns1: true, owns2: false });
+    expect(r).toEqual({
+      ret: 'sent:cmd-1',
+      calls: [[true, 'cmd-1', 'extendscript']],
+      owns1: true,
+      owns2: false,
+    });
   });
 
   it('owns nothing when it cannot hook the bridge, which keeps every BUSY refused', () => {
@@ -96,7 +105,8 @@ describe('trackOwnCommands', () => {
 
 describe('guardedSaveScript: recovery saves only the verified scratch project', () => {
   /** Evaluate the generated ExtendScript against a fake `app`; the script is plain ES3. */
-  const save = (open: string[], active: string, expected: string) => run(`
+  const save = (open: string[], active: string, expected: string) =>
+    run(`
     let saved = 0;
     const projects = ${JSON.stringify(open)}.map((p) => ({ path: p }));
     projects.numProjects = projects.length;
@@ -107,7 +117,10 @@ describe('guardedSaveScript: recovery saves only the verified scratch project', 
   `);
 
   it('saves when the single open project is the verified one', () => {
-    expect(save(['/r/.scratch/s.prproj'], '/r/.scratch/s.prproj', '/r/.scratch/s.prproj')).toEqual({ saved: true, saveCalls: 1 });
+    expect(save(['/r/.scratch/s.prproj'], '/r/.scratch/s.prproj', '/r/.scratch/s.prproj')).toEqual({
+      saved: true,
+      saveCalls: 1,
+    });
   });
 
   it('does not save once the active project has changed', () => {
@@ -117,12 +130,16 @@ describe('guardedSaveScript: recovery saves only the verified scratch project', 
   });
 
   it('does not save while a second project is open', () => {
-    const r = save(['/r/.scratch/s.prproj', '/Users/x/cut.prproj'], '/r/.scratch/s.prproj', '/r/.scratch/s.prproj');
+    const r = save(
+      ['/r/.scratch/s.prproj', '/Users/x/cut.prproj'],
+      '/r/.scratch/s.prproj',
+      '/r/.scratch/s.prproj',
+    );
     expect(r.saveCalls).toBe(0);
   });
 
   it('survives a path containing quotes rather than producing broken script', () => {
-    const odd = "/r/it's \"odd\"/s.prproj";
+    const odd = '/r/it\'s "odd"/s.prproj';
     expect(save([odd], odd, odd)).toEqual({ saved: true, saveCalls: 1 });
   });
 });
@@ -180,19 +197,32 @@ describe('harnesses use the safety helpers', () => {
    * --mutate sweep once filled every optional field of set_autosave_settings and rewrote the
    * user's Auto Save prefs on disk.
    */
-  it.each(['set_autosave_settings', 'create_project', 'write_clipboard'])('%s is skipped by both catalogue sweeps', (tool) => {
-    const smoke = source('live-smoke-sweep.mjs');
-    const skip = smoke.slice(smoke.indexOf('const SKIP = {'), smoke.indexOf('\n};', smoke.indexOf('const SKIP = {')));
-    expect(skip).toMatch(new RegExp(`\\n  ${tool}: '`));
-    const coverage = source('coverage-sweep.mjs');
-    const gate = coverage.slice(coverage.indexOf('const GATE = {'), coverage.indexOf('\n};', coverage.indexOf('const GATE = {')));
-    expect(gate).toMatch(new RegExp(`\\n  ${tool}: \\['`));
-  });
+  it.each(['set_autosave_settings', 'create_project', 'write_clipboard'])(
+    '%s is skipped by both catalogue sweeps',
+    (tool) => {
+      const smoke = source('live-smoke-sweep.mjs');
+      const skip = smoke.slice(
+        smoke.indexOf('const SKIP = {'),
+        smoke.indexOf('\n};', smoke.indexOf('const SKIP = {')),
+      );
+      expect(skip).toMatch(new RegExp(`\\n  ${tool}: '`));
+      const coverage = source('coverage-sweep.mjs');
+      const gate = coverage.slice(
+        coverage.indexOf('const GATE = {'),
+        coverage.indexOf('\n};', coverage.indexOf('const GATE = {')),
+      );
+      expect(gate).toMatch(new RegExp(`\\n  ${tool}: \\['`));
+    },
+  );
 
   /** The env var is read by the in-process handler at call time, so it must be set before any call. */
   it.each([
-    'live-smoke-sweep.mjs', 'coverage-sweep.mjs', 'live-tool-sweep.mjs',
-    'bisect-hang.mjs', 'live-verify-honesty.mjs', 'live-verify-cleanup.mjs',
+    'live-smoke-sweep.mjs',
+    'coverage-sweep.mjs',
+    'live-tool-sweep.mjs',
+    'bisect-hang.mjs',
+    'live-verify-honesty.mjs',
+    'live-verify-cleanup.mjs',
   ])('%s refuses prefs-file writes before its first tool call', (name) => {
     const src = source(name);
     const set = src.indexOf("process.env.PREMIERE_MCP_NO_PREFS_WRITE = '1'");
@@ -202,32 +232,44 @@ describe('harnesses use the safety helpers', () => {
     expect(set).toBeLessThan(firstCall);
   });
 
-  it.each(['live-smoke-sweep.mjs', 'coverage-sweep.mjs'])('%s re-pins the scratch project inside the tool loop and arms recovery with ownership', (name) => {
-    const src = source(name);
-    const loop = src.slice(src.search(/for \((const tool of catalogue|let i = 0; i < catalogue\.length)/));
-    expect(loop).toMatch(/needsScratchRecheck\(name, callsSinceScratchCheck\)/);
-    expect(loop).toMatch(/await checkStillScratch\(bridge, pinned\)/);
-    expect(src).toMatch(/const ownsCommand = trackOwnCommands\(bridge\)/);
-    expect(src).toMatch(/recoveryState = \{[^}]*ownsCommand, pinned \}/);
-  });
+  it.each(['live-smoke-sweep.mjs', 'coverage-sweep.mjs'])(
+    '%s re-pins the scratch project inside the tool loop and arms recovery with ownership',
+    (name) => {
+      const src = source(name);
+      const loop = src.slice(
+        src.search(/for \((const tool of catalogue|let i = 0; i < catalogue\.length)/),
+      );
+      expect(loop).toMatch(/needsScratchRecheck\(name, callsSinceScratchCheck\)/);
+      expect(loop).toMatch(/await checkStillScratch\(bridge, pinned\)/);
+      expect(src).toMatch(/const ownsCommand = trackOwnCommands\(bridge\)/);
+      expect(src).toMatch(/recoveryState = \{[^}]*ownsCommand, pinned \}/);
+    },
+  );
 
   it('ensureHealthy refuses before it presses Escape, not after', () => {
     const src = source(path.join('lib', 'host-recovery.mjs'));
     const fn = src.slice(src.indexOf('export async function ensureHealthy'));
     expect(fn.indexOf('recoveryRefusal(verdict, state.ownsCommand)')).toBeGreaterThan(-1);
-    expect(fn.indexOf('recoveryRefusal(verdict, state.ownsCommand)')).toBeLessThan(fn.indexOf('pressEscape('));
+    expect(fn.indexOf('recoveryRefusal(verdict, state.ownsCommand)')).toBeLessThan(
+      fn.indexOf('pressEscape('),
+    );
   });
 
   it('recoverHost refuses on its own re-probe before it quits Premiere', () => {
     const src = source(path.join('lib', 'host-recovery.mjs'));
     const fn = src.slice(src.indexOf('export async function recoverHost'));
     expect(fn.indexOf('recoveryRefusal(pre, ownsCommand)')).toBeGreaterThan(-1);
-    expect(fn.indexOf('recoveryRefusal(pre, ownsCommand)')).toBeLessThan(fn.indexOf('killPremiere('));
+    expect(fn.indexOf('recoveryRefusal(pre, ownsCommand)')).toBeLessThan(
+      fn.indexOf('killPremiere('),
+    );
   });
 
   it('killPremiere refuses to quit when the guarded save did not save, or the verify step threw', () => {
     const src = source(path.join('lib', 'host-recovery.mjs'));
-    const fn = src.slice(src.indexOf('async function killPremiere'), src.indexOf('async function launchPremiereWithScratch'));
+    const fn = src.slice(
+      src.indexOf('async function killPremiere'),
+      src.indexOf('async function launchPremiereWithScratch'),
+    );
     const saveAt = fn.indexOf('guardedSaveScript(state.path)');
     const quitAt = fn.indexOf("'/usr/bin/pkill', ['-f'");
     expect(saveAt).toBeGreaterThan(-1);
@@ -240,7 +282,10 @@ describe('harnesses use the safety helpers', () => {
 
   it('the post-relaunch loop presses Escape only when recoveryRefusal allows it', () => {
     const src = source(path.join('lib', 'host-recovery.mjs'));
-    const fn = src.slice(src.indexOf('export async function recoverHost'), src.indexOf('export async function ensureHealthy'));
+    const fn = src.slice(
+      src.indexOf('export async function recoverHost'),
+      src.indexOf('export async function ensureHealthy'),
+    );
     expect(fn).toMatch(/if \(!recoveryRefusal\(verdict, ownsCommand\)\) pressEscape\(1\)/);
   });
 

@@ -12,7 +12,14 @@
  * somewhere else (which Premiere's single undo stack would undo first) is noticed.
  */
 
-export interface ClipState { id: string; track: string; name: string; start: number; end: number; inPoint: number }
+export interface ClipState {
+  id: string;
+  track: string;
+  name: string;
+  start: number;
+  end: number;
+  inPoint: number;
+}
 export interface TimelineState {
   sequenceId: string;
   sequenceName: string;
@@ -106,7 +113,13 @@ export interface StateDiff {
   changed: boolean;
   added: ClipState[];
   removed: ClipState[];
-  moved: Array<{ id: string; name: string; track: string; from: { track: string; start: number; end: number; inPoint: number }; to: { track: string; start: number; end: number; inPoint: number } }>;
+  moved: Array<{
+    id: string;
+    name: string;
+    track: string;
+    from: { track: string; start: number; end: number; inPoint: number };
+    to: { track: string; start: number; end: number; inPoint: number };
+  }>;
   renamed: Array<{ id: string; from: string; to: string }>;
   tracks?: { from: TimelineState['tracks']; to: TimelineState['tracks'] };
   markers?: { from: number; to: number };
@@ -122,21 +135,47 @@ export function diffStates(a: TimelineState, b: TimelineState): StateDiff {
   // Clip ids survive a move between tracks only in name; match leftovers by id alone.
   const byIdBefore = new Map<string, ClipState[]>();
   for (const c of a.clips) (byIdBefore.get(c.id) ?? byIdBefore.set(c.id, []).get(c.id)!).push(c);
-  const out: StateDiff = { changed: a.hash !== b.hash, added: [], removed: [], moved: [], renamed: [] };
+  const out: StateDiff = {
+    changed: a.hash !== b.hash,
+    added: [],
+    removed: [],
+    moved: [],
+    renamed: [],
+  };
   const usedBefore = new Set<string>();
   for (const [k, c] of after) {
-    const p = before.get(k) ?? (byIdBefore.get(c.id) ?? []).find((x) => !usedBefore.has(`${x.id}|${x.track}`) && !after.has(`${x.id}|${x.track}`));
-    if (!p) { out.added.push(c); continue; }
+    const p =
+      before.get(k) ??
+      (byIdBefore.get(c.id) ?? []).find(
+        (x) => !usedBefore.has(`${x.id}|${x.track}`) && !after.has(`${x.id}|${x.track}`),
+      );
+    if (!p) {
+      out.added.push(c);
+      continue;
+    }
     usedBefore.add(`${p.id}|${p.track}`);
     if (p.name !== c.name) out.renamed.push({ id: c.id, from: p.name, to: c.name });
-    if (p.track !== c.track || Math.abs(p.start - c.start) > 1e-3 || Math.abs(p.end - c.end) > 1e-3 || Math.abs(p.inPoint - c.inPoint) > 1e-3) {
-      out.moved.push({ id: c.id, name: c.name, track: c.track, from: { track: p.track, start: r3(p.start), end: r3(p.end), inPoint: r3(p.inPoint) }, to: { track: c.track, start: r3(c.start), end: r3(c.end), inPoint: r3(c.inPoint) } });
+    if (
+      p.track !== c.track ||
+      Math.abs(p.start - c.start) > 1e-3 ||
+      Math.abs(p.end - c.end) > 1e-3 ||
+      Math.abs(p.inPoint - c.inPoint) > 1e-3
+    ) {
+      out.moved.push({
+        id: c.id,
+        name: c.name,
+        track: c.track,
+        from: { track: p.track, start: r3(p.start), end: r3(p.end), inPoint: r3(p.inPoint) },
+        to: { track: c.track, start: r3(c.start), end: r3(c.end), inPoint: r3(c.inPoint) },
+      });
     }
   }
   for (const [k, c] of before) if (!usedBefore.has(k)) out.removed.push(c);
-  if (a.tracks.video !== b.tracks.video || a.tracks.audio !== b.tracks.audio) out.tracks = { from: a.tracks, to: b.tracks };
+  if (a.tracks.video !== b.tracks.video || a.tracks.audio !== b.tracks.audio)
+    out.tracks = { from: a.tracks, to: b.tracks };
   if (a.markers !== b.markers) out.markers = { from: a.markers, to: b.markers };
-  if (a.project.sequences !== b.project.sequences || a.project.items !== b.project.items) out.project = { from: a.project, to: b.project };
+  if (a.project.sequences !== b.project.sequences || a.project.items !== b.project.items)
+    out.project = { from: a.project, to: b.project };
   return out;
 }
 
@@ -148,8 +187,14 @@ export function describeDiff(d: StateDiff): string {
   if (d.removed.length) bits.push(`${d.removed.length} removed`);
   if (d.moved.length) bits.push(`${d.moved.length} moved or trimmed`);
   if (d.renamed.length) bits.push(`${d.renamed.length} renamed`);
-  if (d.tracks) bits.push(`tracks V${d.tracks.from.video}/A${d.tracks.from.audio} -> V${d.tracks.to.video}/A${d.tracks.to.audio}`);
+  if (d.tracks)
+    bits.push(
+      `tracks V${d.tracks.from.video}/A${d.tracks.from.audio} -> V${d.tracks.to.video}/A${d.tracks.to.audio}`,
+    );
   if (d.markers) bits.push(`markers ${d.markers.from} -> ${d.markers.to}`);
-  if (d.project) bits.push(`project ${d.project.from.sequences} sequences/${d.project.from.items} items -> ${d.project.to.sequences}/${d.project.to.items}`);
+  if (d.project)
+    bits.push(
+      `project ${d.project.from.sequences} sequences/${d.project.from.items} items -> ${d.project.to.sequences}/${d.project.to.items}`,
+    );
   return bits.length ? bits.join(', ') + '.' : 'Changed (clip order within a track).';
 }

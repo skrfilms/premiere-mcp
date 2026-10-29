@@ -1,7 +1,13 @@
 /**
  * Rough cut from a transcript: quotes found by their words, ranges planned end to end.
  */
-import { findQuote, planStringout, tokenize, wordsFromSrt, wordsFromWhisperJson } from '../../tools/stringout.js';
+import {
+  findQuote,
+  planStringout,
+  tokenize,
+  wordsFromSrt,
+  wordsFromWhisperJson,
+} from '../../tools/stringout.js';
 
 const SRT = `1
 00:00:01,000 --> 00:00:04,000
@@ -25,7 +31,14 @@ describe('stringout from transcript', () => {
     const w = wordsFromSrt(SRT);
     expect(w[0]).toMatchObject({ word: 'we', start: 1 });
     expect(w[5]!.end).toBeCloseTo(4, 5);
-    expect(w.map((x) => x.word).slice(0, 6)).toEqual(['we', 'never', 'planned', 'to', 'go', 'back']);
+    expect(w.map((x) => x.word).slice(0, 6)).toEqual([
+      'we',
+      'never',
+      'planned',
+      'to',
+      'go',
+      'back',
+    ]);
   });
 
   it('finds an exact quote, across cues too', () => {
@@ -48,12 +61,33 @@ describe('stringout from transcript', () => {
   });
 
   it('uses whisper word timestamps when present', () => {
-    const w = wordsFromWhisperJson({ segments: [{ start: 0, end: 2, text: ' Hello there', words: [{ word: ' Hello', start: 0.2, end: 0.6 }, { word: ' there.', start: 0.7, end: 1.1 }] }] });
+    const w = wordsFromWhisperJson({
+      segments: [
+        {
+          start: 0,
+          end: 2,
+          text: ' Hello there',
+          words: [
+            { word: ' Hello', start: 0.2, end: 0.6 },
+            { word: ' there.', start: 0.7, end: 1.1 },
+          ],
+        },
+      ],
+    });
     expect(findQuote(w, 'hello there')).toMatchObject({ start: 0.2, end: 1.1, score: 1 });
   });
 
   it('plans ranges with handles, frame snapped, clamped, laid end to end', () => {
-    const plan = planStringout([{ label: 'a', start: 5, end: 7 }, { label: 'b', start: 0.05, end: 1 }, { label: 'c', start: 9.5, end: 12 }], 0.15, 24, 10);
+    const plan = planStringout(
+      [
+        { label: 'a', start: 5, end: 7 },
+        { label: 'b', start: 0.05, end: 1 },
+        { label: 'c', start: 9.5, end: 12 },
+      ],
+      0.15,
+      24,
+      10,
+    );
     expect(plan[0]).toMatchObject({ sourceIn: 4.833, sourceOut: 7.167, recordIn: 0 });
     expect(plan[1]).toMatchObject({ sourceIn: 0, recordIn: 2.333 });
     expect(plan[2]!.sourceOut).toBe(10);

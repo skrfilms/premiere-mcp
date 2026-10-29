@@ -129,14 +129,23 @@ export function parseDevicesList(stdout: string): { demuxers: string[]; muxers: 
  *   [AVFoundation indev @ 0x…] AVFoundation audio devices:
  *   [AVFoundation indev @ 0x…] [0] MacBook Pro Microphone
  */
-export function parseAvfoundationDevices(stderr: string): { video: AvfDevice[]; audio: AvfDevice[] } {
+export function parseAvfoundationDevices(stderr: string): {
+  video: AvfDevice[];
+  audio: AvfDevice[];
+} {
   const video: AvfDevice[] = [];
   const audio: AvfDevice[] = [];
   let bucket: 'video' | 'audio' | null = null;
   for (const raw of stderr.split('\n')) {
     const line = raw.replace(/^\[[^\]]*\]\s*/, '').trim();
-    if (/^AVFoundation video devices:/i.test(line)) { bucket = 'video'; continue; }
-    if (/^AVFoundation audio devices:/i.test(line)) { bucket = 'audio'; continue; }
+    if (/^AVFoundation video devices:/i.test(line)) {
+      bucket = 'video';
+      continue;
+    }
+    if (/^AVFoundation audio devices:/i.test(line)) {
+      bucket = 'audio';
+      continue;
+    }
     const m = /^\[(\d+)\]\s+(.+)$/.exec(line);
     if (!m || !bucket) continue;
     const device = { index: Number(m[1]), name: (m[2] as string).trim() };
@@ -199,7 +208,9 @@ export function tapCapabilities(env: {
       reason: env.premiereConnected
         ? 'Premiere renders the frame through the sequence via its own frame export. Zero dependencies, and the only reachable tap whose pixels Premiere composited.'
         : 'Premiere is not connected, so it cannot be asked to render a frame. Open the CEP bridge panel and start it.',
-      install: env.premiereConnected ? undefined : 'Open Premiere > Window > Extensions > MCP Bridge (CEP) and press Start.',
+      install: env.premiereConnected
+        ? undefined
+        : 'Open Premiere > Window > Extensions > MCP Bridge (CEP) and press Start.',
     },
     {
       tap: 'export-file',
@@ -212,7 +223,9 @@ export function tapCapabilities(env: {
       reason: env.premiereConnected
         ? 'A sequence/range export is a composited render on disk; frames read back off it prove motion and timing over a range, not just one instant.'
         : 'Premiere is not connected, so no export can be produced or read back.',
-      install: env.premiereConnected ? undefined : 'Open Premiere > Window > Extensions > MCP Bridge (CEP) and press Start.',
+      install: env.premiereConnected
+        ? undefined
+        : 'Open Premiere > Window > Extensions > MCP Bridge (CEP) and press Start.',
     },
     {
       tap: 'screen',
@@ -225,9 +238,12 @@ export function tapCapabilities(env: {
       reason: !env.ffmpegAvailable
         ? 'ffmpeg is not runnable, and the screen tap is an ffmpeg capture.'
         : env.screen.reason,
-      install: (env.screen.available && env.ffmpegAvailable)
-        ? undefined
-        : (env.ffmpegAvailable ? env.screen.install : FFMPEG_INSTALL_GUIDANCE),
+      install:
+        env.screen.available && env.ffmpegAvailable
+          ? undefined
+          : env.ffmpegAvailable
+            ? env.screen.install
+            : FFMPEG_INSTALL_GUIDANCE,
     },
     {
       tap: 'ndi',
@@ -256,12 +272,13 @@ export function tapCapabilities(env: {
       requiresNativeModule: isMac && !env.syphonReceiver,
       reason: !isMac
         ? `Syphon is macOS-only; this host is ${env.os}. Use Spout on Windows, or the screen tap.`
-        : (env.syphonReceiver
+        : env.syphonReceiver
           ? `Syphon receiver advertised via PREMIERE_MCP_SYPHON_RECEIVER (${env.syphonReceiver}).`
-          : 'No Syphon receiver. Syphon passes IOSurface GPU textures between processes; there is no ffmpeg input device for it, so receiving it needs a compiled native addon. Not reachable from this server as shipped.'),
-      install: isMac && !env.syphonReceiver
-        ? 'Install a Syphon-publishing Transmit plugin for Premiere plus a Syphon receiver binary, then set PREMIERE_MCP_SYPHON_RECEIVER to its command.'
-        : undefined,
+          : 'No Syphon receiver. Syphon passes IOSurface GPU textures between processes; there is no ffmpeg input device for it, so receiving it needs a compiled native addon. Not reachable from this server as shipped.',
+      install:
+        isMac && !env.syphonReceiver
+          ? 'Install a Syphon-publishing Transmit plugin for Premiere plus a Syphon receiver binary, then set PREMIERE_MCP_SYPHON_RECEIVER to its command.'
+          : undefined,
     },
     {
       tap: 'spout',
@@ -274,12 +291,13 @@ export function tapCapabilities(env: {
       requiresNativeModule: isWin && !env.spoutReceiver,
       reason: !isWin
         ? `Spout is Windows-only; this host is ${env.os}. Use the screen tap, or NDI with a receiver.`
-        : (env.spoutReceiver
+        : env.spoutReceiver
           ? `Spout receiver advertised via PREMIERE_MCP_SPOUT_RECEIVER (${env.spoutReceiver}).`
-          : 'No Spout receiver. Spout shares DirectX textures between processes; there is no ffmpeg input device for it, so receiving it needs a compiled native addon. Not reachable from this server as shipped.'),
-      install: isWin && !env.spoutReceiver
-        ? 'Install a Spout-publishing Transmit plugin for Premiere plus a Spout receiver binary, then set PREMIERE_MCP_SPOUT_RECEIVER to its command.'
-        : undefined,
+          : 'No Spout receiver. Spout shares DirectX textures between processes; there is no ffmpeg input device for it, so receiving it needs a compiled native addon. Not reachable from this server as shipped.',
+      install:
+        isWin && !env.spoutReceiver
+          ? 'Install a Spout-publishing Transmit plugin for Premiere plus a Spout receiver binary, then set PREMIERE_MCP_SPOUT_RECEIVER to its command.'
+          : undefined,
     },
   ];
 }
@@ -293,9 +311,10 @@ export function recommendTaps(taps: TapCapability[]): {
   const composited = available.find((t) => t.composited === 'yes');
   // For motion: a composited export beats a real-time screen grab, because the
   // pixels are Premiere's. Fall back to any available moving tap.
-  const motion = available.find((t) => t.composited === 'yes' && t.tap === 'export-file')
-    || available.find((t) => t.realtime)
-    || null;
+  const motion =
+    available.find((t) => t.composited === 'yes' && t.tap === 'export-file') ||
+    available.find((t) => t.realtime) ||
+    null;
   return {
     bestCompositedTap: composited ? composited.tap : null,
     bestMotionTap: motion ? motion.tap : null,
@@ -321,11 +340,16 @@ export interface ProbeOptions {
 /**
  * Probe the machine. Spawns ffmpeg/ffprobe; never touches Premiere.
  */
-export async function probeCaptureCapability(options: ProbeOptions = {}): Promise<CaptureCapabilityReport> {
+export async function probeCaptureCapability(
+  options: ProbeOptions = {},
+): Promise<CaptureCapabilityReport> {
   const os = platform();
   const ffmpeg = ffmpegCmd();
   const ffprobe = ffprobeCmd();
-  const [ffmpegOk, ffprobeOk] = await Promise.all([binaryAvailable(ffmpeg), binaryAvailable(ffprobe)]);
+  const [ffmpegOk, ffprobeOk] = await Promise.all([
+    binaryAvailable(ffmpeg),
+    binaryAvailable(ffprobe),
+  ]);
 
   const screen = await probeScreenCapability(os, ffmpegOk, options);
 
@@ -373,14 +397,17 @@ export function programMonitorGeometryCapability(os: string): WindowGeometryCapa
   if (os === 'darwin') {
     return {
       available: false,
-      reason: 'Premiere exposes no windows to macOS accessibility (System Events returns an empty window list for it), and no window-enumeration API is reachable without adding a native/pyobjc dependency. The Program monitor\'s screen rectangle cannot be discovered automatically.',
-      workaround: 'Pass an explicit crop rect (x, y, width, height) for the Program monitor, or call the calibration frame helper once: it writes a full-display grab with a labelled coordinate grid so the rect can be read off by eye and reused.',
+      reason:
+        "Premiere exposes no windows to macOS accessibility (System Events returns an empty window list for it), and no window-enumeration API is reachable without adding a native/pyobjc dependency. The Program monitor's screen rectangle cannot be discovered automatically.",
+      workaround:
+        'Pass an explicit crop rect (x, y, width, height) for the Program monitor, or call the calibration frame helper once: it writes a full-display grab with a labelled coordinate grid so the rect can be read off by eye and reused.',
     };
   }
   return {
     available: false,
     reason: `Automatic Program-monitor window geometry is not implemented for ${os}.`,
-    workaround: 'Pass an explicit crop rect (x, y, width, height), or use the calibration frame helper to read one off a labelled full-display grab.',
+    workaround:
+      'Pass an explicit crop rect (x, y, width, height), or use the calibration frame helper to read one off a labelled full-display grab.',
   };
 }
 
@@ -399,7 +426,11 @@ async function probeScreenCapability(
   };
 
   if (!ffmpegOk) {
-    return { ...base, reason: `ffmpeg ('${ffmpegCmd()}') is not runnable, so no screen capture is possible.`, install: FFMPEG_INSTALL_GUIDANCE };
+    return {
+      ...base,
+      reason: `ffmpeg ('${ffmpegCmd()}') is not runnable, so no screen capture is possible.`,
+      install: FFMPEG_INSTALL_GUIDANCE,
+    };
   }
 
   const devicesRes = await runBinary(ffmpegCmd(), ['-hide_banner', '-devices'], 15_000);
@@ -410,7 +441,8 @@ async function probeScreenCapability(
     return {
       ...base,
       reason: `This ffmpeg build has no screen-capture input device for ${os} (devices seen: ${demuxers.join(', ') || 'none'}).`,
-      install: 'Install an ffmpeg build with the platform capture device compiled in (macOS: avfoundation; Windows: gdigrab; Linux: x11grab).',
+      install:
+        'Install an ffmpeg build with the platform capture device compiled in (macOS: avfoundation; Windows: gdigrab; Linux: x11grab).',
     };
   }
 
@@ -439,8 +471,10 @@ async function probeScreenCapability(
       ...base,
       inputFormat,
       videoDevices: video,
-      reason: 'avfoundation is present but lists no "Capture screen" device. On macOS this usually means the host process has not been granted Screen Recording permission, so the display never appears in the device list.',
-      install: 'Grant Screen Recording to the process running this server in System Settings > Privacy & Security > Screen Recording, then restart it.',
+      reason:
+        'avfoundation is present but lists no "Capture screen" device. On macOS this usually means the host process has not been granted Screen Recording permission, so the display never appears in the device list.',
+      install:
+        'Grant Screen Recording to the process running this server in System Settings > Privacy & Security > Screen Recording, then restart it.',
     };
   }
 
@@ -460,7 +494,8 @@ async function probeScreenCapability(
     if (!verified.ok) {
       result.available = false;
       result.reason = `avfoundation lists a display but a one-frame grab failed, so the capture is not actually usable: ${verified.detail}`;
-      result.install = 'Grant Screen Recording to the process running this server in System Settings > Privacy & Security > Screen Recording, then restart it.';
+      result.install =
+        'Grant Screen Recording to the process running this server in System Settings > Privacy & Security > Screen Recording, then restart it.';
     }
   }
 
@@ -471,7 +506,9 @@ async function probeScreenCapability(
  * Prove screen capture works by grabbing exactly one frame and throwing it away.
  * Writes to a temp file (deleted immediately) so nothing is retained.
  */
-export async function verifyScreenGrab(displayIndex: number): Promise<{ ok: boolean; detail: string }> {
+export async function verifyScreenGrab(
+  displayIndex: number,
+): Promise<{ ok: boolean; detail: string }> {
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
   const { promises: fsp } = await import('node:fs');
@@ -479,19 +516,45 @@ export async function verifyScreenGrab(displayIndex: number): Promise<{ ok: bool
   const res = await runBinary(
     ffmpegCmd(),
     [
-      '-hide_banner', '-loglevel', 'error',
-      '-f', 'avfoundation', '-capture_cursor', '0', '-pixel_format', 'bgr0',
-      '-framerate', '30', '-i', String(displayIndex),
-      '-frames:v', '1', '-update', '1', '-y', probePath,
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-f',
+      'avfoundation',
+      '-capture_cursor',
+      '0',
+      '-pixel_format',
+      'bgr0',
+      '-framerate',
+      '30',
+      '-i',
+      String(displayIndex),
+      '-frames:v',
+      '1',
+      '-update',
+      '1',
+      '-y',
+      probePath,
     ],
     30_000,
   );
   let landed = false;
   try {
     landed = (await fsp.stat(probePath)).size > 0;
-  } catch { /* nothing written */ }
-  try { await fsp.unlink(probePath); } catch { /* best effort */ }
+  } catch {
+    /* nothing written */
+  }
+  try {
+    await fsp.unlink(probePath);
+  } catch {
+    /* best effort */
+  }
   return landed
     ? { ok: true, detail: 'One frame was captured and discarded.' }
-    : { ok: false, detail: (res.stderr || res.spawnError || `ffmpeg exited ${res.code} with no output`).slice(-500) };
+    : {
+        ok: false,
+        detail: (res.stderr || res.spawnError || `ffmpeg exited ${res.code} with no output`).slice(
+          -500,
+        ),
+      };
 }

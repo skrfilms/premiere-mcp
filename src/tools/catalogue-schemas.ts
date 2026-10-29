@@ -9,39 +9,66 @@ import { z } from 'zod';
 export const motionStyleSchema = z.enum(['push_in', 'pull_out', 'alternate', 'none']);
 
 export const clipPlanSchema = z.object({
-  assetIndex: z.number().int().min(0).optional().describe('Index in assetPaths to place for this step. Defaults to the current step index.'),
+  assetIndex: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe('Index in assetPaths to place for this step. Defaults to the current step index.'),
   time: z.number().optional().describe('Timeline position in seconds for this step.'),
-  trackIndex: z.number().int().min(0).optional().describe('Video track index for this step. Defaults to videoTrackIndex.'),
+  trackIndex: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe('Video track index for this step. Defaults to videoTrackIndex.'),
   insertMode: z.enum(['overwrite', 'insert']).optional().describe('Placement mode for this step.'),
-  transitionAfter: z.object({
-    name: z.string().optional().describe('Transition to apply after this clip. Set "none" to skip this boundary.'),
-    duration: z.number().optional().describe('Transition duration in seconds.')
-  }).optional(),
-  motion: z.object({
-    style: motionStyleSchema.optional().describe('Simple motion style for this clip.'),
-    from: z.number().optional().describe('Starting keyframe value.'),
-    to: z.number().optional().describe('Ending keyframe value.'),
-    startTime: z.number().optional().describe('Start time for keyframe animation in seconds.'),
-    endTime: z.number().optional().describe('End time for keyframe animation in seconds.'),
-    componentName: z.string().optional().describe('Component name for keyframing. Defaults to "Motion".'),
-    paramName: z.string().optional().describe('Parameter name for keyframing. Defaults to "Scale".')
-  }).optional(),
-  trim: z.object({
-    inPoint: z.number().optional().describe('Clip in point in seconds.'),
-    outPoint: z.number().optional().describe('Clip out point in seconds.'),
-    duration: z.number().optional().describe('Target clip duration in seconds.')
-  }).optional(),
+  transitionAfter: z
+    .object({
+      name: z
+        .string()
+        .optional()
+        .describe('Transition to apply after this clip. Set "none" to skip this boundary.'),
+      duration: z.number().optional().describe('Transition duration in seconds.'),
+    })
+    .optional(),
+  motion: z
+    .object({
+      style: motionStyleSchema.optional().describe('Simple motion style for this clip.'),
+      from: z.number().optional().describe('Starting keyframe value.'),
+      to: z.number().optional().describe('Ending keyframe value.'),
+      startTime: z.number().optional().describe('Start time for keyframe animation in seconds.'),
+      endTime: z.number().optional().describe('End time for keyframe animation in seconds.'),
+      componentName: z
+        .string()
+        .optional()
+        .describe('Component name for keyframing. Defaults to "Motion".'),
+      paramName: z
+        .string()
+        .optional()
+        .describe('Parameter name for keyframing. Defaults to "Scale".'),
+    })
+    .optional(),
+  trim: z
+    .object({
+      inPoint: z.number().optional().describe('Clip in point in seconds.'),
+      outPoint: z.number().optional().describe('Clip out point in seconds.'),
+      duration: z.number().optional().describe('Target clip duration in seconds.'),
+    })
+    .optional(),
   effects: z.array(z.string()).optional().describe('Effect names to apply to this clip.'),
-  color: z.object({
-    brightness: z.number().optional(),
-    contrast: z.number().optional(),
-    saturation: z.number().optional(),
-    hue: z.number().optional(),
-    temperature: z.number().optional(),
-    tint: z.number().optional(),
-    highlights: z.number().optional(),
-    shadows: z.number().optional()
-  }).optional()
+  color: z
+    .object({
+      brightness: z.number().optional(),
+      contrast: z.number().optional(),
+      saturation: z.number().optional(),
+      hue: z.number().optional(),
+      temperature: z.number().optional(),
+      tint: z.number().optional(),
+      highlights: z.number().optional(),
+      shadows: z.number().optional(),
+    })
+    .optional(),
 });
 
 /**
@@ -52,7 +79,14 @@ export const clipPlanSchema = z.object({
  * without an explicit colour.
  */
 export const MARKER_COLOR_NAMES = [
-  'green', 'red', 'purple', 'orange', 'yellow', 'white', 'blue', 'cyan',
+  'green',
+  'red',
+  'purple',
+  'orange',
+  'yellow',
+  'white',
+  'blue',
+  'cyan',
 ] as const;
 
 /**
@@ -72,8 +106,10 @@ export const MarkerColorSchema = z.union([
   // Deliberately no .transform(): executeTool() discards the parse() result and
   // passes the raw args on, so a transform here would silently never apply.
   // The string-to-number conversion lives in resolveMarkerColor instead.
-  z.string().trim().regex(/^[0-7]$/),
+  z
+    .string()
+    .trim()
+    .regex(/^[0-7]$/),
 ]);
 
-export const MARKER_COLOR_DESCRIPTION =
-  `Marker colour — a name (${MARKER_COLOR_NAMES.join(', ')}) or an index 0-7. Defaults to green.`;
+export const MARKER_COLOR_DESCRIPTION = `Marker colour — a name (${MARKER_COLOR_NAMES.join(', ')}) or an index 0-7. Defaults to green.`;

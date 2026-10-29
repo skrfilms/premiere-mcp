@@ -264,7 +264,9 @@ export class BridgeSocketTransport {
       httpServer.unref();
 
       server = new WebSocketServer({ server: httpServer, maxPayload: MAX_FRAME_BYTES });
-      server.on('connection', (socket, request) => this.onConnection(socket, request.socket.remoteAddress));
+      server.on('connection', (socket, request) =>
+        this.onConnection(socket, request.socket.remoteAddress),
+      );
       // A listener error after startup must not take the process down; the transport simply stops
       // being available and the caller degrades to file IPC.
       server.on('error', (error) => this.logger.warn(`WebSocket transport error: ${error}`));
@@ -278,13 +280,23 @@ export class BridgeSocketTransport {
       this.wss = server;
       this.httpServer = httpServer;
       this.port = port;
-      this.logger.info(`Bridge WebSocket listening on 127.0.0.1:${port} (protocol ${BRIDGE_PROTOCOL_VERSION})`);
+      this.logger.info(
+        `Bridge WebSocket listening on 127.0.0.1:${port} (protocol ${BRIDGE_PROTOCOL_VERSION})`,
+      );
       return { port, endpointFile: join(this.tempDir, ENDPOINT_FILE) };
     } catch (error) {
       this.logger.warn(`Could not start the WebSocket transport, staying on file IPC: ${error}`);
       // Leave nothing listening. A half-started transport is how a leaked handle happens.
-      try { server?.close(); } catch { /* never started */ }
-      try { httpServer?.close(); } catch { /* never started */ }
+      try {
+        server?.close();
+      } catch {
+        /* never started */
+      }
+      try {
+        httpServer?.close();
+      } catch {
+        /* never started */
+      }
       this.wss = null;
       this.httpServer = null;
       this.port = null;
@@ -433,7 +445,8 @@ export class BridgeSocketTransport {
       protocolVersion: String(announced),
       protocolMajor: panelMajor,
       features,
-      premiereVersion: typeof frame['premiereVersion'] === 'string' ? frame['premiereVersion'] : null,
+      premiereVersion:
+        typeof frame['premiereVersion'] === 'string' ? frame['premiereVersion'] : null,
       engine: typeof frame['engine'] === 'string' ? frame['engine'] : null,
       connectedAt: new Date().toISOString(),
       remoteAddress,
@@ -512,7 +525,9 @@ export class BridgeSocketTransport {
     if (!entry) {
       // A response to a command that already timed out. Recorded, not resolved: the caller has
       // already been told the truth about it and must not now be told it succeeded.
-      this.logger.warn(`Late bridge response for command ${id}; the caller has already been answered`);
+      this.logger.warn(
+        `Late bridge response for command ${id}; the caller has already been answered`,
+      );
       return;
     }
 
@@ -520,7 +535,10 @@ export class BridgeSocketTransport {
     this.settle(entry, () => {
       this.recordLatency(roundTripMs);
       if (frame['ok'] === false) {
-        const message = typeof frame['error'] === 'string' ? frame['error'] : 'Panel reported a failure with no message';
+        const message =
+          typeof frame['error'] === 'string'
+            ? frame['error']
+            : 'Panel reported a failure with no message';
         return {
           status: 'failed' as const,
           error: new Error(message),
@@ -538,8 +556,16 @@ export class BridgeSocketTransport {
       // Inventing a tidier envelope here would change tool-visible behaviour on the socket path
       // only, which is the kind of difference nobody finds until a live session.
       const payload = frame['payload'];
-      if (payload !== null && typeof payload === 'object' && (payload as Record<string, unknown>)['result'] !== undefined) {
-        return { status: 'ok' as const, result: (payload as Record<string, unknown>)['result'], roundTripMs };
+      if (
+        payload !== null &&
+        typeof payload === 'object' &&
+        (payload as Record<string, unknown>)['result'] !== undefined
+      ) {
+        return {
+          status: 'ok' as const,
+          result: (payload as Record<string, unknown>)['result'],
+          roundTripMs,
+        };
       }
       return { status: 'ok' as const, result: payload, roundTripMs };
     });
@@ -738,10 +764,21 @@ export class BridgeSocketTransport {
   latency(): LatencyStats {
     const samples = this.latencySamples.slice().sort((a, b) => a - b);
     if (samples.length === 0) {
-      return { samples: 0, lastMs: null, minMs: null, maxMs: null, meanMs: null, p50Ms: null, p95Ms: null };
+      return {
+        samples: 0,
+        lastMs: null,
+        minMs: null,
+        maxMs: null,
+        meanMs: null,
+        p50Ms: null,
+        p95Ms: null,
+      };
     }
     const at = (fraction: number): number => {
-      const index = Math.min(samples.length - 1, Math.max(0, Math.ceil(fraction * samples.length) - 1));
+      const index = Math.min(
+        samples.length - 1,
+        Math.max(0, Math.ceil(fraction * samples.length) - 1),
+      );
       return samples[index] as number;
     };
     const total = samples.reduce((sum, value) => sum + value, 0);
@@ -778,7 +815,11 @@ export class BridgeSocketTransport {
     try {
       socket.close(code, message.slice(0, 100));
     } catch {
-      try { socket.terminate(); } catch { /* already gone */ }
+      try {
+        socket.terminate();
+      } catch {
+        /* already gone */
+      }
     }
     this.logger.warn(`Closed bridge socket with code ${code}: ${message}`);
   }

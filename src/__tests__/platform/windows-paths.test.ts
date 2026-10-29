@@ -43,11 +43,16 @@ interface PanelTempHelpers {
   sanitizeTempDirectoryInput(value: unknown): string;
 }
 
-function loadPanelTempHelpers(platform: 'win32' | 'darwin', env: Record<string, string | undefined>): PanelTempHelpers {
+function loadPanelTempHelpers(
+  platform: 'win32' | 'darwin',
+  env: Record<string, string | undefined>,
+): PanelTempHelpers {
   const source = readFileSync(PANEL_PATH, 'utf8');
   const anchor = 'window.MCPPremiereBridge = MCPPremiereBridge;';
   if (!source.includes(anchor)) {
-    throw new Error(`bridge-cep.js no longer contains the splice anchor "${anchor}" — update this helper.`);
+    throw new Error(
+      `bridge-cep.js no longer contains the splice anchor "${anchor}" — update this helper.`,
+    );
   }
   const patched = source.replace(
     anchor,
@@ -68,9 +73,14 @@ function loadPanelTempHelpers(platform: 'win32' | 'darwin', env: Record<string, 
     require: (name: string) => {
       if (name === 'fs') {
         return {
-          existsSync: () => false, mkdirSync: () => {}, readdirSync: () => [],
-          readFileSync: () => '', writeFileSync: () => {}, unlinkSync: () => {},
-          renameSync: () => {}, statSync: () => ({ isDirectory: () => true }),
+          existsSync: () => false,
+          mkdirSync: () => {},
+          readdirSync: () => [],
+          readFileSync: () => '',
+          writeFileSync: () => {},
+          unlinkSync: () => {},
+          renameSync: () => {},
+          statSync: () => ({ isDirectory: () => true }),
         };
       }
       // The real separator semantics for the platform under test. A posix path.join
@@ -80,14 +90,19 @@ function loadPanelTempHelpers(platform: 'win32' | 'darwin', env: Record<string, 
       if (name === 'os') {
         return {
           platform: () => platform,
-          tmpdir: () => (platform === 'win32' ? 'C:\\Users\\testuser\\AppData\\Local\\Temp' : '/tmp'),
+          tmpdir: () =>
+            platform === 'win32' ? 'C:\\Users\\testuser\\AppData\\Local\\Temp' : '/tmp',
           homedir: () => (platform === 'win32' ? 'C:\\Users\\testuser' : '/Users/testuser'),
         };
       }
       return {};
     },
     CSInterface: function () {
-      return { getHostEnvironment: () => ({ appName: 'PPRO', appVersion: '26.0.0' }), evalScript: () => {}, addEventListener() {} };
+      return {
+        getHostEnvironment: () => ({ appName: 'PPRO', appVersion: '26.0.0' }),
+        evalScript: () => {},
+        addEventListener() {},
+      };
     },
   };
 
@@ -100,10 +115,14 @@ function loadPanelTempHelpers(platform: 'win32' | 'darwin', env: Record<string, 
 
 describe('CEP panel getDefaultTempPath — both platform branches', () => {
   it('uses %TEMP% and backslash separators on win32', () => {
-    const { getDefaultTempPath } = loadPanelTempHelpers('win32', { TEMP: 'C:\\Users\\testuser\\AppData\\Local\\Temp' });
+    const { getDefaultTempPath } = loadPanelTempHelpers('win32', {
+      TEMP: 'C:\\Users\\testuser\\AppData\\Local\\Temp',
+    });
     // The whole point: a hardcoded '/tmp' or a posix join here would produce a path
     // Premiere cannot poll, and the failure mode is a silent bridge timeout.
-    expect(getDefaultTempPath()).toBe('C:\\Users\\testuser\\AppData\\Local\\Temp\\premiere-mcp-bridge');
+    expect(getDefaultTempPath()).toBe(
+      'C:\\Users\\testuser\\AppData\\Local\\Temp\\premiere-mcp-bridge',
+    );
   });
 
   it('falls back to TMP when TEMP is unset on win32', () => {
@@ -138,7 +157,8 @@ describe('CEP panel getDefaultTempPath — both platform branches', () => {
 });
 
 describe('CEP panel sanitizeTempDirectoryInput — win32 inputs', () => {
-  const win32 = () => loadPanelTempHelpers('win32', { TEMP: 'C:\\Temp' }).sanitizeTempDirectoryInput;
+  const win32 = () =>
+    loadPanelTempHelpers('win32', { TEMP: 'C:\\Temp' }).sanitizeTempDirectoryInput;
 
   it('rejects a pasted posix /tmp path on win32 rather than polling a path that cannot exist', () => {
     // Copy-pasting the README's macOS path into the panel on Windows is the obvious
@@ -210,7 +230,8 @@ describe('createSecureTempDir — win32 branch', () => {
       // bridge auth token and the command files that execute ExtendScript inside Premiere.
       expect(createSecureTempDir('abc123').startsWith('C:\\Temp')).toBe(true);
     } finally {
-      if (savedTmp === undefined) delete process.env.TMP; else process.env.TMP = savedTmp;
+      if (savedTmp === undefined) delete process.env.TMP;
+      else process.env.TMP = savedTmp;
     }
   });
 
@@ -276,8 +297,9 @@ describe('the setup text the server hands agents and users', () => {
     // who trusts the pre-filled field and one who follows the docs end up in different
     // directories, and only one of them matches the server.
     for (const env of [{ TEMP: 'C:\\T' }, { TMP: 'D:\\scratch' }, {}]) {
-      expect(bridgeTempDirForDocs('win32', env))
-        .toBe(loadPanelTempHelpers('win32', env).getDefaultTempPath());
+      expect(bridgeTempDirForDocs('win32', env)).toBe(
+        loadPanelTempHelpers('win32', env).getDefaultTempPath(),
+      );
     }
   });
 
@@ -351,7 +373,11 @@ describe('bridge temp-directory ownership check on a platform without getuid()',
   afterEach(() => {
     if (originalEnv === undefined) delete process.env.PREMIERE_TEMP_DIR;
     else process.env.PREMIERE_TEMP_DIR = originalEnv;
-    try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      /* best effort */
+    }
   });
 
   /**

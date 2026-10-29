@@ -70,8 +70,12 @@ describe('the panel copy of the prelude', () => {
     const stringify = panelStringify();
 
     for (const original of [
-      'say "hi"', 'C:\\Users\\bob', 'both " and \\', '\\"',
-      `x${LINE_SEPARATOR}y`, `x${PARAGRAPH_SEPARATOR}y`,
+      'say "hi"',
+      'C:\\Users\\bob',
+      'both " and \\',
+      '\\"',
+      `x${LINE_SEPARATOR}y`,
+      `x${PARAGRAPH_SEPARATOR}y`,
     ]) {
       expect(JSON.parse(stringify(original))).toBe(original);
     }
@@ -98,8 +102,17 @@ describe('the panel copy of the prelude', () => {
     const parse = sandbox.__mcpParse as (v: string) => unknown;
 
     for (const value of [
-      null, true, 0, -2.5e8, '', 'q"uote', 'back\\slash', 'tab\there',
-      [1, [2, [3]]], { a: { b: [null, false, 'x'] } }, { mTextString: 'hello' },
+      null,
+      true,
+      0,
+      -2.5e8,
+      '',
+      'q"uote',
+      'back\\slash',
+      'tab\there',
+      [1, [2, [3]]],
+      { a: { b: [null, false, 'x'] } },
+      { mTextString: 'hello' },
     ]) {
       const encoded = JSON.stringify(value);
       expect(parse(encoded)).toEqual(JSON.parse(encoded));
@@ -117,13 +130,16 @@ describe('the panel copy of the prelude', () => {
     // does implement the __proto__ setter, so it takes the drop path.
     const check = (withDefineProperty: boolean): string => {
       const sandbox = loadPanelPrelude(withDefineProperty);
-      return vm.runInContext(`
+      return vm.runInContext(
+        `
         var parsed = __mcpParse('{"__proto__":{"mTextString":"INJECTED"},"name":"clip"}');
         [ parsed.name,
           parsed.mTextString === undefined,
           Object.getPrototypeOf(parsed) === Object.prototype,
           ({}).mTextString === undefined ].join('|');
-      `, sandbox) as string;
+      `,
+        sandbox,
+      ) as string;
     };
 
     expect(check(true)).toBe('clip|true|true|true');
@@ -138,8 +154,17 @@ describe('the panel copy of the prelude', () => {
     const parse = sandbox.__mcpParse as (v: string) => unknown;
 
     for (const value of [
-      null, true, 0, -2.5e8, '', 'q"uote', 'back\\slash', 'tab\there',
-      [1, [2, [3]]], { a: { b: [null, false, 'x'] } }, { mTextString: 'hello' },
+      null,
+      true,
+      0,
+      -2.5e8,
+      '',
+      'q"uote',
+      'back\\slash',
+      'tab\there',
+      [1, [2, [3]]],
+      { a: { b: [null, false, 'x'] } },
+      { mTextString: 'hello' },
     ]) {
       const encoded = JSON.stringify(value);
       expect(parse(encoded)).toEqual(JSON.parse(encoded));
@@ -155,13 +180,16 @@ describe('the panel copy of the prelude', () => {
   it('does not let a __proto__ key reparent the object, in the panel copy too', () => {
     const sandbox = loadPanelPrelude();
 
-    const result = vm.runInContext(`
+    const result = vm.runInContext(
+      `
       var parsed = __mcpParse('{"__proto__":{"polluted":true},"name":"clip"}');
       [ Object.prototype.hasOwnProperty.call(parsed, '__proto__'),
         Object.getPrototypeOf(parsed) === Object.prototype,
         parsed.polluted === undefined,
         parsed.name ].join('|');
-    `, sandbox);
+    `,
+      sandbox,
+    );
 
     expect(result).toBe('true|true|true|clip');
   });
@@ -190,13 +218,22 @@ describe('the panel copy of the prelude', () => {
       require: (name: string) => {
         if (name === 'fs') {
           return {
-            existsSync: () => false, mkdirSync: () => {}, readdirSync: () => [],
-            readFileSync: () => '', writeFileSync: () => {}, unlinkSync: () => {},
-            renameSync: () => {}, statSync: () => ({ isDirectory: () => false }),
+            existsSync: () => false,
+            mkdirSync: () => {},
+            readdirSync: () => [],
+            readFileSync: () => '',
+            writeFileSync: () => {},
+            unlinkSync: () => {},
+            renameSync: () => {},
+            statSync: () => ({ isDirectory: () => false }),
           };
         }
         if (name === 'path') {
-          return { join: (...p: string[]) => p.join('/'), basename: (v: string) => v, dirname: (v: string) => v };
+          return {
+            join: (...p: string[]) => p.join('/'),
+            basename: (v: string) => v,
+            dirname: (v: string) => v,
+          };
         }
         if (name === 'os') return { tmpdir: () => '/tmp', homedir: () => '/tmp' };
         return {};
@@ -204,7 +241,9 @@ describe('the panel copy of the prelude', () => {
       CSInterface: function () {
         return {
           getHostEnvironment: () => ({ appName: 'PPRO', appVersion: '26.0.0' }),
-          evalScript: (script: string) => { handed = script; },
+          evalScript: (script: string) => {
+            handed = script;
+          },
           addEventListener() {},
         };
       },
@@ -232,13 +271,16 @@ describe('the panel copy of the prelude', () => {
   it('does not let a __proto__ key reparent the object, in the panel copy too', () => {
     const sandbox = loadPanelPrelude();
 
-    const result = vm.runInContext(`
+    const result = vm.runInContext(
+      `
       var parsed = __mcpParse('{"__proto__":{"polluted":true},"name":"clip"}');
       [ Object.prototype.hasOwnProperty.call(parsed, '__proto__'),
         Object.getPrototypeOf(parsed) === Object.prototype,
         parsed.polluted === undefined,
         parsed.name ].join('|');
-    `, sandbox);
+    `,
+      sandbox,
+    );
 
     expect(result).toBe('true|true|true|clip');
   });

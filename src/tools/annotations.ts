@@ -32,9 +32,26 @@ export interface ToolAnnotations {
 
 /** Name prefixes that denote a pure inspection tool. */
 const READ_PREFIXES = [
-  'get_', 'list_', 'read_', 'find_', 'search_', 'inspect_', 'reflect_', 'is_',
-  'check_', 'detect_', 'probe_', 'validate_', 'verify_', 'lint_', 'diff_',
-  'has_', 'describe_', 'capture_', 'generate_scope', 'evaluate_',
+  'get_',
+  'list_',
+  'read_',
+  'find_',
+  'search_',
+  'inspect_',
+  'reflect_',
+  'is_',
+  'check_',
+  'detect_',
+  'probe_',
+  'validate_',
+  'verify_',
+  'lint_',
+  'diff_',
+  'has_',
+  'describe_',
+  'capture_',
+  'generate_scope',
+  'evaluate_',
 ];
 
 /**
@@ -43,9 +60,25 @@ const READ_PREFIXES = [
  * may not be trivially recoverable.
  */
 const DESTRUCTIVE_PREFIXES = [
-  'delete_', 'remove_', 'clear_', 'close_', 'overwrite_', 'ripple_', 'razor_',
-  'reset_', 'restore_', 'unlink_', 'detach_', 'unnest_', 'extract_', 'lift_',
-  'consolidate_', 'replace_', 'trim_', 'split_', 'flush_',
+  'delete_',
+  'remove_',
+  'clear_',
+  'close_',
+  'overwrite_',
+  'ripple_',
+  'razor_',
+  'reset_',
+  'restore_',
+  'unlink_',
+  'detach_',
+  'unnest_',
+  'extract_',
+  'lift_',
+  'consolidate_',
+  'replace_',
+  'trim_',
+  'split_',
+  'flush_',
 ];
 
 /**
@@ -54,19 +87,48 @@ const DESTRUCTIVE_PREFIXES = [
  * cannot be predicted from arguments alone.
  */
 const OPEN_WORLD_EXACT = new Set([
-  'execute_extendscript', 'evaluate_expression', 'batch_execute',
-  'import_media', 'import_folder', 'import_image_sequence', 'import_mogrt',
-  'import_mogrt_from_library', 'import_edl', 'import_fcp_xml', 'import_sequences',
-  'import_sequences_from_project', 'import_ae_comps',
-  'open_project', 'create_project', 'save_project_as',
-  'probe_media', 'index_footage', 'search_footage',
-  'transcribe_to_srt', 'normalize_loudness', 'bake_speed_change',
-  'capture_program_output', 'capture_frame', 'generate_scope',
-  'read_srt', 'write_srt', 'validate_srt', 'update_srt_cue', 'insert_srt_cue',
-  'remove_srt_cue', 'shift_srt_timing',
-  'read_clipboard', 'write_clipboard',
-  'relink_media', 'consolidate_and_transfer', 'encode_file', 'encode_project_item',
-  'start_batch_encode', 'add_to_render_queue', 'export_frame', 'export_sequence',
+  'execute_extendscript',
+  'evaluate_expression',
+  'batch_execute',
+  'import_media',
+  'import_folder',
+  'import_image_sequence',
+  'import_mogrt',
+  'import_mogrt_from_library',
+  'import_edl',
+  'import_fcp_xml',
+  'import_sequences',
+  'import_sequences_from_project',
+  'import_ae_comps',
+  'open_project',
+  'create_project',
+  'save_project_as',
+  'probe_media',
+  'index_footage',
+  'search_footage',
+  'transcribe_to_srt',
+  'normalize_loudness',
+  'bake_speed_change',
+  'capture_program_output',
+  'capture_frame',
+  'generate_scope',
+  'read_srt',
+  'write_srt',
+  'validate_srt',
+  'update_srt_cue',
+  'insert_srt_cue',
+  'remove_srt_cue',
+  'shift_srt_timing',
+  'read_clipboard',
+  'write_clipboard',
+  'relink_media',
+  'consolidate_and_transfer',
+  'encode_file',
+  'encode_project_item',
+  'start_batch_encode',
+  'add_to_render_queue',
+  'export_frame',
+  'export_sequence',
   // get_capabilities can spawn ffmpeg/ffprobe/whisper to probe local backends.
   'get_capabilities',
   // NOTE: find_tool is deliberately NOT here. It ranks this server's own static
@@ -101,22 +163,52 @@ const OVERRIDES: Record<string, Partial<ToolAnnotations>> = {
   // Restoring a checkpoint overwrites current work — the most destructive tool we have.
   restore_recovery_checkpoint: { destructiveHint: true, idempotentHint: true },
   // Arbitrary code: unknowable by construction.
-  execute_extendscript: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
-  batch_execute: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  execute_extendscript: {
+    readOnlyHint: false,
+    destructiveHint: true,
+    idempotentHint: false,
+    openWorldHint: true,
+  },
+  batch_execute: {
+    readOnlyHint: false,
+    destructiveHint: true,
+    idempotentHint: false,
+    openWorldHint: true,
+  },
   // Reads state, but through a spawned process rather than the DOM.
   evaluate_expression: { readOnlyHint: true, openWorldHint: true },
   // The router invokes an arbitrary catalogue tool, so its behaviour is exactly as
   // unknowable as its target. Hinted at the pessimistic end on purpose: a client must
   // not treat one approval of `call_tool` as an approval of everything it can reach.
-  call_tool: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  call_tool: {
+    readOnlyHint: false,
+    destructiveHint: true,
+    idempotentHint: false,
+    openWorldHint: true,
+  },
   // These change what THIS server advertises. Real state, but server-side only: no
   // Premiere request, no filesystem, and re-running one lands on the same list.
-  activate_tools: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  deactivate_tools: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  activate_tools: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+  },
+  deactivate_tools: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: false,
+  },
   // Runs an arbitrary plan of sequence edits, so its effect is as broad as the plan it
   // wraps — hinted at the pessimistic end for the same reason as call_tool. It clones and
   // may delete a sequence, and re-running the same plan is not a no-op, so not idempotent.
-  transact_sequence_edits: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  transact_sequence_edits: {
+    readOnlyHint: false,
+    destructiveHint: true,
+    idempotentHint: false,
+    openWorldHint: true,
+  },
 };
 
 function startsWithAny(name: string, prefixes: string[]): boolean {
@@ -151,9 +243,20 @@ export function annotationsFor(name: string): ToolAnnotations {
   // idempotent: calling it twice yields two objects.
   const idempotent =
     readOnly ||
-    startsWithAny(name, ['set_', 'enable_', 'disable_', 'mute_', 'lock_', 'rename_', 'select_', 'deselect_', 'move_', 'link_', 'toggle_']);
-  const openWorld =
-    OPEN_WORLD_EXACT.has(name) || startsWithAny(name, OPEN_WORLD_PREFIXES);
+    startsWithAny(name, [
+      'set_',
+      'enable_',
+      'disable_',
+      'mute_',
+      'lock_',
+      'rename_',
+      'select_',
+      'deselect_',
+      'move_',
+      'link_',
+      'toggle_',
+    ]);
+  const openWorld = OPEN_WORLD_EXACT.has(name) || startsWithAny(name, OPEN_WORLD_PREFIXES);
 
   const base: ToolAnnotations = {
     title: humanTitle(name),

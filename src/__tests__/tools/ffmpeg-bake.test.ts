@@ -20,8 +20,16 @@ const noBridge = { executeScript: async () => ({ success: true }) } as never;
 
 describe('bake_speed_change', () => {
   let scratch: string;
-  beforeAll(() => { scratch = mkdtempSync(join(tmpdir(), 'skry-speed-')); });
-  afterAll(() => { try { rmSync(scratch, { recursive: true, force: true }); } catch { /* best effort */ } });
+  beforeAll(() => {
+    scratch = mkdtempSync(join(tmpdir(), 'skry-speed-'));
+  });
+  afterAll(() => {
+    try {
+      rmSync(scratch, { recursive: true, force: true });
+    } catch {
+      /* best effort */
+    }
+  });
 
   it('rejects a call with neither mediaPath nor projectItemId', async () => {
     const tools = new PremiereProTools(noBridge);
@@ -34,7 +42,11 @@ describe('bake_speed_change', () => {
     const media = join(scratch, 'clip.mov');
     writeFileSync(media, 'not really media, just needs to exist');
     const tools = new PremiereProTools(noBridge);
-    for (const bad of [{ mediaPath: media }, { mediaPath: media, speed: 0 }, { mediaPath: media, speed: -1 }]) {
+    for (const bad of [
+      { mediaPath: media },
+      { mediaPath: media, speed: 0 },
+      { mediaPath: media, speed: -1 },
+    ]) {
       const result = await tools.executeTool('bake_speed_change', bad);
       expect(result.success).toBe(false);
       expect(String(result.error)).toMatch(/speed/i);
@@ -73,7 +85,9 @@ describe('bake_speed_change', () => {
 describe('bake_speed_change — atempo chain math', () => {
   // Reach the private helper through the instance; it is pure and deterministic.
   const chain = (speed: number): string =>
-    (new PremiereProTools(noBridge) as unknown as { buildAtempoChain(s: number): string }).buildAtempoChain(speed);
+    (
+      new PremiereProTools(noBridge) as unknown as { buildAtempoChain(s: number): string }
+    ).buildAtempoChain(speed);
 
   it('leaves in-range factors as a single atempo', () => {
     expect(chain(1)).toBe('atempo=1');
@@ -94,9 +108,11 @@ describe('bake_speed_change — atempo chain math', () => {
     expect(chain(0.125)).toBe('atempo=0.5,atempo=0.5,atempo=0.5');
   });
 
-  it('every step of any produced chain is within ffmpeg\'s [0.5, 2.0] atempo range', () => {
+  it("every step of any produced chain is within ffmpeg's [0.5, 2.0] atempo range", () => {
     for (const speed of [0.1, 0.25, 0.33, 0.5, 0.75, 1, 1.5, 2, 3, 4, 5, 10]) {
-      const factors = chain(speed).split(',').map((s) => Number(s.replace('atempo=', '')));
+      const factors = chain(speed)
+        .split(',')
+        .map((s) => Number(s.replace('atempo=', '')));
       const product = factors.reduce((a, b) => a * b, 1);
       for (const f of factors) {
         expect(f).toBeGreaterThanOrEqual(0.5 - 1e-6);
@@ -110,8 +126,16 @@ describe('bake_speed_change — atempo chain math', () => {
 
 describe('normalize_loudness', () => {
   let scratch: string;
-  beforeAll(() => { scratch = mkdtempSync(join(tmpdir(), 'skry-loud-')); });
-  afterAll(() => { try { rmSync(scratch, { recursive: true, force: true }); } catch { /* best effort */ } });
+  beforeAll(() => {
+    scratch = mkdtempSync(join(tmpdir(), 'skry-loud-'));
+  });
+  afterAll(() => {
+    try {
+      rmSync(scratch, { recursive: true, force: true });
+    } catch {
+      /* best effort */
+    }
+  });
 
   it('rejects a call with neither mediaPath nor projectItemId', async () => {
     const tools = new PremiereProTools(noBridge);
@@ -136,7 +160,10 @@ describe('normalize_loudness', () => {
     process.env.PREMIERE_MCP_FFMPEG_CMD = 'skry-ffmpeg-does-not-exist-xyz';
     try {
       const tools = new PremiereProTools(noBridge);
-      const result = await tools.executeTool('normalize_loudness', { mediaPath: media, targetLufs: -23 });
+      const result = await tools.executeTool('normalize_loudness', {
+        mediaPath: media,
+        targetLufs: -23,
+      });
       expect(result.success).toBe(false);
       expect(result.error).toMatch(/not found on PATH/i);
       expect(result.error).toMatch(/brew install ffmpeg/);

@@ -130,8 +130,9 @@ describe('published tool counts match the catalogue', () => {
     // the wrong ones matters more than finding every phrasing, so assert both
     // directions: the real number appears, and no other 3-digit count is claimed.
     expect(readme).toContain(`\`${count}\``);
-    const claimed = (readme.match(/`(\d{3})`\s*(?:MCP\s+)?(?:active\s+)?(?:advertised\s+)?tools?/g) || [])
-      .map((match) => Number((match.match(/\d{3}/) || ['0'])[0]));
+    const claimed = (
+      readme.match(/`(\d{3})`\s*(?:MCP\s+)?(?:active\s+)?(?:advertised\s+)?tools?/g) || []
+    ).map((match) => Number((match.match(/\d{3}/) || ['0'])[0]));
     for (const value of claimed) expect(value).toBe(count);
   });
 

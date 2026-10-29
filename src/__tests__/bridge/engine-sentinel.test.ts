@@ -103,11 +103,18 @@ setInterval(() => {
 }, 50);
 `;
 
-function startPanel(mode: 'accept' | 'reject' | 'hung' | 'peer-deletes' | 'busy', busyId?: string): void {
+function startPanel(
+  mode: 'accept' | 'reject' | 'hung' | 'peer-deletes' | 'busy',
+  busyId?: string,
+): void {
   const stubPath = join(dir, 'panel-stub.mjs');
   writeFileSync(stubPath, PANEL_STUB);
   const heartbeat = join(dir, 'bridge-heartbeat.json');
-  try { unlinkSync(heartbeat); } catch { /* none yet */ }
+  try {
+    unlinkSync(heartbeat);
+  } catch {
+    /* none yet */
+  }
   panel = spawn(process.execPath, [stubPath, dir, mode, busyId ?? ''], { stdio: 'ignore' });
   // Wait for the stub's first heartbeat. spawn() returns before the child is running, and on a
   // slow Windows CI runner the sentinel probed first and (correctly) called the panel dead.
@@ -116,12 +123,24 @@ function startPanel(mode: 'accept' | 'reject' | 'hung' | 'peer-deletes' | 'busy'
   while (!existsSync(heartbeat) && Date.now() < deadline) Atomics.wait(nap, 0, 0, 50);
 }
 
-interface Verdict { state: string; code: number; detail: string; status: number; contendedBy?: number[]; busyWith?: string }
+interface Verdict {
+  state: string;
+  code: number;
+  detail: string;
+  status: number;
+  contendedBy?: number[];
+  busyWith?: string;
+}
 
 function runSentinel(timeoutMs = 4000, extraEnv: Record<string, string> = {}): Verdict {
-  const env: Record<string, string | undefined> = { ...process.env, PREMIERE_TEMP_DIR: dir, ...extraEnv };
+  const env: Record<string, string | undefined> = {
+    ...process.env,
+    PREMIERE_TEMP_DIR: dir,
+    ...extraEnv,
+  };
   // Unset unless a test asks for it, so the process.ppid fallback is what the other tests exercise.
-  if (!('PREMIERE_MCP_SENTINEL_PARENT_PID' in extraEnv)) delete env.PREMIERE_MCP_SENTINEL_PARENT_PID;
+  if (!('PREMIERE_MCP_SENTINEL_PARENT_PID' in extraEnv))
+    delete env.PREMIERE_MCP_SENTINEL_PARENT_PID;
   const out = spawnSync(process.execPath, [SENTINEL, '--json', `--timeout=${timeoutMs}`], {
     encoding: 'utf8',
     env,
@@ -251,7 +270,7 @@ describe('engine-sentinel peer accounting', () => {
     expect(verdict.contendedBy).toEqual([process.pid]);
   });
 
-  it('names the in-flight command on BUSY so a caller can tell its own wedge from a peer\'s', async () => {
+  it("names the in-flight command on BUSY so a caller can tell its own wedge from a peer's", async () => {
     writeToken();
     startPanel('busy', 'someone-elses-command-id');
     expect(runSentinel(2000).busyWith).toBe('someone-elses-command-id');
@@ -265,7 +284,8 @@ describe('engine-sentinel temp-directory citizenship', () => {
     writeToken();
     startPanel('accept');
     runSentinel();
-    const leftover = require('fs').readdirSync(dir)
+    const leftover = require('fs')
+      .readdirSync(dir)
       .filter((n: string) => n.startsWith('client-') && n.endsWith('.json'));
     expect(leftover).toEqual([]);
   });

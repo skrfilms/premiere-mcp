@@ -20,9 +20,15 @@ export class MulticamTools extends MotionLayoutTools {
    * <activevideoangle> is the one shown. Measured on 2026-10-27 with three solid-colour angles:
    * each cut rendered its own angle. Angles are synced at their media start (all in points 0).
    */
-  protected async createMulticamCut(angleItemIds: string[], cuts: Array<{ startSecs: number; endSecs: number; angle: number }>, sequenceName: string): Promise<any> {
-    if (!Array.isArray(angleItemIds) || angleItemIds.length < 2) return { success: false, error: 'angleItemIds needs at least two camera clips.' };
-    if (!Array.isArray(cuts) || cuts.length === 0) return { success: false, error: 'cuts needs at least one {startSecs, endSecs, angle}.' };
+  protected async createMulticamCut(
+    angleItemIds: string[],
+    cuts: Array<{ startSecs: number; endSecs: number; angle: number }>,
+    sequenceName: string,
+  ): Promise<any> {
+    if (!Array.isArray(angleItemIds) || angleItemIds.length < 2)
+      return { success: false, error: 'angleItemIds needs at least two camera clips.' };
+    if (!Array.isArray(cuts) || cuts.length === 0)
+      return { success: false, error: 'cuts needs at least one {startSecs, endSecs, angle}.' };
     const info: any = await this.bridge.executeScript(`
       try {
         var ids = ${JSON.stringify(angleItemIds)}, out = [];
@@ -47,35 +53,60 @@ export class MulticamTools extends MotionLayoutTools {
     const tcFrames = (tc: string) => {
       const p = String(tc).split(/[:;]/).map(Number);
       const [h = NaN, m = NaN, sec = NaN, f = NaN] = p;
-      return p.length === 4 && p.every((n) => Number.isFinite(n)) ? ((h * 60 + m) * 60 + sec) * fps + f : NaN;
+      return p.length === 4 && p.every((n) => Number.isFinite(n))
+        ? ((h * 60 + m) * 60 + sec) * fps + f
+        : NaN;
     };
     const durations = angles.map((a) => tcFrames(a.duration));
     const mcLen = Math.min(...durations.filter((d) => Number.isFinite(d) && d > 0));
-    if (!Number.isFinite(mcLen)) return { success: false, error: 'Could not read the media duration of the angle clips.' };
+    if (!Number.isFinite(mcLen))
+      return { success: false, error: 'Could not read the media duration of the angle clips.' };
     const toF = (s: number) => Math.round(s * fps);
     for (const c of cuts) {
-      if (!(c.angle >= 1 && c.angle <= angles.length)) return { success: false, error: `angle ${c.angle} is out of range 1..${angles.length}. Nothing was created.` };
+      if (!(c.angle >= 1 && c.angle <= angles.length))
+        return {
+          success: false,
+          error: `angle ${c.angle} is out of range 1..${angles.length}. Nothing was created.`,
+        };
       if (!(c.endSecs > c.startSecs) || c.startSecs < 0 || toF(c.endSecs) > mcLen) {
-        return { success: false, error: `cut ${c.startSecs}s-${c.endSecs}s is empty or runs past the shortest angle (${(mcLen / fps).toFixed(3)}s). Nothing was created.` };
+        return {
+          success: false,
+          error: `cut ${c.startSecs}s-${c.endSecs}s is empty or runs past the shortest angle (${(mcLen / fps).toFixed(3)}s). Nothing was created.`,
+        };
       }
     }
     const esc = (v: string) => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const rate = `<rate><timebase>${fps}</timebase><ntsc>FALSE</ntsc></rate>`;
     const sc = `<samplecharacteristics>${rate}<width>${width}</width><height>${height}</height><pixelaspectratio>square</pixelaspectratio><fielddominance>none</fielddominance></samplecharacteristics>`;
-    const fileEl = (i: number, full: boolean) => full
-      ? `<file id="mc-file-${i}"><name>${esc(angles[i]!.name)}</name><pathurl>file://localhost${esc(encodeURI(angles[i]!.path))}</pathurl>${rate}<duration>${durations[i]}</duration><media><video>${sc}</video></media></file>`
-      : `<file id="mc-file-${i}"/>`;
-    const multiclip = (active: number, first: boolean, n: number) => '<multiclip id="mc-cut-1"><name>' + esc(sequenceName) + ' multicam</name><collapsed>FALSE</collapsed><synctype>1</synctype>'
-      + angles.map((a, i) => `<angle><name>${esc(a.name)}</name>${i + 1 === active ? '<activevideoangle>TRUE</activevideoangle><activeaudioangle>TRUE</activeaudioangle>' : ''}`
-        + `<clip id="mc-angle-${i}-${n}"><name>${esc(a.name)}</name><duration>${mcLen}</duration>${rate}<in>0</in><out>${mcLen}</out><media><video><track>`
-        + `<clipitem id="mc-angle-item-${i}-${n}"><name>${esc(a.name)}</name><duration>${mcLen}</duration>${rate}<start>0</start><end>${mcLen}</end><in>0</in><out>${mcLen}</out>${fileEl(i, first)}</clipitem>`
-        + '</track></video></media></clip></angle>').join('')
-      + '</multiclip>';
+    const fileEl = (i: number, full: boolean) =>
+      full
+        ? `<file id="mc-file-${i}"><name>${esc(angles[i]!.name)}</name><pathurl>file://localhost${esc(encodeURI(angles[i]!.path))}</pathurl>${rate}<duration>${durations[i]}</duration><media><video>${sc}</video></media></file>`
+        : `<file id="mc-file-${i}"/>`;
+    const multiclip = (active: number, first: boolean, n: number) =>
+      '<multiclip id="mc-cut-1"><name>' +
+      esc(sequenceName) +
+      ' multicam</name><collapsed>FALSE</collapsed><synctype>1</synctype>' +
+      angles
+        .map(
+          (a, i) =>
+            `<angle><name>${esc(a.name)}</name>${i + 1 === active ? '<activevideoangle>TRUE</activevideoangle><activeaudioangle>TRUE</activeaudioangle>' : ''}` +
+            `<clip id="mc-angle-${i}-${n}"><name>${esc(a.name)}</name><duration>${mcLen}</duration>${rate}<in>0</in><out>${mcLen}</out><media><video><track>` +
+            `<clipitem id="mc-angle-item-${i}-${n}"><name>${esc(a.name)}</name><duration>${mcLen}</duration>${rate}<start>0</start><end>${mcLen}</end><in>0</in><out>${mcLen}</out>${fileEl(i, first)}</clipitem>` +
+            '</track></video></media></clip></angle>',
+        )
+        .join('') +
+      '</multiclip>';
     const sorted = [...cuts].sort((a, b) => a.startSecs - b.startSecs);
-    const items = sorted.map((c, n) => `<clipitem id="mc-cut-item-${n}"><name>${esc(sequenceName)} multicam</name><duration>${mcLen}</duration>${rate}`
-      + `<start>${toF(c.startSecs)}</start><end>${toF(c.endSecs)}</end><in>${toF(c.startSecs)}</in><out>${toF(c.endSecs)}</out>${multiclip(c.angle, n === 0, n)}</clipitem>`).join('');
-    const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE xmeml>\n<xmeml version="4"><sequence id="mc-cut-seq"><name>${esc(sequenceName)}</name><duration>${toF(sorted[sorted.length - 1]!.endSecs)}</duration>${rate}`
-      + `<media><video><format>${sc}</format><track>${items}</track></video></media></sequence></xmeml>\n`;
+    const items = sorted
+      .map(
+        (c, n) =>
+          `<clipitem id="mc-cut-item-${n}"><name>${esc(sequenceName)} multicam</name><duration>${mcLen}</duration>${rate}` +
+          `<start>${toF(c.startSecs)}</start><end>${toF(c.endSecs)}</end><in>${toF(c.startSecs)}</in><out>${toF(c.endSecs)}</out>${multiclip(c.angle, n === 0, n)}</clipitem>`,
+      )
+      .join('');
+    const xml =
+      `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE xmeml>\n<xmeml version="4"><sequence id="mc-cut-seq"><name>${esc(sequenceName)}</name><duration>${toF(sorted[sorted.length - 1]!.endSecs)}</duration>${rate}` +
+      `<media><video><format>${sc}</format><track>${items}</track></video></media></sequence></xmeml>\n`;
     const dir = join(tmpdir(), 'premiere-mcp-multicam');
     mkdirSync(dir, { recursive: true });
     const xmlPath = join(dir, `multicam-cut-${Date.now()}.xml`);
@@ -110,7 +141,12 @@ export class MulticamTools extends MotionLayoutTools {
     `);
   }
 
-  protected async enableMulticam(seqId: string|undefined, trackIndex: number, clipIndex: number, enabled: boolean): Promise<any> {
+  protected async enableMulticam(
+    seqId: string | undefined,
+    trackIndex: number,
+    clipIndex: number,
+    enabled: boolean,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -154,7 +190,11 @@ export class MulticamTools extends MotionLayoutTools {
     `);
   }
 
-  protected async flattenMulticam(seqId: string|undefined, trackIndex: number, clipIndex: number): Promise<any> {
+  protected async flattenMulticam(
+    seqId: string | undefined,
+    trackIndex: number,
+    clipIndex: number,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -167,7 +207,11 @@ export class MulticamTools extends MotionLayoutTools {
     `);
   }
 
-  protected async multicamInfo(seqId: string|undefined, trackIndex: number, clipIndex: number): Promise<any> {
+  protected async multicamInfo(
+    seqId: string | undefined,
+    trackIndex: number,
+    clipIndex: number,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -180,7 +224,12 @@ export class MulticamTools extends MotionLayoutTools {
     `);
   }
 
-  protected async setMulticamAngle(seqId: string|undefined, trackIndex: number, clipIndex: number, angleIndex: number): Promise<any> {
+  protected async setMulticamAngle(
+    seqId: string | undefined,
+    trackIndex: number,
+    clipIndex: number,
+    angleIndex: number,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -205,11 +254,16 @@ export class MulticamTools extends MotionLayoutTools {
    * and then report "Bin is empty". Uses the shared __resolveBin prelude helper. Sub-bins are
    * also skipped when collecting angles -- they were previously pushed in as camera angles.
    */
-  protected async createMulticamSourceSequence(binName: string, newSeqName: string, presetPath?: string, binId?: string): Promise<any> {
+  protected async createMulticamSourceSequence(
+    binName: string,
+    newSeqName: string,
+    presetPath?: string,
+    binId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var req = __resolveBin(${JSON.stringify(binId??null)}, ${JSON.stringify(binName)});
-        if (req.error) return JSON.stringify({success:false,error:req.error+' No sequence was created.',binName:${JSON.stringify(binName)},binId:${JSON.stringify(binId??null)},matchCount:req.matchCount});
+        var req = __resolveBin(${JSON.stringify(binId ?? null)}, ${JSON.stringify(binName)});
+        if (req.error) return JSON.stringify({success:false,error:req.error+' No sequence was created.',binName:${JSON.stringify(binName)},binId:${JSON.stringify(binId ?? null)},matchCount:req.matchCount});
         var bin = req.bin;
         var clips = [];
         for (var j = 0; j < bin.children.numItems; j++) { if (!__isBin(bin.children[j])) clips.push(bin.children[j]); }
@@ -224,7 +278,11 @@ export class MulticamTools extends MotionLayoutTools {
     `);
   }
 
-  protected async createMulticamFromClips(projectItemIds: string[], seqName: string, presetPath?: string): Promise<any> {
+  protected async createMulticamFromClips(
+    projectItemIds: string[],
+    seqName: string,
+    presetPath?: string,
+  ): Promise<any> {
     const idsJson = JSON.stringify(projectItemIds);
     return await this.bridge.executeScript(`
       try {

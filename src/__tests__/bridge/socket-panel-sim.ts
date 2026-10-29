@@ -91,7 +91,9 @@ export function connectSimPanel(tempDir: string, options: SimPanelOptions = {}):
   ready.catch(() => {});
 
   let resolveClosed: (value: [number, string]) => void = () => {};
-  const closed = new Promise<[number, string]>((resolve) => { resolveClosed = resolve; });
+  const closed = new Promise<[number, string]>((resolve) => {
+    resolveClosed = resolve;
+  });
 
   socket.on('open', () => {
     if (options.sendHello === false) return;
@@ -129,7 +131,11 @@ export function connectSimPanel(tempDir: string, options: SimPanelOptions = {}):
 
       const respond =
         options.respond ??
-        ((c: SimCommand) => ({ success: true, result: { echoed: c.id }, timestamp: new Date().toISOString() }));
+        ((c: SimCommand) => ({
+          success: true,
+          result: { echoed: c.id },
+          timestamp: new Date().toISOString(),
+        }));
       const payload = respond(command);
       if (payload === null) return;
       socket.send(JSON.stringify({ type: 'response', id: command.id, payload }));
@@ -159,10 +165,17 @@ export function connectSimPanel(tempDir: string, options: SimPanelOptions = {}):
           resolve(pending);
           return;
         }
-        waiters.push((command) => { consumed += 1; resolve(command); });
+        waiters.push((command) => {
+          consumed += 1;
+          resolve(command);
+        });
       }),
     close: () => {
-      try { socket.close(); } catch { /* already gone */ }
+      try {
+        socket.close();
+      } catch {
+        /* already gone */
+      }
     },
   };
 }

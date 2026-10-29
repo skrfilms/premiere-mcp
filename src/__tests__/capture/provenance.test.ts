@@ -18,7 +18,15 @@ import {
 } from '../../capture/provenance.js';
 import type { CaptureTapKind } from '../../capture/types.js';
 
-const ALL_TAPS: CaptureTapKind[] = ['render', 'export-file', 'media-file', 'screen', 'ndi', 'syphon', 'spout'];
+const ALL_TAPS: CaptureTapKind[] = [
+  'render',
+  'export-file',
+  'media-file',
+  'screen',
+  'ndi',
+  'syphon',
+  'spout',
+];
 
 describe('provenance labelling', () => {
   it('labels only Premiere-rendered taps as composited renders', () => {
@@ -117,7 +125,12 @@ describe('makeEvidence', () => {
 
 describe('timePosition', () => {
   it('computes frame and timecode when both time and rate are known', () => {
-    expect(timePosition(2, 24)).toEqual({ seconds: 2, frame: 48, timecode: '00:00:02:00', fps: 24 });
+    expect(timePosition(2, 24)).toEqual({
+      seconds: 2,
+      frame: 48,
+      timecode: '00:00:02:00',
+      fps: 24,
+    });
   });
 
   it('keeps frame and timecode unknown when the frame rate is not known', () => {

@@ -46,11 +46,17 @@ function catalogueNames(): string[] {
 }
 
 function sweepFiles(): string[] {
-  return existsSync(SWEEP_DIR) ? readdirSync(SWEEP_DIR).filter((f) => f.endsWith('.json')).sort() : [];
+  return existsSync(SWEEP_DIR)
+    ? readdirSync(SWEEP_DIR)
+        .filter((f) => f.endsWith('.json'))
+        .sort()
+    : [];
 }
 
 function loadSweeps(): Sweep[] {
-  return sweepFiles().map((f) => validateSweep(JSON.parse(readFileSync(join(SWEEP_DIR, f), 'utf8')), f));
+  return sweepFiles().map((f) =>
+    validateSweep(JSON.parse(readFileSync(join(SWEEP_DIR, f), 'utf8')), f),
+  );
 }
 
 describe('verification ledger files', () => {
@@ -63,25 +69,46 @@ describe('verification ledger files', () => {
     const bad = { environment: null, tools: [] };
     expect(() => validateSweep(bad, 'bad.json')).toThrow(LedgerFormatError);
     const env = {
-      ranAt: '2026-08-27T00:00:00Z', harness: 'h', mode: 'read-only', gitSha: 'abc',
-      gitDirty: false, premiereVersion: null, platform: 'darwin', catalogueSize: 1,
+      ranAt: '2026-08-27T00:00:00Z',
+      harness: 'h',
+      mode: 'read-only',
+      gitSha: 'abc',
+      gitDirty: false,
+      premiereVersion: null,
+      platform: 'darwin',
+      catalogueSize: 1,
     };
-    expect(() => validateSweep({ environment: env, tools: [{ name: 'ping', outcome: 'probably_fine' }] }, 'x.json'))
-      .toThrow(/is not one of/);
-    expect(() => validateSweep({ environment: { ...env, ranAt: 'yesterday' }, tools: [] }, 'x.json'))
-      .toThrow(/ranAt/);
-    expect(() => validateSweep({ environment: { ...env, mode: 'sort-of' }, tools: [] }, 'x.json'))
-      .toThrow(/mode/);
+    expect(() =>
+      validateSweep(
+        { environment: env, tools: [{ name: 'ping', outcome: 'probably_fine' }] },
+        'x.json',
+      ),
+    ).toThrow(/is not one of/);
+    expect(() =>
+      validateSweep({ environment: { ...env, ranAt: 'yesterday' }, tools: [] }, 'x.json'),
+    ).toThrow(/ranAt/);
+    expect(() =>
+      validateSweep({ environment: { ...env, mode: 'sort-of' }, tools: [] }, 'x.json'),
+    ).toThrow(/mode/);
   });
 
   it('the newest sweep wins per tool, even when it is a skip', () => {
     const env = (ranAt: string) => ({
-      ranAt, harness: 'h', mode: 'read-only' as const, gitSha: 'abc',
-      gitDirty: false, premiereVersion: null, platform: 'darwin', catalogueSize: 1,
+      ranAt,
+      harness: 'h',
+      mode: 'read-only' as const,
+      gitSha: 'abc',
+      gitDirty: false,
+      premiereVersion: null,
+      platform: 'darwin',
+      catalogueSize: 1,
     });
     const standings = currentStandings([
       { environment: env('2026-08-01T00:00:00Z'), tools: [{ name: 'ping', outcome: 'pass' }] },
-      { environment: env('2026-08-20T00:00:00Z'), tools: [{ name: 'ping', outcome: 'skipped_unsafe', detail: 'r' }] },
+      {
+        environment: env('2026-08-20T00:00:00Z'),
+        tools: [{ name: 'ping', outcome: 'skipped_unsafe', detail: 'r' }],
+      },
     ]);
     // "We last looked on the 20th and did not run it" is the true statement; an older pass
     // must not mask a tool nobody exercises any more.
@@ -112,7 +139,9 @@ describe('docs/LIVE-VERIFICATION.md', () => {
     // This is the load-bearing assertion of the whole mechanism: the document is a pure
     // function of verification/sweeps/*.json plus the catalogue, so it cannot say anything a
     // sweep did not observe. Regenerate with `npm run verify:report`.
-    expect(readFileSync(DOC, 'utf8')).toBe(renderVerificationReport(loadSweeps(), catalogueNames()));
+    expect(readFileSync(DOC, 'utf8')).toBe(
+      renderVerificationReport(loadSweeps(), catalogueNames()),
+    );
   });
 
   it('reports the never-exercised count instead of only what passed', () => {
@@ -136,7 +165,9 @@ describe('docs/LIVE-VERIFICATION.md', () => {
     const doc = readFileSync(DOC, 'utf8');
     const standings = currentStandings(loadSweeps());
     const rows = [...doc.matchAll(/^\| `([a-z0-9_]+)` \| ([^|]+) \|/gm)];
-    const claimed = rows.filter((m) => !m[2]!.includes('absent from every sweep')).map((m) => m[1]!);
+    const claimed = rows
+      .filter((m) => !m[2]!.includes('absent from every sweep'))
+      .map((m) => m[1]!);
     for (const name of claimed) expect(standings.has(name)).toBe(true);
   });
 
@@ -149,7 +180,14 @@ describe('outcome vocabulary', () => {
   it('keeps the not-executed outcomes distinguishable from a pass', () => {
     // Collapsing skips into "pass" or dropping them entirely is how a 40%-coverage sweep
     // starts reading as a green checkmark.
-    expect(OUTCOMES).toEqual(['pass', 'fail', 'skipped_args', 'skipped_unsafe', 'skipped_wedged', 'deferred_mutating']);
+    expect(OUTCOMES).toEqual([
+      'pass',
+      'fail',
+      'skipped_args',
+      'skipped_unsafe',
+      'skipped_wedged',
+      'deferred_mutating',
+    ]);
   });
 
   it('does not count a wedge-rejected tool as evidence about that tool', () => {

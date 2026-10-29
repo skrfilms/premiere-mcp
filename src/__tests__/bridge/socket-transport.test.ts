@@ -61,7 +61,11 @@ afterEach(async () => {
     await transport.stop();
     transport = null;
   }
-  try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+  try {
+    rmSync(dir, { recursive: true, force: true });
+  } catch {
+    /* best effort */
+  }
 });
 
 describe('the endpoint file', () => {
@@ -73,10 +77,13 @@ describe('the endpoint file', () => {
    */
   const itPosixMode = process.platform === 'win32' ? it.skip : it;
 
-  itPosixMode('publishes the endpoint file mode 0600, since it carries the session token', async () => {
-    await startTransport();
-    expect(statSync(join(dir, ENDPOINT_FILE)).mode & 0o777).toBe(0o600);
-  });
+  itPosixMode(
+    'publishes the endpoint file mode 0600, since it carries the session token',
+    async () => {
+      await startTransport();
+      expect(statSync(join(dir, ENDPOINT_FILE)).mode & 0o777).toBe(0o600);
+    },
+  );
 
   it('publishes an ephemeral loopback port', async () => {
     const started = await startTransport();
@@ -137,9 +144,19 @@ describe('the endpoint file', () => {
         const probe = new WebSocket(`ws://${address}:${port}`);
         // A connection to a port bound on this same machine completes in single-digit ms, so a
         // short window is enough: anything slower than this is not a listener answering.
-        const timer = setTimeout(() => { probe.terminate(); resolve('timeout'); }, 500);
-        probe.once('open', () => { clearTimeout(timer); probe.close(); resolve('CONNECTED'); });
-        probe.once('error', () => { clearTimeout(timer); resolve('refused'); });
+        const timer = setTimeout(() => {
+          probe.terminate();
+          resolve('timeout');
+        }, 500);
+        probe.once('open', () => {
+          clearTimeout(timer);
+          probe.close();
+          resolve('CONNECTED');
+        });
+        probe.once('error', () => {
+          clearTimeout(timer);
+          resolve('refused');
+        });
       });
       expect(refused).not.toBe('CONNECTED');
     }
@@ -185,7 +202,9 @@ describe('authentication on the first frame', () => {
     const raw = new WebSocket(`ws://127.0.0.1:${port}`);
     await new Promise<void>((resolve) => raw.once('open', () => resolve()));
     raw.send(JSON.stringify({ type: 'response', id: 'x', payload: { success: true } }));
-    const code = await new Promise<number>((resolve) => raw.once('close', (value) => resolve(value)));
+    const code = await new Promise<number>((resolve) =>
+      raw.once('close', (value) => resolve(value)),
+    );
     expect(code).toBe(CLOSE_CODES.BAD_HANDSHAKE);
   });
 });
@@ -311,7 +330,10 @@ describe('publishing over the socket', () => {
     const created = await startTransport();
     const sim = panel();
     await sim.ready;
-    await created.publish({ id: 'cmd-tok', commandType: 'extendscript', script: 'return 1;' }, 2000);
+    await created.publish(
+      { id: 'cmd-tok', commandType: 'extendscript', script: 'return 1;' },
+      2000,
+    );
     expect(sim.commands).toHaveLength(1);
     expect(sim.commands[0]?.token).toBe(TOKEN);
   });
@@ -380,7 +402,12 @@ describe('no silent recovery after a published command', () => {
     await sim.ready;
 
     const inFlight = created.publish(
-      { id: 'cmd-mutate', commandType: 'extendscript', script: 'track.insertClip(x, 0);', mutating: true },
+      {
+        id: 'cmd-mutate',
+        commandType: 'extendscript',
+        script: 'track.insertClip(x, 0);',
+        mutating: true,
+      },
       5000,
     );
     await sim.nextCommand();
@@ -435,9 +462,14 @@ describe('no silent recovery after a published command', () => {
     let late: ((payload: Record<string, unknown>) => void) | null = null;
     const sim = panel({
       respond: (command) => {
-        late = () => sim.socket.send(JSON.stringify({
-          type: 'response', id: command.id, payload: { success: true, result: 'too late' },
-        }));
+        late = () =>
+          sim.socket.send(
+            JSON.stringify({
+              type: 'response',
+              id: command.id,
+              payload: { success: true, result: 'too late' },
+            }),
+          );
         return null;
       },
     });

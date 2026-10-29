@@ -68,7 +68,10 @@ export interface BuildServerOptions {
 }
 
 function inputSchemaToJsonSchema(inputSchema: ZodTypeAny): ObjectJsonSchema {
-  const jsonSchema = z.toJSONSchema(inputSchema, { unrepresentable: 'any' }) as Record<string, unknown>;
+  const jsonSchema = z.toJSONSchema(inputSchema, { unrepresentable: 'any' }) as Record<
+    string,
+    unknown
+  >;
   if (jsonSchema.type !== 'object') {
     return { type: 'object', additionalProperties: true };
   }
@@ -145,36 +148,75 @@ export function buildPremiereMcpServer(
 
     // A retry carrying a requestId that already finished gets the first answer, not a second
     // edit; one still in flight gets its status. See tools/journal.ts.
-    const requestId = typeof callArgs.requestId === 'string' && callArgs.requestId ? callArgs.requestId : null;
+    const requestId =
+      typeof callArgs.requestId === 'string' && callArgs.requestId ? callArgs.requestId : null;
     if (requestId) {
       const seen = journal.byRequestId(requestId);
       if (seen && seen.status !== 'running' && seen.result !== undefined) {
-        const replay = { ...(seen.result as Record<string, unknown>), replayed: true, replayNote: `requestId ${requestId} already ran (${seen.status}) at ${seen.finishedAt}; this is that result, and nothing was run again.` };
-        return server.projectCallToolResult({ content: [{ type: 'text', text: JSON.stringify(replay, null, 2) }], structuredContent: replay, isError: false }, undefined);
+        const replay = {
+          ...(seen.result as Record<string, unknown>),
+          replayed: true,
+          replayNote: `requestId ${requestId} already ran (${seen.status}) at ${seen.finishedAt}; this is that result, and nothing was run again.`,
+        };
+        return server.projectCallToolResult(
+          {
+            content: [{ type: 'text', text: JSON.stringify(replay, null, 2) }],
+            structuredContent: replay,
+            isError: false,
+          },
+          undefined,
+        );
       }
       if (seen && seen.status === 'running') {
-        const busy = { success: false, inProgress: true, requestId, startedAt: seen.startedAt, error: `requestId ${requestId} is still running (started ${seen.startedAt}). It was not started again; check get_recent_calls.` };
-        return server.projectCallToolResult({ content: [{ type: 'text', text: JSON.stringify(busy, null, 2) }], structuredContent: busy, isError: true }, undefined);
+        const busy = {
+          success: false,
+          inProgress: true,
+          requestId,
+          startedAt: seen.startedAt,
+          error: `requestId ${requestId} is still running (started ${seen.startedAt}). It was not started again; check get_recent_calls.`,
+        };
+        return server.projectCallToolResult(
+          {
+            content: [{ type: 'text', text: JSON.stringify(busy, null, 2) }],
+            structuredContent: busy,
+            isError: true,
+          },
+          undefined,
+        );
       }
     }
 
     // Progress while a call runs, for clients that asked for it: a heartbeat every few seconds
     // keeps a long export or transcription from looking dead, and resets timeouts on clients
     // that honour resetTimeoutOnProgress.
-    const progressToken = (request.params as { _meta?: { progressToken?: string | number } })._meta?.progressToken;
+    const progressToken = (request.params as { _meta?: { progressToken?: string | number } })._meta
+      ?.progressToken;
     const started = Date.now();
-    const ticker = progressToken !== undefined && ctx?.mcpReq?.notify
-      ? setInterval(() => {
-          const secs = Math.round((Date.now() - started) / 1000);
-          void ctx.mcpReq.notify({ method: 'notifications/progress', params: { progressToken, progress: secs, message: `${name} still running (${secs}s)` } }).catch(() => {});
-        }, 5000)
-      : undefined;
-    const readOnly = annotationsFor(name).readOnlyHint === true || /^get_(recent_calls|job|project_notes)$|^list_jobs$|^what_changed$/.test(name);
+    const ticker =
+      progressToken !== undefined && ctx?.mcpReq?.notify
+        ? setInterval(() => {
+            const secs = Math.round((Date.now() - started) / 1000);
+            void ctx.mcpReq
+              .notify({
+                method: 'notifications/progress',
+                params: {
+                  progressToken,
+                  progress: secs,
+                  message: `${name} still running (${secs}s)`,
+                },
+              })
+              .catch(() => {});
+          }, 5000)
+        : undefined;
+    const readOnly =
+      annotationsFor(name).readOnlyHint === true ||
+      /^get_(recent_calls|job|project_notes)$|^list_jobs$|^what_changed$/.test(name);
     const entry = journal.begin(name, callArgs, readOnly);
     // Edits run with the sequence state read around them (revert_last_call, what_changed).
-    const exec = (a: Record<string, unknown>) => readOnly || typeof tools.runTracked !== 'function'
-      ? tools.executeTool(name, a)
-      : tools.runTracked(name, a, () => tools.executeTool(name, a));
+    const exec = (a: Record<string, unknown>) =>
+      readOnly || typeof tools.runTracked !== 'function'
+        ? tools.executeTool(name, a)
+        : tools.runTracked(name, a, () => tools.executeTool(name, a));
 
     try {
       let result = await exec(callArgs);
@@ -183,26 +225,63 @@ export function buildPremiereMcpServer(
       // (MCP elicitation), ask, and on yes run it once more with confirm:true. Otherwise the result
       // goes back as-is and tells the assistant to confirm with the user first.
       // Expanded tools put extra fields under `details`; look in both places.
-      const raw = result as { needsConfirmation?: boolean; confirmPrompt?: string; details?: { needsConfirmation?: boolean; confirmPrompt?: string } } | null;
-      const r0 = raw ? (raw.needsConfirmation ? raw : raw.details?.needsConfirmation ? raw.details : null) : null;
-      if (r0 && r0.needsConfirmation && callArgs.confirm !== true && server.getClientCapabilities()?.elicitation && ctx?.mcpReq?.elicitInput) {
+      const raw = result as {
+        needsConfirmation?: boolean;
+        confirmPrompt?: string;
+        details?: { needsConfirmation?: boolean; confirmPrompt?: string };
+      } | null;
+      const r0 = raw
+        ? raw.needsConfirmation
+          ? raw
+          : raw.details?.needsConfirmation
+            ? raw.details
+            : null
+        : null;
+      if (
+        r0 &&
+        r0.needsConfirmation &&
+        callArgs.confirm !== true &&
+        server.getClientCapabilities()?.elicitation &&
+        ctx?.mcpReq?.elicitInput
+      ) {
         try {
           const answer = await ctx.mcpReq.elicitInput({
             message: r0.confirmPrompt || `Go ahead with ${name}?`,
-            requestedSchema: { type: 'object', properties: { confirm: { type: 'boolean', title: 'Go ahead', description: r0.confirmPrompt || '' } }, required: ['confirm'] },
+            requestedSchema: {
+              type: 'object',
+              properties: {
+                confirm: {
+                  type: 'boolean',
+                  title: 'Go ahead',
+                  description: r0.confirmPrompt || '',
+                },
+              },
+              required: ['confirm'],
+            },
           } as never);
-          const yes = answer?.action === 'accept' && (answer.content as { confirm?: unknown } | undefined)?.confirm === true;
+          const yes =
+            answer?.action === 'accept' &&
+            (answer.content as { confirm?: unknown } | undefined)?.confirm === true;
           result = yes
             ? await exec({ ...callArgs, confirm: true })
-            : { ...(result as Record<string, unknown>), userDeclined: answer?.action !== 'accept' || !yes, note: 'The user was asked and did not confirm. Nothing was changed.' };
-        } catch { /* elicitation unavailable on this connection: fall through with the needsConfirmation result */ }
+            : {
+                ...(result as Record<string, unknown>),
+                userDeclined: answer?.action !== 'accept' || !yes,
+                note: 'The user was asked and did not confirm. Nothing was changed.',
+              };
+        } catch {
+          /* elicitation unavailable on this connection: fall through with the needsConfirmation result */
+        }
       }
       if (ticker) clearInterval(ticker);
       journal.finish(entry, result);
 
       const image = attachImageForResult(result);
       const enriched = image.reason
-        ? { ...(result as Record<string, unknown>), inlineImage: { attached: false, reason: image.reason } }
+        ? {
+            ...(result as Record<string, unknown>),
+            inlineImage: { attached: false, reason: image.reason },
+          }
         : image.attachment
           ? {
               ...(result as Record<string, unknown>),
@@ -218,7 +297,14 @@ export function buildPremiereMcpServer(
       // Cap the size so one call cannot fill the assistant's context; say what was cut.
       const capped = capResult(enriched, maxResultChars(callArgs.maxResultChars));
       const sent: Record<string, unknown> = capped.cuts
-        ? { ...(capped.value as Record<string, unknown>), resultTruncated: { originalChars: capped.originalChars, cuts: capped.cuts, how: 'Ask for less (most list tools take limit/offset or a filter), or pass maxResultChars (up to 400000) on the call to raise the cap.' } }
+        ? {
+            ...(capped.value as Record<string, unknown>),
+            resultTruncated: {
+              originalChars: capped.originalChars,
+              cuts: capped.cuts,
+              how: 'Ask for less (most list tools take limit/offset or a filter), or pass maxResultChars (up to 400000) on the call to raise the cap.',
+            },
+          }
         : (capped.value as Record<string, unknown>);
 
       const content: CallToolResult['content'] = [
@@ -304,9 +390,11 @@ export function buildPremiereMcpServer(
 
   if (options.wireExposureNotifications) {
     tools.onExposureChanged(() => {
-      void server.notification({ method: 'notifications/tools/list_changed' }).catch((error: unknown) => {
-        logger.error('Failed to send tools/list_changed:', error);
-      });
+      void server
+        .notification({ method: 'notifications/tools/list_changed' })
+        .catch((error: unknown) => {
+          logger.error('Failed to send tools/list_changed:', error);
+        });
     });
   }
 

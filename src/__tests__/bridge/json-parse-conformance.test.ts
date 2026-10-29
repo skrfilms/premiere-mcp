@@ -26,9 +26,15 @@ import vm from 'vm';
 
 jest.mock('fs', () => ({
   promises: {
-    mkdir: jest.fn(), access: jest.fn(), readdir: jest.fn(), writeFile: jest.fn(),
-    readFile: jest.fn(), unlink: jest.fn(), rename: jest.fn(), rm: jest.fn(),
-  }
+    mkdir: jest.fn(),
+    access: jest.fn(),
+    readdir: jest.fn(),
+    writeFile: jest.fn(),
+    readFile: jest.fn(),
+    unlink: jest.fn(),
+    rename: jest.fn(),
+    rm: jest.fn(),
+  },
 }));
 
 jest.mock('node:crypto', () => ({
@@ -98,18 +104,79 @@ describe('both copies of JSON.parse', () => {
    */
   const CORPUS: string[] = [
     // numbers, valid and not
-    '012', '000', '0123', '-012', '01', '-01', '0', '-0', '12', '1.5', '0.5',
-    '1e3', '1E+2', '1e-2', '-2.25e10', '1.', '.5', '+1', '1e', '1e+', '--1', '0x10',
+    '012',
+    '000',
+    '0123',
+    '-012',
+    '01',
+    '-01',
+    '0',
+    '-0',
+    '12',
+    '1.5',
+    '0.5',
+    '1e3',
+    '1E+2',
+    '1e-2',
+    '-2.25e10',
+    '1.',
+    '.5',
+    '+1',
+    '1e',
+    '1e+',
+    '--1',
+    '0x10',
     // string escapes: every two-character form, and hex that decimal would misread
-    '"\\b"', '"\\f"', '"\\n"', '"\\r"', '"\\t"', '"\\/"', '"\\\\"', '"\\""',
-    '"\\u0001"', '"\\u00e9"', '"\\u4e2d"', '"\\uFFFF"', '"\\uD834\\uDD1E"', '"\\uabcd"',
-    '"\\u00E9"', '"\\uZZZZ"', '"\\u00"', '"\\x41"', '"unterminated',
+    '"\\b"',
+    '"\\f"',
+    '"\\n"',
+    '"\\r"',
+    '"\\t"',
+    '"\\/"',
+    '"\\\\"',
+    '"\\""',
+    '"\\u0001"',
+    '"\\u00e9"',
+    '"\\u4e2d"',
+    '"\\uFFFF"',
+    '"\\uD834\\uDD1E"',
+    '"\\uabcd"',
+    '"\\u00E9"',
+    '"\\uZZZZ"',
+    '"\\u00"',
+    '"\\x41"',
+    '"unterminated',
     // structure
-    '{}', '[]', '{"a":1}', '{"a":1,"a":2}', '{"":0}', '[[[[1]]]]', '{"a":[1,{"b":null}]}',
-    '[1,]', '{"a":1,}', '{a:1}', "{'a':1}", '[1,,2]', '{,}', '{"a"}', '[1] [2]',
+    '{}',
+    '[]',
+    '{"a":1}',
+    '{"a":1,"a":2}',
+    '{"":0}',
+    '[[[[1]]]]',
+    '{"a":[1,{"b":null}]}',
+    '[1,]',
+    '{"a":1,}',
+    '{a:1}',
+    "{'a':1}",
+    '[1,,2]',
+    '{,}',
+    '{"a"}',
+    '[1] [2]',
     // literals and whitespace
-    'true', 'false', 'null', 'tru', 'nul', 'NaN', 'Infinity', '-Infinity', 'undefined',
-    ' \t\r\n{"a":\t1}\n ', '', ' ', '1', '[1]',
+    'true',
+    'false',
+    'null',
+    'tru',
+    'nul',
+    'NaN',
+    'Infinity',
+    '-Infinity',
+    'undefined',
+    ' \t\r\n{"a":\t1}\n ',
+    '',
+    ' ',
+    '1',
+    '[1]',
   ];
 
   /** Deterministic pseudo-random JSON; no Math.random, so failures reproduce. */
@@ -119,20 +186,27 @@ describe('both copies of JSON.parse', () => {
     const pick = <T>(items: T[]): T => items[Math.floor(next() * items.length)];
 
     const build = (depth: number): unknown => {
-      const kinds = depth > 3
-        ? ['number', 'string', 'bool', 'null']
-        : ['number', 'string', 'bool', 'null', 'array', 'object'];
+      const kinds =
+        depth > 3
+          ? ['number', 'string', 'bool', 'null']
+          : ['number', 'string', 'bool', 'null', 'array', 'object'];
       switch (pick(kinds)) {
-        case 'number': return (next() - 0.5) * Math.pow(10, Math.floor(next() * 10));
+        case 'number':
+          return (next() - 0.5) * Math.pow(10, Math.floor(next() * 10));
         case 'string':
-          return Array.from({ length: Math.floor(next() * 10) },
-            () => String.fromCharCode(Math.floor(next() * 2200))).join('');
-        case 'bool': return next() > 0.5;
-        case 'null': return null;
-        case 'array': return Array.from({ length: Math.floor(next() * 4) }, () => build(depth + 1));
+          return Array.from({ length: Math.floor(next() * 10) }, () =>
+            String.fromCharCode(Math.floor(next() * 2200)),
+          ).join('');
+        case 'bool':
+          return next() > 0.5;
+        case 'null':
+          return null;
+        case 'array':
+          return Array.from({ length: Math.floor(next() * 4) }, () => build(depth + 1));
         default: {
           const out: Record<string, unknown> = {};
-          for (let i = 0; i < Math.floor(next() * 4); i++) out[`k${Math.floor(next() * 500)}`] = build(depth + 1);
+          for (let i = 0; i < Math.floor(next() * 4); i++)
+            out[`k${Math.floor(next() * 500)}`] = build(depth + 1);
           return out;
         }
       }
@@ -173,10 +247,14 @@ describe('both copies of JSON.parse', () => {
     for (const text of CORPUS) {
       const expected = platform(text);
       if (outcome(server, text) !== expected) {
-        serverDisagreements.push(`${JSON.stringify(text)} server=${outcome(server, text)} platform=${expected}`);
+        serverDisagreements.push(
+          `${JSON.stringify(text)} server=${outcome(server, text)} platform=${expected}`,
+        );
       }
       if (outcome(panel, text) !== expected) {
-        panelDisagreements.push(`${JSON.stringify(text)} panel=${outcome(panel, text)} platform=${expected}`);
+        panelDisagreements.push(
+          `${JSON.stringify(text)} panel=${outcome(panel, text)} platform=${expected}`,
+        );
       }
     }
 
@@ -190,9 +268,10 @@ describe('both copies of JSON.parse', () => {
     const server = await serverParser();
     const panel = panelParser();
 
-    const drift = CORPUS
-      .filter((text) => outcome(server, text) !== outcome(panel, text))
-      .map((text) => `${JSON.stringify(text)} server=${outcome(server, text)} panel=${outcome(panel, text)}`);
+    const drift = CORPUS.filter((text) => outcome(server, text) !== outcome(panel, text)).map(
+      (text) =>
+        `${JSON.stringify(text)} server=${outcome(server, text)} panel=${outcome(panel, text)}`,
+    );
 
     expect(drift).toEqual([]);
   }, 120_000);

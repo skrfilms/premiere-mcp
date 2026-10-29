@@ -23,9 +23,15 @@ import { promises as fs } from 'fs';
 
 jest.mock('fs', () => ({
   promises: {
-    mkdir: jest.fn(), access: jest.fn(), readdir: jest.fn(), writeFile: jest.fn(),
-    readFile: jest.fn(), unlink: jest.fn(), rename: jest.fn(), rm: jest.fn(),
-  }
+    mkdir: jest.fn(),
+    access: jest.fn(),
+    readdir: jest.fn(),
+    writeFile: jest.fn(),
+    readFile: jest.fn(),
+    unlink: jest.fn(),
+    rename: jest.fn(),
+    rm: jest.fn(),
+  },
 }));
 
 jest.mock('node:crypto', () => ({
@@ -42,17 +48,29 @@ const PAYLOADS = [BREAKOUT_DOUBLE, BREAKOUT_SINGLE, BREAKOUT_BACKSLASH];
 
 /** Lifecycle and transport; driving these tests the harness, not a script. */
 const NOT_SCRIPT_BUILDERS = new Set([
-  'constructor', 'initialize', 'cleanup', 'executeScript', 'waitForResponse',
-  'detectPremiereProInstallation', 'initializeCommunication', 'isConnected',
-  'getTempDir', 'runDiagnostics',
+  'constructor',
+  'initialize',
+  'cleanup',
+  'executeScript',
+  'waitForResponse',
+  'detectPremiereProInstallation',
+  'initializeCommunication',
+  'isConnected',
+  'getTempDir',
+  'runDiagnostics',
   // CEP JavaScript and Node-side clipboard helpers — not ExtendScript builders
-  'executeCepJs', 'readClipboard', 'writeClipboard',
+  'executeCepJs',
+  'readClipboard',
+  'writeClipboard',
   // Transport, same category as executeScript/waitForResponse above: these RECEIVE a script and
   // publish it over one channel or the other. They never build one, so a caller string reaching
   // them is the script by definition and holding it to the ES3-parse contract would assert that a
   // transport rejects the payload it was handed. startSocketTransport is excluded for a second
   // reason as well — it binds a loopback listener, and the sweep would open one per call.
-  'startSocketTransport', 'chooseChannel', 'publishCommand', 'publishOverFileIpc',
+  'startSocketTransport',
+  'chooseChannel',
+  'publishCommand',
+  'publishOverFileIpc',
   'getTransportStatus',
 ]);
 
@@ -62,17 +80,29 @@ function payloadRuns(script: string): boolean {
     app: {
       enableQE() {},
       project: {
-        name: 'p', sequences: { numSequences: 0 },
-        rootItem: { name: 'r', nodeId: 'r', children: { numItems: 0 }, createBin: () => ({ name: 'b', nodeId: 'n' }) },
-        activeSequence: null, importFiles: () => true, importSequences: () => true,
+        name: 'p',
+        sequences: { numSequences: 0 },
+        rootItem: {
+          name: 'r',
+          nodeId: 'r',
+          children: { numItems: 0 },
+          createBin: () => ({ name: 'b', nodeId: 'n' }),
+        },
+        activeSequence: null,
+        importFiles: () => true,
+        importSequences: () => true,
         newSequence: () => ({ sequenceID: 's', name: 'n' }),
       },
       encoder: { encodeSequence: () => true, launchEncoder: () => true },
     },
     qe: { project: {} },
     JSON,
-    File: function () { return { exists: false, fsName: '/tmp/x' }; },
-    Folder: function () { return { exists: false, create: () => false }; },
+    File: function () {
+      return { exists: false, fsName: '/tmp/x' };
+    },
+    Folder: function () {
+      return { exists: false, create: () => false };
+    },
   };
   vm.createContext(sandbox);
   try {
@@ -111,7 +141,9 @@ describe('scripts the bridge builds itself', () => {
   const scriptsWritten = (): string[] =>
     mockFs.writeFile.mock.calls
       .map(([, payload]) => payload)
-      .filter((payload): payload is string => typeof payload === 'string' && payload.includes('"script"'))
+      .filter(
+        (payload): payload is string => typeof payload === 'string' && payload.includes('"script"'),
+      )
       .map((payload) => JSON.parse(payload).script as string);
 
   const scriptBuilders = (bridge: PremiereProBridge): string[] =>
@@ -134,9 +166,14 @@ describe('scripts the bridge builds itself', () => {
         for (const arity of [1, 2, 3, 4]) {
           jest.clearAllMocks();
           const bridge = await readyBridge();
-          const call = (bridge as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>)[method];
+          const call = (
+            bridge as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>
+          )[method];
           try {
-            await call.apply(bridge, Array.from({ length: arity }, () => payload));
+            await call.apply(
+              bridge,
+              Array.from({ length: arity }, () => payload),
+            );
           } catch {
             // Argument validation and missing DOM members are fine; anything the
             // method wrote before failing is still inspected below.

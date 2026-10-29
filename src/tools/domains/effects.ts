@@ -14,7 +14,12 @@ import { generatedAssetsDir } from '../../utils/scratch-paths.js';
 import { runUxp, uxpAvailable } from '../../bridge/uxp-channel.js';
 
 export class EffectsTools extends AssemblyTools {
-  protected async removeEffectAtIndex(trackIndex: number, clipIndex: number, componentIndex: number, sequenceId?: string): Promise<any> {
+  protected async removeEffectAtIndex(
+    trackIndex: number,
+    clipIndex: number,
+    componentIndex: number,
+    sequenceId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       app.enableQE(); ${this.qeClipScript(trackIndex, clipIndex, sequenceId)}
       if (!__clip) return JSON.stringify({success:false,error:'Clip not found'});
@@ -38,7 +43,12 @@ export class EffectsTools extends AssemblyTools {
     `);
   }
 
-  protected async reorderEffects(trackIndex: number, clipIndex: number, newOrder: string[], sequenceId?: string): Promise<any> {
+  protected async reorderEffects(
+    trackIndex: number,
+    clipIndex: number,
+    newOrder: string[],
+    sequenceId?: string,
+  ): Promise<any> {
     const orderJson = JSON.stringify(newOrder);
     return await this.bridge.executeScript(`
       try {
@@ -90,7 +100,11 @@ export class EffectsTools extends AssemblyTools {
     `);
   }
 
-  protected async effectStackReport(trackIndex: number, clipIndex: number, sequenceId?: string): Promise<any> {
+  protected async effectStackReport(
+    trackIndex: number,
+    clipIndex: number,
+    sequenceId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(sequenceId)};
@@ -113,7 +127,13 @@ export class EffectsTools extends AssemblyTools {
     `);
   }
 
-  protected async enableDisableEffect(trackIndex: number, clipIndex: number, effectName: string, enabled: boolean, sequenceId?: string): Promise<any> {
+  protected async enableDisableEffect(
+    trackIndex: number,
+    clipIndex: number,
+    effectName: string,
+    enabled: boolean,
+    sequenceId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(sequenceId)};
@@ -167,7 +187,12 @@ export class EffectsTools extends AssemblyTools {
   }
 
   // Batch H: Effects shortcuts
-  protected async blurClip(trackIndex: number, clipIndex: number, amount: number, sequenceId?: string): Promise<any> {
+  protected async blurClip(
+    trackIndex: number,
+    clipIndex: number,
+    amount: number,
+    sequenceId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -208,7 +233,12 @@ export class EffectsTools extends AssemblyTools {
     `);
   }
 
-  protected async sharpenClip(trackIndex: number, clipIndex: number, amount: number, sequenceId?: string): Promise<any> {
+  protected async sharpenClip(
+    trackIndex: number,
+    clipIndex: number,
+    amount: number,
+    sequenceId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -233,7 +263,12 @@ export class EffectsTools extends AssemblyTools {
     `);
   }
 
-  protected async enableDisableAllEffects(trackIndex: number, clipIndex: number, enabled: boolean, sequenceId?: string): Promise<any> {
+  protected async enableDisableAllEffects(
+    trackIndex: number,
+    clipIndex: number,
+    enabled: boolean,
+    sequenceId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(sequenceId)};
@@ -281,7 +316,11 @@ export class EffectsTools extends AssemblyTools {
     `);
   }
 
-  protected async removeAllEffectsQe(trackIndex: number, clipIndex: number, sequenceId?: string): Promise<any> {
+  protected async removeAllEffectsQe(
+    trackIndex: number,
+    clipIndex: number,
+    sequenceId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -306,7 +345,11 @@ export class EffectsTools extends AssemblyTools {
     `);
   }
 
-  protected async listEffectsOnClipQe(trackIndex: number, clipIndex: number, sequenceId?: string): Promise<any> {
+  protected async listEffectsOnClipQe(
+    trackIndex: number,
+    clipIndex: number,
+    sequenceId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -443,7 +486,12 @@ export class EffectsTools extends AssemblyTools {
   //   4. For each entry in `parameters`, attempts to set the matching property by displayName
   //      (exact match first, then case-insensitive whitespace-stripped match)
   //   5. Returns dump + per-param result so debugging is one round-trip
-  protected async applyEffect(clipId: string, effectName: string, parameters?: Record<string, any>, expectedMatchName?: string): Promise<any> {
+  protected async applyEffect(
+    clipId: string,
+    effectName: string,
+    parameters?: Record<string, any>,
+    expectedMatchName?: string,
+  ): Promise<any> {
     const paramJson = JSON.stringify(parameters || {});
     const clipIdJson = JSON.stringify(clipId);
     const effectNameJson = JSON.stringify(effectName);
@@ -769,9 +817,16 @@ export class EffectsTools extends AssemblyTools {
    * Premiere sometimes accepts without placing anything. UXP's own executeTransaction can report
    * true and place nothing too (seen once on 2026-10-27), so its word is never taken alone.
    */
-  protected async uxpTransitionAtCut(sequenceId: string | null, trackIndex: number, cutSecs: number, transitionName: string, durationSecs: number): Promise<any> {
+  protected async uxpTransitionAtCut(
+    sequenceId: string | null,
+    trackIndex: number,
+    cutSecs: number,
+    transitionName: string,
+    durationSecs: number,
+  ): Promise<any> {
     if (!uxpAvailable()) return { success: false, error: 'UXP probe panel not running' };
-    const countAt = async () => this.bridge.executeScript(`
+    const countAt = async () =>
+      this.bridge.executeScript(`
       try {
         app.enableQE();
         var seq = __findSequence(${JSON.stringify(sequenceId)});
@@ -782,7 +837,8 @@ export class EffectsTools extends AssemblyTools {
     `);
     const before: any = await countAt();
     if (!before?.success) return before;
-    const u = await runUxp(`
+    const u = await runUxp(
+      `
       const p = await ppro.Project.getActiveProject();
       const s = (await p.getSequences()).find((q) => String(q.guid) === ${JSON.stringify(String(before.guid))});
       if (!s) return { error: 'sequence not found in UXP' };
@@ -810,16 +866,42 @@ export class EffectsTools extends AssemblyTools {
         executed = p.executeTransaction((c) => { c.addAction(action); }, 'MCP add transition');
       });
       return { executed, matchName: match };
-    `, 20000, 'Add transition');
-    if (!u.ok || u.result?.error) return { success: false, error: `UXP could not add the transition: ${u.error ?? u.result?.error}` };
+    `,
+      20000,
+      'Add transition',
+    );
+    if (!u.ok || u.result?.error)
+      return {
+        success: false,
+        error: `UXP could not add the transition: ${u.error ?? u.result?.error}`,
+      };
     const after: any = await countAt();
     const landed = after?.success && Number(after.at) > Number(before.at);
     return landed
-      ? { success: true, verified: true, verifiedBy: 'QE transition list at the cut (placed through UXP)', via: 'uxp', cutSecs, transition: u.result.matchName, durationSecs }
-      : { success: false, verified: true, via: 'uxp', error: `UXP accepted the transition but QE shows nothing new at ${cutSecs}s.`, cutSecs };
+      ? {
+          success: true,
+          verified: true,
+          verifiedBy: 'QE transition list at the cut (placed through UXP)',
+          via: 'uxp',
+          cutSecs,
+          transition: u.result.matchName,
+          durationSecs,
+        }
+      : {
+          success: false,
+          verified: true,
+          via: 'uxp',
+          error: `UXP accepted the transition but QE shows nothing new at ${cutSecs}s.`,
+          cutSecs,
+        };
   }
 
-  protected async addTransition(clipId1: string, clipId2: string, transitionName: string, duration: number): Promise<any> {
+  protected async addTransition(
+    clipId1: string,
+    clipId2: string,
+    transitionName: string,
+    duration: number,
+  ): Promise<any> {
     const script = `
       try {
         app.enableQE();
@@ -892,7 +974,12 @@ export class EffectsTools extends AssemblyTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async addTransitionToClip(clipId: string, transitionName: string, position: 'start' | 'end', duration: number): Promise<any> {
+  protected async addTransitionToClip(
+    clipId: string,
+    transitionName: string,
+    position: 'start' | 'end',
+    duration: number,
+  ): Promise<any> {
     const atEnd = position === 'end';
     const script = `
       try {
@@ -1031,7 +1118,12 @@ export class EffectsTools extends AssemblyTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async applyMorphCut(trackIndex: number, clipIndex: number, seqId?: string, durationFrames?: number): Promise<any> {
+  protected async applyMorphCut(
+    trackIndex: number,
+    clipIndex: number,
+    seqId?: string,
+    durationFrames?: number,
+  ): Promise<any> {
     // Was "Invalid parameter" on every call:
     //
     //   clip.addTransition(mc, 2, 0)
@@ -1139,7 +1231,12 @@ export class EffectsTools extends AssemblyTools {
   }
 
   // Batch Operations Implementation
-  protected async batchAddTransitions(sequenceId: string, trackIndex: number, transitionName: string, duration: number): Promise<any> {
+  protected async batchAddTransitions(
+    sequenceId: string,
+    trackIndex: number,
+    transitionName: string,
+    duration: number,
+  ): Promise<any> {
     const script = `
       try {
         app.enableQE();
@@ -1215,8 +1312,13 @@ export class EffectsTools extends AssemblyTools {
   }
 
   protected async verifyEffectRendered(
-    _seqId: string | undefined, trackIndex: number, clipIndex: number,
-    effectName: string, effectParam?: string, effectParamValue?: string, outputDir = generatedAssetsDir()
+    _seqId: string | undefined,
+    trackIndex: number,
+    clipIndex: number,
+    effectName: string,
+    effectParam?: string,
+    effectParamValue?: string,
+    outputDir = generatedAssetsDir(),
   ): Promise<any> {
     const pathMod = pathSync;
     const fs = fsSync;
@@ -1239,11 +1341,29 @@ export class EffectsTools extends AssemblyTools {
         return JSON.stringify({success:true,mediaPath:mediaPath,sourceTimeSecs:sourceTimeSecs});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
-    if (!mediaInfo?.success) return { success: false, error: 'Could not locate clip media: ' + mediaInfo?.error };
+    if (!mediaInfo?.success)
+      return { success: false, error: 'Could not locate clip media: ' + mediaInfo?.error };
 
     try {
-      runFf('ffmpeg', ['-y', '-ss', String(mediaInfo.sourceTimeSecs), '-i', String(mediaInfo.mediaPath), '-frames:v', '1', '-update', '1', frameBefore], { timeoutMs: 15000 });
-    } catch (e: any) { return { success: false, error: 'ffmpeg frame capture failed: ' + e.message?.slice(0,100) }; }
+      runFf(
+        'ffmpeg',
+        [
+          '-y',
+          '-ss',
+          String(mediaInfo.sourceTimeSecs),
+          '-i',
+          String(mediaInfo.mediaPath),
+          '-frames:v',
+          '1',
+          '-update',
+          '1',
+          frameBefore,
+        ],
+        { timeoutMs: 15000 },
+      );
+    } catch (e: any) {
+      return { success: false, error: 'ffmpeg frame capture failed: ' + e.message?.slice(0, 100) };
+    }
 
     // Step 2: apply the effect via QE
     const applyResult: any = await this.bridge.executeScript(`
@@ -1259,32 +1379,65 @@ export class EffectsTools extends AssemblyTools {
         clip.addVideoEffect(eff);
         var after = domClip.components.numItems;
         var added = after > before;
-        ${effectParam && effectParamValue ? `
+        ${
+          effectParam && effectParamValue
+            ? `
         if (added) {
           var newComp = app.project.activeSequence.videoTracks[${trackIndex}].clips[${clipIndex}].getComponentAt ? null : null;
           var qeComp = clip.getComponentAt(after - 1);
           if (qeComp) { try { qeComp.setParamValue(${JSON.stringify(effectParam)}, ${JSON.stringify(effectParamValue)}); } catch(ep) {} }
-        }` : ''}
+        }`
+            : ''
+        }
         return JSON.stringify({success:true,effectAdded:added,componentsBefore:before,componentsAfter:after});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
-    if (!applyResult?.success) return { success: false, error: 'Effect apply failed: ' + applyResult?.error, verified: false };
+    if (!applyResult?.success)
+      return {
+        success: false,
+        error: 'Effect apply failed: ' + applyResult?.error,
+        verified: false,
+      };
 
     // Step 3: capture frame AFTER applying
     try {
-      runFf('ffmpeg', ['-y', '-ss', String(mediaInfo.sourceTimeSecs), '-i', String(mediaInfo.mediaPath), '-frames:v', '1', '-update', '1', frameAfter], { timeoutMs: 15000 });
-    } catch (e: any) { return { success: false, error: 'Post-effect frame capture failed', verified: false }; }
+      runFf(
+        'ffmpeg',
+        [
+          '-y',
+          '-ss',
+          String(mediaInfo.sourceTimeSecs),
+          '-i',
+          String(mediaInfo.mediaPath),
+          '-frames:v',
+          '1',
+          '-update',
+          '1',
+          frameAfter,
+        ],
+        { timeoutMs: 15000 },
+      );
+    } catch (e: any) {
+      return { success: false, error: 'Post-effect frame capture failed', verified: false };
+    }
 
     // Step 4: pixel diff
     try {
-      const psnrOut = runFf('ffmpeg', ['-hide_banner', '-i', frameBefore, '-i', frameAfter, '-lavfi', 'psnr', '-f', 'null', '-'], { timeoutMs: 10000, mergeStderr: true });
+      const psnrOut = runFf(
+        'ffmpeg',
+        ['-hide_banner', '-i', frameBefore, '-i', frameAfter, '-lavfi', 'psnr', '-f', 'null', '-'],
+        { timeoutMs: 10000, mergeStderr: true },
+      );
       const match = psnrOut.match(/psnr_avg:(\S+)/);
       const psnr = match?.[1] ? parseFloat(match[1]) : null;
       const identical = psnr !== null && psnr > 45;
       const effectLanded = !identical; // effect changed the image = verified
 
       // Cleanup temp frames
-      try { fs.unlinkSync(frameBefore); fs.unlinkSync(frameAfter); } catch(_) {}
+      try {
+        fs.unlinkSync(frameBefore);
+        fs.unlinkSync(frameAfter);
+      } catch (_) {}
 
       return {
         success: true,
@@ -1295,10 +1448,14 @@ export class EffectsTools extends AssemblyTools {
         pixelDifferenceDetected: effectLanded,
         note: effectLanded
           ? `Effect "${effectName}" confirmed: rendered output changed (PSNR ${psnr?.toFixed(1)}dB).`
-          : `Effect "${effectName}" may not have rendered yet or had no visible impact (PSNR ${psnr?.toFixed(1)}dB — frames appear identical). Try render_sequence_previews first.`
+          : `Effect "${effectName}" may not have rendered yet or had no visible impact (PSNR ${psnr?.toFixed(1)}dB — frames appear identical). Try render_sequence_previews first.`,
       };
     } catch (e: any) {
-      return { success: false, error: 'PSNR comparison failed: ' + e.message?.slice(0,100), verified: false };
+      return {
+        success: false,
+        error: 'PSNR comparison failed: ' + e.message?.slice(0, 100),
+        verified: false,
+      };
     }
   }
 

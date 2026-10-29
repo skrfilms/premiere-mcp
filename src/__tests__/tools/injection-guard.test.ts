@@ -35,7 +35,11 @@ import { join } from 'node:path';
 import { parse } from 'acorn';
 import { PremiereProTools } from '../../tools/index.js';
 import {
-  seedArgs, stringPaths, withPayloadAt, argNamesFromScript, seedFreeFormArgs,
+  seedArgs,
+  stringPaths,
+  withPayloadAt,
+  argNamesFromScript,
+  seedFreeFormArgs,
 } from '../helpers/schema-args.js';
 
 // A few tools (e.g. consolidate_and_transfer) do real Node-side filesystem work
@@ -53,7 +57,11 @@ beforeAll(() => {
 });
 afterAll(() => {
   process.chdir(originalCwd);
-  try { rmSync(scratchCwd, { recursive: true, force: true }); } catch { /* best effort */ }
+  try {
+    rmSync(scratchCwd, { recursive: true, force: true });
+  } catch {
+    /* best effort */
+  }
 });
 
 /** Closes a double-quoted literal, sets a flag, and reopens it so the rest parses. */
@@ -82,8 +90,15 @@ const BREAKOUT_LINE_SEPARATOR = 'zz\u2028__OWNED = true;\u2028';
 const BENIGN_BACKSLASH = 'C:\\Footage\\take "1"';
 
 const PAYLOADS = [
-  BREAKOUT_DOUBLE, BREAKOUT_SINGLE, ADD_KEY, BENIGN_DOUBLE, BENIGN_SINGLE,
-  BREAKOUT_BACKSLASH, BREAKOUT_NEWLINE, BREAKOUT_LINE_SEPARATOR, BENIGN_BACKSLASH,
+  BREAKOUT_DOUBLE,
+  BREAKOUT_SINGLE,
+  ADD_KEY,
+  BENIGN_DOUBLE,
+  BENIGN_SINGLE,
+  BREAKOUT_BACKSLASH,
+  BREAKOUT_NEWLINE,
+  BREAKOUT_LINE_SEPARATOR,
+  BENIGN_BACKSLASH,
 ];
 
 /**
@@ -157,9 +172,7 @@ const NO_GENERATED_SCRIPT = new Set([
  *
  * Numeric path segments are normalised to `*`, so this matches any array index.
  */
-const ARBITRARY_CODE_POSITIONS = new Set([
-  'batch_execute.operations.*.script',
-]);
+const ARBITRARY_CODE_POSITIONS = new Set(['batch_execute.operations.*.script']);
 
 const positionKey = (toolName: string, path: (string | number)[]): string =>
   `${toolName}.${path.map((seg) => (/^\d+$/.test(String(seg)) ? '*' : seg)).join('.')}`;
@@ -172,7 +185,10 @@ const positionKey = (toolName: string, path: (string | number)[]): string =>
  * get the full set.
  */
 const BREAKOUT_PAYLOADS = [
-  BREAKOUT_DOUBLE, BREAKOUT_SINGLE, BREAKOUT_BACKSLASH, BREAKOUT_LINE_SEPARATOR,
+  BREAKOUT_DOUBLE,
+  BREAKOUT_SINGLE,
+  BREAKOUT_BACKSLASH,
+  BREAKOUT_LINE_SEPARATOR,
 ];
 
 /** Runs an emitted script against a host that records whether the payload fired. */
@@ -184,7 +200,12 @@ function payloadRuns(script: string): boolean {
       project: {
         name: 'p',
         sequences: { numSequences: 0 },
-        rootItem: { name: 'root', nodeId: 'r', children: { numItems: 0 }, createBin: () => ({ name: 'b', nodeId: 'n' }) },
+        rootItem: {
+          name: 'root',
+          nodeId: 'r',
+          children: { numItems: 0 },
+          createBin: () => ({ name: 'b', nodeId: 'n' }),
+        },
         activeSequence: null,
         importFiles: () => true,
         importSequences: () => true,
@@ -192,8 +213,12 @@ function payloadRuns(script: string): boolean {
     },
     qe: { project: {} },
     JSON,
-    File: function () { return { exists: false }; },
-    Folder: function () { return { exists: false, create: () => false }; },
+    File: function () {
+      return { exists: false };
+    },
+    Folder: function () {
+      return { exists: false, create: () => false };
+    },
   };
   vm.createContext(sandbox);
   try {
@@ -224,11 +249,16 @@ describe('generated scripts cannot be broken out of', () => {
       if (stringPaths(base).length === 0) {
         let probeScript = '';
         const prober = new PremiereProTools({
-          executeScript: async (s: string) => { probeScript = s; return { success: true }; },
+          executeScript: async (s: string) => {
+            probeScript = s;
+            return { success: true };
+          },
         } as never);
         try {
           await prober.executeTool(tool.name, base);
-        } catch { /* nothing emitted; leaves base as it was */ }
+        } catch {
+          /* nothing emitted; leaves base as it was */
+        }
         if (probeScript) {
           // The arguments the shared helpers read apply to every one of these
           // tools, and they all emit the same body, so fuzzing those names once
@@ -253,10 +283,16 @@ describe('generated scripts cannot be broken out of', () => {
         for (const payload of payloads) {
           const scripts: string[] = [];
           const tools = new PremiereProTools({
-            executeScript: async (s: string) => { scripts.push(s); return { success: true }; },
+            executeScript: async (s: string) => {
+              scripts.push(s);
+              return { success: true };
+            },
           } as never);
           try {
-            await tools.executeTool(tool.name, withPayloadAt(base, path, payload) as Record<string, unknown>);
+            await tools.executeTool(
+              tool.name,
+              withPayloadAt(base, path, payload) as Record<string, unknown>,
+            );
           } catch {
             // schema rejection: nothing was emitted
           }

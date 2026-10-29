@@ -28,7 +28,16 @@ function fakeHost(store: Record<string, string>) {
           const [, key, value] = setMatch as unknown as [string, string, string];
           const before = store[key] ?? null;
           store[key] = value;
-          return { success: true, verified: true, verifiedBy: 'app.properties.getProperty() readback', changed: before !== value, key, value, before, readback: value };
+          return {
+            success: true,
+            verified: true,
+            verifiedBy: 'app.properties.getProperty() readback',
+            changed: before !== value,
+            key,
+            value,
+            before,
+            readback: value,
+          };
         }
         const read: Record<string, string | null> = { success: true } as any;
         for (const key of Object.keys(store)) read[key] = store[key]!;
@@ -125,7 +134,9 @@ describe('set_autosave_settings', () => {
 
 describe('get_autosave_settings', () => {
   it('coerces the string preferences into typed values and reports the keys it read', async () => {
-    const tools = new PremiereProTools(fakeHost({ ...DEFAULTS, 'BE.Prefs.AutoSave.Interval': '10' }).transport);
+    const tools = new PremiereProTools(
+      fakeHost({ ...DEFAULTS, 'BE.Prefs.AutoSave.Interval': '10' }).transport,
+    );
     const result: any = await tools.executeTool('get_autosave_settings', {});
     expect(result.success).toBe(true);
     expect(result.enabled).toBe(true);

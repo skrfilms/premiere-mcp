@@ -88,7 +88,9 @@ describe('doctor parity — capabilities the mac doctor has, the Windows doctor 
     // present file had no premiere-pro entry, so a correct Claude-Code-only install
     // reported failures. Both doctors must return early on a missing file.
     expect(macDoctor).toMatch(/if \[\[ ! -f "\$path" \]\]; then\s*\n\s*return/);
-    expect(winDoctor).toMatch(/if \(-not \(Test-Path -LiteralPath \$Path -PathType Leaf\)\) \{ return \}/);
+    expect(winDoctor).toMatch(
+      /if \(-not \(Test-Path -LiteralPath \$Path -PathType Leaf\)\) \{ return \}/,
+    );
     // A present-but-empty premiere-pro entry is INFO on both.
     expect(macDoctor).toMatch(/no-entry\)\s*info/);
     expect(winDoctor).toMatch(/Info "\$Label present but has no premiere-pro entry"/);
@@ -144,9 +146,9 @@ describe('the Windows scripts carry no POSIX-only assumptions', () => {
    */
   const codeOnly = (source: string): string =>
     source
-      .replace(/<#[\s\S]*?#>/g, '')      // block comments, including the help header
+      .replace(/<#[\s\S]*?#>/g, '') // block comments, including the help header
       .split('\n')
-      .map((line) => line.replace(/(^|\s)#.*$/, '$1'))  // line comments
+      .map((line) => line.replace(/(^|\s)#.*$/, '$1')) // line comments
       .join('\n');
 
   const winScripts: Array<[string, string]> = [
@@ -162,21 +164,27 @@ describe('the Windows scripts carry no POSIX-only assumptions', () => {
     expect(offenders).toEqual([]);
   });
 
-  it.each(winScripts)('%s does not reach for $HOME/Library, defaults(1), chmod or uname', (_name, source) => {
-    const code = codeOnly(source);
-    expect(code).not.toMatch(/\$HOME/);
-    expect(code).not.toMatch(/Library\/Application Support/);
-    expect(code).not.toMatch(/\bdefaults (read|write)\b/);
-    expect(code).not.toMatch(/\bchmod\b/);
-    expect(code).not.toMatch(/\buname\b/);
-  });
+  it.each(winScripts)(
+    '%s does not reach for $HOME/Library, defaults(1), chmod or uname',
+    (_name, source) => {
+      const code = codeOnly(source);
+      expect(code).not.toMatch(/\$HOME/);
+      expect(code).not.toMatch(/Library\/Application Support/);
+      expect(code).not.toMatch(/\bdefaults (read|write)\b/);
+      expect(code).not.toMatch(/\bchmod\b/);
+      expect(code).not.toMatch(/\buname\b/);
+    },
+  );
 
-  it.each(winScripts)('%s uses Join-Path rather than gluing separators into strings', (_name, source) => {
-    expect(source).toMatch(/Join-Path/);
-    // A '\'-concatenated path is the Windows equivalent of the mistake being guarded
-    // against: it breaks the moment either side already has (or lacks) a separator.
-    expect(source).not.toMatch(/\$\w+ \+ '\\\\'/);
-  });
+  it.each(winScripts)(
+    '%s uses Join-Path rather than gluing separators into strings',
+    (_name, source) => {
+      expect(source).toMatch(/Join-Path/);
+      // A '\'-concatenated path is the Windows equivalent of the mistake being guarded
+      // against: it breaks the moment either side already has (or lacks) a separator.
+      expect(source).not.toMatch(/\$\w+ \+ '\\\\'/);
+    },
+  );
 
   it.each(winScripts)('%s guards on Windows before doing anything', (_name, source) => {
     expect(source).toMatch(/IsWindows/);
@@ -271,16 +279,18 @@ describe('hardcoded /tmp in src — ratchet, not a clean bill of health', () => 
     const hits: string[] = [];
     const branched: string[] = [];
     for (const file of sourceFiles(SRC)) {
-      readFileSync(file, 'utf8').split('\n').forEach((line, i) => {
-        for (const match of line.matchAll(/'\/tmp[^']*'/g)) {
-          // Forward slashes whatever the host: on Windows path.relative() returns
-          // 'utils\\security.ts', which never matched the allowlist and failed CI there.
-          const rel = path.relative(SRC, file).split(path.sep).join('/');
-          const where = `${rel}:${i + 1} ${match[0]}`;
-          const key = `${rel} ${match[0]}`;
-          (PLATFORM_BRANCHED.has(key) ? branched : hits).push(where);
-        }
-      });
+      readFileSync(file, 'utf8')
+        .split('\n')
+        .forEach((line, i) => {
+          for (const match of line.matchAll(/'\/tmp[^']*'/g)) {
+            // Forward slashes whatever the host: on Windows path.relative() returns
+            // 'utils\\security.ts', which never matched the allowlist and failed CI there.
+            const rel = path.relative(SRC, file).split(path.sep).join('/');
+            const where = `${rel}:${i + 1} ${match[0]}`;
+            const key = `${rel} ${match[0]}`;
+            (PLATFORM_BRANCHED.has(key) ? branched : hits).push(where);
+          }
+        });
     }
 
     /*

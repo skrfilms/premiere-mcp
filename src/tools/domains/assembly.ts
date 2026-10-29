@@ -51,22 +51,48 @@ export class AssemblyTools extends ToolsBase {
     if (!info || info.success === false) return info;
     const t = Number.isFinite(at) ? at : info.start;
     if (t < info.start - 1e-6 || t >= info.end) {
-      return { success: false, error: `time ${t}s is outside "${info.name}" (${info.start}s-${info.end}s). Nothing was changed.` };
+      return {
+        success: false,
+        error: `time ${t}s is outside "${info.name}" (${info.start}s-${info.end}s). Nothing was changed.`,
+      };
     }
     if (info.reversed || !(info.speed > 0)) {
-      return { success: false, error: `"${info.name}" is reversed or time-remapped, so the source frame at ${t}s cannot be computed. Nothing was changed.` };
+      return {
+        success: false,
+        error: `"${info.name}" is reversed or time-remapped, so the source frame at ${t}s cannot be computed. Nothing was changed.`,
+      };
     }
     if (!info.mediaPath || !existsSync(info.mediaPath)) {
-      return { success: false, error: `The clip's media is not on disk (${info.mediaPath || 'no path'}), so its frame cannot be extracted.` };
+      return {
+        success: false,
+        error: `The clip's media is not on disk (${info.mediaPath || 'no path'}), so its frame cannot be extracted.`,
+      };
     }
     const sourceSecs = info.inPoint + (t - info.start) * info.speed;
     const outDir = join(info.projectDir || dirname(info.mediaPath), 'Freeze Frames');
     mkdirSync(outDir, { recursive: true });
     const stamp = sourceSecs.toFixed(3).replace('.', '_');
-    const base = String(info.name).replace(/\.[^.]+$/, '').replace(/[^A-Za-z0-9_-]+/g, '_');
+    const base = String(info.name)
+      .replace(/\.[^.]+$/, '')
+      .replace(/[^A-Za-z0-9_-]+/g, '_');
     const png = join(outDir, `${base}_hold_${stamp}.png`);
     try {
-      runFf('ffmpeg', ['-v', 'error', '-y', '-ss', String(sourceSecs), '-i', info.mediaPath, '-frames:v', '1', png], { timeoutMs: 60000 });
+      runFf(
+        'ffmpeg',
+        [
+          '-v',
+          'error',
+          '-y',
+          '-ss',
+          String(sourceSecs),
+          '-i',
+          info.mediaPath,
+          '-frames:v',
+          '1',
+          png,
+        ],
+        { timeoutMs: 60000 },
+      );
     } catch (e: any) {
       return { success: false, error: `ffmpeg could not extract the frame: ${e.message}` };
     }
@@ -108,7 +134,15 @@ export class AssemblyTools extends ToolsBase {
     `);
   }
 
-  protected async threePointEdit(projectItemId: string, sourceIn?: string, sourceOut?: string, sequenceTimecode?: string, mode = 'overwrite', videoTrack = 0, _audioTrack = 0): Promise<any> {
+  protected async threePointEdit(
+    projectItemId: string,
+    sourceIn?: string,
+    sourceOut?: string,
+    sequenceTimecode?: string,
+    mode = 'overwrite',
+    videoTrack = 0,
+    _audioTrack = 0,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var root = app.project.rootItem;
@@ -122,7 +156,9 @@ export class AssemblyTools extends ToolsBase {
         // sequenceTimecode is a timecode string ("00:00:50:00", ';' for drop-frame) or plain
         // seconds. It was assigned straight to Time.seconds, which throws "Illegal Parameter type"
         // for every timecode, so passing one at all made the tool fail.
-        ${sequenceTimecode ? `
+        ${
+          sequenceTimecode
+            ? `
         var tcRaw = ${JSON.stringify(String(sequenceTimecode))};
         var tcSecs = NaN;
         if (/^[0-9]+(\\.[0-9]+)?$/.test(tcRaw)) {
@@ -136,7 +172,9 @@ export class AssemblyTools extends ToolsBase {
           }
         }
         if (isNaN(tcSecs)) return JSON.stringify({success:false,error:'sequenceTimecode "' + tcRaw + '" is neither HH:MM:SS:FF nor a number of seconds. Nothing was edited.'});
-        var t = new Time(); t.seconds = tcSecs; seq.setPlayerPosition(String(t.ticks));` : ''}
+        var t = new Time(); t.seconds = tcSecs; seq.setPlayerPosition(String(t.ticks));`
+            : ''
+        }
         var destTrack = seq.videoTracks[${videoTrack}];
         if (!destTrack) return JSON.stringify({success:false,error:'Video track ${videoTrack} does not exist on this sequence'});
         var beforeCount = destTrack.clips.numItems;
@@ -165,13 +203,24 @@ export class AssemblyTools extends ToolsBase {
             error:'The edit did not land: the clip covering ' + landAtSeconds + 's on video track ${videoTrack} is ' + (coveringName === null ? 'absent' : '"' + coveringName + '"') + ', not "' + String(item.name) + '". A locked or targeted-off track, or an out-of-range source in/out, will make Premiere accept the call and place nothing.',
             mode:${JSON.stringify(mode)},sourceItem:String(item.name),clipsBefore:beforeCount,clipsAfter:afterCount,atSeconds:landAtSeconds});
         }
-        return JSON.stringify({success:true,verified:true,verifiedBy:'clip covering the playhead compared by projectItem.nodeId',changed:true,mode:${JSON.stringify(mode)},sourceItem:String(item.name),sourceIn:${JSON.stringify(sourceIn??null)},sourceOut:${JSON.stringify(sourceOut??null)},clipsBefore:beforeCount,clipsAfter:afterCount,atSeconds:landAtSeconds});
+        return JSON.stringify({success:true,verified:true,verifiedBy:'clip covering the playhead compared by projectItem.nodeId',changed:true,mode:${JSON.stringify(mode)},sourceItem:String(item.name),sourceIn:${JSON.stringify(sourceIn ?? null)},sourceOut:${JSON.stringify(sourceOut ?? null)},clipsBefore:beforeCount,clipsAfter:afterCount,atSeconds:landAtSeconds});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
 
   // Timeline Operations Implementation
-  protected async addToTimelineBatch(sequenceId: string, clips: Array<{ projectItemId: string; trackIndex: number; time?: number; linkAudio?: boolean; sourceInPoint?: number; sourceOutPoint?: number }>, mode: 'absolute' | 'append' = 'absolute'): Promise<any> {
+  protected async addToTimelineBatch(
+    sequenceId: string,
+    clips: Array<{
+      projectItemId: string;
+      trackIndex: number;
+      time?: number;
+      linkAudio?: boolean;
+      sourceInPoint?: number;
+      sourceOutPoint?: number;
+    }>,
+    mode: 'absolute' | 'append' = 'absolute',
+  ): Promise<any> {
     // In absolute mode every clip needs an explicit time; in append mode time is
     // computed on the track cursor, so a missing time is expected, not an error.
     if (mode !== 'append') {
@@ -189,16 +238,40 @@ export class AssemblyTools extends ToolsBase {
       const result: any = await this.bridge.addToTimelineBatch(sequenceId, clips, mode);
       return { sequenceId, mode, requested: clips.length, ...result };
     } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error), sequenceId, mode, requested: clips.length };
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+        sequenceId,
+        mode,
+        requested: clips.length,
+      };
     }
   }
 
-  protected async addToTimeline(sequenceId: string, projectItemId: string, trackIndex: number, time: number, insertMode = 'overwrite', linkAudio: boolean = true, sourceInPoint?: number, sourceOutPoint?: number): Promise<any> {
+  protected async addToTimeline(
+    sequenceId: string,
+    projectItemId: string,
+    trackIndex: number,
+    time: number,
+    insertMode = 'overwrite',
+    linkAudio: boolean = true,
+    sourceInPoint?: number,
+    sourceOutPoint?: number,
+  ): Promise<any> {
     try {
       // insertMode used to stop here: it was echoed in every response below while
       // the bridge unconditionally overwrote, so a caller asking to insert-and-shift
       // had the footage it was moving destroyed and was told the opposite.
-      const result: any = await this.bridge.addToTimeline(sequenceId, projectItemId, trackIndex, time, linkAudio, sourceInPoint, sourceOutPoint, insertMode);
+      const result: any = await this.bridge.addToTimeline(
+        sequenceId,
+        projectItemId,
+        trackIndex,
+        time,
+        linkAudio,
+        sourceInPoint,
+        sourceOutPoint,
+        insertMode,
+      );
       if (!result.success) {
         return {
           ...result,
@@ -209,7 +282,7 @@ export class AssemblyTools extends ToolsBase {
           insertMode: insertMode,
           linkAudio: linkAudio,
           sourceInPoint: sourceInPoint,
-          sourceOutPoint: sourceOutPoint
+          sourceOutPoint: sourceOutPoint,
         };
       }
       return {
@@ -223,7 +296,7 @@ export class AssemblyTools extends ToolsBase {
         linkAudio: linkAudio,
         sourceInPoint: sourceInPoint,
         sourceOutPoint: sourceOutPoint,
-        ...result
+        ...result,
       };
     } catch (error) {
       return {
@@ -232,12 +305,16 @@ export class AssemblyTools extends ToolsBase {
         sequenceId: sequenceId,
         projectItemId: projectItemId,
         trackIndex: trackIndex,
-        time: time
+        time: time,
       };
     }
   }
 
-  protected async removeFromTimeline(clipId: string, sequenceId?: string, deleteMode = 'ripple'): Promise<any> {
+  protected async removeFromTimeline(
+    clipId: string,
+    sequenceId?: string,
+    deleteMode = 'ripple',
+  ): Promise<any> {
     const script = `
       ${TRIM_LIB}
       try {
@@ -344,7 +421,12 @@ export class AssemblyTools extends ToolsBase {
     return await this.bridge.executeScript(script);
   }
 
-  protected async razorTimelineAtTime(sequenceId?: string, time?: number, videoTrackIndices?: number[], audioTrackIndices?: number[]): Promise<any> {
+  protected async razorTimelineAtTime(
+    sequenceId?: string,
+    time?: number,
+    videoTrackIndices?: number[],
+    audioTrackIndices?: number[],
+  ): Promise<any> {
     const normalizedTime = time ?? 0;
     const videoIndices = videoTrackIndices ?? [];
     const audioIndices = audioTrackIndices ?? [];
@@ -472,8 +554,9 @@ export class AssemblyTools extends ToolsBase {
   protected async createNestedSequence(_clipIds: string[], _name: string): Promise<any> {
     return {
       success: false,
-      error: "create_nested_sequence: This feature requires selection and nesting APIs. Implementation pending.",
-      note: "You can manually nest clips via right-click > Nest"
+      error:
+        'create_nested_sequence: This feature requires selection and nesting APIs. Implementation pending.',
+      note: 'You can manually nest clips via right-click > Nest',
     };
   }
 
@@ -554,7 +637,11 @@ export class AssemblyTools extends ToolsBase {
    * To relink every use of a project item at once instead (the usual VFX version-up), use
    * replace_clip_media, which keeps the timeline clips themselves untouched.
    */
-  protected async replaceClip(clipId: string, newProjectItemId: string, preserveEffects?: boolean): Promise<any> {
+  protected async replaceClip(
+    clipId: string,
+    newProjectItemId: string,
+    preserveEffects?: boolean,
+  ): Promise<any> {
     const keep = preserveEffects !== false;
     const prep: any = await this.bridge.executeScript(`
       try {
@@ -629,7 +716,12 @@ export class AssemblyTools extends ToolsBase {
     }
 
     // Effects: old clip -> temporary copy (it holds them while the old clip goes away).
-    await (this as any).executeTool('copy_effects_between_clips', { sourceClipId: clipId, targetClipId: prep.staged, sourceSequenceId: prep.seq, targetSequenceId: prep.seq });
+    await (this as any).executeTool('copy_effects_between_clips', {
+      sourceClipId: clipId,
+      targetClipId: prep.staged,
+      sourceSequenceId: prep.seq,
+      targetSequenceId: prep.seq,
+    });
 
     // No TrackItem.move(): sliding the staged copy back across other clips left Premiere's
     // internal track order scrambled (QE listed SH020 6-12s before SH010 1-4s, then "Empty from
@@ -673,7 +765,12 @@ export class AssemblyTools extends ToolsBase {
     if (!placed?.success) return placed;
 
     // Effects: temporary copy -> the clip now in the old slot.
-    const copied: any = await (this as any).executeTool('copy_effects_between_clips', { sourceClipId: prep.staged, targetClipId: placed.finalId, sourceSequenceId: prep.seq, targetSequenceId: prep.seq });
+    const copied: any = await (this as any).executeTool('copy_effects_between_clips', {
+      sourceClipId: prep.staged,
+      targetClipId: placed.finalId,
+      sourceSequenceId: prep.seq,
+      targetSequenceId: prep.seq,
+    });
 
     return await this.bridge.executeScript(`
       try {
@@ -719,7 +816,11 @@ export class AssemblyTools extends ToolsBase {
     `);
   }
 
-  protected async batchReplaceClips(oldItemId: string, newItemId: string, seqId?: string): Promise<any> {
+  protected async batchReplaceClips(
+    oldItemId: string,
+    newItemId: string,
+    seqId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var newItem = __findProjectItem(${JSON.stringify(newItemId)});

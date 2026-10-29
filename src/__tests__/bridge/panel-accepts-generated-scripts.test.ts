@@ -22,9 +22,15 @@ import { loadPanel } from '../helpers/panel.js';
 
 jest.mock('fs', () => ({
   promises: {
-    mkdir: jest.fn(), access: jest.fn(), readdir: jest.fn(), writeFile: jest.fn(),
-    readFile: jest.fn(), unlink: jest.fn(), rename: jest.fn(), rm: jest.fn(),
-  }
+    mkdir: jest.fn(),
+    access: jest.fn(),
+    readdir: jest.fn(),
+    writeFile: jest.fn(),
+    readFile: jest.fn(),
+    unlink: jest.fn(),
+    rename: jest.fn(),
+    rm: jest.fn(),
+  },
 }));
 
 jest.mock('node:crypto', () => ({

@@ -16,10 +16,15 @@ import { promises as fs } from 'fs';
 
 jest.mock('fs', () => ({
   promises: {
-    mkdir: jest.fn(), access: jest.fn(), readdir: jest.fn(),
-    writeFile: jest.fn(), readFile: jest.fn(), unlink: jest.fn(),
-    rename: jest.fn(), rm: jest.fn(),
-  }
+    mkdir: jest.fn(),
+    access: jest.fn(),
+    readdir: jest.fn(),
+    writeFile: jest.fn(),
+    readFile: jest.fn(),
+    unlink: jest.fn(),
+    rename: jest.fn(),
+    rm: jest.fn(),
+  },
 }));
 jest.mock('node:crypto', () => ({
   randomUUID: jest.fn(() => 'test-uuid-1234'),
@@ -41,7 +46,9 @@ describe('prelude QE helpers', () => {
     mockFs.unlink.mockResolvedValue(undefined);
     mockFs.readFile.mockResolvedValue(JSON.stringify({ result: { ok: true } }));
   });
-  afterEach(() => { delete process.env.PREMIERE_TEMP_DIR; });
+  afterEach(() => {
+    delete process.env.PREMIERE_TEMP_DIR;
+  });
 
   /** Runs the prelude's helper definitions, then `extra`, in an isolated context. */
   const runWithPrelude = async (extra: string): Promise<Record<string, unknown>> => {

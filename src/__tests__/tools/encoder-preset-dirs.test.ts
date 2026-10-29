@@ -21,10 +21,21 @@ jest.mock('node:os', () => {
 describe('get_encoder_presets default directories', () => {
   it('discovers user presets under ~/Documents/Adobe/Adobe Media Encoder', async () => {
     const fakeHome = await fs.mkdtemp(join(os.tmpdir(), 'premiere-home-test-'));
-    const presetDir = join(fakeHome, 'Documents', 'Adobe', 'Adobe Media Encoder', '26.0', 'Presets');
+    const presetDir = join(
+      fakeHome,
+      'Documents',
+      'Adobe',
+      'Adobe Media Encoder',
+      '26.0',
+      'Presets',
+    );
     await fs.mkdir(presetDir, { recursive: true });
     const presetPath = join(presetDir, 'Selects ProRes.epr');
-    await fs.writeFile(presetPath, '<Preset><PresetName>Selects ProRes</PresetName></Preset>', 'utf8');
+    await fs.writeFile(
+      presetPath,
+      '<Preset><PresetName>Selects ProRes</PresetName></Preset>',
+      'utf8',
+    );
     (os.homedir as jest.Mock).mockReturnValue(fakeHome);
 
     try {

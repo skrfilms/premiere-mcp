@@ -56,12 +56,25 @@ export function runBinary(cmd: string, args: string[], timeoutMs = 120_000): Pro
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      try { proc.kill('SIGKILL'); } catch { /* already gone */ }
-      resolve({ ok: false, code: null, stdout, stderr: `${stderr}\n[timed out after ${timeoutMs}ms]` });
+      try {
+        proc.kill('SIGKILL');
+      } catch {
+        /* already gone */
+      }
+      resolve({
+        ok: false,
+        code: null,
+        stdout,
+        stderr: `${stderr}\n[timed out after ${timeoutMs}ms]`,
+      });
     }, timeoutMs);
 
-    proc.stdout?.on('data', (c) => { stdout += c.toString(); });
-    proc.stderr?.on('data', (c) => { stderr += c.toString(); });
+    proc.stdout?.on('data', (c) => {
+      stdout += c.toString();
+    });
+    proc.stderr?.on('data', (c) => {
+      stderr += c.toString();
+    });
     proc.on('error', (err) => {
       if (settled) return;
       settled = true;
@@ -106,10 +119,22 @@ export async function fileSize(path: string): Promise<Known<number>> {
  * both when ffprobe is absent or the file is unreadable -- never 0x0, which a
  * consumer could mistake for a real measurement.
  */
-export async function probeDimensions(path: string): Promise<{ width: Known<number>; height: Known<number> }> {
+export async function probeDimensions(
+  path: string,
+): Promise<{ width: Known<number>; height: Known<number> }> {
   const res = await runBinary(
     ffprobeCmd(),
-    ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', path],
+    [
+      '-v',
+      'error',
+      '-select_streams',
+      'v:0',
+      '-show_entries',
+      'stream=width,height',
+      '-of',
+      'csv=p=0',
+      path,
+    ],
     20_000,
   );
   if (!res.ok) return { width: UNKNOWN, height: UNKNOWN };
@@ -118,7 +143,10 @@ export async function probeDimensions(path: string): Promise<{ width: Known<numb
 
 /** Pure: parse `1920,1080` (possibly with trailing junk/newlines) from ffprobe csv output. */
 export function parseDimensionCsv(stdout: string): { width: Known<number>; height: Known<number> } {
-  const line = stdout.split('\n').map((l) => l.trim()).find((l) => /^\d+,\d+/.test(l));
+  const line = stdout
+    .split('\n')
+    .map((l) => l.trim())
+    .find((l) => /^\d+,\d+/.test(l));
   if (!line) return { width: UNKNOWN, height: UNKNOWN };
   const [w, h] = line.split(',');
   const width = Number(w);
@@ -133,7 +161,18 @@ export function parseDimensionCsv(stdout: string): { width: Known<number>; heigh
 export async function probeFrameCount(path: string): Promise<Known<number>> {
   const res = await runBinary(
     ffprobeCmd(),
-    ['-v', 'error', '-select_streams', 'v:0', '-count_frames', '-show_entries', 'stream=nb_read_frames', '-of', 'csv=p=0', path],
+    [
+      '-v',
+      'error',
+      '-select_streams',
+      'v:0',
+      '-count_frames',
+      '-show_entries',
+      'stream=nb_read_frames',
+      '-of',
+      'csv=p=0',
+      path,
+    ],
     60_000,
   );
   if (!res.ok) return UNKNOWN;

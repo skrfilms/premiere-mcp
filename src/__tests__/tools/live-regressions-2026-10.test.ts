@@ -48,7 +48,12 @@ describe('bridge prelude array polyfills', () => {
 describe('copy_markers_between_sequences', () => {
   const scriptFor = async (args: Record<string, unknown>): Promise<string> => {
     let script = '';
-    const bridge = { executeScript: async (s: string) => { script = s; return { success: true }; } };
+    const bridge = {
+      executeScript: async (s: string) => {
+        script = s;
+        return { success: true };
+      },
+    };
     await new PremiereProTools(bridge as never).executeTool('copy_markers_between_sequences', args);
     return script;
   };
@@ -77,8 +82,15 @@ describe('QE sequence resolution', () => {
   // so pairing the two indices addressed the wrong sequence.
   it('resolves a named QE sequence by guid, not by DOM index', async () => {
     let script = '';
-    const bridge = { executeScript: async (s: string) => { script = s; return { success: true }; } };
-    await new PremiereProTools(bridge as never).executeTool('get_qe_sequence_props', { sequenceId: 'SEQ-1' });
+    const bridge = {
+      executeScript: async (s: string) => {
+        script = s;
+        return { success: true };
+      },
+    };
+    await new PremiereProTools(bridge as never).executeTool('get_qe_sequence_props', {
+      sequenceId: 'SEQ-1',
+    });
     expect(script).toContain('__qeSequenceOpening(__d)');
     expect(script).not.toMatch(/return qe\.project\.getSequenceAt\(i\)/);
   });
@@ -87,31 +99,47 @@ describe('QE sequence resolution', () => {
 describe('gap closing', () => {
   const scriptFor = async (name: string, args: Record<string, unknown>): Promise<string> => {
     let script = '';
-    const bridge = { executeScript: async (s: string) => { script = s; return { success: true }; } };
+    const bridge = {
+      executeScript: async (s: string) => {
+        script = s;
+        return { success: true };
+      },
+    };
     await new PremiereProTools(bridge as never).executeTool(name, args);
     return script;
   };
 
   // close_gap_at used to call a getTimelineGaps() this host lacks and then report a note;
   // close_all_gaps returned success:true having moved nothing.
-  it.each(['close_gap_at', 'close_all_gaps'])('%s moves clips and reads them back', async (name) => {
-    const s = await scriptFor(name, { timecode: '1' });
-    expect(s).not.toContain('getTimelineGaps');
-    expect(s).toContain('.move(off)');
-    expect(s).toContain('misplaced');
-  });
+  it.each(['close_gap_at', 'close_all_gaps'])(
+    '%s moves clips and reads them back',
+    async (name) => {
+      const s = await scriptFor(name, { timecode: '1' });
+      expect(s).not.toContain('getTimelineGaps');
+      expect(s).toContain('.move(off)');
+      expect(s).toContain('misplaced');
+    },
+  );
 });
 
 describe('gap readers', () => {
   // Sequence.getTimelineGaps() does not exist on 26.5.2; a typeof-guarded call to it made
   // get_sequence_gaps report zero gaps and delivery_qc never flag one.
-  it.each(['get_sequence_gaps', 'delivery_qc'])('%s computes gaps from clip ranges', async (name) => {
-    let script = '';
-    const bridge = { executeScript: async (s: string) => { script = s; return { success: true }; } };
-    await new PremiereProTools(bridge as never).executeTool(name, { sequenceId: 'S' });
-    expect(script).not.toContain('seq.getTimelineGaps');
-    expect(script).toMatch(/__(track|video)Gaps\(/);
-  });
+  it.each(['get_sequence_gaps', 'delivery_qc'])(
+    '%s computes gaps from clip ranges',
+    async (name) => {
+      let script = '';
+      const bridge = {
+        executeScript: async (s: string) => {
+          script = s;
+          return { success: true };
+        },
+      };
+      await new PremiereProTools(bridge as never).executeTool(name, { sequenceId: 'S' });
+      expect(script).not.toContain('seq.getTimelineGaps');
+      expect(script).toMatch(/__(track|video)Gaps\(/);
+    },
+  );
 });
 
 describe('QE frame export time', () => {
@@ -133,13 +161,27 @@ describe('QE frame export time', () => {
     expect(tc('10584000000', 3725 + 1 / 24)).toBe('01:02:05:01');
   });
 
-  it.each(['capture_program_output', 'export_frame', 'capture_frame', 'export_thumbnail'])('%s exports by timecode only', async (name) => {
-    let script = '';
-    const bridge = { executeScript: async (s: string) => { script = s; return { success: false }; } };
-    await new PremiereProTools(bridge as never).executeTool(name, { sequenceId: 'S', time: 2, outputPath: '/tmp/x.png' });
-    expect(script).toContain('__qeTimecode(');
-    expect(script).not.toMatch(/tryExport\(timeNumber|tryFrameExport\(frameTicks|tryFrameExport\(frameSeconds/);
-  });
+  it.each(['capture_program_output', 'export_frame', 'capture_frame', 'export_thumbnail'])(
+    '%s exports by timecode only',
+    async (name) => {
+      let script = '';
+      const bridge = {
+        executeScript: async (s: string) => {
+          script = s;
+          return { success: false };
+        },
+      };
+      await new PremiereProTools(bridge as never).executeTool(name, {
+        sequenceId: 'S',
+        time: 2,
+        outputPath: '/tmp/x.png',
+      });
+      expect(script).toContain('__qeTimecode(');
+      expect(script).not.toMatch(
+        /tryExport\(timeNumber|tryFrameExport\(frameTicks|tryFrameExport\(frameSeconds/,
+      );
+    },
+  );
 });
 
 describe('QE clip addressing by DOM index', () => {
@@ -150,21 +192,38 @@ describe('QE clip addressing by DOM index', () => {
     const { join } = require('node:path');
     const dir = join(__dirname, '..', '..', 'tools');
     const files: string[] = [];
-    const walk = (d: string) => { for (const n of readdirSync(d, { withFileTypes: true })) { const p = join(d, n.name); if (n.isDirectory()) walk(p); else if (p.endsWith('.ts')) files.push(p); } };
+    const walk = (d: string) => {
+      for (const n of readdirSync(d, { withFileTypes: true })) {
+        const p = join(d, n.name);
+        if (n.isDirectory()) walk(p);
+        else if (p.endsWith('.ts')) files.push(p);
+      }
+    };
     walk(dir);
     const offenders: string[] = [];
     for (const f of files) {
-      readFileSync(f, 'utf8').split('\n').forEach((line: string, i: number) => {
-        if (/\.getItemAt\(\$\{(clipIndex|ci|Number\(clipIndex\))\}\)/.test(line)) offenders.push(`${f}:${i + 1}`);
-      });
+      readFileSync(f, 'utf8')
+        .split('\n')
+        .forEach((line: string, i: number) => {
+          if (/\.getItemAt\(\$\{(clipIndex|ci|Number\(clipIndex\))\}\)/.test(line))
+            offenders.push(`${f}:${i + 1}`);
+        });
     }
     expect(offenders).toEqual([]);
   });
 
   it('speed_change undoes a speed Premiere applied incorrectly', async () => {
     let script = '';
-    const bridge = { executeScript: async (s: string) => { script = s; return { success: true }; } };
-    await new PremiereProTools(bridge as never).executeTool('speed_change', { clipId: 'C', speed: 2 });
+    const bridge = {
+      executeScript: async (s: string) => {
+        script = s;
+        return { success: true };
+      },
+    };
+    await new PremiereProTools(bridge as never).executeTool('speed_change', {
+      clipId: 'C',
+      speed: 2,
+    });
     expect(script).toContain('qe.project.undo()');
     expect(script).toContain('wantDur');
   });
@@ -174,7 +233,10 @@ describe('timecode to ticks', () => {
   const ticks = (timebase: string, tc: string): string | null => {
     const ctx = vm.createContext({});
     vm.runInContext(EXTENDSCRIPT_HELPERS, ctx);
-    return vm.runInContext(`__timecodeToTicks({timebase:${JSON.stringify(timebase)}}, ${JSON.stringify(tc)})`, ctx);
+    return vm.runInContext(
+      `__timecodeToTicks({timebase:${JSON.stringify(timebase)}}, ${JSON.stringify(tc)})`,
+      ctx,
+    );
   };
   it('converts non-drop, drop-frame and seconds', () => {
     expect(ticks('10584000000', '01:00:00:00')).toBe('914457600000000'); // 24 fps
@@ -189,24 +251,38 @@ describe('timecode to ticks', () => {
 describe('review fixes', () => {
   const scriptOf = async (name: string, args: Record<string, unknown>): Promise<string> => {
     let script = '';
-    const bridge = { executeScript: async (s: string) => { script = s; return { success: true }; } };
+    const bridge = {
+      executeScript: async (s: string) => {
+        script = s;
+        return { success: true };
+      },
+    };
     await new PremiereProTools(bridge as never).executeTool(name, args);
     return script;
   };
 
   it('close_all_gaps keeps the leading gap unless asked', async () => {
-    expect(await scriptOf('close_all_gaps', { sequenceId: 'S' })).toContain('var includeLeading = false;');
-    expect(await scriptOf('close_all_gaps', { sequenceId: 'S', includeLeadingGap: true })).toContain('var includeLeading = true;');
+    expect(await scriptOf('close_all_gaps', { sequenceId: 'S' })).toContain(
+      'var includeLeading = false;',
+    );
+    expect(
+      await scriptOf('close_all_gaps', { sequenceId: 'S', includeLeadingGap: true }),
+    ).toContain('var includeLeading = true;');
   });
 
   it('close_gap_at parses timecode with the shared drop-frame-aware helper', async () => {
-    expect(await scriptOf('close_gap_at', { timecode: '00;01;00;02' })).toContain('__timecodeToTicks(seq, tc)');
+    expect(await scriptOf('close_gap_at', { timecode: '00;01;00;02' })).toContain(
+      '__timecodeToTicks(seq, tc)',
+    );
   });
 
-  it('linkAudio=false removes only the placed clip\'s linked audio', async () => {
+  it("linkAudio=false removes only the placed clip's linked audio", async () => {
     let s = '';
     const bridge = Object.create(PremiereProBridge.prototype);
-    bridge.executeScript = async (x: string) => { s = x; return { success: true }; };
+    bridge.executeScript = async (x: string) => {
+      s = x;
+      return { success: true };
+    };
     await bridge.addToTimeline('S', 'P', 1, 10, false);
     expect(s).toContain('__removeLinkedAudio(placedClip)');
     expect(s).not.toMatch(/audioClip\.projectItem\.nodeId === projectItem\.nodeId/);

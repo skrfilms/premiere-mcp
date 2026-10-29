@@ -44,7 +44,7 @@ export class SequenceTrackTools extends EffectsTools {
         });
       }
     `;
-    
+
     return await this.bridge.executeScript(script);
   }
 
@@ -122,7 +122,11 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(script);
   }
 
-  protected async deleteEmptyTracks(sequenceId: string | undefined, video: boolean, audio: boolean): Promise<any> {
+  protected async deleteEmptyTracks(
+    sequenceId: string | undefined,
+    video: boolean,
+    audio: boolean,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -136,7 +140,11 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  protected async setSequenceInOutQe(inPoint?: string, outPoint?: string, sequenceId?: string): Promise<any> {
+  protected async setSequenceInOutQe(
+    inPoint?: string,
+    outPoint?: string,
+    sequenceId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -244,16 +252,47 @@ ${this.buildSequenceResolver(sequenceId)}
     try {
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       const base = path.join(dir, 'thumb_%04d.jpg');
-      const dur = parseFloat(runFf('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', filePath], { timeoutMs: 15000 }).trim());
+      const dur = parseFloat(
+        runFf(
+          'ffprobe',
+          [
+            '-v',
+            'error',
+            '-show_entries',
+            'format=duration',
+            '-of',
+            'default=noprint_wrappers=1:nokey=1',
+            filePath,
+          ],
+          { timeoutMs: 15000 },
+        ).trim(),
+      );
       const fps = count / dur;
-      runFf('ffmpeg', ['-y', '-loglevel', 'error', '-i', filePath, '-vf', `fps=${fps}`, '-frames:v', String(count), base], { timeoutMs: 120000 });
+      runFf(
+        'ffmpeg',
+        [
+          '-y',
+          '-loglevel',
+          'error',
+          '-i',
+          filePath,
+          '-vf',
+          `fps=${fps}`,
+          '-frames:v',
+          String(count),
+          base,
+        ],
+        { timeoutMs: 120000 },
+      );
       const files: string[] = [];
       for (let i = 1; i <= count; i++) {
-        const p = path.join(dir, `thumb_${String(i).padStart(4,'0')}.jpg`);
+        const p = path.join(dir, `thumb_${String(i).padStart(4, '0')}.jpg`);
         if (fs.existsSync(p)) files.push(p);
       }
       return { success: true, count: files.length, files, durationSecs: dur };
-    } catch (e: any) { return { success: false, error: e.message }; }
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
   }
 
   protected async listSequencesByName(pattern: string): Promise<any> {
@@ -311,13 +350,17 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   // Sequence Management Implementation
-  protected async createSequence(name: string, presetPath: string, frameRate?: number): Promise<any> {
+  protected async createSequence(
+    name: string,
+    presetPath: string,
+    frameRate?: number,
+  ): Promise<any> {
     try {
       const result: any = await this.bridge.createSequence(name, presetPath);
       if (result?.success === false) {
         return {
           ...result,
-          sequenceName: result.sequenceName || name
+          sequenceName: result.sequenceName || name,
         };
       }
 
@@ -342,14 +385,15 @@ ${this.buildSequenceResolver(sequenceId)}
               // setSequenceSettings reads the rate back after writing: `after` on the
               // success path, `settings` on the no-op / rejected branches.
               ...((): any => {
-                const actual = frameRateResult.after?.frameRate ?? frameRateResult.settings?.frameRate;
+                const actual =
+                  frameRateResult.after?.frameRate ?? frameRateResult.settings?.frameRate;
                 return actual !== undefined && actual !== null ? { frameRateActual: actual } : {};
               })(),
               ...(frameRateResult.success === false || frameRateResult.warning
                 ? { frameRateWarning: frameRateResult.error || frameRateResult.warning }
-                : {})
+                : {}),
             }
-          : {})
+          : {}),
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -358,16 +402,26 @@ ${this.buildSequenceResolver(sequenceId)}
         success: false,
         error: `Failed to create sequence: ${message}`,
         sequenceName: name,
-        ...(timedOut ? {
-          warning: 'Premiere may still create the sequence after this timeout. Wait for the bridge to become responsive, then run list_sequences to verify before retrying. The server intentionally does not run automatic recovery after a timeout because that can wedge the CEP bridge on Windows.'
-        } : {})
+        ...(timedOut
+          ? {
+              warning:
+                'Premiere may still create the sequence after this timeout. Wait for the bridge to become responsive, then run list_sequences to verify before retrying. The server intentionally does not run automatic recovery after a timeout because that can wedge the CEP bridge on Windows.',
+            }
+          : {}),
       };
     }
   }
 
-  protected async createSequenceFromProjectItems(name: string, projectItemIds: string[]): Promise<any> {
+  protected async createSequenceFromProjectItems(
+    name: string,
+    projectItemIds: string[],
+  ): Promise<any> {
     if (!projectItemIds.length) {
-      return { success: false, error: 'At least one imported project item is required to create a sequence without a dialog.' };
+      return {
+        success: false,
+        error:
+          'At least one imported project item is required to create a sequence without a dialog.',
+      };
     }
 
     const script = `
@@ -402,7 +456,11 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(script);
   }
 
-  protected async duplicateSequence(sequenceId: string, newName: string, clearContents = false): Promise<any> {
+  protected async duplicateSequence(
+    sequenceId: string,
+    newName: string,
+    clearContents = false,
+  ): Promise<any> {
     const safeName = JSON.stringify(newName);
     const script = `
       try {
@@ -575,7 +633,9 @@ ${this.buildSequenceResolver(sequenceId)}
    * Shared by lint_timeline and diff_sequences. Defaults to the active sequence.
    */
   protected async walkSequence(sequenceId?: string): Promise<any> {
-    const seqExpr = sequenceId ? `__findSequence(${JSON.stringify(sequenceId)})` : 'app.project.activeSequence';
+    const seqExpr = sequenceId
+      ? `__findSequence(${JSON.stringify(sequenceId)})`
+      : 'app.project.activeSequence';
     const script = `
       try {
         var sequence = ${seqExpr};
@@ -636,7 +696,11 @@ ${this.buildSequenceResolver(sequenceId)}
    * Resolve the active sequence's id, so capture_program_output can default to
    * "whatever is open" the way the frame/scope tools elsewhere accept no id.
    */
-  protected async resolveActiveSequenceId(): Promise<{ id?: string; name?: string; error?: string }> {
+  protected async resolveActiveSequenceId(): Promise<{
+    id?: string;
+    name?: string;
+    error?: string;
+  }> {
     const script = `
       try {
         var seq = app.project.activeSequence;
@@ -690,7 +754,11 @@ ${this.buildSequenceResolver(sequenceId)}
   //     existing tracks keep their indices)
   //   - "below" → insert at 0 (legacy behavior, pushes existing up — only useful in special
   //     cases since V1 in Premiere's UI is the bottom)
-  protected async addTrack(sequenceId: string, trackType: string, position: string = 'above'): Promise<any> {
+  protected async addTrack(
+    sequenceId: string,
+    trackType: string,
+    position: string = 'above',
+  ): Promise<any> {
     const isVideo = trackType === 'video';
     const numVideo = isVideo ? 1 : 0;
     const numAudio = isVideo ? 0 : 1;
@@ -761,16 +829,22 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(script);
   }
 
-  protected async deleteTrack(sequenceId: string, trackType: string, trackIndex: number): Promise<any> {
+  protected async deleteTrack(
+    sequenceId: string,
+    trackType: string,
+    trackIndex: number,
+  ): Promise<any> {
     if (trackType === 'caption') {
       return {
         success: false,
-        error: 'Caption track deletion is not supported by Premiere Pro scripting. The ExtendScript DOM exposes no sequence.captionTracks/getCaptionTracks surface, and the QE DOM exposes no caption-track accessor or delete method.',
+        error:
+          'Caption track deletion is not supported by Premiere Pro scripting. The ExtendScript DOM exposes no sequence.captionTracks/getCaptionTracks surface, and the QE DOM exposes no caption-track accessor or delete method.',
         sequenceId,
         trackType,
         trackIndex,
         unsupportedByPremiereApi: true,
-        workaround: 'Delete caption tracks manually in Premiere, or remove/recreate captions from the source .srt before creating the caption track.'
+        workaround:
+          'Delete caption tracks manually in Premiere, or remove/recreate captions from the source .srt before creating the caption track.',
       };
     }
 
@@ -848,7 +922,12 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(script);
   }
 
-  protected async lockTrack(sequenceId: string, trackType: string, trackIndex: number, locked: boolean): Promise<any> {
+  protected async lockTrack(
+    sequenceId: string,
+    trackType: string,
+    trackIndex: number,
+    locked: boolean,
+  ): Promise<any> {
     const script = `
       try {
 ${this.buildSequenceResolver(sequenceId)}
@@ -897,7 +976,11 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(script);
   }
 
-  protected async toggleTrackVisibility(sequenceId: string, trackIndex: number, visible: boolean): Promise<any> {
+  protected async toggleTrackVisibility(
+    sequenceId: string,
+    trackIndex: number,
+    visible: boolean,
+  ): Promise<any> {
     const script = `
       try {
 ${this.buildSequenceResolver(sequenceId)}
@@ -1195,7 +1278,13 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(script);
   }
 
-  protected async distributeClipsEvenly(trackIndex: number, clipIndices: number[], startSecs: number, endSecs: number, seqId?: string): Promise<any> {
+  protected async distributeClipsEvenly(
+    trackIndex: number,
+    clipIndices: number[],
+    startSecs: number,
+    endSecs: number,
+    seqId?: string,
+  ): Promise<any> {
     const n = clipIndices.length;
     if (n === 0) return { success: false, error: 'No clips specified' };
     const step = (endSecs - startSecs) / n;
@@ -1353,7 +1442,11 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  protected async setTrackLockQe(trackIndex: number, locked: boolean, audio: boolean): Promise<any> {
+  protected async setTrackLockQe(
+    trackIndex: number,
+    locked: boolean,
+    audio: boolean,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -1375,7 +1468,11 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  protected async attachSequenceCustomProperty(key: string, value: string, seqId?: string): Promise<any> {
+  protected async attachSequenceCustomProperty(
+    key: string,
+    value: string,
+    seqId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(seqId)};
@@ -1443,14 +1540,21 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   // Set Sequence In/Out Points Implementation
-  protected async setSequenceInOutPoints(sequenceId: string | undefined, inPoint?: number, outPoint?: number): Promise<any> {
+  protected async setSequenceInOutPoints(
+    sequenceId: string | undefined,
+    inPoint?: number,
+    outPoint?: number,
+  ): Promise<any> {
     const setIn = inPoint !== undefined;
     const setOut = outPoint !== undefined;
     // Premiere does not reject in >= out: it stores a collapsed range that reads back as about
     // -400000 s, which looked like a broken API in the sweep. Every argument form works when the
     // range is real (measured on 26.5.2), so refuse the degenerate request instead.
     if (setIn && setOut && !(Number(outPoint) > Number(inPoint))) {
-      return { success: false, error: `outPoint (${outPoint}s) must be after inPoint (${inPoint}s). Nothing was changed.` };
+      return {
+        success: false,
+        error: `outPoint (${outPoint}s) must be after inPoint (${inPoint}s). Nothing was changed.`,
+      };
     }
     const script = `
       try {
@@ -1501,7 +1605,10 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   // Create Subsequence Implementation
-  protected async createSubsequence(sequenceId: string, ignoreTrackTargeting?: boolean): Promise<any> {
+  protected async createSubsequence(
+    sequenceId: string,
+    ignoreTrackTargeting?: boolean,
+  ): Promise<any> {
     const ignoreTargeting = ignoreTrackTargeting ? 'true' : 'false';
     const script = `
       try {
@@ -1527,11 +1634,16 @@ ${this.buildSequenceResolver(sequenceId)}
    * could not be reached at all, and a CLIP sharing the name would win. Uses the shared
    * __resolveBin prelude helper (id, "/"-separated path, or deep name with an ambiguity refusal).
    */
-  protected async createSequenceFromBin(binName: string, seqName: string, presetPath?: string, binId?: string): Promise<any> {
+  protected async createSequenceFromBin(
+    binName: string,
+    seqName: string,
+    presetPath?: string,
+    binId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var req = __resolveBin(${JSON.stringify(binId??null)}, ${JSON.stringify(binName)});
-        if (req.error) return JSON.stringify({success:false,error:req.error+' No sequence was created.',binName:${JSON.stringify(binName)},binId:${JSON.stringify(binId??null)},matchCount:req.matchCount});
+        var req = __resolveBin(${JSON.stringify(binId ?? null)}, ${JSON.stringify(binName)});
+        if (req.error) return JSON.stringify({success:false,error:req.error+' No sequence was created.',binName:${JSON.stringify(binName)},binId:${JSON.stringify(binId ?? null)},matchCount:req.matchCount});
         var bin = req.bin;
         var items = [];
         for (var j=0;j<bin.children.numItems;j++) {

@@ -12,7 +12,10 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 /** The bridge directory default for a platform/env pair, matching the panel's own fallback. */
-export function defaultBridgeDir(platform: string, env: Record<string, string | undefined>): string {
+export function defaultBridgeDir(
+  platform: string,
+  env: Record<string, string | undefined>,
+): string {
   if (platform !== 'win32') return '/tmp/premiere-mcp-bridge';
   return `${env.TEMP || env.TMP || 'C:\\Temp'}\\premiere-mcp-bridge`;
 }
@@ -25,6 +28,10 @@ export function bridgeDir(): string {
 /** Scratch output for generated frames, presets and assets; created if missing. */
 export function generatedAssetsDir(): string {
   const dir = join(bridgeDir(), 'generated-assets');
-  try { mkdirSync(dir, { recursive: true }); } catch { /* the tool reports the write failure itself */ }
+  try {
+    mkdirSync(dir, { recursive: true });
+  } catch {
+    /* the tool reports the write failure itself */
+  }
   return dir;
 }

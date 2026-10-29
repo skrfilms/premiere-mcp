@@ -72,7 +72,7 @@ describe('every prompt renders', () => {
   });
 
   it('an unknown prompt name is a clean error, not an empty prompt', async () => {
-    await expect(prompts.getPrompt('not_a_prompt', {})).rejects.toThrow("not found");
+    await expect(prompts.getPrompt('not_a_prompt', {})).rejects.toThrow('not found');
   });
 });
 
@@ -101,7 +101,11 @@ describe('prompt-to-bundle alignment', () => {
   it('every task bundle is reachable from at least one prompt', () => {
     // A bundle nobody is told to use is a bundle nobody uses. This is the link between
     // the two surfaces: the prompt names the bundle, the bundle covers the prompt.
-    const claimed = new Set(workflowSpecs().map((workflow) => workflow.bundle).filter(Boolean));
+    const claimed = new Set(
+      workflowSpecs()
+        .map((workflow) => workflow.bundle)
+        .filter(Boolean),
+    );
     for (const bundle of Object.keys(TASK_BUNDLES)) {
       expect(Array.from(claimed)).toContain(bundle);
     }

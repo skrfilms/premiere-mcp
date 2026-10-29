@@ -46,18 +46,18 @@ const TAP_COMPOSITED: Record<CaptureTapKind, CompositedVerdict> = {
  */
 const TAP_INHERENT_CAVEATS: Record<CaptureTapKind, string[]> = {
   render: [
-    'Rendered by Premiere at export quality, which can differ from the Program monitor\'s playback-resolution preview.',
+    "Rendered by Premiere at export quality, which can differ from the Program monitor's playback-resolution preview.",
   ],
   'export-file': [
-    'These are the pixels of the exported FILE. If the export preset scaled, cropped or re-encoded the sequence, the difference from the timeline is the preset\'s, not the edit\'s.',
+    "These are the pixels of the exported FILE. If the export preset scaled, cropped or re-encoded the sequence, the difference from the timeline is the preset's, not the edit's.",
   ],
   'media-file': [
     'Decoded from a source file: no timeline composite. Nothing here reflects effects, transitions, opacity, or clips on higher tracks.',
   ],
   screen: [
-    'SCREEN CAPTURE, not a composited render. Nothing in these pixels proves they came from Premiere\'s Program monitor.',
+    "SCREEN CAPTURE, not a composited render. Nothing in these pixels proves they came from Premiere's Program monitor.",
     'Another window may have been in front, the panel may have been scrolled or resized, and the monitor may have been at reduced playback resolution.',
-    'Scaled by the display and subject to the display\'s colour management, so it is not colour-accurate evidence.',
+    "Scaled by the display and subject to the display's colour management, so it is not colour-accurate evidence.",
     'The frame time is the moment of capture on the wall clock, not a sequence timecode, unless one was supplied by the caller.',
   ],
   ndi: [
@@ -80,11 +80,15 @@ export function compositedForTap(tap: CaptureTapKind): CompositedVerdict {
 }
 
 export function inherentCaveats(tap: CaptureTapKind): string[] {
-  return [...(TAP_INHERENT_CAVEATS[tap] ?? ['Unrecognised tap: treat this artifact as untrusted.'])];
+  return [
+    ...(TAP_INHERENT_CAVEATS[tap] ?? ['Unrecognised tap: treat this artifact as untrusted.']),
+  ];
 }
 
 /** One line an agent can put in front of a human without misleading them. */
-export function describeProvenance(evidence: Pick<CaptureEvidence, 'provenance' | 'composited' | 'tap'>): string {
+export function describeProvenance(
+  evidence: Pick<CaptureEvidence, 'provenance' | 'composited' | 'tap'>,
+): string {
   switch (evidence.provenance) {
     case 'composited-render':
       return `Composited render from the '${evidence.tap}' tap: Premiere rendered these pixels through the sequence, so effects, transitions and upper tracks are included.`;
@@ -140,14 +144,19 @@ export function timecodeToFrames(timecode: string, fps: number): number | undefi
   const framesPerSecond = Math.round(fps);
   const ff = Number(m[5]);
   if (ff >= framesPerSecond) return undefined;
-  const frames = ((Number(m[2]) * 3600) + (Number(m[3]) * 60) + Number(m[4])) * framesPerSecond + ff;
+  const frames = (Number(m[2]) * 3600 + Number(m[3]) * 60 + Number(m[4])) * framesPerSecond + ff;
   return m[1] ? -frames : frames;
 }
 
 /** Build a fully-populated time position, marking anything unknowable. */
 export function timePosition(seconds: Known<number>, fps: Known<number>): CaptureTimePosition {
   if (typeof seconds !== 'number' || !Number.isFinite(seconds)) {
-    return { seconds: UNKNOWN, frame: UNKNOWN, timecode: UNKNOWN, fps: typeof fps === 'number' ? fps : UNKNOWN };
+    return {
+      seconds: UNKNOWN,
+      frame: UNKNOWN,
+      timecode: UNKNOWN,
+      fps: typeof fps === 'number' ? fps : UNKNOWN,
+    };
   }
   if (typeof fps !== 'number' || !Number.isFinite(fps) || fps <= 0) {
     // We know when, but not in what frame grid -- so frame and timecode stay unknown.

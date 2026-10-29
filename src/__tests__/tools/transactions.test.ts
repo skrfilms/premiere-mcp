@@ -256,9 +256,18 @@ describe('schema', () => {
 describe('classifyTransactionTool', () => {
   it('accepts sequence-scoped edits', () => {
     for (const tool of [
-      'razor_all_tracks', 'ripple_delete', 'apply_video_effect', 'set_clip_opacity',
-      'add_transition', 'move_clip_to_track', 'add_keyframe', 'bake_keyframe_ease',
-      'delete_track', 'add_marker', 'speed_change', 'lumetri_basic_set',
+      'razor_all_tracks',
+      'ripple_delete',
+      'apply_video_effect',
+      'set_clip_opacity',
+      'add_transition',
+      'move_clip_to_track',
+      'add_keyframe',
+      'bake_keyframe_ease',
+      'delete_track',
+      'add_marker',
+      'speed_change',
+      'lumetri_basic_set',
     ]) {
       expect(classifyTransactionTool(tool).rollback).toBe('restorable');
     }
@@ -416,7 +425,9 @@ describe('refusing before anything happens', () => {
     const host = fake({ checkpointFails: true });
     const result = await runTransaction(
       host.executor,
-      input({ steps: [{ tool: 'razor_all_tracks', args: { time: 5 } }, { tool: 'ripple_delete' }] }),
+      input({
+        steps: [{ tool: 'razor_all_tracks', args: { time: 5 } }, { tool: 'ripple_delete' }],
+      }),
       CLOCK,
     );
 
@@ -563,9 +574,23 @@ describe('commit', () => {
       input({
         label: 'conform reel 1',
         steps: [
-          { id: 'cut', tool: 'razor_all_tracks', args: { time: 5 }, expectFingerprintChanged: true },
-          { id: 'grade', tool: 'apply_video_effect', args: { nodeId: 'n1', matchName: 'AE.ADBE Motion' },
-            verify: { tool: 'list_clip_effects', args: { nodeId: 'n1' }, path: 'effects.0.matchName', equals: 'AE.ADBE Motion' } },
+          {
+            id: 'cut',
+            tool: 'razor_all_tracks',
+            args: { time: 5 },
+            expectFingerprintChanged: true,
+          },
+          {
+            id: 'grade',
+            tool: 'apply_video_effect',
+            args: { nodeId: 'n1', matchName: 'AE.ADBE Motion' },
+            verify: {
+              tool: 'list_clip_effects',
+              args: { nodeId: 'n1' },
+              path: 'effects.0.matchName',
+              equals: 'AE.ADBE Motion',
+            },
+          },
           { id: 'fade', tool: 'fade_in_video', args: { nodeId: 'n1', durationSeconds: 1 } },
         ],
       }),
@@ -583,7 +608,10 @@ describe('commit', () => {
     // 3 steps + 1 read-back = 4 runTool calls, in that order.
     expect(host.runTool).toHaveBeenCalledTimes(4);
     expect(host.runTool.mock.calls.map((c) => c[0])).toEqual([
-      'razor_all_tracks', 'apply_video_effect', 'list_clip_effects', 'fade_in_video',
+      'razor_all_tracks',
+      'apply_video_effect',
+      'list_clip_effects',
+      'fade_in_video',
     ]);
     // Snapshot taken once, before any step.
     expect(host.createCheckpoint).toHaveBeenCalledTimes(1);
@@ -643,7 +671,12 @@ describe('the ledger', () => {
       input({
         onFailure: 'keep_partial',
         steps: [
-          { id: 'first', tool: 'razor_all_tracks', args: { time: 5 }, expectFingerprintChanged: true },
+          {
+            id: 'first',
+            tool: 'razor_all_tracks',
+            args: { time: 5 },
+            expectFingerprintChanged: true,
+          },
           { id: 'second', tool: 'ripple_delete', args: { trackIndex: 0, time: 9 } },
           { id: 'third', tool: 'add_transition', args: { nodeId: 'n2' } },
         ],
@@ -743,7 +776,9 @@ describe('a step that cannot be verified is a failure', () => {
   });
 
   it('treats verified:false as a failure even when success is true', async () => {
-    const host = fake({ results: { set_clip_opacity: { success: true, verified: false, error: 'QE readback empty' } } });
+    const host = fake({
+      results: { set_clip_opacity: { success: true, verified: false, error: 'QE readback empty' } },
+    });
     const result = await runTransaction(host.executor, unverifiablePlan(), CLOCK);
     expect(result.success).toBe(false);
     expect(result.steps[0]?.verification.basis).toBe('self_unverified');
@@ -752,7 +787,9 @@ describe('a step that cannot be verified is a failure', () => {
 
   it('fails a step whose read-back contradicts it', async () => {
     const host = fake({
-      results: { list_clip_effects: { success: true, effects: [{ matchName: 'AE.ADBE Opacity' }] } },
+      results: {
+        list_clip_effects: { success: true, effects: [{ matchName: 'AE.ADBE Opacity' }] },
+      },
     });
     const result = await runTransaction(
       host.executor,
@@ -761,7 +798,11 @@ describe('a step that cannot be verified is a failure', () => {
           {
             tool: 'apply_video_effect',
             args: { nodeId: 'n1', matchName: 'AE.ADBE Motion' },
-            verify: { tool: 'list_clip_effects', path: 'effects.0.matchName', equals: 'AE.ADBE Motion' },
+            verify: {
+              tool: 'list_clip_effects',
+              path: 'effects.0.matchName',
+              equals: 'AE.ADBE Motion',
+            },
           },
         ],
       }),
@@ -774,7 +815,9 @@ describe('a step that cannot be verified is a failure', () => {
   });
 
   it('fails a step whose read-back tool itself fails', async () => {
-    const host = fake({ results: { list_clip_effects: { success: false, error: 'clip not found' } } });
+    const host = fake({
+      results: { list_clip_effects: { success: false, error: 'clip not found' } },
+    });
     const result = await runTransaction(
       host.executor,
       input({
@@ -782,7 +825,11 @@ describe('a step that cannot be verified is a failure', () => {
           {
             tool: 'apply_video_effect',
             args: { nodeId: 'n1' },
-            verify: { tool: 'list_clip_effects', path: 'effects.0.matchName', equals: 'AE.ADBE Motion' },
+            verify: {
+              tool: 'list_clip_effects',
+              path: 'effects.0.matchName',
+              equals: 'AE.ADBE Motion',
+            },
           },
         ],
       }),
@@ -796,7 +843,9 @@ describe('a step that cannot be verified is a failure', () => {
     const host = fake({ fingerprints: ['same'] });
     const result = await runTransaction(
       host.executor,
-      input({ steps: [{ tool: 'razor_all_tracks', args: { time: 5 }, expectFingerprintChanged: true }] }),
+      input({
+        steps: [{ tool: 'razor_all_tracks', args: { time: 5 }, expectFingerprintChanged: true }],
+      }),
       CLOCK,
     );
     expect(result.success).toBe(false);
@@ -817,7 +866,9 @@ describe('a step that cannot be verified is a failure', () => {
     });
     const result = await runTransaction(
       host.executor,
-      input({ steps: [{ tool: 'razor_all_tracks', args: { time: 5 }, expectFingerprintChanged: true }] }),
+      input({
+        steps: [{ tool: 'razor_all_tracks', args: { time: 5 }, expectFingerprintChanged: true }],
+      }),
       CLOCK,
     );
     expect(result.success).toBe(false);

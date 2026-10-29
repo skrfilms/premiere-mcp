@@ -114,11 +114,14 @@ export function validateSweep(value: unknown, source: string): Sweep {
   if (typeof env !== 'object' || env === null) return fail('missing "environment"');
   const e = env as Record<string, unknown>;
   for (const key of ['ranAt', 'harness', 'mode', 'gitSha', 'platform'] as const) {
-    if (typeof e[key] !== 'string' || !(e[key] as string)) return fail(`environment.${key} must be a non-empty string`);
+    if (typeof e[key] !== 'string' || !(e[key] as string))
+      return fail(`environment.${key} must be a non-empty string`);
   }
-  if (e['mode'] !== 'read-only' && e['mode'] !== 'mutate') return fail('environment.mode must be "read-only" or "mutate"');
+  if (e['mode'] !== 'read-only' && e['mode'] !== 'mutate')
+    return fail('environment.mode must be "read-only" or "mutate"');
   if (typeof e['gitDirty'] !== 'boolean') return fail('environment.gitDirty must be a boolean');
-  if (typeof e['catalogueSize'] !== 'number') return fail('environment.catalogueSize must be a number');
+  if (typeof e['catalogueSize'] !== 'number')
+    return fail('environment.catalogueSize must be a number');
   if (e['premiereVersion'] !== null && typeof e['premiereVersion'] !== 'string') {
     return fail('environment.premiereVersion must be a string or null');
   }
@@ -131,9 +134,12 @@ export function validateSweep(value: unknown, source: string): Sweep {
   const records: SweepToolRecord[] = tools.map((entry, i) => {
     if (typeof entry !== 'object' || entry === null) return fail(`tools[${i}] is not an object`);
     const t = entry as Record<string, unknown>;
-    if (typeof t['name'] !== 'string' || !t['name']) return fail(`tools[${i}].name must be a non-empty string`);
+    if (typeof t['name'] !== 'string' || !t['name'])
+      return fail(`tools[${i}].name must be a non-empty string`);
     if (typeof t['outcome'] !== 'string' || !OUTCOME_SET.has(t['outcome'])) {
-      return fail(`tools[${i}].outcome ${JSON.stringify(t['outcome'])} is not one of ${OUTCOMES.join(', ')}`);
+      return fail(
+        `tools[${i}].outcome ${JSON.stringify(t['outcome'])} is not one of ${OUTCOMES.join(', ')}`,
+      );
     }
     if (seen.has(t['name'])) return fail(`tools[${i}] repeats ${t['name']}`);
     seen.add(t['name']);
@@ -160,7 +166,9 @@ export interface ToolStanding extends SweepToolRecord {
  * passes above skips would let an old success mask a tool nobody exercises any more.
  */
 export function currentStandings(sweeps: Sweep[]): Map<string, ToolStanding> {
-  const byNewest = [...sweeps].sort((a, b) => a.environment.ranAt.localeCompare(b.environment.ranAt));
+  const byNewest = [...sweeps].sort((a, b) =>
+    a.environment.ranAt.localeCompare(b.environment.ranAt),
+  );
   const out = new Map<string, ToolStanding>();
   for (const sweep of byNewest) {
     for (const record of sweep.tools) {
@@ -204,21 +212,27 @@ export function renderVerificationReport(sweeps: Sweep[], catalogue: string[]): 
   const counts = countBy(standings);
   const executed = counts.pass + counts.fail;
   const pct = (n: number): string => (names.length ? ((n / names.length) * 100).toFixed(1) : '0.0');
-  const newest = [...sweeps].sort((a, b) => b.environment.ranAt.localeCompare(a.environment.ranAt))[0];
+  const newest = [...sweeps].sort((a, b) =>
+    b.environment.ranAt.localeCompare(a.environment.ranAt),
+  )[0];
   const orphans = [...standings.keys()].filter((n) => !known.has(n)).sort();
 
   const L: string[] = [];
   L.push('# Live verification ledger');
   L.push('');
   L.push('<!-- GENERATED FILE. Do not edit by hand: `npm run verify:report` rewrites it from');
-  L.push('     verification/sweeps/*.json, and a test fails when this file and the ledger disagree.');
+  L.push(
+    '     verification/sweeps/*.json, and a test fails when this file and the ledger disagree.',
+  );
   L.push('     To change what it says, run a sweep. -->');
   L.push('');
   L.push('Every claim below comes from a sweep that actually ran against a live Premiere host and');
   L.push('wrote a file. Tools nobody has executed live are counted and named, not omitted.');
   L.push('');
   if (!newest) {
-    L.push('**No sweep has ever been recorded.** `verification/sweeps/` is empty, so this build has');
+    L.push(
+      '**No sweep has ever been recorded.** `verification/sweeps/` is empty, so this build has',
+    );
     L.push(`no live evidence for any of its ${names.length} tools.`);
     L.push('');
     return L.join('\n') + '\n';
@@ -227,7 +241,9 @@ export function renderVerificationReport(sweeps: Sweep[], catalogue: string[]): 
   L.push('');
   L.push(`- ran at: **${newest.environment.ranAt}**`);
   L.push(`- harness: \`${newest.environment.harness}\` (${newest.environment.mode})`);
-  L.push(`- commit: \`${newest.environment.gitSha}\`${newest.environment.gitDirty ? ' **with uncommitted changes in the tree**' : ''}`);
+  L.push(
+    `- commit: \`${newest.environment.gitSha}\`${newest.environment.gitDirty ? ' **with uncommitted changes in the tree**' : ''}`,
+  );
   L.push(`- Premiere: ${newest.environment.premiereVersion ?? '_host did not answer_'}`);
   L.push(`- platform: ${newest.environment.platform}`);
   L.push('');
@@ -250,12 +266,19 @@ export function renderVerificationReport(sweeps: Sweep[], catalogue: string[]): 
   }
   L.push(`| absent from every sweep | ${unmentioned.length} | ${pct(unmentioned.length)}% |`);
   L.push('');
-  const unverified = [...standings.values()].filter((s) => s.outcome === 'pass' && s.verified === false);
+  const unverified = [...standings.values()].filter(
+    (s) => s.outcome === 'pass' && s.verified === false,
+  );
   if (unverified.length) {
-    L.push(`Of the ${counts.pass} tools that passed, **${unverified.length}** returned \`verified:false\` —`);
-    L.push('the call succeeded and the effect was not confirmed, so they are not evidence of an effect:');
+    L.push(
+      `Of the ${counts.pass} tools that passed, **${unverified.length}** returned \`verified:false\` —`,
+    );
+    L.push(
+      'the call succeeded and the effect was not confirmed, so they are not evidence of an effect:',
+    );
     L.push('');
-    for (const s of unverified.sort((a, b) => a.name.localeCompare(b.name))) L.push(`- \`${s.name}\``);
+    for (const s of unverified.sort((a, b) => a.name.localeCompare(b.name)))
+      L.push(`- \`${s.name}\``);
     L.push('');
   }
   const failures = [...standings.values()].filter((s) => s.outcome === 'fail');
@@ -267,7 +290,9 @@ export function renderVerificationReport(sweeps: Sweep[], catalogue: string[]): 
     L.push('| tool | last seen | error |');
     L.push('| --- | --- | --- |');
     for (const s of failures.sort((a, b) => a.name.localeCompare(b.name))) {
-      L.push(`| \`${s.name}\` | ${s.ranAt} | ${(s.detail ?? '').replace(/\|/g, '\\|').slice(0, 160)} |`);
+      L.push(
+        `| \`${s.name}\` | ${s.ranAt} | ${(s.detail ?? '').replace(/\|/g, '\\|').slice(0, 160)} |`,
+      );
     }
   }
   L.push('');
@@ -283,13 +308,17 @@ export function renderVerificationReport(sweeps: Sweep[], catalogue: string[]): 
     }
     const note = (s.detail ?? '').replace(/\|/g, '\\|').slice(0, 120);
     const verified = s.verified === undefined ? '' : ` (verified:${s.verified})`;
-    L.push(`| \`${name}\` | ${OUTCOME_LABEL[s.outcome]}${verified} | ${s.ranAt} | \`${s.harness}\` | ${note} |`);
+    L.push(
+      `| \`${name}\` | ${OUTCOME_LABEL[s.outcome]}${verified} | ${s.ranAt} | \`${s.harness}\` | ${note} |`,
+    );
   }
   L.push('');
   if (orphans.length) {
     L.push('## Ledger entries with no matching tool');
     L.push('');
-    L.push('These names appear in a sweep but not in the current catalogue — renamed or removed since.');
+    L.push(
+      'These names appear in a sweep but not in the current catalogue — renamed or removed since.',
+    );
     L.push('');
     for (const n of orphans) L.push(`- \`${n}\``);
     L.push('');
@@ -298,9 +327,13 @@ export function renderVerificationReport(sweeps: Sweep[], catalogue: string[]): 
   L.push('');
   L.push('| ran at | harness | mode | commit | Premiere | tools recorded |');
   L.push('| --- | --- | --- | --- | --- | --- |');
-  for (const s of [...sweeps].sort((a, b) => b.environment.ranAt.localeCompare(a.environment.ranAt))) {
+  for (const s of [...sweeps].sort((a, b) =>
+    b.environment.ranAt.localeCompare(a.environment.ranAt),
+  )) {
     const e = s.environment;
-    L.push(`| ${e.ranAt} | \`${e.harness}\` | ${e.mode} | \`${e.gitSha}\`${e.gitDirty ? ' (dirty)' : ''} | ${e.premiereVersion ?? '—'} | ${s.tools.length} |`);
+    L.push(
+      `| ${e.ranAt} | \`${e.harness}\` | ${e.mode} | \`${e.gitSha}\`${e.gitDirty ? ' (dirty)' : ''} | ${e.premiereVersion ?? '—'} | ${s.tools.length} |`,
+    );
   }
   L.push('');
   return L.join('\n') + '\n';
