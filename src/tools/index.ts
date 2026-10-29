@@ -22,7 +22,7 @@ import { join } from 'node:path';
 import { PremiereProResources } from '../resources/index.js';
 import { PremiereProPrompts } from '../prompts/index.js';
 import { executeExpandedTool, getExpandedTools, isExpandedTool } from './expanded.js';
-import { applyProfile, resolveProfile, PROFILES } from './profiles.js';
+import { applyProfile, resolveProfile, PROFILES, TASK_BUNDLES } from './profiles.js';
 import { classifySelection, resolvePageSize, routerVerdict, type RouterVerdict } from './router.js';
 import { findTools, type SearchableTool } from './search.js';
 import { generateToolTypings, type TypingsTool, type JsonSchemaNode } from './typings.js';
@@ -67,6 +67,9 @@ import { folderOf, listCandidateFiles, parseVersioned, planVersionUp, type Proje
 // public surface before the split and the tests import them from it.
 export { findNulByteArgument, evaluateTextInjectionResult, summarizeBatch } from './domains/shared.js';
 export type { BatchVerdict } from './domains/shared.js';
+
+/** Advertised-tool count past which activate_tools warns (published selection guidance). */
+const MENU_WARN_AT = 50;
 
 export class PremiereProTools extends TrimmingTools {
   /**
@@ -368,6 +371,21 @@ export class PremiereProTools extends TrimmingTools {
     return runTransaction(executor, (args ?? {}) as never);
   }
 
+  /** A task bundle by name: "task-grade", "grade" or "grading" all find task-grade; "core" works too. */
+  private resolveBundle(raw: string): { name: string; tools: string[] } | { error: string } {
+    const key = raw.trim().toLowerCase().replace(/\s+/g, '-');
+    const names = ['core', ...Object.keys(TASK_BUNDLES)];
+    // Loose names: a word of the bundle sharing its first four letters ("grading" -> grade).
+    const near = (n: string) => n.startsWith('task-') && n.slice(5).split('-').some((w) => key.split('-').some((k) => k.length >= 4 && w.length >= 4 && k.slice(0, 4) === w.slice(0, 4)));
+    const hit = names.find((n) => n === key || n === `task-${key}`) ?? (names.filter(near).length === 1 ? names.find(near) : undefined);
+    if (!hit) return { error: `No bundle called '${raw}'.` };
+    return { name: hit, tools: PROFILES[hit] ?? [] };
+  }
+
+  private bundleList(): Array<{ name: string; tools: number }> {
+    return ['core', ...Object.keys(TASK_BUNDLES)].map((name) => ({ name, tools: (PROFILES[name] ?? []).length }));
+  }
+
   /** activate_tools: promote hidden tools into the advertised list for this session. */
   private activateTools(args: Record<string, any>): any {
     const requested: string[] = [];
@@ -385,8 +403,12 @@ export class PremiereProTools extends TrimmingTools {
       for (const match of matches) if (!requested.includes(match.name)) requested.push(match.name);
     }
 
+    const bundle = typeof args?.bundle === 'string' && args.bundle.trim() ? this.resolveBundle(args.bundle) : null;
+    if (bundle && 'error' in bundle) return { success: false, error: bundle.error, bundles: this.bundleList() };
+    if (bundle) for (const name of bundle.tools) if (!requested.includes(name)) requested.push(name);
+
     if (!requested.length) {
-      return { success: false, error: 'activate_tools requires names or a query. Use find_tool to search the catalogue first.' };
+      return { success: false, error: 'activate_tools requires names, a query, or a bundle. Use find_tool to search the catalogue first.', bundles: this.bundleList() };
     }
 
     const activated: string[] = [];
@@ -412,8 +434,13 @@ export class PremiereProTools extends TrimmingTools {
     const exposed = this.getAvailableTools();
     return {
       success: activated.length > 0 || alreadyExposed.length > 0,
+      ...(bundle ? { bundle: bundle.name } : {}),
       activated,
       alreadyExposed,
+      // Loading menus and never dropping them is the failure mode; say so when it starts.
+      ...(exposed.length > MENU_WARN_AT
+        ? { warning: `${exposed.length} tools are now advertised, past the ~${MENU_WARN_AT} where tool choice gets less reliable. Drop what this task no longer needs: deactivate_tools({ bundle }) or deactivate_tools({ all: true }).` }
+        : {}),
       ...(refused.length ? { refused } : {}),
       toolsNowAdvertised: exposed.length,
       activeThisSession: Array.from(this.activatedTools).sort(),
@@ -446,8 +473,15 @@ export class PremiereProTools extends TrimmingTools {
     const names: string[] = Array.isArray(args?.names)
       ? args.names.filter((entry: unknown): entry is string => typeof entry === 'string' && entry.trim().length > 0)
       : [];
+    if (typeof args?.bundle === 'string' && args.bundle.trim()) {
+      const bundle = this.resolveBundle(args.bundle);
+      if ('error' in bundle) return { success: false, error: bundle.error, bundles: this.bundleList() };
+      // Only what this session activated; a bundle tool the profile advertises stays.
+      for (const name of bundle.tools) if (this.activatedTools.has(name) && !names.includes(name)) names.push(name);
+      if (!names.length) return { success: true, deactivated: [], note: `Nothing from ${bundle.name} was activated this session.`, toolsNowAdvertised: this.getAvailableTools().length };
+    }
     if (!names.length) {
-      return { success: false, error: 'deactivate_tools requires names, or all:true to clear every activation.' };
+      return { success: false, error: 'deactivate_tools requires names, a bundle, or all:true to clear every activation.' };
     }
 
     const deactivated: string[] = [];

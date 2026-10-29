@@ -25,6 +25,9 @@ All notable changes are documented here. Releases use semantic versioning.
 - `look_at_cut`: one image strip of the cut, one labelled frame per shot.
 - `stringout_from_transcript`: paper edit from a Whisper `.json` or `.srt`; give the lines
   in cut order and get a sequence of just those moments. Unfound lines are listed, not guessed.
+- **Switch task menu mid-session.** `activate_tools({ bundle: "task-grade" })` (or just
+  "grade" / "grading") loads a whole task menu with real schemas; `deactivate_tools({ bundle })`
+  drops it. Past ~50 advertised tools the reply warns and says what to drop.
 - `scripts/workflow-tests.mjs` W5–W8 run these end to end against live Premiere.
 
 The timeout-safety tools are in `core` and named in the server instructions; under a task
