@@ -13,13 +13,13 @@ Two independent axes, kept apart on purpose:
 
 ## Headline
 
-Catalogue: **649** tools.
+Catalogue: **663** tools.
 
 | standing | tools | share of catalogue |
 | --- | --- | --- |
 | **nothing has ever run it** | **0** | **0.0%** |
-| run by the suite and live | 556 | 85.7% |
-| run by the suite only (mock host) | 93 | 14.3% |
+| run by the suite and live | 556 | 83.9% |
+| run by the suite only (mock host) | 107 | 16.1% |
 | run live only | 0 | 0.0% |
 
 A tool in the first row is shipped on the strength of a code review and a schema. It may
@@ -27,9 +27,9 @@ well work; nothing here is evidence that it does.
 
 ## The measured run
 
-- commit: `7352a3003458cd5713c5323b67dce31790c8521e` **with uncommitted changes in the tree**
-- catalogue at measurement: 649
-- test files that dispatched at least one tool: 35
+- commit: `8666aa79493bcb672bd5296a62da80182fa1ce4c` **with uncommitted changes in the tree**
+- catalogue at measurement: 663
+- test files that dispatched at least one tool: 37
 
 Measured by instrumenting the dispatcher, not by grepping test files for tool names:
 a name in a table of expected strings is not a call, and a name assembled at runtime is
@@ -41,14 +41,26 @@ None. Every tool in the catalogue has been dispatched by the suite, by a live sw
 
 ## Recorded names that are not tools in this catalogue
 
-The instrumented run dispatched 3 name(s) that the catalogue does not
+The instrumented run dispatched 13 name(s) that the catalogue does not
 contain. They are excluded from every count above. Expect deliberate negative paths here
 (an unknown name, a misspelling that exercises the suggester); anything else is a tool
 that was removed after the run, and the run is stale.
 
+- `12" Cuts`
+- `Bob's Takes`
+- `C:\Footage\take "1"`
 - `definitely_not_a_tool`
 - `splitt_clip`
 - `unknown_tool`
+- `x`
+- `zz
+__OWNED = true;
+`
+- `zz"); __OWNED = true; ("`
+- `zz", INJECTED: "yes`
+- `zz'; __OWNED = true; var __x = '`
+- `zz\"); __OWNED = true; ("`
+- `zz __OWNED = true; `
 
 ## Per-tool standing
 
@@ -62,6 +74,7 @@ that was removed after the run, and the run is stale.
 | `add_marker` | yes (6) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/index.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `add_marker_to_project_item` | yes (4) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `add_metadata_schema_field` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
+| `add_project_note` | yes (5) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `add_text_overlay` | yes (6) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/index.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `add_to_render_queue` | yes (6) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/index.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `add_to_timeline` | yes (7) | yes | `src/__tests__/bridge/unconfirmed-placement.test.ts`, `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/index.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
@@ -143,7 +156,7 @@ that was removed after the run, and the run is stale.
 | `consolidate_duplicates` | yes (5) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `convert_project_to_production` | yes (5) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `copy_effect_values` | yes (4) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
-| `copy_effects_between_clips` | yes (4) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
+| `copy_effects_between_clips` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `copy_grade` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `copy_markers_between_sequences` | yes (6) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/live-regressions-2026-10.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `count_tracks_used` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
@@ -238,7 +251,7 @@ that was removed after the run, and the run is stale.
 | `find_items_matching_media_path` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `find_keyframe_near_time` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `find_project_item_by_name` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
-| `find_tool` | yes (8) | yes | `src/__tests__/http/http-listener.test.ts`, `src/__tests__/http/http-transport.test.ts`, `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/search.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
+| `find_tool` | yes (10) | yes | `src/__tests__/http/http-listener.test.ts`, `src/__tests__/http/http-transport.test.ts`, `src/__tests__/tools/call-journal.test.ts`, `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/search-eval.test.ts`, `src/__tests__/tools/search.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `find_unused_sequences` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `fit_clip_duration` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `flash_frame_scan` | yes (6) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/no-shell-injection.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
@@ -301,6 +314,7 @@ that was removed after the run, and the run is stale.
 | `get_item_treepath` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `get_item_video_components` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `get_item_xmp_metadata` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
+| `get_job` | yes (6) | no | `src/__tests__/tools/call-journal.test.ts`, `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `get_keyframes` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `get_linked_items` | yes (4) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `get_location_copy_settings` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
@@ -322,6 +336,7 @@ that was removed after the run, and the run is stale.
 | `get_project_info` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `get_project_item_info` | yes (4) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `get_project_item_info_extended` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
+| `get_project_notes` | yes (5) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `get_project_panel_columns` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `get_project_panel_metadata` | yes (4) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `get_project_panel_selection` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
@@ -336,6 +351,7 @@ that was removed after the run, and the run is stale.
 | `get_qe_project_info` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `get_qe_sequence_props` | yes (6) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/live-regressions-2026-10.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `get_qe_sequence_settings` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
+| `get_recent_calls` | yes (6) | no | `src/__tests__/tools/call-journal.test.ts`, `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `get_render_queue_status` | yes (6) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/index.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `get_renderer_names` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `get_selected_clips` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
@@ -418,6 +434,7 @@ that was removed after the run, and the run is stale.
 | `list_clip_effects` | yes (4) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `list_effects_on_clip_qe` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `list_export_presets` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
+| `list_jobs` | yes (5) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `list_lumetri_presets` | yes (4) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `list_markers` | yes (6) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/index.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `list_open_projects` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
@@ -430,6 +447,7 @@ that was removed after the run, and the run is stale.
 | `list_video_transitions` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `lock_track` | yes (6) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/index.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `log_clip` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
+| `look_at_cut` | yes (5) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `loudness_report` | yes (6) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/no-shell-injection.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `lower_third_preset` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `lumetri_basic_set` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
@@ -505,6 +523,7 @@ that was removed after the run, and the run is stale.
 | `remove_keyframe_range` | yes (4) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `remove_mogrt_clip` | yes (5) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `remove_selected_clips` | yes (4) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
+| `remove_silence` | yes (5) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `remove_srt_cue` | yes (5) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `remove_time_remap` | yes (5) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `rename_bin` | yes (4) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
@@ -523,6 +542,7 @@ that was removed after the run, and the run is stale.
 | `resolve_conflict` | yes (5) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `restore_recovery_checkpoint` | yes (6) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/recovery.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `reverse_clip` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
+| `revert_last_call` | yes (5) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `ripple_delete` | yes (4) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `ripple_trim_in` | yes (6) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/trim-semantics.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `ripple_trim_out` | yes (6) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/trim-semantics.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
@@ -663,12 +683,15 @@ that was removed after the run, and the run is stale.
 | `stabilize_clip` | yes (5) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `start_batch_encode` | yes (4) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `start_encode_and_monitor` | yes (5) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
+| `start_job` | yes (6) | no | `src/__tests__/tools/call-journal.test.ts`, `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `stem_export` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `step_frames` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `step_source_monitor` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `stop_playback` | yes (4) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `stop_source_monitor` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `storyboard_bin_to_sequence` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
+| `stringout_from_transcript` | yes (5) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
+| `sync_by_audio` | yes (5) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `sync_lock_track` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `sync_production` | yes (5) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `three_point_edit` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
@@ -698,8 +721,11 @@ that was removed after the run, and the run is stale.
 | `verify_premiere_connection` | yes (6) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/index.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `verify_speed_duration` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `version_up_sequence` | yes (6) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/regex-escape-collapse.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
+| `version_up_shots` | yes (5) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `vfx_pull_list` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `watermark_apply` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
+| `what_changed` | yes (5) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
+| `where_used` | yes (5) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `write_clipboard` | yes (5) | no | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `write_sidecar_file` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |
 | `write_srt` | yes (5) | yes | `src/__tests__/tools/es3-absent-methods.test.ts`, `src/__tests__/tools/generated-script-syntax.test.ts`, `src/__tests__/tools/injection-guard.test.ts`, `src/__tests__/tools/schema-args.test.ts`, `src/__tests__/tools/undefined-identifiers.test.ts` |

@@ -22,7 +22,7 @@ import { join } from 'node:path';
 import { PremiereProResources } from '../resources/index.js';
 import { PremiereProPrompts } from '../prompts/index.js';
 import { executeExpandedTool, getExpandedTools, isExpandedTool } from './expanded.js';
-import { applyProfile, resolveProfile, PROFILES } from './profiles.js';
+import { applyProfile, resolveProfile, PROFILES, TASK_BUNDLES } from './profiles.js';
 import { classifySelection, resolvePageSize, routerVerdict, type RouterVerdict } from './router.js';
 import { findTools, type SearchableTool } from './search.js';
 import { generateToolTypings, type TypingsTool, type JsonSchemaNode } from './typings.js';
@@ -55,12 +55,26 @@ import { runFf } from './ff-exec.js';
 import { REPORT_DIALOG_TOOLS, REPORT_LINGER_MS, withReportDialogGuard } from '../bridge/report-dialog-guard.js';
 import { generatedAssetsDir } from '../utils/scratch-paths.js';
 import { runUxp, uxpAvailable } from '../bridge/uxp-channel.js';
+import { recent as recentCalls } from './journal.js';
+import { getJob, listJobs, startJob } from './jobs.js';
+import { planSilenceCuts, toTimecode } from './silence.js';
+import { findQuote, planStringout, wordsFromSrt, wordsFromWhisperJson } from './stringout.js';
+import { decodeAudio, findOffset, SYNC_RATE } from './audio-sync.js';
+import { captureScript, describeDiff, diffStates, revertScript, type TimelineState } from './timeline-state.js';
+import { addNote, notesPathFor } from './project-notes.js';
+import { folderOf, listCandidateFiles, parseVersioned, planVersionUp, type ProjectMedia } from './version-up.js';
 
 // The header declarations and pure helpers moved to ./domains/shared.ts when this file was
 // split into one class per tool domain. Re-exported here: they were part of this module's
 // public surface before the split and the tests import them from it.
 export { findNulByteArgument, evaluateTextInjectionResult, summarizeBatch } from './domains/shared.js';
 export type { BatchVerdict } from './domains/shared.js';
+
+/** Calls that are not edits of a sequence, or are about the tracking itself. */
+const UNTRACKED_TOOLS = new Set(['revert_last_call', 'what_changed', 'undo', 'start_job', 'get_job', 'list_jobs', 'get_recent_calls', 'find_tool', 'activate_tools', 'deactivate_tools', 'get_project_notes', 'add_project_note', 'get_tool_typings']);
+
+/** Advertised-tool count past which activate_tools warns (published selection guidance). */
+const MENU_WARN_AT = 50;
 
 export class PremiereProTools extends TrimmingTools {
   /**
@@ -362,6 +376,21 @@ export class PremiereProTools extends TrimmingTools {
     return runTransaction(executor, (args ?? {}) as never);
   }
 
+  /** A task bundle by name: "task-grade", "grade" or "grading" all find task-grade; "core" works too. */
+  private resolveBundle(raw: string): { name: string; tools: string[] } | { error: string } {
+    const key = raw.trim().toLowerCase().replace(/\s+/g, '-');
+    const names = ['core', ...Object.keys(TASK_BUNDLES)];
+    // Loose names: a word of the bundle sharing its first four letters ("grading" -> grade).
+    const near = (n: string) => n.startsWith('task-') && n.slice(5).split('-').some((w) => key.split('-').some((k) => k.length >= 4 && w.length >= 4 && k.slice(0, 4) === w.slice(0, 4)));
+    const hit = names.find((n) => n === key || n === `task-${key}`) ?? (names.filter(near).length === 1 ? names.find(near) : undefined);
+    if (!hit) return { error: `No bundle called '${raw}'.` };
+    return { name: hit, tools: PROFILES[hit] ?? [] };
+  }
+
+  private bundleList(): Array<{ name: string; tools: number }> {
+    return ['core', ...Object.keys(TASK_BUNDLES)].map((name) => ({ name, tools: (PROFILES[name] ?? []).length }));
+  }
+
   /** activate_tools: promote hidden tools into the advertised list for this session. */
   private activateTools(args: Record<string, any>): any {
     const requested: string[] = [];
@@ -379,8 +408,12 @@ export class PremiereProTools extends TrimmingTools {
       for (const match of matches) if (!requested.includes(match.name)) requested.push(match.name);
     }
 
+    const bundle = typeof args?.bundle === 'string' && args.bundle.trim() ? this.resolveBundle(args.bundle) : null;
+    if (bundle && 'error' in bundle) return { success: false, error: bundle.error, bundles: this.bundleList() };
+    if (bundle) for (const name of bundle.tools) if (!requested.includes(name)) requested.push(name);
+
     if (!requested.length) {
-      return { success: false, error: 'activate_tools requires names or a query. Use find_tool to search the catalogue first.' };
+      return { success: false, error: 'activate_tools requires names, a query, or a bundle. Use find_tool to search the catalogue first.', bundles: this.bundleList() };
     }
 
     const activated: string[] = [];
@@ -406,8 +439,13 @@ export class PremiereProTools extends TrimmingTools {
     const exposed = this.getAvailableTools();
     return {
       success: activated.length > 0 || alreadyExposed.length > 0,
+      ...(bundle ? { bundle: bundle.name } : {}),
       activated,
       alreadyExposed,
+      // Loading menus and never dropping them is the failure mode; say so when it starts.
+      ...(exposed.length > MENU_WARN_AT
+        ? { warning: `${exposed.length} tools are now advertised, past the ~${MENU_WARN_AT} where tool choice gets less reliable. Drop what this task no longer needs: deactivate_tools({ bundle }) or deactivate_tools({ all: true }).` }
+        : {}),
       ...(refused.length ? { refused } : {}),
       toolsNowAdvertised: exposed.length,
       activeThisSession: Array.from(this.activatedTools).sort(),
@@ -440,8 +478,15 @@ export class PremiereProTools extends TrimmingTools {
     const names: string[] = Array.isArray(args?.names)
       ? args.names.filter((entry: unknown): entry is string => typeof entry === 'string' && entry.trim().length > 0)
       : [];
+    if (typeof args?.bundle === 'string' && args.bundle.trim()) {
+      const bundle = this.resolveBundle(args.bundle);
+      if ('error' in bundle) return { success: false, error: bundle.error, bundles: this.bundleList() };
+      // Only what this session activated; a bundle tool the profile advertises stays.
+      for (const name of bundle.tools) if (this.activatedTools.has(name) && !names.includes(name)) names.push(name);
+      if (!names.length) return { success: true, deactivated: [], note: `Nothing from ${bundle.name} was activated this session.`, toolsNowAdvertised: this.getAvailableTools().length };
+    }
     if (!names.length) {
-      return { success: false, error: 'deactivate_tools requires names, or all:true to clear every activation.' };
+      return { success: false, error: 'deactivate_tools requires names, a bundle, or all:true to clear every activation.' };
     }
 
     const deactivated: string[] = [];
@@ -610,17 +655,74 @@ export class PremiereProTools extends TrimmingTools {
       switch (name) {
         // Discovery Tools
         case 'list_project_items':
-          return await this.listProjectItems(args.includeBins, args.includeMetadata);
+          return await this.listProjectItems(args.includeBins, args.includeMetadata, { limit: args.limit, offset: args.offset, nameContains: args.nameContains, type: args.type, binPath: args.binPath });
         case 'list_sequences':
           return await this.listSequences();
         case 'list_sequence_tracks':
           return await this.listSequenceTracks(args.sequenceId);
         case 'get_project_info':
-          return await this.getProjectInfo();
+          return this.withProjectNotes(await this.getProjectInfo());
+        case 'what_changed': return await this.whatChanged(args);
+        case 'revert_last_call': return await this.revertLastCall(args);
+        case 'get_project_notes': return await this.getProjectNotes();
+        case 'add_project_note': return await this.addProjectNote(args);
         case 'verify_premiere_connection':
           return await this.verifyPremiereConnection();
         case 'get_capabilities':
           return await this.getCapabilities(args.checkConnection, args.probeLocalTools);
+        case 'remove_silence': return await this.removeSilence(args);
+        case 'sync_by_audio': return await this.syncByAudio(args);
+        case 'stringout_from_transcript': return await this.stringoutFromTranscript(args);
+        case 'look_at_cut': return await this.lookAtCut(args);
+        case 'version_up_shots': {
+          const media: any = await this.bridge.executeScript(`
+            try {
+              var out = [];
+              (function walk(it){ for (var i = 0; i < it.children.numItems; i++) { var c = it.children[i]; if (c.type === 2) { walk(c); continue; } var p = ''; try { p = String(c.getMediaPath()); } catch (e) {} if (p) out.push({ id: String(c.nodeId), name: String(c.name), path: p }); } })(app.project.rootItem);
+              return JSON.stringify({ success: true, items: out });
+            } catch (e) { return JSON.stringify({ success: false, error: e.toString() }); }
+          `);
+          if (!media?.success) return media;
+          const filter = args.shotFilter ? String(args.shotFilter).toLowerCase() : '';
+          const items = (media.items as ProjectMedia[]).filter((m) => !filter || m.name.toLowerCase().includes(filter) || m.path.toLowerCase().includes(filter));
+          const ownDirs = [...new Set(items.filter((m) => parseVersioned(m.path.split(/[\\/]/).pop() ?? '')).map((m) => folderOf(m.path)))];
+          const files = [...listCandidateFiles(ownDirs, false), ...listCandidateFiles((args.renderDirs ?? []).map(String), args.recursive !== false)];
+          const plan = planVersionUp(items, files);
+          if (args.dryRun === true) return { success: true, dryRun: true, toRelink: plan.relink, alreadyCurrent: plan.current.length, unversionedItems: plan.unversionedCount, foldersSearched: ownDirs.length + (args.renderDirs?.length ?? 0) };
+          const applied: any[] = [];
+          for (const p of plan.relink) {
+            const r: any = await this.executeTool('replace_clip_media', { projectItemId: p.id, newFilePath: p.to });
+            const ok = r?.success !== false;
+            applied.push({ shot: p.shot, from: `v${p.fromVersion}`, to: `v${p.toVersion}`, item: r?.data?.item ?? p.name, ok, error: ok ? undefined : (r?.error ?? 'relink failed') });
+          }
+          const failed = applied.filter((a) => !a.ok).length;
+          return { success: failed === 0, relinked: applied.length - failed, failed, alreadyCurrent: plan.current.length, results: applied,
+            note: applied.length === 0 ? 'Every versioned shot is already on its newest version in the folders searched.' : 'Timeline clips keep their trims and effects; relinked media can render black for a moment while Premiere loads it.' };
+        }
+        case 'where_used':
+          return await this.bridge.executeScript(`
+            try {
+              var it = __findProjectItem(${JSON.stringify(String(args.projectItemId ?? ''))});
+              if (!it) return JSON.stringify({ success: false, error: 'Project item not found' });
+              var u = __usesOf(it, ${Math.max(1, Math.min(Number(args.limit) || 50, 500))});
+              return JSON.stringify({ success: true, item: String(it.name), isBin: it.type === 2, usedCount: u.total, sequences: u.sequences, uses: u.uses, unused: u.total === 0 });
+            } catch (e) { return JSON.stringify({ success: false, error: e.toString() }); }
+          `);
+        case 'get_recent_calls':
+          return { success: true, calls: recentCalls({ limit: args.limit, mutatingOnly: args.mutatingOnly, sinceSeconds: args.sinceSeconds }),
+            note: 'status "running" with no finishedAt means the call was still in Premiere when this was read, or the server stopped mid-call.' };
+        case 'start_job': {
+          const target = String(args.tool ?? '');
+          if (!target || target === 'start_job') return { success: false, error: 'tool is required and cannot be start_job.' };
+          const job = startJob(target, () => this.executeTool(target, args.args ?? {}, options));
+          return { success: true, jobId: job.jobId, tool: target, status: job.status, note: 'Poll get_job with this jobId.' };
+        }
+        case 'get_job': {
+          const job = getJob(String(args.jobId ?? ''));
+          return job ? { success: true, ...job } : { success: false, error: 'No such job in this server process (jobs do not survive a server restart; get_recent_calls still shows whether the call finished).' };
+        }
+        case 'list_jobs':
+          return { success: true, jobs: listJobs() };
         case 'find_tool':
           return this.findTool(args);
         case 'get_tool_typings':
@@ -2012,6 +2114,365 @@ export class PremiereProTools extends TrimmingTools {
    * cannot be reported as created unless it actually exists. Resolves the active
    * sequence when no id is given.
    */
+  private async lookAtCut(args: any): Promise<any> {
+    const max = Math.max(1, Math.min(Number(args.maxFrames) || 8, 16));
+    const shots: any = await this.bridge.executeScript(`
+      try {
+        var seq = __findSequence(${JSON.stringify(args.sequenceId ?? null)});
+        if (!seq) return JSON.stringify({ success: false, error: 'Sequence not found' });
+        // The shot on screen at a time is the top-most clip there; collect each clip's midpoint
+        // on every video track, then keep only the ones nothing above covers.
+        var mids = [];
+        for (var t = 0; t < seq.videoTracks.numTracks; t++) { var tr = seq.videoTracks[t]; for (var c = 0; c < tr.clips.numItems; c++) { var cl = tr.clips[c]; if (cl.disabled) continue; mids.push({ t: (cl.start.seconds + cl.end.seconds) / 2, track: t, name: String(cl.name) }); } }
+        var visible = [];
+        for (var i = 0; i < mids.length; i++) {
+          var covered = false;
+          for (var u = mids[i].track + 1; u < seq.videoTracks.numTracks && !covered; u++) { var up = seq.videoTracks[u]; for (var k = 0; k < up.clips.numItems; k++) { var x = up.clips[k]; if (!x.disabled && x.start.seconds <= mids[i].t && x.end.seconds > mids[i].t) { covered = true; break; } } }
+          if (!covered) visible.push(mids[i]);
+        }
+        visible.sort(function (a, b) { return a.t - b.t; });
+        return JSON.stringify({ success: true, sequenceId: String(seq.sequenceID), name: String(seq.name), shots: visible });
+      } catch (e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+    if (!shots?.success) return shots;
+    let picks: Array<{ t: number; name: string }> = Array.isArray(args.times) && args.times.length
+      ? (args.times as number[]).map((t) => ({ t: Number(t), name: '' }))
+      : shots.shots;
+    if (picks.length > max) { const step = picks.length / max; picks = Array.from({ length: max }, (_, i) => picks[Math.floor(i * step)]!); }
+    if (!picks.length) return { success: false, error: 'Nothing on the timeline to look at.' };
+    const fsSync = await import('node:fs'); const pathSync = await import('node:path'); const osSync = await import('node:os');
+    const work = fsSync.mkdtempSync(pathSync.join(osSync.tmpdir(), 'premiere-mcp-look-'));
+    const frames: string[] = [];
+    for (const [i, p] of picks.entries()) {
+      const out = pathSync.join(work, `f${String(i).padStart(2, '0')}.png`);
+      const r: any = await this.executeTool('capture_program_output', { sequenceId: shots.sequenceId, time: p.t, format: 'png', outputPath: out });
+      if (r?.success === false || !fsSync.existsSync(out)) return { success: false, error: `Could not render the frame at ${p.t}s: ${r?.error ?? 'no file'}` };
+      // Label each frame with its time and shot so the sheet reads on its own.
+      const labelled = pathSync.join(work, `l${String(i).padStart(2, '0')}.png`);
+      const label = `${p.t.toFixed(2)}s ${p.name}`.replace(/[^A-Za-z0-9_. :-]/g, '').slice(0, 40).replace(/:/g, '\\:');
+      runFf('ffmpeg', ['-v', 'error', '-y', '-i', out, '-vf', `scale=480:-2,drawbox=y=ih-30:w=iw:h=30:color=black@0.6:t=fill,drawtext=text='${label}':fontcolor=white:fontsize=18:x=8:y=h-24`, labelled], { timeoutMs: 30000 });
+      frames.push(fsSync.existsSync(labelled) ? labelled : out);
+    }
+    const cols = Math.min(4, frames.length), rows = Math.ceil(frames.length / cols);
+    const sheet = args.outputPath ? String(args.outputPath) : pathSync.join(work, 'look_at_cut.jpg');
+    const inputs = frames.flatMap((f) => ['-i', f]);
+    if (frames.length === 1) runFf('ffmpeg', ['-v', 'error', '-y', '-i', frames[0]!, '-q:v', '4', sheet], { timeoutMs: 30000 });
+    else runFf('ffmpeg', ['-v', 'error', '-y', ...inputs, '-filter_complex', `${frames.map((_, i) => `[${i}:v]`).join('')}xstack=inputs=${frames.length}:layout=${frames.map((_, i) => `${(i % cols) === 0 ? '0' : Array.from({ length: i % cols }, () => 'w0').join('+')}_${Math.floor(i / cols) === 0 ? '0' : Array.from({ length: Math.floor(i / cols) }, () => 'h0').join('+')}`).join('|')}:fill=black`, '-q:v', '4', sheet], { timeoutMs: 60000 });
+    if (!fsSync.existsSync(sheet)) return { success: false, error: 'ffmpeg did not write the contact sheet.' };
+    return { success: true, outputPath: sheet, sequence: shots.name, frames: picks.map((p) => ({ timeSecs: Math.round(p.t * 1000) / 1000, shot: p.name || undefined })), grid: `${cols}x${rows}` };
+  }
+
+  // ---- Timeline state around edits: revert_last_call and what_changed (see timeline-state.ts)
+
+  private callStates: Array<{ tool: string; at: string; before: TimelineState; after: TimelineState }> = [];
+  private lastSeen = new Map<string, TimelineState>();
+  private captureDownUntil = 0;
+
+  /** The state of a sequence (or the active one), or null when Premiere cannot say. Never throws. */
+  async captureTimelineState(sequenceId?: string): Promise<TimelineState | null> {
+    if (Date.now() < this.captureDownUntil) return null;
+    try {
+      const r: any = await this.bridge.executeScript(captureScript(sequenceId), 8000);
+      if (!r?.success || typeof r.hash !== 'string') return null;
+      return { sequenceId: r.sequenceId, sequenceName: r.sequenceName, hash: r.hash, tracks: r.tracks, clips: r.clips ?? [], markers: r.markers ?? 0, project: r.project, capturedAt: new Date().toISOString() };
+    } catch {
+      // A dead bridge would make every edit wait twice more; stop asking for a while.
+      this.captureDownUntil = Date.now() + 30_000;
+      return null;
+    }
+  }
+
+  /**
+   * Run an editing call with the sequence's state read before and after. Records the pair for
+   * revert_last_call, and flags a change made outside this server since its last edit (a hand
+   * edit in Premiere), since clip ids the assistant is holding may now be stale.
+   */
+  async runTracked(name: string, args: Record<string, any>, run: () => Promise<any>): Promise<any> {
+    if (UNTRACKED_TOOLS.has(name) || process.env.PREMIERE_MCP_TRACK_STATE === '0') return run();
+    const seqArg = typeof args?.sequenceId === 'string' ? args.sequenceId : typeof args?.args?.sequenceId === 'string' ? args.args.sequenceId : undefined;
+    const before = await this.captureTimelineState(seqArg);
+    const result = await run();
+    if (!before) return result;
+    const after = await this.captureTimelineState(before.sequenceId);
+    const seen = this.lastSeen.get(before.sequenceId);
+    const outside = seen && seen.hash !== before.hash ? diffStates(seen, before) : null;
+    if (after) {
+      this.lastSeen.set(after.sequenceId, after);
+      if (after.hash !== before.hash) {
+        this.callStates.push({ tool: name, at: new Date().toISOString(), before, after });
+        if (this.callStates.length > 20) this.callStates.shift();
+      }
+    }
+    if (outside && result && typeof result === 'object' && !Array.isArray(result)) {
+      return { ...result, changedOutsideThisServer: { summary: describeDiff(outside), note: `"${before.sequenceName}" changed since the last edit made through this server, probably by hand in Premiere. Clip ids from earlier replies may be stale.` } };
+    }
+    return result;
+  }
+
+  private async whatChanged(args: any): Promise<any> {
+    const now = await this.captureTimelineState(typeof args.sequenceId === 'string' ? args.sequenceId : undefined);
+    if (!now) return { success: false, error: 'Could not read the sequence from Premiere.' };
+    const base = this.lastSeen.get(now.sequenceId);
+    this.lastSeen.set(now.sequenceId, now);
+    if (!base) return { success: true, baselineRecorded: true, sequence: now.sequenceName, clips: now.clips.length, note: 'No earlier state of this sequence in this session; recorded one now. Call again later to see what changed since.' };
+    const d = diffStates(base, now);
+    const cap = <T,>(a: T[]) => a.slice(0, 50);
+    return { success: true, sequence: now.sequenceName, sequenceId: now.sequenceId, since: base.capturedAt, changed: d.changed, summary: describeDiff(d),
+      added: cap(d.added), removed: cap(d.removed), moved: cap(d.moved), renamed: cap(d.renamed), tracks: d.tracks, markers: d.markers, project: d.project };
+  }
+
+  private async revertLastCall(args: any): Promise<any> {
+    const wanted = typeof args.sequenceId === 'string' ? args.sequenceId : null;
+    const idx = this.callStates.map((c, i) => [c, i] as const).filter(([c]) => !wanted || c.before.sequenceId === wanted).pop()?.[1];
+    if (idx === undefined) return { success: false, error: 'No edit made through this server in this session changed a sequence, so there is nothing to revert. (Only calls made since the server started are tracked.)' };
+    const last = this.callStates[idx]!;
+    const now = await this.captureTimelineState(last.before.sequenceId);
+    if (!now) return { success: false, error: 'Could not read the sequence from Premiere.' };
+    if (now.hash === last.before.hash) { this.callStates.splice(idx, 1); return { success: true, alreadyReverted: true, tool: last.tool, note: 'The sequence is already as it was before that call.' }; }
+    if (now.hash !== last.after.hash && args.force !== true) {
+      // Premiere has one undo stack: whatever happened since would be undone first.
+      return { success: false, tool: last.tool, changedSince: describeDiff(diffStates(last.after, now)),
+        error: `"${last.before.sequenceName}" changed after ${last.tool} ran, so undoing back to before it would also undo those later changes. Nothing was undone. Pass force:true to undo them too.` };
+    }
+    const r: any = await this.bridge.executeScript(revertScript(last.before.sequenceId, last.before.hash, Number(args.maxSteps) > 0 ? Math.min(Number(args.maxSteps), 200) : 40), 120000);
+    if (!r?.success && r?.restored === false) {
+      return { success: false, tool: last.tool, undoSteps: r?.undoSteps, redoneSteps: r?.redoneSteps, restoredToAfter: false,
+        error: `Undoing never matched the state before ${last.tool}, and redoing did not get all the way back either: the sequence is NOT as it was before this revert. Check it with what_changed, and use Premiere's Edit > Redo if needed.` };
+    }
+    if (!r?.success) {
+      return { success: false, tool: last.tool, undoSteps: r?.undoSteps, error: r?.error ?? `Undoing ${r?.undoSteps} steps never got back to the state before ${last.tool}, so it redid its way back and the sequence is as it was. Some script edits never reach Premiere's undo stack (markers are one); undo those by hand, or pass a larger maxSteps if the call made many steps.`, restoredToAfter: r?.restored === true || r?.restoredToAfter === now.hash };
+    }
+    this.callStates.splice(idx, 1);
+    const back = await this.captureTimelineState(last.before.sequenceId);
+    if (back) this.lastSeen.set(back.sequenceId, back);
+    return { success: true, verified: back?.hash === last.before.hash, verifiedBy: 'sequence state hash equals the one recorded before the call', reverted: last.tool, ranAt: last.at, sequence: last.before.sequenceName, undoSteps: r.undoSteps };
+  }
+
+  // ---- Project notes: conventions that should not be re-learned every session
+
+  private async projectPath(): Promise<string | null> {
+    const r: any = await this.bridge.executeScript('try { return JSON.stringify({ success: true, path: String(app.project.path || "") }); } catch (e) { return JSON.stringify({ success: false }); }');
+    return r?.success && r.path ? String(r.path) : null;
+  }
+
+  private withProjectNotes(info: any): any {
+    if (!info?.success || !info.path) return info;
+    const file = notesPathFor(String(info.path));
+    let text = '';
+    try { text = fsSync.readFileSync(file, 'utf8'); } catch { return { ...info, projectNotesPath: file, projectNotes: null, projectNotesHint: 'No notes for this project yet. add_project_note records a convention (naming, bins, export settings) so the next session starts knowing it.' }; }
+    return { ...info, projectNotesPath: file, projectNotes: text.length > 4000 ? `${text.slice(0, 4000)}… (get_project_notes for the rest)` : text };
+  }
+
+  private async getProjectNotes(): Promise<any> {
+    const p = await this.projectPath();
+    if (!p) return { success: false, error: 'No saved project is open (notes live next to the .prproj).' };
+    const file = notesPathFor(p);
+    try { return { success: true, path: file, notes: fsSync.readFileSync(file, 'utf8') }; } catch { return { success: true, path: file, notes: null, note: 'No notes yet.' }; }
+  }
+
+  private async addProjectNote(args: any): Promise<any> {
+    const note = String(args.note ?? '').trim();
+    if (!note) return { success: false, error: 'note is required.' };
+    const p = await this.projectPath();
+    if (!p) return { success: false, error: 'No saved project is open (notes live next to the .prproj).' };
+    const file = notesPathFor(p);
+    let text = '';
+    try { text = fsSync.readFileSync(file, 'utf8'); } catch { /* new file */ }
+    const next = addNote(text, note, typeof args.section === 'string' && args.section.trim() ? args.section.trim() : 'Conventions', new Date());
+    fsSync.writeFileSync(file, next, 'utf8');
+    const back = fsSync.readFileSync(file, 'utf8');
+    return { success: back.includes(note), verified: back.includes(note), path: file, notes: back };
+  }
+
+  private async stringoutFromTranscript(args: any): Promise<any> {
+    const id = String(args.projectItemId ?? '');
+    const quotes: string[] = (args.quotes ?? []).map(String).filter((q: string) => q.trim());
+    const wanted: Array<{ label: string; start: number; end: number }> = [];
+    const missing: string[] = [];
+    const matches: any[] = [];
+    if (quotes.length) {
+      if (!args.transcriptPath) return { success: false, error: 'quotes need a transcriptPath (.json from Whisper or .srt).' };
+      let raw: string;
+      try { raw = fsSync.readFileSync(String(args.transcriptPath), 'utf8'); } catch (e: any) { return { success: false, error: `Could not read the transcript: ${e.message}` }; }
+      let words;
+      try { words = /\.json$/i.test(String(args.transcriptPath)) ? wordsFromWhisperJson(JSON.parse(raw)) : wordsFromSrt(raw); } catch (e: any) { return { success: false, error: `Could not parse the transcript: ${e.message}` }; }
+      if (!words.length) return { success: false, error: 'The transcript has no words in it.' };
+      for (const q of quotes) {
+        const m = findQuote(words, q, Number(args.minScore) > 0 ? Number(args.minScore) : 0.75);
+        if (!m) { missing.push(q); continue; }
+        matches.push({ ...m, approximate: m.score < 1 });
+        wanted.push({ label: q.slice(0, 60), start: m.start, end: m.end });
+      }
+    } else {
+      for (const r of args.ranges ?? []) if (Number(r.end) > Number(r.start)) wanted.push({ label: String(r.label ?? `${r.start}-${r.end}`), start: Number(r.start), end: Number(r.end) });
+    }
+    if (!wanted.length) return { success: false, error: quotes.length ? 'None of the quotes were found in the transcript.' : 'Give quotes (with a transcriptPath) or ranges.', missing };
+    const info: any = await this.bridge.executeScript(`
+      try {
+        var it = __findProjectItem(${JSON.stringify(id)});
+        if (!it) return JSON.stringify({ success: false, error: 'Project item not found' });
+        var dur = 0, fr = 0;
+        try { fr = Number(it.getFootageInterpretation().frameRate); } catch (e) {}
+        var oi = null, oo = null; try { oi = it.getInPoint(4).seconds; oo = it.getOutPoint(4).seconds; } catch (e) {}
+        try { it.clearInPoint(4); it.clearOutPoint(4); dur = Number(it.getOutPoint(4).seconds); } catch (e) {}
+        try { if (oi !== null) { it.setInPoint(oi, 4); it.setOutPoint(oo, 4); } } catch (e) {}
+        return JSON.stringify({ success: true, name: String(it.name), duration: dur, fps: fr > 0 ? fr : 24 });
+      } catch (e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+    if (!info?.success) return info;
+    const plan = planStringout(wanted, args.handleSeconds !== undefined ? Number(args.handleSeconds) : 0.15, info.fps, info.duration, Number(args.gapSeconds) > 0 ? Number(args.gapSeconds) : 0);
+    const total = plan.length ? Math.round((plan[plan.length - 1]!.recordIn + plan[plan.length - 1]!.sourceOut - plan[plan.length - 1]!.sourceIn) * 1000) / 1000 : 0;
+    if (args.dryRun) return { success: true, dryRun: true, plan, matches, missing, totalSeconds: total };
+    const name = String(args.sequenceName ?? `${info.name} stringout`);
+    const built: any = await this.bridge.executeScript(`
+      try {
+        var plan = ${JSON.stringify(plan)};
+        var it = __findProjectItem(${JSON.stringify(id)});
+        var seq = app.project.createNewSequenceFromClips(${JSON.stringify(name)}, [it], app.project.rootItem);
+        if (!seq) return JSON.stringify({ success: false, error: 'Could not create the sequence' });
+        app.project.openSequence(seq.sequenceID);
+        // createNewSequenceFromClips matches the source's settings but drops the whole clip in; clear it.
+        for (var v = 0; v < seq.videoTracks.numTracks; v++) while (seq.videoTracks[v].clips.numItems) seq.videoTracks[v].clips[0].remove(false, false);
+        for (var a = 0; a < seq.audioTracks.numTracks; a++) while (seq.audioTracks[a].clips.numItems) seq.audioTracks[a].clips[0].remove(false, false);
+        var oi = null, oo = null; try { oi = it.getInPoint(4).seconds; oo = it.getOutPoint(4).seconds; } catch (e) {}
+        var placed = [], err = null;
+        try {
+          for (var i = 0; i < plan.length; i++) {
+            it.setInPoint(plan[i].sourceIn, 4); it.setOutPoint(plan[i].sourceOut, 4);
+            var t = new Time(); t.seconds = plan[i].recordIn;
+            seq.videoTracks[0].overwriteClip(it, t);
+          }
+        } catch (eP) { err = eP.toString(); }
+        try { if (oi !== null) { it.setInPoint(oi, 4); it.setOutPoint(oo, 4); } } catch (e) {}
+        var tr = seq.videoTracks[0];
+        for (var c = 0; c < tr.clips.numItems; c++) placed.push({ start: tr.clips[c].start.seconds, end: tr.clips[c].end.seconds, inPoint: tr.clips[c].inPoint.seconds });
+        var audio = 0; try { audio = seq.audioTracks[0].clips.numItems; } catch (e) {}
+        return JSON.stringify({ success: !err, error: err, sequenceId: String(seq.sequenceID), placed: placed, audioClips: audio });
+      } catch (e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+    if (!built?.success) return { success: false, error: built?.error ?? 'Building the sequence failed.', plan };
+    const tol = 0.05;
+    const ok = built.placed.length === plan.length && plan.every((p, i) => Math.abs(built.placed[i].start - p.recordIn) < tol && Math.abs(built.placed[i].inPoint - p.sourceIn) < tol && Math.abs((built.placed[i].end - built.placed[i].start) - (p.sourceOut - p.sourceIn)) < tol);
+    return { success: ok, verified: ok, verifiedBy: 'start/in/duration readback of every placed clip', sequenceId: built.sequenceId, sequenceName: name, lines: plan.length, totalSeconds: total,
+      audioClips: built.audioClips, matches, missing, plan, error: ok ? undefined : 'The placed clips do not match the plan; see plan and placed.', placed: ok ? undefined : built.placed };
+  }
+
+  private async syncByAudio(args: any): Promise<any> {
+    const ids: string[] = [String(args.referenceItemId ?? ''), ...((args.itemIds ?? []) as unknown[]).map(String)];
+    if (ids.length < 2 || !ids[0]) return { success: false, error: 'referenceItemId and at least one itemId are required.' };
+    const info: any = await this.bridge.executeScript(`
+      try {
+        var ids = ${JSON.stringify(ids)}, out = [];
+        for (var i = 0; i < ids.length; i++) { var it = __findProjectItem(ids[i]); if (!it) return JSON.stringify({ success: false, error: 'Project item not found: ' + ids[i] }); var p = ''; try { p = String(it.getMediaPath()); } catch (e) {} out.push({ id: ids[i], name: String(it.name), path: p }); }
+        return JSON.stringify({ success: true, items: out });
+      } catch (e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+    if (!info?.success) return info;
+    const seconds = Number(args.analyzeSeconds) > 0 ? Number(args.analyzeSeconds) : 90;
+    let ref: Float32Array;
+    try { ref = decodeAudio(info.items[0].path, seconds); } catch (e: any) { return { success: false, error: e.message }; }
+    const results: any[] = [{ id: info.items[0].id, name: info.items[0].name, offsetSeconds: 0, score: 1, reference: true }];
+    for (const it of info.items.slice(1)) {
+      try {
+        const r = findOffset(ref, decodeAudio(it.path, seconds), SYNC_RATE, Number(args.maxOffsetSeconds) > 0 ? Number(args.maxOffsetSeconds) : 30);
+        results.push({ id: it.id, name: it.name, offsetSeconds: Math.round(r.offsetSeconds * 10000) / 10000, score: r.score, weak: r.score < 0.3 });
+      } catch (e: any) { results.push({ id: it.id, name: it.name, error: e.message }); }
+    }
+    const usable = results.filter((r) => r.offsetSeconds !== undefined && !r.weak);
+    if (!args.sequenceName) return { success: results.every((r) => !r.error), offsets: results, note: 'Place each clip at (reference position + offsetSeconds) to line them up.' };
+    // Build the synced sequence: shift everything so the earliest clip starts at 0.
+    const shift = -Math.min(0, ...usable.map((r) => r.offsetSeconds));
+    const built: any = await this.bridge.executeScript(`
+      try {
+        var plan = ${JSON.stringify(usable.map((r) => ({ id: r.id, at: r.offsetSeconds + shift })))};
+        var refItem = __findProjectItem(plan[0].id);
+        var seq = app.project.createNewSequenceFromClips(${JSON.stringify(String(args.sequenceName))}, [refItem], app.project.rootItem);
+        if (!seq) return JSON.stringify({ success: false, error: 'Could not create the sequence' });
+        app.project.openSequence(seq.sequenceID);
+        app.enableQE();
+        var q = qe.project.getActiveSequence();
+        var need = plan.length;
+        var g = 0; while (seq.videoTracks.numTracks < need && g++ < 20) q.addTracks(1, seq.videoTracks.numTracks, 0, 0, 0, 0, 0, 0);
+        g = 0; while (seq.audioTracks.numTracks < need && g++ < 20) q.addTracks(0, 0, 0, 1, seq.audioTracks.numTracks, 0, 0, 0);
+        // The reference landed at 0; move it only by placing fresh when it needs a shift.
+        var placed = [];
+        for (var i = 0; i < plan.length; i++) {
+          var t = new Time(); t.seconds = plan[i].at;
+          if (i === 0) {
+            if (plan[0].at > 0.0005) { seq.videoTracks[0].clips[0].remove(false, false); try { seq.audioTracks[0].clips[0].remove(false, false); } catch (eA) {} seq.videoTracks[0].overwriteClip(refItem, t); }
+          } else {
+            seq.videoTracks[i].overwriteClip(__findProjectItem(plan[i].id), t);
+          }
+          var tr = seq.videoTracks[i];
+          placed.push({ track: 'V' + (i + 1), start: tr.clips.numItems ? tr.clips[0].start.seconds : null });
+        }
+        return JSON.stringify({ success: true, sequenceId: String(seq.sequenceID), placed: placed });
+      } catch (e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+    const placedOk = built?.success && (built.placed as any[]).every((p: any, i: number) => p.start !== null && Math.abs(p.start - (usable[i].offsetSeconds + shift)) < 0.05);
+    return { success: !!placedOk, verified: !!placedOk, verifiedBy: 'clip start readback per track', offsets: results, sequenceId: built?.sequenceId, placed: built?.placed,
+      skippedWeak: results.filter((r) => r.weak).map((r) => r.name), error: placedOk ? undefined : (built?.error ?? 'A clip did not land at its synced position.') };
+  }
+
+  private async removeSilence(args: any): Promise<any> {
+    const clipId = String(args.clipId ?? '');
+    const info: any = await this.bridge.executeScript(`
+      try {
+        var f = __findClip(${JSON.stringify(clipId)});
+        if (!f) return JSON.stringify({ success: false, error: 'Clip not found' });
+        var c = f.clip, sp = 1; try { sp = Number(c.getSpeed()); } catch (e) {}
+        var rev = false; try { rev = !!c.isSpeedReversed(); } catch (e) {}
+        return JSON.stringify({ success: true, seq: String(f.sequenceId), start: c.start.seconds, end: c.end.seconds, inPoint: c.inPoint.seconds, speed: sp, reversed: rev,
+          path: String(c.projectItem.getMediaPath()), fps: 254016000000 / Number(f.sequence.timebase), seqEnd: f.sequence.end ? Number(f.sequence.end) / 254016000000 : null });
+      } catch (e) { return JSON.stringify({ success: false, error: e.toString() }); }
+    `);
+    if (!info?.success) return info;
+    if (info.reversed) return { success: false, error: 'The clip is reversed, so its source silences cannot be mapped onto the timeline. Nothing was changed.' };
+    const det: any = await this.executeTool('detect_silence', { mediaPath: info.path, noiseThresholdDb: args.noiseThresholdDb ?? -35, minDurationSeconds: args.minSilenceSeconds ?? 0.5 });
+    if (!det?.success) return { success: false, error: `Could not analyse the clip's audio: ${det?.error ?? 'unknown'}` };
+    const cuts = planSilenceCuts(det.silenceIntervals ?? [], { start: info.start, end: info.end, inPoint: info.inPoint, speed: info.speed }, args.paddingSeconds ?? 0.1, args.minSilenceSeconds ?? 0.5, info.fps);
+    const total = Math.round(cuts.reduce((n, c) => n + c.duration, 0) * 1000) / 1000;
+    if (cuts.length === 0) return { success: true, cuts: [], removedSeconds: 0, note: 'No pause long enough to cut in this clip.' };
+    if (args.confirm !== true) {
+      return { success: false, needsConfirmation: true, cuts, removedSeconds: total,
+        confirmPrompt: `Cut ${cuts.length} silent pause(s), ${total}s in all, from this clip? Every track is cut and closed up at those times so sync holds.`,
+        error: `Plan only: ${cuts.length} pause(s), ${total}s. Nothing was cut; call again with confirm:true to apply.` };
+    }
+    const cp: any = await this.executeTool('create_recovery_checkpoint', { sequenceId: info.seq, label: 'before remove_silence' });
+    const done: any[] = [];
+    for (const c of [...cuts].reverse()) {
+      const lifted: any = await this.bridge.executeScript(`
+        try {
+          app.enableQE();
+          var seq = __findSequence(${JSON.stringify(info.seq)});
+          app.project.openSequence(seq.sequenceID);
+          var q = __qeSequenceOpening(seq);
+          q.razor(${JSON.stringify(toTimecode(c.start, info.fps))});
+          q.razor(${JSON.stringify(toTimecode(c.end, info.fps))});
+          var a = ${c.start}, b = ${c.end}, lifted = 0;
+          var kinds = [seq.videoTracks, seq.audioTracks];
+          for (var k = 0; k < 2; k++) for (var t = 0; t < kinds[k].numTracks; t++) {
+            var tr = kinds[k][t];
+            for (var i = tr.clips.numItems - 1; i >= 0; i--) {
+              var cl = tr.clips[i];
+              if (cl.start.seconds >= a - 0.01 && cl.end.seconds <= b + 0.01) { cl.remove(false, false); lifted++; }
+            }
+          }
+          return JSON.stringify({ success: true, lifted: lifted });
+        } catch (e) { return JSON.stringify({ success: false, error: e.toString() }); }
+      `);
+      if (!lifted?.success) { done.push({ ...c, ok: false, error: lifted?.error }); break; }
+      const closed: any = await this.executeTool('close_gap_at', { timecode: String((c.start + c.end) / 2), sequenceId: info.seq });
+      done.push({ ...c, ok: closed?.success !== false, lifted: lifted.lifted, error: closed?.success === false ? closed.error : undefined });
+      if (closed?.success === false) break;
+    }
+    const failed = done.filter((d) => !d.ok);
+    return { success: failed.length === 0, verified: failed.length === 0, verifiedBy: 'each gap closed with close_gap_at (clip start readback on every track)',
+      cutsApplied: done.filter((d) => d.ok).length, cutsPlanned: cuts.length, removedSeconds: Math.round(done.filter((d) => d.ok).reduce((n, d) => n + d.duration, 0) * 1000) / 1000,
+      cuts: done, recoveryCheckpoint: cp?.checkpointName ?? null,
+      error: failed.length ? `Stopped at the cut at ${failed[0].start}s: ${failed[0].error}. Earlier (later-in-time) cuts were applied; restore from the recovery checkpoint to undo.` : undefined };
+  }
+
   private async verifyKeyframeInterpolation(set: any, args: any): Promise<any> {
     const data = set.data ?? set;
     const loc: any = await this.bridge.executeScript(`

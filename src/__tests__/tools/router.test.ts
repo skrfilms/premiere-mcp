@@ -24,7 +24,7 @@ import {
   decodeCursor,
   resolvePageSize,
 } from '../../tools/router.js';
-import { resolveProfile } from '../../tools/profiles.js';
+import { PROFILES, resolveProfile } from '../../tools/profiles.js';
 import { PremiereProTools } from '../../tools/index.js';
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
@@ -257,6 +257,34 @@ describe('excluding the router actually removes it', () => {
 });
 
 describe('activate_tools / deactivate_tools', () => {
+  it('switches task menu mid-session: load a bundle whole, drop it again', async () => {
+    await withEnv({ PREMIERE_MCP_PROFILE: 'task-cut-dialogue' }, async () => {
+      const tools = new PremiereProTools(noBridge);
+      const base = tools.getAvailableTools().map((tool) => tool.name);
+      expect(base).not.toContain('apply_lumetri_preset');
+
+      const loaded = await tools.executeTool('activate_tools', { bundle: 'grading' });
+      expect(loaded.bundle).toBe('task-grade');
+      const now = tools.getAvailableTools().map((tool) => tool.name);
+      for (const name of PROFILES['task-grade']!) expect(now).toContain(name);
+      // Two task menus at once is past the selection guidance: the agent is told to drop one.
+      expect(loaded.warning).toMatch(/deactivate_tools/);
+
+      const dropped = await tools.executeTool('deactivate_tools', { bundle: 'task-grade' });
+      expect(dropped.success).toBe(true);
+      // Tools both menus share stay: the profile itself advertises them.
+      expect(tools.getAvailableTools().map((tool) => tool.name)).toEqual(base);
+    });
+  });
+
+  it('names the bundles when asked for one that does not exist', async () => {
+    await withEnv({ PREMIERE_MCP_PROFILE: 'core' }, async () => {
+      const r = await new PremiereProTools(noBridge).executeTool('activate_tools', { bundle: 'sound design' });
+      expect(r.success).toBe(false);
+      expect(r.bundles.map((b: any) => b.name)).toContain('task-grade');
+    });
+  });
+
   it('promotes a hidden tool into the advertised list and fires tools/list_changed once', async () => {
     await withEnv({ PREMIERE_MCP_PROFILE: 'core' }, async () => {
       const tools = new PremiereProTools(noBridge);

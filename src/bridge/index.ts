@@ -648,6 +648,39 @@ function __resolveImportBin(binId, binName) {
   }
   return r;
 }
+/*
+ * Every timeline use of a project item, or of anything inside a bin. "Where is this used?" is
+ * the question to ask before deleting: a user reported deleting one bin emptied five timelines.
+ */
+function __usesOf(item, limit) {
+  var ids = {};
+  (function collect(it) {
+    ids[String(it.nodeId)] = String(it.name);
+    if (it.type === 2 || it.type === 3) for (var i = 0; i < it.children.numItems; i++) collect(it.children[i]);
+  })(item);
+  var uses = [], total = 0, seqNames = {};
+  for (var s = 0; s < app.project.sequences.numSequences; s++) {
+    var seq = app.project.sequences[s];
+    var kinds = [['video', seq.videoTracks], ['audio', seq.audioTracks]];
+    for (var k = 0; k < 2; k++) {
+      var tracks = kinds[k][1];
+      for (var t = 0; t < tracks.numTracks; t++) {
+        var tr = tracks[t];
+        for (var c = 0; c < tr.clips.numItems; c++) {
+          var clip = tr.clips[c], pid = null;
+          try { pid = clip.projectItem ? String(clip.projectItem.nodeId) : null; } catch (e) {}
+          if (pid && ids[pid] !== undefined) {
+            total++;
+            seqNames[String(seq.name)] = true;
+            if (uses.length < (limit || 50)) uses.push({ sequence: String(seq.name), sequenceId: String(seq.sequenceID), track: (kinds[k][0] === 'video' ? 'V' : 'A') + (t + 1), startSecs: clip.start.seconds, item: ids[pid] });
+          }
+        }
+      }
+    }
+  }
+  var names = []; for (var n in seqNames) names.push(n);
+  return { total: total, sequences: names, uses: uses };
+}
 function __resolveBin(binId, binName) {
   var root = (app.project && app.project.rootItem) ? app.project.rootItem : null;
   if (!root) return { error: 'No project is open.' };
