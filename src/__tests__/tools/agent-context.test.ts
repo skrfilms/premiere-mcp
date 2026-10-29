@@ -4,6 +4,7 @@
  */
 import { capResult, maxResultChars } from '../../tools/result-size.js';
 import { diffStates, describeDiff, type TimelineState } from '../../tools/timeline-state.js';
+import { join } from 'node:path';
 import { addNote, notesPathFor } from '../../tools/project-notes.js';
 
 const state = (hash: string, clips: TimelineState['clips'], extra: Partial<TimelineState> = {}): TimelineState => ({
@@ -74,7 +75,8 @@ describe('result size cap', () => {
 
 describe('project notes', () => {
   it('live next to the project file', () => {
-    expect(notesPathFor('/shows/SPHE/SPHE_SQ05.prproj')).toBe('/shows/SPHE/SPHE_SQ05.mcp-notes.md');
+    // Native separators, like the project path Premiere reports on each platform.
+    expect(notesPathFor(join('/shows', 'SPHE', 'SPHE_SQ05.prproj'))).toBe(join('/shows', 'SPHE', 'SPHE_SQ05.mcp-notes.md'));
   });
 
   it('start a file, add under a section, and keep sections apart', () => {
