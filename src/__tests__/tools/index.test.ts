@@ -109,7 +109,7 @@ describe('PremiereProTools', () => {
       expect(toolNames).toContain('apply_video_effect');
       expect(toolNames).toContain('get_timeline_render_status');
       expect(toolNames).toContain('transact_sequence_edits');
-      expect(availableTools).toHaveLength(649);
+      expect(availableTools).toHaveLength(663);
       expect(unimplementedExpandedToolNames).toEqual([]);
       for (const name of expandedToolNames) {
         expect(toolNames).toContain(name);
@@ -614,8 +614,8 @@ describe('PremiereProTools', () => {
       expect(result.success).toBe(true);
       // The full catalogue is exposed by default (no profile env set). The
       // catalog block now also reports the active profile for introspection.
-      expect(result.catalog.tools).toBe(649);
-      expect(result.catalog.toolsInFullCatalog).toBe(649);
+      expect(result.catalog.tools).toBe(663);
+      expect(result.catalog.toolsInFullCatalog).toBe(663);
       // Resource and prompt counts must be COMPUTED from the modules that own them, not
       // stated. They were hardcoded as 13 and 10 while the real resource count had already
       // drifted to 21, so get_capabilities was publishing a false number to every client.

@@ -243,6 +243,12 @@ export async function executeExpandedTool(
       if (!script.trim()) {
         return { success: false, error: 'execute_extendscript requires script or code' };
       }
+      // A raw script can do anything the panel can. The ones that delete, close or quit get a
+      // confirmation step, the same as the dedicated delete tools.
+      const risky = /\b(deleteSequence|deleteBin|closeDocument|app\.quit|\.remove\s*\(|removeEmptyTracks|\bFile\([^)]*\)\.remove|Folder\([^)]*\)\.remove)/.exec(script);
+      if (risky && args.confirm !== true) {
+        return { success: false, needsConfirmation: true, confirmPrompt: `Run a raw script that calls ${risky[1]}? It can delete or close things in Premiere.`, error: `This script calls ${risky[1]}, which can delete or close things. Nothing was run; call again with confirm:true to go ahead.` };
+      }
       // Caller-authored: pass the source through verbatim.
       return await bridge.executeScript(script, undefined, true);
     }
@@ -2147,12 +2153,24 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
         case "delete_project_item":
           var deleteItem = findItem(args.binId || args.bin_id || args.projectItemId || args.itemId || args.item_id || args.name);
           if (!deleteItem) return fail("Project item not found");
+          // Deleting media still on a timeline removes it from every sequence that uses it. Ask
+          // first (needsConfirmation), and say exactly where it is used.
+          if (args.confirm !== true) {
+            var deleteUses = __usesOf(deleteItem, 20);
+            if (deleteUses.total > 0) return fail(String(deleteItem.name) + ' is used ' + deleteUses.total + ' time(s) on the timeline in: ' + deleteUses.sequences.join(', ') + '. Deleting it removes those clips. Nothing was deleted; call again with confirm:true to go ahead.', { needsConfirmation: true, confirmPrompt: 'Delete ' + String(deleteItem.name) + '? It is used ' + deleteUses.total + ' time(s) in ' + deleteUses.sequences.join(', ') + ', and those clips will be removed.', uses: deleteUses });
+          }
           var deleteRes = deleteProjectItemRobust(deleteItem);
           if (!deleteRes.deleted) return fail(deleteRes.error || "Delete failed", { item: deleteRes.item, verified: deleteRes.verified === true, method: deleteRes.method });
           return ok({ deleted: true, verified: true, item: deleteRes.item, method: deleteRes.method });
 
         case "delete_multiple_project_items":
           var deleteIds = args.projectItemIds || args.itemIds || args.ids || [];
+          if (args.confirm !== true) {
+            var bulkTotal = 0, bulkSeqs = {};
+            for (var bu = 0; bu < deleteIds.length; bu++) { var bItem = findItem(deleteIds[bu]); if (!bItem) continue; var bUses = __usesOf(bItem, 1); bulkTotal += bUses.total; for (var bs = 0; bs < bUses.sequences.length; bs++) bulkSeqs[bUses.sequences[bs]] = true; }
+            var bulkNames = []; for (var bn in bulkSeqs) bulkNames.push(bn);
+            if (bulkTotal > 0) return fail("These items are used " + bulkTotal + " time(s) on the timeline in: " + bulkNames.join(", ") + ". Nothing was deleted; call again with confirm:true to go ahead.", { needsConfirmation: true, confirmPrompt: "Delete " + deleteIds.length + " item(s)? They are used " + bulkTotal + " time(s) in " + bulkNames.join(", ") + ", and those clips will be removed.", usedCount: bulkTotal, sequences: bulkNames });
+          }
           var deleteResults = [];
           for (var di = 0; di < deleteIds.length; di++) {
             var itemToDelete = findItem(deleteIds[di]);

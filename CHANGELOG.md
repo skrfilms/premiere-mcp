@@ -4,6 +4,52 @@ All notable changes are documented here. Releases use semantic versioning.
 
 ## [Unreleased]
 
+### Added: safe retries and editor workflows
+
+- **"Did my last call run?"** Every call is journaled; `get_recent_calls` shows what ran,
+  including calls whose reply was lost to a client timeout. A `requestId` on any call makes
+  a retry return the first result instead of applying the edit twice.
+- **Background jobs and progress.** `start_job` / `get_job` / `list_jobs` run slow tools
+  (exports, renders, transcription) without outliving the client's timeout; clients that
+  send a progress token get a heartbeat every 5 s.
+- **Ask before destroying.** Deleting a bin or item that is used on a timeline, and raw
+  scripts that delete or quit, now return `needsConfirmation` with where it is used. Clients
+  that support elicitation get a yes/no question; on yes the call runs with `confirm`.
+- `where_used`: every sequence and time a project item appears.
+- `version_up_shots`: relinks every versioned shot (`SH010_comp_v003` and so on) to the
+  newest render on disk, keeping trims and effects. Dry run first.
+- `remove_silence`: cuts the pauses out of a talking clip and closes the gaps on every
+  track, so music and other audio stay in sync. Asks first; takes a recovery checkpoint.
+- `sync_by_audio`: finds the offset between recordings of the same moment by waveform
+  (8 kHz FFT cross-correlation, sub-frame) and can build the synced multi-track sequence.
+- `look_at_cut`: one image strip of the cut, one labelled frame per shot.
+- `stringout_from_transcript`: paper edit from a Whisper `.json` or `.srt`; give the lines
+  in cut order and get a sequence of just those moments. Unfound lines are listed, not guessed.
+- **Switch task menu mid-session.** `activate_tools({ bundle: "task-grade" })` (or just
+  "grade" / "grading") loads a whole task menu with real schemas; `deactivate_tools({ bundle })`
+  drops it. Past ~50 advertised tools the reply warns and says what to drop.
+- **Undo a whole call.** `revert_last_call` takes back the last edit made through the server
+  however many Premiere steps it took: it undoes until the sequence matches the state recorded
+  before the call, and if it never does, redoes back to where it started (by state, not by
+  count). It refuses when the sequence changed after that call. Script-added markers are not on
+  Premiere's undo stack, so marker-only edits are refused cleanly.
+- **Hand edits are noticed.** The next edit after a change made by hand in Premiere says so
+  (`changedOutsideThisServer`), and `what_changed` lists clips added, removed, moved, trimmed
+  or renamed since the server last looked.
+- **Replies sized to fit.** Every result is capped (40,000 characters by default; `maxResultChars`
+  per call or `PREMIERE_MCP_MAX_RESULT_CHARS`) by halving its longest lists, and says what was
+  cut. `list_project_items` pages (200 by default) and filters by name, type and bin. Results
+  are sent as compact JSON.
+- **Project notes.** `add_project_note` / `get_project_notes` keep conventions (naming, where
+  renders land, delivery) in a Markdown file next to the `.prproj`; `get_project_info`
+  includes them, so each session starts knowing them.
+- **Declared result shapes** (`outputSchema`) for the 15 most-called tools. All fields are
+  optional and extra fields are allowed, so failures still fit; W9 checks live results.
+- `scripts/workflow-tests.mjs` W5–W9 run these end to end against live Premiere.
+
+The timeout-safety tools are in `core` and named in the server instructions; under a task
+bundle they are reached through `call_tool`, which keeps every bundle at or under 50 tools.
+
 Live sweep against Premiere Pro 26.5.2: 496 tools pass and 61 fail, up from 449 and 111.
 New fixtures (a real multicam, a caption track, an AE-authored MOGRT) made 54 more tools
 genuinely testable, and running them found the bugs below. Every effect below was checked
