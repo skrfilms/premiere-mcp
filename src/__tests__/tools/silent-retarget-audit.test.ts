@@ -28,7 +28,13 @@ import { join } from 'node:path';
 const DOMAIN_DIR = join(__dirname, '..', '..', 'tools', 'domains');
 const domainFiles = readdirSync(DOMAIN_DIR).filter((f) => f.endsWith('.ts'));
 
-interface Method { file: string; name: string; signature: string; body: string; line: number }
+interface Method {
+  file: string;
+  name: string;
+  signature: string;
+  body: string;
+  line: number;
+}
 
 /**
  * Comment lines are stripped before scanning. Every fix in this file left a doc comment behind
@@ -54,7 +60,23 @@ function domainMethods(): Method[] {
     });
     starts.forEach(([i, name], idx) => {
       const end = idx + 1 < starts.length ? starts[idx + 1]![0] : lines.length;
-      out.push({ file, name, signature: lines[i]!, body: lines.slice(i, end).join('\n'), line: i + 1 });
+      out.push({
+        file,
+        name,
+        // The whole parameter list, which a formatter may wrap over several lines: up to the
+        // line that opens the body.
+        signature: lines
+          .slice(
+            i,
+            Math.min(
+              end,
+              i + 1 + lines.slice(i, end).findIndex((l) => /\)\s*(?::[^{]*)?\{\s*$/.test(l)),
+            ),
+          )
+          .join(' '),
+        body: lines.slice(i, end).join('\n'),
+        line: i + 1,
+      });
     });
   }
   return out;
@@ -97,14 +119,14 @@ describe('a sequence id that is accepted must be used', () => {
    * heuristic loose enough to admit them is loose enough to admit the defect.
    */
   const ACTIVE_SEQUENCE_IS_INTENTIONAL = new Set([
-    'razorTimelineAtTime',      // sets the target active, razors, restores __priorActive
+    'razorTimelineAtTime', // sets the target active, razors, restores __priorActive
     'applyAudioEffectToAllClips',
     'addTrack',
     'duplicateSequence',
-    'deleteTrack',              // reports which sequence QE could actually reach
-    'setActiveSequence',        // the active sequence IS its subject
-    'versionUpSequence',        // confirms openSequence() landed on the new sequence
-    'readSequenceCaptions',     // already fails closed on an unresolvable id, in longhand
+    'deleteTrack', // reports which sequence QE could actually reach
+    'setActiveSequence', // the active sequence IS its subject
+    'versionUpSequence', // confirms openSequence() landed on the new sequence
+    'readSequenceCaptions', // already fails closed on an unresolvable id, in longhand
   ]);
 
   it('no method that takes a sequence id reaches for the active sequence directly', () => {
@@ -133,7 +155,10 @@ describe('the shared sequence resolvers fail closed', () => {
   it('an unresolvable id throws instead of substituting the active sequence', () => {
     // Asserting on the source, not a call, because these emit ExtendScript text: the
     // substitution is a string the host runs, so the string is the thing to pin.
-    const region = base.slice(base.indexOf('protected buildSeqRes'), base.indexOf('protected statSnapshot'));
+    const region = base.slice(
+      base.indexOf('protected buildSeqRes'),
+      base.indexOf('protected statSnapshot'),
+    );
 
     expect(region).toContain('Sequence not found by id:');
     expect(region).toContain('Refusing to fall back to the active sequence');
@@ -144,7 +169,10 @@ describe('the shared sequence resolvers fail closed', () => {
 
   it('still uses the active sequence when no id is given, which is the documented default', () => {
     // Failing closed on an OMITTED id would break every tool that legitimately defaults.
-    const region = base.slice(base.indexOf('protected buildSeqRes'), base.indexOf('protected statSnapshot'));
+    const region = base.slice(
+      base.indexOf('protected buildSeqRes'),
+      base.indexOf('protected statSnapshot'),
+    );
 
     expect(region).toContain("if (!sid) return 'app.project.activeSequence';");
     expect(region).toContain("if (!seqId) return 'qe.project.getActiveSequence()';");

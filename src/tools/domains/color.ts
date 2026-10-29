@@ -7,7 +7,7 @@
 import { ProjectMediaTools } from './project-media.js';
 import { spawn } from 'child_process';
 // Synchronous fs/path/os bindings for the Node-side (non-ExtendScript) tools.
-// Kept separate from the `promises as fs` import above, which is the async API.
+// The async API is the separate `promises as fs` import.
 import * as fsSync from 'node:fs';
 import * as pathSync from 'node:path';
 import * as osSync from 'node:os';
@@ -111,50 +111,85 @@ export class ColorTools extends ProjectMediaTools {
   }
 
   protected async lumetriBasicSet(args: any): Promise<any> {
-    const ti = args.trackIndex ?? 0; const ci = args.clipIndex ?? 0;
+    const ti = args.trackIndex ?? 0;
+    const ci = args.clipIndex ?? 0;
     const targets: Array<{ index: number; name: string; value: number }> = [];
     // index/name pairs verified against 26.3.2; the name is checked before the write.
     const map: Array<[string, number, string]> = [
-      ['temperature', 14, 'Temperature'], ['tint', 15, 'Tint'], ['saturation', 16, 'Saturation'],
-      ['exposure', 19, 'Exposure'], ['contrast', 20, 'Contrast'], ['highlights', 21, 'Highlights'],
-      ['shadows', 22, 'Shadows'], ['whites', 23, 'Whites'], ['blacks', 24, 'Blacks'],
+      ['temperature', 14, 'Temperature'],
+      ['tint', 15, 'Tint'],
+      ['saturation', 16, 'Saturation'],
+      ['exposure', 19, 'Exposure'],
+      ['contrast', 20, 'Contrast'],
+      ['highlights', 21, 'Highlights'],
+      ['shadows', 22, 'Shadows'],
+      ['whites', 23, 'Whites'],
+      ['blacks', 24, 'Blacks'],
     ];
     for (const [arg, index, name] of map) {
       if (args[arg] !== undefined) targets.push({ index, name, value: Number(args[arg]) });
     }
-    if (targets.length === 0) return { success: false, error: `No Lumetri basic parameters provided. Supply at least one of: ${map.map((m) => m[0]).join(', ')}.` };
-    return await this.bridge.executeScript(this.lumetriParamScript(args.sequenceId, ti, ci, targets));
+    if (targets.length === 0)
+      return {
+        success: false,
+        error: `No Lumetri basic parameters provided. Supply at least one of: ${map.map((m) => m[0]).join(', ')}.`,
+      };
+    return await this.bridge.executeScript(
+      this.lumetriParamScript(args.sequenceId, ti, ci, targets),
+    );
   }
 
   protected async lumetriCreativeSet(args: any): Promise<any> {
-    const ti = args.trackIndex ?? 0; const ci = args.clipIndex ?? 0;
+    const ti = args.trackIndex ?? 0;
+    const ci = args.clipIndex ?? 0;
     const targets: Array<{ index: number; name: string; value: number }> = [];
     const map: Array<[string, number, string]> = [
-      ['fadedFilm', 40, 'Faded Film'], ['sharpen', 41, 'Sharpen'],
-      ['vibrance', 42, 'Vibrance'], ['saturation', 43, 'Saturation'],
+      ['fadedFilm', 40, 'Faded Film'],
+      ['sharpen', 41, 'Sharpen'],
+      ['vibrance', 42, 'Vibrance'],
+      ['saturation', 43, 'Saturation'],
     ];
     for (const [arg, index, name] of map) {
       if (args[arg] !== undefined) targets.push({ index, name, value: Number(args[arg]) });
     }
-    if (targets.length === 0) return { success: false, error: `No Lumetri creative parameters provided. Supply at least one of: ${map.map((m) => m[0]).join(', ')}.` };
-    return await this.bridge.executeScript(this.lumetriParamScript(args.sequenceId, ti, ci, targets));
+    if (targets.length === 0)
+      return {
+        success: false,
+        error: `No Lumetri creative parameters provided. Supply at least one of: ${map.map((m) => m[0]).join(', ')}.`,
+      };
+    return await this.bridge.executeScript(
+      this.lumetriParamScript(args.sequenceId, ti, ci, targets),
+    );
   }
 
   protected async lumetriVignetteSet(args: any): Promise<any> {
-    const ti = args.trackIndex ?? 0; const ci = args.clipIndex ?? 0;
+    const ti = args.trackIndex ?? 0;
+    const ci = args.clipIndex ?? 0;
     const targets: Array<{ index: number; name: string; value: number }> = [];
     const map: Array<[string, number, string]> = [
-      ['amount', 110, 'Amount'], ['midpoint', 111, 'Midpoint'],
-      ['roundness', 112, 'Roundness'], ['feather', 113, 'Feather'],
+      ['amount', 110, 'Amount'],
+      ['midpoint', 111, 'Midpoint'],
+      ['roundness', 112, 'Roundness'],
+      ['feather', 113, 'Feather'],
     ];
     for (const [arg, index, name] of map) {
       if (args[arg] !== undefined) targets.push({ index, name, value: Number(args[arg]) });
     }
-    if (targets.length === 0) return { success: false, error: `No Lumetri vignette parameters provided. Supply at least one of: ${map.map((m) => m[0]).join(', ')}.` };
-    return await this.bridge.executeScript(this.lumetriParamScript(args.sequenceId, ti, ci, targets));
+    if (targets.length === 0)
+      return {
+        success: false,
+        error: `No Lumetri vignette parameters provided. Supply at least one of: ${map.map((m) => m[0]).join(', ')}.`,
+      };
+    return await this.bridge.executeScript(
+      this.lumetriParamScript(args.sequenceId, ti, ci, targets),
+    );
   }
 
-  protected async lumetriReport(sequenceId: string | undefined, ti: number, ci: number): Promise<any> {
+  protected async lumetriReport(
+    sequenceId: string | undefined,
+    ti: number,
+    ci: number,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(sequenceId)};
@@ -181,29 +216,182 @@ export class ColorTools extends ProjectMediaTools {
     return { success: true, gradeJson: JSON.stringify(report.grade), clipName: report.clipName };
   }
 
-  protected async pasteGradeToClips(gradeJson: string, targets: Array<{trackIndex: number, clipIndex: number}>, sequenceId?: string): Promise<any> {
+  protected async pasteGradeToClips(
+    gradeJson: string,
+    targets: Array<{ trackIndex: number; clipIndex: number }>,
+    sequenceId?: string,
+  ): Promise<any> {
     const grade = JSON.parse(gradeJson);
-    const names = ['Blob','HDR','BasicCorrection','Active','','','InputLUT','InputLUT2','HDRWhite','','','Intensity','Color','WhiteBalance','Temperature','Tint','Saturation','','Light','Exposure','Contrast','Highlights','Shadows','Whites','Blacks','HDRSpecular','','','','','Creative','Active2','','','Look','Look2','','ColorSpace','Intensity2','Adjustments','FadedFilm','Sharpen','Vibrance','Saturation2','','TintBalance','','','Curves','Active3','RGBCurves','Active4','HDRRange','','','HueSatCurves','Active5','HueSatSel','HueSat','Active6','HueHueSel','HueHue','Active7','HueLumaSel','HueLuma','Active8','LumaSatSel','LumaSat','Active9','SatSatSel','SatSat','','','ColorWheels','Active10','','FaceDetection','','HDRWhite2','','','HSLSecondary','Active11','Key','SetColor','AddColor','RemoveColor','','ShowMask','','InvertMask','','','','Refine','Denoise','Blur','Blur2','Correction','','','Temperature2','Tint2','Contrast2','Sharpen2','Saturation3','Saturation4','','Vignette','Active12','Amount','Midpoint','Roundness','Feather'];
-    const numericKeys = ['Temperature','Tint','Saturation','Exposure','Contrast','Highlights','Shadows','Whites','Blacks','FadedFilm','Sharpen','Vibrance','Saturation2','Amount','Midpoint','Roundness','Feather','Intensity','Intensity2'];
+    const names = [
+      'Blob',
+      'HDR',
+      'BasicCorrection',
+      'Active',
+      '',
+      '',
+      'InputLUT',
+      'InputLUT2',
+      'HDRWhite',
+      '',
+      '',
+      'Intensity',
+      'Color',
+      'WhiteBalance',
+      'Temperature',
+      'Tint',
+      'Saturation',
+      '',
+      'Light',
+      'Exposure',
+      'Contrast',
+      'Highlights',
+      'Shadows',
+      'Whites',
+      'Blacks',
+      'HDRSpecular',
+      '',
+      '',
+      '',
+      '',
+      'Creative',
+      'Active2',
+      '',
+      '',
+      'Look',
+      'Look2',
+      '',
+      'ColorSpace',
+      'Intensity2',
+      'Adjustments',
+      'FadedFilm',
+      'Sharpen',
+      'Vibrance',
+      'Saturation2',
+      '',
+      'TintBalance',
+      '',
+      '',
+      'Curves',
+      'Active3',
+      'RGBCurves',
+      'Active4',
+      'HDRRange',
+      '',
+      '',
+      'HueSatCurves',
+      'Active5',
+      'HueSatSel',
+      'HueSat',
+      'Active6',
+      'HueHueSel',
+      'HueHue',
+      'Active7',
+      'HueLumaSel',
+      'HueLuma',
+      'Active8',
+      'LumaSatSel',
+      'LumaSat',
+      'Active9',
+      'SatSatSel',
+      'SatSat',
+      '',
+      '',
+      'ColorWheels',
+      'Active10',
+      '',
+      'FaceDetection',
+      '',
+      'HDRWhite2',
+      '',
+      '',
+      'HSLSecondary',
+      'Active11',
+      'Key',
+      'SetColor',
+      'AddColor',
+      'RemoveColor',
+      '',
+      'ShowMask',
+      '',
+      'InvertMask',
+      '',
+      '',
+      '',
+      'Refine',
+      'Denoise',
+      'Blur',
+      'Blur2',
+      'Correction',
+      '',
+      '',
+      'Temperature2',
+      'Tint2',
+      'Contrast2',
+      'Sharpen2',
+      'Saturation3',
+      'Saturation4',
+      '',
+      'Vignette',
+      'Active12',
+      'Amount',
+      'Midpoint',
+      'Roundness',
+      'Feather',
+    ];
+    const numericKeys = [
+      'Temperature',
+      'Tint',
+      'Saturation',
+      'Exposure',
+      'Contrast',
+      'Highlights',
+      'Shadows',
+      'Whites',
+      'Blacks',
+      'FadedFilm',
+      'Sharpen',
+      'Vibrance',
+      'Saturation2',
+      'Amount',
+      'Midpoint',
+      'Roundness',
+      'Feather',
+      'Intensity',
+      'Intensity2',
+    ];
     // The `names` table above is a positional map of Lumetri's flat parameter list, with
     // synthetic suffixes for the repeated names (Saturation2, Temperature2, ...). Only the real
     // parameter name is checked against the host, so strip the suffix before passing it as the
     // expected name — otherwise every de-duplicated entry would fail its own name guard.
     const paramTargets = names
       .map((n, i) => ({ n, i }))
-      .filter(({ n }) => n && (n in grade) && numericKeys.includes(n))
+      .filter(({ n }) => n && n in grade && numericKeys.includes(n))
       .map(({ n, i }) => ({ index: i, name: n.replace(/[0-9]+$/, ''), value: Number(grade[n]) }))
       .filter((t) => Number.isFinite(t.value));
 
     if (paramTargets.length === 0) {
-      return { success: false, error: 'The supplied grade contained no numeric Lumetri parameters that this tool knows how to paste.', pasted: 0, results: [] };
+      return {
+        success: false,
+        error:
+          'The supplied grade contained no numeric Lumetri parameters that this tool knows how to paste.',
+        pasted: 0,
+        results: [],
+      };
     }
 
     const results: any[] = [];
     for (const t of targets) {
-      const r: any = await this.bridge.executeScript(this.lumetriParamScript(sequenceId, t.trackIndex, t.clipIndex, paramTargets));
-      results.push({ trackIndex: t.trackIndex, clipIndex: t.clipIndex, success: r?.success === true,
-        applied: r?.applied ?? 0, requested: r?.requested ?? paramTargets.length, error: r?.error ?? null });
+      const r: any = await this.bridge.executeScript(
+        this.lumetriParamScript(sequenceId, t.trackIndex, t.clipIndex, paramTargets),
+      );
+      results.push({
+        trackIndex: t.trackIndex,
+        clipIndex: t.clipIndex,
+        success: r?.success === true,
+        applied: r?.applied ?? 0,
+        requested: r?.requested ?? paramTargets.length,
+        error: r?.error ?? null,
+      });
     }
     // Previously returned success:true and pasted:results.length no matter what each clip did,
     // so a paste that landed on nothing reported total success.
@@ -211,14 +399,38 @@ export class ColorTools extends ProjectMediaTools {
     return {
       success: fullyPasted > 0 && fullyPasted === results.length,
       verified: true,
-      pasted: fullyPasted, attempted: results.length, parameters: paramTargets.length, results,
-      error: fullyPasted === results.length ? null
-        : (fullyPasted === 0 ? 'The grade was pasted to no clips; see results[].' : `Only ${fullyPasted} of ${results.length} clips received the full grade; see results[].`),
+      pasted: fullyPasted,
+      attempted: results.length,
+      parameters: paramTargets.length,
+      results,
+      error:
+        fullyPasted === results.length
+          ? null
+          : fullyPasted === 0
+            ? 'The grade was pasted to no clips; see results[].'
+            : `Only ${fullyPasted} of ${results.length} clips received the full grade; see results[].`,
     };
   }
 
-  protected async autoWhiteBalance(sequenceId: string | undefined, ti: number, ci: number): Promise<any> {
-    const newData = JSON.stringify({ mAutoTonePressed: true, mBlacks: 0, mContrast: 0, mExposure: 0, mHighlights: 0, mLastPressedAutoToneButton: 0, mResetPressed: false, mSaturation: 0, mShadows: 0, mTemperature: 0, mTint: 0, mWhites: 0 });
+  protected async autoWhiteBalance(
+    sequenceId: string | undefined,
+    ti: number,
+    ci: number,
+  ): Promise<any> {
+    const newData = JSON.stringify({
+      mAutoTonePressed: true,
+      mBlacks: 0,
+      mContrast: 0,
+      mExposure: 0,
+      mHighlights: 0,
+      mLastPressedAutoToneButton: 0,
+      mResetPressed: false,
+      mSaturation: 0,
+      mShadows: 0,
+      mTemperature: 0,
+      mTint: 0,
+      mWhites: 0,
+    });
     // This one writes a JSON BLOB to the Auto Tone Analytics Data parameter, not a number, so the
     // numeric helper does not apply. Verified by comparing the blob string back, and honest that a
     // successful write is not proof Premiere has finished analysing.
@@ -293,7 +505,14 @@ export class ColorTools extends ProjectMediaTools {
     `);
   }
 
-  protected async setClipBorderColor(trackIndex: number, clipIndex: number, _r: number, _g: number, _b: number, sequenceId?: string): Promise<any> {
+  protected async setClipBorderColor(
+    trackIndex: number,
+    clipIndex: number,
+    _r: number,
+    _g: number,
+    _b: number,
+    sequenceId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       app.enableQE(); ${this.qeClipScript(trackIndex, clipIndex, sequenceId)}
       if (!__clip) return JSON.stringify({success:false,error:'Clip not found'});
@@ -328,8 +547,18 @@ export class ColorTools extends ProjectMediaTools {
     return await this.setColorSpaceOverride(projectItemId, colorSpaceName);
   }
 
-  protected async applyLutToClip(trackIndex: number, clipIndex: number, lutPath: string, sequenceId?: string, installIfMissing?: boolean): Promise<any> {
-    return await this.applyLutByRenderMatch({ trackIndex, clipIndex, sequenceId }, lutPath, installIfMissing === true);
+  protected async applyLutToClip(
+    trackIndex: number,
+    clipIndex: number,
+    lutPath: string,
+    sequenceId?: string,
+    installIfMissing?: boolean,
+  ): Promise<any> {
+    return await this.applyLutByRenderMatch(
+      { trackIndex, clipIndex, sequenceId },
+      lutPath,
+      installIfMissing === true,
+    );
   }
 
   /**
@@ -346,9 +575,23 @@ export class ColorTools extends ProjectMediaTools {
    * into the user LUT folder Premiere scans at launch, and the caller is told a restart is needed.
    * Upper-track clips covering the probe frame are disabled while probing and restored after.
    */
-  protected async applyLutByRenderMatch(target: { clipId?: string | undefined; trackIndex?: number | undefined; clipIndex?: number | undefined; sequenceId?: string | undefined }, lutPath: string, installIfMissing: boolean): Promise<any> {
-    if (!lutPath || !fsSync.existsSync(lutPath)) return { success: false, error: `LUT file not found: ${lutPath}` };
-    if (!/\.cube$/i.test(lutPath)) return { success: false, error: 'Only .cube LUTs can be verified (ffmpeg renders the reference from the file).' };
+  protected async applyLutByRenderMatch(
+    target: {
+      clipId?: string | undefined;
+      trackIndex?: number | undefined;
+      clipIndex?: number | undefined;
+      sequenceId?: string | undefined;
+    },
+    lutPath: string,
+    installIfMissing: boolean,
+  ): Promise<any> {
+    if (!lutPath || !fsSync.existsSync(lutPath))
+      return { success: false, error: `LUT file not found: ${lutPath}` };
+    if (!/\.cube$/i.test(lutPath))
+      return {
+        success: false,
+        error: 'Only .cube LUTs can be verified (ffmpeg renders the reference from the file).',
+      };
     const locate = target.clipId
       ? `var f = __findClip(${JSON.stringify(target.clipId)}, ${JSON.stringify(target.sequenceId ?? null)});`
       : `var sq0 = ${this.buildSeqRes(target.sequenceId)}; var tr0 = sq0.videoTracks[${Number(target.trackIndex ?? 0)}]; var cl0 = tr0 ? tr0.clips[${Number(target.clipIndex ?? 0)}] : null;
@@ -389,15 +632,19 @@ export class ColorTools extends ProjectMediaTools {
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
     if (!prep || prep.success === false) return prep;
-    const setIdx = (idx: number) => this.bridge.executeScript(`
+    const setIdx = (idx: number) =>
+      this.bridge.executeScript(
+        `
       try {
         var f = __findClip(${JSON.stringify(prep.clipId)}, ${JSON.stringify(prep.sequenceId)});
         var lum = null; for (var i = 0; i < f.clip.components.numItems; i++) if (String(f.clip.components[i].displayName) === 'Lumetri Color') lum = f.clip.components[i];
         lum.properties[${prep.slot}].setValue(${'${idx}'}, true);
         return JSON.stringify({success:true,now:Number(lum.properties[${prep.slot}].getValue())});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
-    `.replace('${idx}', String(idx)));
-    const restoreHidden = () => this.bridge.executeScript(`
+    `.replace('${idx}', String(idx)),
+      );
+    const restoreHidden = () =>
+      this.bridge.executeScript(`
       try {
         var ids = ${JSON.stringify(prep.hidden)};
         var seq = __findSequence(${JSON.stringify(prep.sequenceId)});
@@ -411,29 +658,51 @@ export class ColorTools extends ProjectMediaTools {
     const work = fsSync.mkdtempSync(pathSync.join(osSync.tmpdir(), 'premiere-mcp-lut-'));
     const capture = async (name: string) => {
       const out = pathSync.join(work, `${name}.png`);
-      const r: any = await (this as any).executeTool('capture_program_output', { sequenceId: prep.sequenceId, time: prep.at, format: 'png', outputPath: out });
+      const r: any = await (this as any).executeTool('capture_program_output', {
+        sequenceId: prep.sequenceId,
+        time: prep.at,
+        format: 'png',
+        outputPath: out,
+      });
       return r && r.success !== false && fsSync.existsSync(out) ? out : null;
     };
     const psnr = (a: string, b: string): number => {
-      const txt = runFf('ffmpeg', ['-hide_banner', '-i', a, '-i', b, '-lavfi', 'psnr', '-f', 'null', '-'], { timeoutMs: 30000, mergeStderr: true });
+      const txt = runFf(
+        'ffmpeg',
+        ['-hide_banner', '-i', a, '-i', b, '-lavfi', 'psnr', '-f', 'null', '-'],
+        { timeoutMs: 30000, mergeStderr: true },
+      );
       const m = /average:(inf|[\d.]+)/.exec(txt);
       return m ? (m[1] === 'inf' ? 99 : Number(m[1])) : 0;
     };
     try {
       const base = await capture('base');
-      if (!base) return { success: false, error: 'Could not capture the clip frame to verify against.' };
+      if (!base)
+        return { success: false, error: 'Could not capture the clip frame to verify against.' };
       const ref = pathSync.join(work, 'ref.png');
       // ffmpeg's lut3d parser is stricter than Premiere's about filter-graph escaping; copy to a plain path.
       const lutCopy = pathSync.join(work, 'lut.cube');
       fsSync.copyFileSync(lutPath, lutCopy);
-      runFf('ffmpeg', ['-v', 'error', '-y', '-i', base, '-vf', `lut3d=file=${lutCopy}`, ref], { timeoutMs: 60000 });
-      if (!fsSync.existsSync(ref)) return { success: false, error: 'ffmpeg could not apply the LUT to the reference frame (is the .cube valid?).' };
+      runFf('ffmpeg', ['-v', 'error', '-y', '-i', base, '-vf', `lut3d=file=${lutCopy}`, ref], {
+        timeoutMs: 60000,
+      });
+      if (!fsSync.existsSync(ref))
+        return {
+          success: false,
+          error: 'ffmpeg could not apply the LUT to the reference frame (is the .cube valid?).',
+        };
       // A LUT that leaves this frame unchanged (an identity, or a no-op on this footage) has
       // nothing to match against: every dropdown entry would be "closest" by accident.
       if (psnr(ref, base) >= 45) {
         await setIdx(prep.before);
-        return { success: false, verified: true, lutPath, restoredInputLutIndex: prep.before,
-          error: 'This LUT does not change this clip\'s frame (it is an identity or a no-op on this footage), so which dropdown entry it is cannot be verified. Nothing was changed.' };
+        return {
+          success: false,
+          verified: true,
+          lutPath,
+          restoredInputLutIndex: prep.before,
+          error:
+            "This LUT does not change this clip's frame (it is an identity or a no-op on this footage), so which dropdown entry it is cannot be verified. Nothing was changed.",
+        };
       }
       const scores: Array<{ index: number; psnr: number }> = [];
       for (let idx = 1; idx <= prep.maxIdx; idx++) {
@@ -449,40 +718,77 @@ export class ColorTools extends ProjectMediaTools {
       const runnerUp = scores[1];
       // 32 dB, not 30: the wrong entry nearest an unlisted LUT reached 29.9 dB in testing, while
       // right entries matched at 34-38 dB.
-      const confident = !!best && best.psnr >= 32 && (!runnerUp || best.psnr - runnerUp.psnr >= 3 || best.psnr >= 45);
+      const confident =
+        !!best &&
+        best.psnr >= 32 &&
+        (!runnerUp || best.psnr - runnerUp.psnr >= 3 || best.psnr >= 45);
       if (confident) {
         await setIdx(best!.index);
-        return { success: true, verified: true, verifiedBy: 'render of the chosen Input LUT index matched ffmpeg lut3d of the ungraded frame',
-          lutPath, inputLutIndex: best!.index, matchPsnrDb: best!.psnr, runnerUpPsnrDb: runnerUp?.psnr ?? null, addedLumetri: prep.addedLumetri,
-          note: best!.psnr < 34 ? 'Matched, but the clip carries other Lumetri corrections, which make the match looser.' : undefined };
+        return {
+          success: true,
+          verified: true,
+          verifiedBy:
+            'render of the chosen Input LUT index matched ffmpeg lut3d of the ungraded frame',
+          lutPath,
+          inputLutIndex: best!.index,
+          matchPsnrDb: best!.psnr,
+          runnerUpPsnrDb: runnerUp?.psnr ?? null,
+          addedLumetri: prep.addedLumetri,
+          note:
+            best!.psnr < 34
+              ? 'Matched, but the clip carries other Lumetri corrections, which make the match looser.'
+              : undefined,
+        };
       }
       await setIdx(prep.before);
       let installed: string | null = null;
       if (installIfMissing) {
-        const dir = pathSync.join(osSync.homedir(), 'Library', 'Application Support', 'Adobe', 'Common', 'LUTs', 'Input');
+        const dir = pathSync.join(
+          osSync.homedir(),
+          'Library',
+          'Application Support',
+          'Adobe',
+          'Common',
+          'LUTs',
+          'Input',
+        );
         fsSync.mkdirSync(dir, { recursive: true });
         installed = pathSync.join(dir, pathSync.basename(lutPath));
         fsSync.copyFileSync(lutPath, installed);
       }
-      return { success: false, verified: true, lutPath, candidates: scores.slice(0, 4), restoredInputLutIndex: prep.before,
+      return {
+        success: false,
+        verified: true,
+        lutPath,
+        candidates: scores.slice(0, 4),
+        restoredInputLutIndex: prep.before,
         installedTo: installed,
         error: installed
           ? `This LUT is not in Premiere's Input LUT list yet. It has been copied to ${installed}; restart Premiere, then run this again.`
-          : 'This LUT is not in Premiere\'s Input LUT list (no dropdown entry renders like it), so it cannot be selected from script. Pass installIfMissing:true to copy it into the user LUT folder (a Premiere restart is needed before it appears), or use the Browse... entry by hand.' };
+          : "This LUT is not in Premiere's Input LUT list (no dropdown entry renders like it), so it cannot be selected from script. Pass installIfMissing:true to copy it into the user LUT folder (a Premiere restart is needed before it appears), or use the Browse... entry by hand.",
+      };
     } finally {
       await restoreHidden();
-      try { fsSync.rmSync(work, { recursive: true, force: true }); } catch { /* temp */ }
+      try {
+        fsSync.rmSync(work, { recursive: true, force: true });
+      } catch {
+        /* temp */
+      }
     }
   }
 
   /** Map a scope name to its (verified) ffmpeg video filter. */
   private scopeFilter(scope: string): string {
     switch (scope) {
-      case 'vectorscope': return 'vectorscope';
-      case 'histogram': return 'histogram';
-      case 'rgb_parade': return 'waveform=display=parade:components=7';
+      case 'vectorscope':
+        return 'vectorscope';
+      case 'histogram':
+        return 'histogram';
+      case 'rgb_parade':
+        return 'waveform=display=parade:components=7';
       case 'waveform':
-      default: return 'waveform';
+      default:
+        return 'waveform';
     }
   }
 
@@ -508,7 +814,8 @@ export class ColorTools extends ProjectMediaTools {
       if (resolved.error) return { success: false, error: resolved.error };
       resolvedPath = resolved.path;
     }
-    if (!resolvedPath) return { success: false, error: 'Provide either mediaPath or projectItemId' };
+    if (!resolvedPath)
+      return { success: false, error: 'Provide either mediaPath or projectItemId' };
 
     try {
       await fs.access(resolvedPath, fsConstants.R_OK);
@@ -525,18 +832,36 @@ export class ColorTools extends ProjectMediaTools {
       };
     }
 
-    const outPng = (outputPath && outputPath.trim())
-      || join(dirname(resolvedPath), `${basename(resolvedPath, extname(resolvedPath))}_${scope}.png`);
+    const outPng =
+      (outputPath && outputPath.trim()) ||
+      join(dirname(resolvedPath), `${basename(resolvedPath, extname(resolvedPath))}_${scope}.png`);
     const filter = this.scopeFilter(scope);
     const seek = Math.max(0, timeSeconds);
 
     return await new Promise((resolve) => {
-      const argv = ['-y', '-ss', String(seek), '-i', resolvedPath as string, '-frames:v', '1', '-vf', filter, outPng];
+      const argv = [
+        '-y',
+        '-ss',
+        String(seek),
+        '-i',
+        resolvedPath as string,
+        '-frames:v',
+        '1',
+        '-vf',
+        filter,
+        outPng,
+      ];
       const proc = spawn(ffmpeg, argv);
       let stderr = '';
-      proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+      proc.stderr.on('data', (chunk) => {
+        stderr += chunk.toString();
+      });
       proc.on('error', (err) => {
-        resolve({ success: false, error: `Failed to run ffmpeg ('${ffmpeg}'): ${err.message}`, mediaPath: resolvedPath });
+        resolve({
+          success: false,
+          error: `Failed to run ffmpeg ('${ffmpeg}'): ${err.message}`,
+          mediaPath: resolvedPath,
+        });
       });
       proc.on('close', async (code) => {
         // Verify-after-write: the PNG must actually exist before we claim success.
@@ -552,7 +877,11 @@ export class ColorTools extends ProjectMediaTools {
           return;
         }
         let sizeBytes: number | undefined;
-        try { sizeBytes = (await fs.stat(outPng)).size; } catch { /* size is best-effort */ }
+        try {
+          sizeBytes = (await fs.stat(outPng)).size;
+        } catch {
+          /* size is best-effort */
+        }
         resolve({
           success: true,
           scope,
@@ -579,7 +908,7 @@ export class ColorTools extends ProjectMediaTools {
     clipId: string,
     requestedParams: Record<string, number | string>,
     label: string,
-    extra: Record<string, unknown> = {}
+    extra: Record<string, unknown> = {},
   ): Promise<any> {
     const script = `
       try {
@@ -597,9 +926,18 @@ export class ColorTools extends ProjectMediaTools {
         if (!qeClip) return JSON.stringify({ success: false, error: "Could not address the clip through the QE API." });
         var effect = qe.project.getVideoEffectByName("Lumetri Color");
         if (!effect) return JSON.stringify({ success: false, error: "Lumetri Color effect not found" });
-        qeClip.addVideoEffect(effect);
         var clip = info.clip;
-        var lastComp = clip.components[clip.components.numItems - 1];
+        function lumetris() {
+          var out = [];
+          for (var q = 0; q < clip.components.numItems; q++) if (String(clip.components[q].matchName) === "AE.ADBE Lumetri") out.push(clip.components[q]);
+          return out;
+        }
+        var lumBefore = lumetris().length;
+        qeClip.addVideoEffect(effect);
+        // The new Lumetri by internal name: Premiere does not always append effects last.
+        var lumAfter = lumetris();
+        if (lumAfter.length <= lumBefore) return JSON.stringify({ success: false, verified: true, error: "Lumetri Color was not added to the clip." });
+        var lastComp = lumAfter[lumAfter.length - 1];
 
         function normalizeName(s) { return String(s).toLowerCase().replace(/[\\s_-]+/g, ''); }
         function valuesEquivalent(actual, requested) {
@@ -701,20 +1039,23 @@ export class ColorTools extends ProjectMediaTools {
   protected async colorCorrect(clipId: string, adjustments: any): Promise<any> {
     const requested: Record<string, number> = {};
     // brightness and exposure are the same Lumetri parameter; an explicit exposure wins.
-    if (adjustments.brightness !== undefined) requested["Exposure"] = adjustments.brightness;
-    if (adjustments.exposure !== undefined) requested["Exposure"] = adjustments.exposure;
-    if (adjustments.contrast !== undefined) requested["Contrast"] = adjustments.contrast;
-    if (adjustments.saturation !== undefined) requested["Saturation"] = adjustments.saturation;
-    if (adjustments.vibrance !== undefined) requested["Vibrance"] = adjustments.vibrance;
-    if (adjustments.highlights !== undefined) requested["Highlights"] = adjustments.highlights;
-    if (adjustments.shadows !== undefined) requested["Shadows"] = adjustments.shadows;
-    if (adjustments.whites !== undefined) requested["Whites"] = adjustments.whites;
-    if (adjustments.blacks !== undefined) requested["Blacks"] = adjustments.blacks;
-    if (adjustments.temperature !== undefined) requested["Temperature"] = adjustments.temperature;
-    if (adjustments.tint !== undefined) requested["Tint"] = adjustments.tint;
+    if (adjustments.brightness !== undefined) requested['Exposure'] = adjustments.brightness;
+    if (adjustments.exposure !== undefined) requested['Exposure'] = adjustments.exposure;
+    if (adjustments.contrast !== undefined) requested['Contrast'] = adjustments.contrast;
+    if (adjustments.saturation !== undefined) requested['Saturation'] = adjustments.saturation;
+    if (adjustments.vibrance !== undefined) requested['Vibrance'] = adjustments.vibrance;
+    if (adjustments.highlights !== undefined) requested['Highlights'] = adjustments.highlights;
+    if (adjustments.shadows !== undefined) requested['Shadows'] = adjustments.shadows;
+    if (adjustments.whites !== undefined) requested['Whites'] = adjustments.whites;
+    if (adjustments.blacks !== undefined) requested['Blacks'] = adjustments.blacks;
+    if (adjustments.temperature !== undefined) requested['Temperature'] = adjustments.temperature;
+    if (adjustments.tint !== undefined) requested['Tint'] = adjustments.tint;
 
     const unsupported: string[] = [];
-    if (adjustments.hue !== undefined) unsupported.push('hue (Lumetri Basic Correction exposes no Hue parameter on this build; use vibrance or saturation, or a Hue/Saturation Curves preset)');
+    if (adjustments.hue !== undefined)
+      unsupported.push(
+        'hue (Lumetri Basic Correction exposes no Hue parameter on this build; use vibrance or saturation, or a Hue/Saturation Curves preset)',
+      );
 
     if (Object.keys(requested).length === 0) {
       return {
@@ -736,23 +1077,40 @@ export class ColorTools extends ProjectMediaTools {
       success: false,
       unsupported,
       appliedAnyway: result?.applied ?? 0,
-      error: [result?.error, `Unsupported on this build and NOT applied: ${unsupported.join('; ')}.`]
-        .filter(Boolean).join(' '),
+      error: [
+        result?.error,
+        `Unsupported on this build and NOT applied: ${unsupported.join('; ')}.`,
+      ]
+        .filter(Boolean)
+        .join(' '),
     };
   }
 
-  protected async applyLut(clipId: string, lutPath: string, _intensity = 100, installIfMissing?: boolean): Promise<any> {
+  protected async applyLut(
+    clipId: string,
+    lutPath: string,
+    _intensity = 100,
+    installIfMissing?: boolean,
+  ): Promise<any> {
     return await this.applyLutByRenderMatch({ clipId }, lutPath, installIfMissing === true);
   }
 
-  protected async lumetriHslSecondarySet(trackIndex: number, clipIndex: number, params: any, seqId?: string): Promise<any> {
+  protected async lumetriHslSecondarySet(
+    trackIndex: number,
+    clipIndex: number,
+    params: any,
+    seqId?: string,
+  ): Promise<any> {
     const sets = [];
     if (params.showMask !== undefined) sets.push(`props[88].setValue(${params.showMask},true);`);
-    if (params.invertMask !== undefined) sets.push(`props[90].setValue(${params.invertMask},true);`);
-    if (params.temperature !== undefined) sets.push(`props[101].setValue(${params.temperature},true);`);
+    if (params.invertMask !== undefined)
+      sets.push(`props[90].setValue(${params.invertMask},true);`);
+    if (params.temperature !== undefined)
+      sets.push(`props[101].setValue(${params.temperature},true);`);
     if (params.tint !== undefined) sets.push(`props[102].setValue(${params.tint},true);`);
     if (params.contrast !== undefined) sets.push(`props[103].setValue(${params.contrast},true);`);
-    if (params.saturation !== undefined) sets.push(`props[105].setValue(${params.saturation},true);`);
+    if (params.saturation !== undefined)
+      sets.push(`props[105].setValue(${params.saturation},true);`);
     if (params.denoise !== undefined) sets.push(`props[95].setValue(${params.denoise},true);`);
     if (params.blur !== undefined) sets.push(`props[96].setValue(${params.blur},true);`);
     return await this.bridge.executeScript(`
@@ -772,32 +1130,100 @@ export class ColorTools extends ProjectMediaTools {
     try {
       // signalstats per frame, printed by the metadata filter to stdout. The old movie= source put
       // the path inside a filtergraph unescaped and through a shell.
-      const out = runFf('ffmpeg', ['-hide_banner', '-nostats', '-loglevel', 'error', '-i', mediaPath, '-an', '-vf', 'signalstats,metadata=print:file=-', '-f', 'null', '-'], { timeoutMs: 180000 });
-      let frames = 0, illegalHigh = 0, illegalLow = 0;
+      const out = runFf(
+        'ffmpeg',
+        [
+          '-hide_banner',
+          '-nostats',
+          '-loglevel',
+          'error',
+          '-i',
+          mediaPath,
+          '-an',
+          '-vf',
+          'signalstats,metadata=print:file=-',
+          '-f',
+          'null',
+          '-',
+        ],
+        { timeoutMs: 180000 },
+      );
+      let frames = 0,
+        illegalHigh = 0,
+        illegalLow = 0;
       for (const l of out.split('\n')) {
         if (l.startsWith('frame:')) frames++;
-        const hi = l.match(/^lavfi\.signalstats\.YMAX=(\d+)/); if (hi && Number(hi[1]) > 235) illegalHigh++;
-        const lo = l.match(/^lavfi\.signalstats\.YMIN=(\d+)/); if (lo && Number(lo[1]) < 16) illegalLow++;
+        const hi = l.match(/^lavfi\.signalstats\.YMAX=(\d+)/);
+        if (hi && Number(hi[1]) > 235) illegalHigh++;
+        const lo = l.match(/^lavfi\.signalstats\.YMIN=(\d+)/);
+        if (lo && Number(lo[1]) < 16) illegalLow++;
       }
-      if (frames === 0) return { success: false, error: 'ffmpeg decoded no video frames from this file, so nothing was measured.' };
-      return { success: true, totalFrames: frames, illegalHighFrames: illegalHigh, illegalLowFrames: illegalLow, broadcastSafe: illegalHigh === 0 && illegalLow === 0, note: 'Limits are 8-bit studio range: luma above 235 or below 16.' };
-    } catch (e: any) { return { success: false, error: e.message }; }
+      if (frames === 0)
+        return {
+          success: false,
+          error: 'ffmpeg decoded no video frames from this file, so nothing was measured.',
+        };
+      return {
+        success: true,
+        totalFrames: frames,
+        illegalHighFrames: illegalHigh,
+        illegalLowFrames: illegalLow,
+        broadcastSafe: illegalHigh === 0 && illegalLow === 0,
+        note: 'Limits are 8-bit studio range: luma above 235 or below 16.',
+      };
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
   }
 
-  protected extractPalette(mediaPath: string, startSecs = 0, durationSecs = 10, colorCount = 8): any {
-    const os = osSync, path = pathSync;
+  protected extractPalette(
+    mediaPath: string,
+    startSecs = 0,
+    durationSecs = 10,
+    colorCount = 8,
+  ): any {
+    const os = osSync,
+      path = pathSync;
     const palettePath = path.join(os.tmpdir(), 'mcp_palette.png');
     try {
       // stats_mode=single emits one palette PER FRAME, which the image2 muxer cannot write
       // to a single output path ("Conversion failed!"). The default (stats_mode=full)
       // computes one palette across the whole range, and -frames:v 1 pins the output to
       // exactly one image.
-      runFf('ffmpeg', ['-y', '-ss', String(startSecs), '-t', String(durationSecs), '-i', mediaPath, '-vf', `palettegen=max_colors=${Number(colorCount)}`, '-frames:v', '1', '-update', '1', palettePath], { timeoutMs: 30000 });
-      return { success: true, palettePath, note: 'Palette PNG written. Use image tools to extract hex values from the palette image.' };
-    } catch (e: any) { return { success: false, error: e.message }; }
+      runFf(
+        'ffmpeg',
+        [
+          '-y',
+          '-ss',
+          String(startSecs),
+          '-t',
+          String(durationSecs),
+          '-i',
+          mediaPath,
+          '-vf',
+          `palettegen=max_colors=${Number(colorCount)}`,
+          '-frames:v',
+          '1',
+          '-update',
+          '1',
+          palettePath,
+        ],
+        { timeoutMs: 30000 },
+      );
+      return {
+        success: true,
+        palettePath,
+        note: 'Palette PNG written. Use image tools to extract hex values from the palette image.',
+      };
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
   }
 
-  protected async setColorSpaceOverride(projectItemId: string, colorSpaceName: string): Promise<any> {
+  protected async setColorSpaceOverride(
+    projectItemId: string,
+    colorSpaceName: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var item=${this.findItemById(projectItemId)};
@@ -825,7 +1251,13 @@ export class ColorTools extends ProjectMediaTools {
     `);
   }
 
-  protected async matchShotColor(srcTrack: number, srcClip: number, tgtTrack: number, tgtClip: number, seqId?: string): Promise<any> {
+  protected async matchShotColor(
+    srcTrack: number,
+    srcClip: number,
+    tgtTrack: number,
+    tgtClip: number,
+    seqId?: string,
+  ): Promise<any> {
     // Copies every Lumetri Color value the host will read and write, matched by position AND
     // display name (both clips carry the same Lumetri layout), and reads each one back. The old
     // version copied nine Basic parameters, swallowed every write error, reported a count with no
@@ -864,7 +1296,12 @@ export class ColorTools extends ProjectMediaTools {
     `);
   }
 
-  protected async gradeSnapshot(trackIndex: number, clipIndex: number, outputPath: string, seqId?: string): Promise<any> {
+  protected async gradeSnapshot(
+    trackIndex: number,
+    clipIndex: number,
+    outputPath: string,
+    seqId?: string,
+  ): Promise<any> {
     const result = await this.bridge.executeScript(`
       try {
         var clip=${this.buildSeqRes(seqId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
@@ -888,8 +1325,12 @@ export class ColorTools extends ProjectMediaTools {
     `);
     if (result && result.success) {
       const fs = fsSync;
-      try { fs.writeFileSync(outputPath, JSON.stringify(result.grade, null, 2)); return { ...result, outputPath, written: true }; }
-      catch (e: any) { return { ...result, outputPath, written: false, writeError: e.message }; }
+      try {
+        fs.writeFileSync(outputPath, JSON.stringify(result.grade, null, 2));
+        return { ...result, outputPath, written: true };
+      } catch (e: any) {
+        return { ...result, outputPath, written: false, writeError: e.message };
+      }
     }
     return result;
   }
@@ -900,15 +1341,50 @@ export class ColorTools extends ProjectMediaTools {
       // `r`, which lutrgb does not define, so ffmpeg rejected it on every call. After format=gray the
       // three channels all carry luma, so each band can be painted from it: clipped highlights
       // (>235) red, crushed blacks (<16) blue, the 18%-grey/skin band (110-140) green, the rest grey.
-      const band = (hi: number, lo: number, mid: number) => `'if(gt(val,235),${hi},if(lt(val,16),${lo},if(between(val,110,140),${mid},val)))'`;
+      const band = (hi: number, lo: number, mid: number) =>
+        `'if(gt(val,235),${hi},if(lt(val,16),${lo},if(between(val,110,140),${mid},val)))'`;
       const vf = `scale=1280:-2,format=gray,format=rgb24,lutrgb=r=${band(255, 0, 0)}:g=${band(0, 0, 255)}:b=${band(0, 255, 0)}`;
       const fs = fsSync;
       const before = fs.existsSync(outputPath) ? fs.statSync(outputPath).mtimeMs : null;
-      runFf('ffmpeg', ['-y', '-loglevel', 'error', '-ss', String(timeSecs), '-i', mediaPath, '-frames:v', '1', '-update', '1', '-vf', vf, outputPath], { timeoutMs: 20000 });
+      runFf(
+        'ffmpeg',
+        [
+          '-y',
+          '-loglevel',
+          'error',
+          '-ss',
+          String(timeSecs),
+          '-i',
+          mediaPath,
+          '-frames:v',
+          '1',
+          '-update',
+          '1',
+          '-vf',
+          vf,
+          outputPath,
+        ],
+        { timeoutMs: 20000 },
+      );
       const st = fs.existsSync(outputPath) ? fs.statSync(outputPath) : null;
-      if (!st || st.size === 0 || (before !== null && st.mtimeMs === before)) return { success: false, error: 'ffmpeg ran but no new image was written to outputPath.' };
-      return { success: true, verified: true, verifiedBy: 'output file written', outputPath, bytes: st.size, legend: { red: 'luma > 235 (clipped)', blue: 'luma < 16 (crushed)', green: 'luma 110-140 (mid grey / skin)', grey: 'everything else' } };
-    } catch (e: any) { return { success: false, error: e.message }; }
+      if (!st || st.size === 0 || (before !== null && st.mtimeMs === before))
+        return { success: false, error: 'ffmpeg ran but no new image was written to outputPath.' };
+      return {
+        success: true,
+        verified: true,
+        verifiedBy: 'output file written',
+        outputPath,
+        bytes: st.size,
+        legend: {
+          red: 'luma > 235 (clipped)',
+          blue: 'luma < 16 (crushed)',
+          green: 'luma 110-140 (mid grey / skin)',
+          grey: 'everything else',
+        },
+      };
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
   }
 
   protected async getColorManagementOptions(): Promise<any> {
@@ -1009,8 +1485,11 @@ export class ColorTools extends ProjectMediaTools {
   }
 
   protected async verifyColorGrade(
-    _seqId: string | undefined, trackIndex: number, clipIndex: number,
-    gradeParams: Record<string, number>, outputDir = generatedAssetsDir()
+    seqId: string | undefined,
+    trackIndex: number,
+    clipIndex: number,
+    gradeParams: Record<string, number>,
+    outputDir = generatedAssetsDir(),
   ): Promise<any> {
     const pathMod = pathSync;
     const fs = fsSync;
@@ -1021,7 +1500,7 @@ export class ColorTools extends ProjectMediaTools {
     // Get clip media path
     const mediaInfo: any = await this.bridge.executeScript(`
       try {
-        var clip = app.project.activeSequence.videoTracks[${trackIndex}].clips[${clipIndex}];
+        var clip = ${this.buildSeqRes(seqId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
         var mediaPath = clip.projectItem ? String(clip.projectItem.getMediaPath()) : '';
         var midSecs = (clip.start.seconds + clip.end.seconds) / 2;
@@ -1032,19 +1511,49 @@ export class ColorTools extends ProjectMediaTools {
     if (!mediaInfo?.success) return { success: false, error: mediaInfo?.error, verified: false };
 
     try {
-      runFf('ffmpeg', ['-y', '-ss', String(mediaInfo.sourceTimeSecs), '-i', String(mediaInfo.mediaPath), '-frames:v', '1', '-update', '1', frameBefore], { timeoutMs: 15000 });
-    } catch (e: any) { return { success: false, error: 'Pre-grade capture failed', verified: false }; }
+      runFf(
+        'ffmpeg',
+        [
+          '-y',
+          '-ss',
+          String(mediaInfo.sourceTimeSecs),
+          '-i',
+          String(mediaInfo.mediaPath),
+          '-frames:v',
+          '1',
+          '-update',
+          '1',
+          frameBefore,
+        ],
+        { timeoutMs: 15000 },
+      );
+    } catch (e: any) {
+      return { success: false, error: 'Pre-grade capture failed', verified: false };
+    }
 
     // Apply grade params
-    const paramMap: Record<string, number> = { exposure: 19, contrast: 20, highlights: 21, shadows: 22, whites: 23, blacks: 24, temperature: 14, tint: 15, saturation: 16 };
+    const paramMap: Record<string, number> = {
+      exposure: 19,
+      contrast: 20,
+      highlights: 21,
+      shadows: 22,
+      whites: 23,
+      blacks: 24,
+      temperature: 14,
+      tint: 15,
+      saturation: 16,
+    };
     const setStatements = Object.entries(gradeParams)
       .filter(([k]) => paramMap[k] !== undefined)
-      .map(([k, v]) => `try { lumetriComp.properties[${paramMap[k]}].setValue(${v}, true); } catch(ep) {}`)
+      .map(
+        ([k, v]) =>
+          `try { lumetriComp.properties[${paramMap[k]}].setValue(${v}, true); } catch(ep) {}`,
+      )
       .join('\n        ');
 
     const gradeResult: any = await this.bridge.executeScript(`
       try {
-        var clip = app.project.activeSequence.videoTracks[${trackIndex}].clips[${clipIndex}];
+        var clip = ${this.buildSeqRes(seqId)}.videoTracks[${trackIndex}].clips[${clipIndex}];
         var lumetriComp = null;
         for (var i = 0; i < clip.components.numItems; i++) {
           if (String(clip.components[i].displayName).indexOf('Lumetri') >= 0) { lumetriComp = clip.components[i]; break; }
@@ -1054,15 +1563,42 @@ export class ColorTools extends ProjectMediaTools {
         return JSON.stringify({success:true,paramsSet:${JSON.stringify(Object.keys(gradeParams))}});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
-    if (!gradeResult?.success) return { success: false, error: 'Grade apply failed: ' + gradeResult?.error, verified: false };
+    if (!gradeResult?.success)
+      return {
+        success: false,
+        error: 'Grade apply failed: ' + gradeResult?.error,
+        verified: false,
+      };
 
     try {
-      runFf('ffmpeg', ['-y', '-ss', String(mediaInfo.sourceTimeSecs), '-i', String(mediaInfo.mediaPath), '-frames:v', '1', '-update', '1', frameAfter], { timeoutMs: 15000 });
-      const psnrOut = runFf('ffmpeg', ['-hide_banner', '-i', frameBefore, '-i', frameAfter, '-lavfi', 'psnr', '-f', 'null', '-'], { timeoutMs: 10000, mergeStderr: true });
+      runFf(
+        'ffmpeg',
+        [
+          '-y',
+          '-ss',
+          String(mediaInfo.sourceTimeSecs),
+          '-i',
+          String(mediaInfo.mediaPath),
+          '-frames:v',
+          '1',
+          '-update',
+          '1',
+          frameAfter,
+        ],
+        { timeoutMs: 15000 },
+      );
+      const psnrOut = runFf(
+        'ffmpeg',
+        ['-hide_banner', '-i', frameBefore, '-i', frameAfter, '-lavfi', 'psnr', '-f', 'null', '-'],
+        { timeoutMs: 10000, mergeStderr: true },
+      );
       const match = psnrOut.match(/psnr_avg:(\S+)/);
       const psnr = match?.[1] ? parseFloat(match[1]) : null;
       const gradeLanded = psnr !== null && psnr < 45;
-      try { fs.unlinkSync(frameBefore); fs.unlinkSync(frameAfter); } catch(_) {}
+      try {
+        fs.unlinkSync(frameBefore);
+        fs.unlinkSync(frameAfter);
+      } catch (_) {}
       return {
         success: true,
         verified: gradeLanded,
@@ -1071,14 +1607,22 @@ export class ColorTools extends ProjectMediaTools {
         gradeParams,
         note: gradeLanded
           ? `Grade confirmed: rendered output changed (PSNR ${psnr?.toFixed(1)}dB).`
-          : `Grade may not have rendered yet (PSNR ${psnr?.toFixed(1)}dB — frames identical). Try render_sequence_previews first.`
+          : `Grade may not have rendered yet (PSNR ${psnr?.toFixed(1)}dB — frames identical). Try render_sequence_previews first.`,
       };
     } catch (e: any) {
-      return { success: false, error: e.message?.slice(0,100), verified: false };
+      return { success: false, error: e.message?.slice(0, 100), verified: false };
     }
   }
 
-  protected async setMogrtColor(seqId: string|undefined, trackIndex: number, clipIndex: number, paramName: string, r: number, g: number, b: number): Promise<any> {
+  protected async setMogrtColor(
+    seqId: string | undefined,
+    trackIndex: number,
+    clipIndex: number,
+    paramName: string,
+    r: number,
+    g: number,
+    b: number,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var clip = ${this.buildSeqRes(seqId)}.videoTracks[${trackIndex}].clips[${clipIndex}];

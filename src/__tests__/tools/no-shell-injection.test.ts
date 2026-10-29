@@ -41,17 +41,32 @@ describe('no shell between tools and ffmpeg', () => {
   const marker = join(tmpdir(), `premiere-mcp-injection-${process.pid}`);
   const hostile = `/nonexistent/x"; touch ${marker}; echo "$(touch ${marker})\`touch ${marker}\``;
   const bridge = {
-    executeScript: async () => ({ success: true, mediaPath: hostile, path: hostile, sourceTimeSecs: 0, duration: 1 }),
+    executeScript: async () => ({
+      success: true,
+      mediaPath: hostile,
+      path: hostile,
+      sourceTimeSecs: 0,
+      duration: 1,
+    }),
   };
 
-  afterEach(() => { try { rmSync(marker, { force: true }); } catch { /* none */ } });
+  afterEach(() => {
+    try {
+      rmSync(marker, { force: true });
+    } catch {
+      /* none */
+    }
+  });
 
   it.each([
     ['black_frame_scan', { filePath: hostile }],
     ['freeze_frame_scan', { filePath: hostile }],
     ['flash_frame_scan', { filePath: hostile }],
     ['broadcast_safe_check', { mediaPath: hostile }],
-    ['false_color_frame', { mediaPath: hostile, timeSecs: 0, outputPath: join(tmpdir(), 'pmcp-fc.png') }],
+    [
+      'false_color_frame',
+      { mediaPath: hostile, timeSecs: 0, outputPath: join(tmpdir(), 'pmcp-fc.png') },
+    ],
     ['extract_palette', { mediaPath: hostile }],
     ['loudness_report', { filePath: hostile }],
     ['audio_peaks_report', { filePath: hostile }],

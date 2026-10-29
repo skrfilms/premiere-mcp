@@ -56,12 +56,34 @@ export interface FindToolResult {
  * with an inspection verb. Used only to answer `readOnly` filters — it is a naming
  * heuristic, not a capability guarantee, and the result says so.
  */
-const READ_VERB = /^(get|list|read|find|search|inspect|reflect|is|check|detect|probe|validate|verify|lint|diff)_/;
+const READ_VERB =
+  /^(get|list|read|find|search|inspect|reflect|is|check|detect|probe|validate|verify|lint|diff)_/;
 
 /** Split a query into lowercase alphanumeric terms, dropping noise words. */
 const STOP_WORDS = new Set([
-  'a', 'an', 'and', 'the', 'to', 'of', 'for', 'in', 'on', 'with', 'how', 'do', 'i',
-  'my', 'tool', 'tools', 'premiere', 'please', 'can', 'you', 'that', 'this', 'it',
+  'a',
+  'an',
+  'and',
+  'the',
+  'to',
+  'of',
+  'for',
+  'in',
+  'on',
+  'with',
+  'how',
+  'do',
+  'i',
+  'my',
+  'tool',
+  'tools',
+  'premiere',
+  'please',
+  'can',
+  'you',
+  'that',
+  'this',
+  'it',
 ]);
 
 export function tokenizeQuery(query: string): string[] {
@@ -82,9 +104,15 @@ export function tokenizeQuery(query: string): string[] {
  * work; the added terms score a little below the caller's own words.
  */
 const PHRASES: Array<[RegExp, string[]]> = [
-  [/black and white|b ?& ?w\b|\bb\/w\b|monochrome|gr[ae]yscale|desaturat/, ['saturation', 'color', 'correct']],
+  [
+    /black and white|b ?& ?w\b|\bb\/w\b|monochrome|gr[ae]yscale|desaturat/,
+    ['saturation', 'color', 'correct'],
+  ],
   [/subtitle/, ['caption']],
-  [/\bswap\b|new render|new version|\bv\d{2,4}\b|replace (this|the) (shot|clip)/, ['replace', 'media']],
+  [
+    /\bswap\b|new render|new version|\bv\d{2,4}\b|replace (this|the) (shot|clip)/,
+    ['replace', 'media'],
+  ],
   [/speed up|slow ?(mo|motion|down)|faster|slower|retime|time ?remap/, ['speed', 'bake']],
   [/freeze|hold (this|the|that)? ?frame/, ['freeze', 'frame']],
   [/dissolve/, ['transition']],
@@ -105,7 +133,15 @@ const PHRASES: Array<[RegExp, string[]]> = [
  * Kept short and limited to tools people reach for; a hit here counts like a name token.
  */
 const ALIASES: Record<string, string[]> = {
-  color_correct: ['black', 'white', 'desaturate', 'saturation', 'monochrome', 'grayscale', 'greyscale'],
+  color_correct: [
+    'black',
+    'white',
+    'desaturate',
+    'saturation',
+    'monochrome',
+    'grayscale',
+    'greyscale',
+  ],
   replace_clip_media: ['swap', 'render', 'version', 'update', 'replace', 'media'],
   create_caption_track: ['subtitles', 'subtitle', 'caption', 'captions', 'srt'],
   bake_speed_change: ['speed', 'slow', 'faster', 'slower', 'retime', 'bake'],
@@ -121,7 +157,8 @@ const ALIASES: Record<string, string[]> = {
 };
 
 /** Words that make a query an action ("make it...", "add a..."), not a question. */
-const ACTION_VERB = /^(make|add|apply|set|swap|replace|speed|slow|freeze|hold|export|cut|split|zoom|play|drop|grab|lower|raise|fade|duck|close|ripple|remove|delete|create|build|put|turn|trim|crop|insert|place|move|desaturate|reverse|match|normalize)$/;
+const ACTION_VERB =
+  /^(make|add|apply|set|swap|replace|speed|slow|freeze|hold|export|cut|split|zoom|play|drop|grab|lower|raise|fade|duck|close|ripple|remove|delete|create|build|put|turn|trim|crop|insert|place|move|desaturate|reverse|match|normalize)$/;
 const ASK_VERB = /^(get|list|show|what|which|check|is|are|how|count|read|inspect)$/;
 /** Tools that observe rather than change. Pushed down when the ask is an action. */
 const OBSERVER = /^(get|list|is|has|read|inspect|reflect|verify)_|_(scan|report|info)$/;
@@ -129,7 +166,8 @@ const OBSERVER = /^(get|list|is|has|read|inspect|reflect|verify)_|_(scan|report|
 export function expandQuery(query: string): string[] {
   const q = String(query || '').toLowerCase();
   const out: string[] = [];
-  for (const [re, terms] of PHRASES) if (re.test(q)) for (const t of terms) if (out.indexOf(t) === -1) out.push(t);
+  for (const [re, terms] of PHRASES)
+    if (re.test(q)) for (const t of terms) if (out.indexOf(t) === -1) out.push(t);
   return out;
 }
 
@@ -192,8 +230,12 @@ export function findTools(
   const limit = Math.max(1, Math.min(options.limit ?? 15, 100));
   const terms = tokenizeQuery(options.query);
   const expansion = expandQuery(options.query).filter((t) => terms.indexOf(t) === -1);
-  const rawWords = String(options.query || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
-  const actionIntent = rawWords.some((w) => ACTION_VERB.test(w)) && !rawWords.some((w) => ASK_VERB.test(w));
+  const rawWords = String(options.query || '')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  const actionIntent =
+    rawWords.some((w) => ACTION_VERB.test(w)) && !rawWords.some((w) => ASK_VERB.test(w));
   const includeHidden = options.includeHidden !== false;
 
   const scored: FindToolMatch[] = [];
@@ -253,7 +295,7 @@ export function findTools(
   }
 
   // Stable ordering: score desc, then name asc so identical scores don't shuffle.
-  scored.sort((a, b) => (b.score - a.score) || a.name.localeCompare(b.name));
+  scored.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
 
   const matches = scored.slice(0, limit);
   const note = buildNote(terms, scored.length, matches.length, hiddenByProfile, includeHidden);
@@ -281,21 +323,22 @@ function buildNote(
   if (total === 0) {
     return terms.length
       ? `No tool name or description matched ${terms.map((t) => `"${t}"`).join(' / ')}. ` +
-        'Try a single domain noun (marker, transition, caption, proxy, lumetri, keyframe, ' +
-        'export, bin, track) rather than a whole sentence. This search is lexical with a small ' +
-        'editor-vocabulary map, so an unusual synonym may still not match.'
+          'Try a single domain noun (marker, transition, caption, proxy, lumetri, keyframe, ' +
+          'export, bin, track) rather than a whole sentence. This search is lexical with a small ' +
+          'editor-vocabulary map, so an unusual synonym may still not match.'
       : 'Empty query — pass a keyword such as "marker" or "audio fade".';
   }
   const parts = [`${total} match${total === 1 ? '' : 'es'}`];
-  if (returned < total) parts.push(`showing the top ${returned} by relevance (raise limit for more)`);
+  if (returned < total)
+    parts.push(`showing the top ${returned} by relevance (raise limit for more)`);
   if (hidden > 0) {
     parts.push(
       includeHidden
         ? `${hidden} of them are marked exposed:false — they exist in this build but the active ` +
-          'tool profile hides them, so calling one will fail until the profile is widened ' +
-          '(see get_capabilities for the active profile)'
+            'tool profile hides them, so calling one will fail until the profile is widened ' +
+            '(see get_capabilities for the active profile)'
         : `${hidden} further match${hidden === 1 ? '' : 'es'} hidden by the active tool profile ` +
-          '(pass includeHidden to see them)',
+            '(pass includeHidden to see them)',
     );
   }
   parts.push('Scores rank within this result set only; they are not confidence values');

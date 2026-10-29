@@ -34,7 +34,7 @@ describe('PremiereProResources', () => {
 
     it('should return all expected resources', () => {
       const availableResources = resources.getAvailableResources();
-      const uris = availableResources.map(r => r.uri);
+      const uris = availableResources.map((r) => r.uri);
 
       expect(uris).toContain('premiere://project/info');
       expect(uris).toContain('premiere://project/sequences');
@@ -54,7 +54,7 @@ describe('PremiereProResources', () => {
     it('should have valid resource structure', () => {
       const availableResources = resources.getAvailableResources();
 
-      availableResources.forEach(resource => {
+      availableResources.forEach((resource) => {
         expect(resource).toHaveProperty('uri');
         expect(resource).toHaveProperty('name');
         expect(resource).toHaveProperty('description');
@@ -69,8 +69,9 @@ describe('PremiereProResources', () => {
 
   describe('readResource()', () => {
     it('should throw error for unknown resource', async () => {
-      await expect(resources.readResource('premiere://unknown/resource'))
-        .rejects.toThrow("Resource 'premiere://unknown/resource' not found");
+      await expect(resources.readResource('premiere://unknown/resource')).rejects.toThrow(
+        "Resource 'premiere://unknown/resource' not found",
+      );
     });
 
     describe('premiere://project/info', () => {
@@ -83,12 +84,12 @@ describe('PremiereProResources', () => {
           settings: {
             scratchDiskPath: '/tmp',
             captureFormat: 'DV',
-            previewFormat: 'H.264'
+            previewFormat: 'H.264',
           },
           statistics: {
             sequenceCount: 3,
-            projectItemCount: 15
-          }
+            projectItemCount: 15,
+          },
         };
 
         mockBridge.executeScript.mockResolvedValue(mockData);
@@ -110,10 +111,10 @@ describe('PremiereProResources', () => {
               frameRate: 29.97,
               duration: 120.5,
               videoTracks: 3,
-              audioTracks: 2
-            }
+              audioTracks: 2,
+            },
           ],
-          totalCount: 1
+          totalCount: 1,
         };
 
         mockBridge.executeScript.mockResolvedValue(mockData);
@@ -135,10 +136,10 @@ describe('PremiereProResources', () => {
               mediaPath: '/path/to/video.mp4',
               duration: 10.5,
               hasVideo: true,
-              hasAudio: true
-            }
+              hasAudio: true,
+            },
           ],
-          totalCount: 1
+          totalCount: 1,
         };
 
         mockBridge.executeScript.mockResolvedValue(mockData);
@@ -157,16 +158,16 @@ describe('PremiereProResources', () => {
               id: 'bin-1',
               name: 'Raw Footage',
               depth: 0,
-              itemCount: 5
+              itemCount: 5,
             },
             {
               id: 'bin-2',
               name: 'Music',
               depth: 0,
-              itemCount: 3
-            }
+              itemCount: 3,
+            },
           ],
-          totalCount: 2
+          totalCount: 2,
         };
 
         mockBridge.executeScript.mockResolvedValue(mockData);
@@ -188,11 +189,11 @@ describe('PremiereProResources', () => {
               trackIndex: 0,
               startTime: 0,
               endTime: 10,
-              duration: 10
-            }
+              duration: 10,
+            },
           ],
           totalCount: 1,
-          activeSequence: 'Main Sequence'
+          activeSequence: 'Main Sequence',
         };
 
         mockBridge.executeScript.mockResolvedValue(mockData);
@@ -215,11 +216,11 @@ describe('PremiereProResources', () => {
               enabled: true,
               locked: false,
               muted: false,
-              clipCount: 5
-            }
+              clipCount: 5,
+            },
           ],
           totalCount: 1,
-          activeSequence: 'Main Sequence'
+          activeSequence: 'Main Sequence',
         };
 
         mockBridge.executeScript.mockResolvedValue(mockData);
@@ -242,11 +243,11 @@ describe('PremiereProResources', () => {
               endTime: 30,
               duration: 30,
               type: 'comment',
-              color: 'green'
-            }
+              color: 'green',
+            },
           ],
           totalCount: 1,
-          activeSequence: 'Main Sequence'
+          activeSequence: 'Main Sequence',
         };
 
         mockBridge.executeScript.mockResolvedValue(mockData);
@@ -265,16 +266,16 @@ describe('PremiereProResources', () => {
               name: 'Gaussian Blur',
               matchName: 'GaussianBlur',
               category: 'Blur & Sharpen',
-              type: 'video'
+              type: 'video',
             },
             {
               name: 'Volume',
               matchName: 'Volume',
               category: 'Audio Effects',
-              type: 'audio'
-            }
+              type: 'audio',
+            },
           ],
-          totalCount: 2
+          totalCount: 2,
         };
 
         mockBridge.executeScript.mockResolvedValue(mockData);
@@ -296,10 +297,10 @@ describe('PremiereProResources', () => {
               effectMatchName: 'GaussianBlur',
               trackType: 'video',
               trackIndex: 0,
-              enabled: true
-            }
+              enabled: true,
+            },
           ],
-          totalCount: 1
+          totalCount: 1,
         };
 
         mockBridge.executeScript.mockResolvedValue(mockData);
@@ -318,16 +319,16 @@ describe('PremiereProResources', () => {
               name: 'Cross Dissolve',
               matchName: 'CrossDissolve',
               category: 'Dissolve',
-              type: 'video'
+              type: 'video',
             },
             {
               name: 'Constant Power',
               matchName: 'ConstantPower',
               category: 'Crossfade',
-              type: 'audio'
-            }
+              type: 'audio',
+            },
           ],
-          totalCount: 2
+          totalCount: 2,
         };
 
         mockBridge.executeScript.mockResolvedValue(mockData);
@@ -347,10 +348,10 @@ describe('PremiereProResources', () => {
               matchName: 'H264_MatchSource',
               category: 'H.264',
               description: 'Match source settings',
-              fileExtension: '.mp4'
-            }
+              fileExtension: '.mp4',
+            },
           ],
-          totalCount: 1
+          totalCount: 1,
         };
 
         mockBridge.executeScript.mockResolvedValue(mockData);
@@ -368,7 +369,7 @@ describe('PremiereProResources', () => {
             name: 'Test Project',
             path: '/path/to/project.prproj',
             creationTime: '2024-01-01T00:00:00Z',
-            modificationTime: '2024-01-15T12:00:00Z'
+            modificationTime: '2024-01-15T12:00:00Z',
           },
           sequence: {
             name: 'Main Sequence',
@@ -377,17 +378,17 @@ describe('PremiereProResources', () => {
             settings: {
               frameSize: {
                 width: 1920,
-                height: 1080
+                height: 1080,
               },
               pixelAspectRatio: 1.0,
-              fieldType: 'progressive'
-            }
+              fieldType: 'progressive',
+            },
           },
           statistics: {
             totalClips: 15,
             totalEffects: 8,
-            totalTransitions: 3
-          }
+            totalTransitions: 3,
+          },
         };
 
         mockBridge.executeScript.mockResolvedValue(mockData);
@@ -424,13 +425,13 @@ describe('PremiereProResources', () => {
     it('should handle script execution errors', async () => {
       mockBridge.executeScript.mockRejectedValue(new Error('Script failed'));
 
-      await expect(resources.readResource('premiere://project/info'))
-        .rejects.toThrow('Script failed');
+      await expect(resources.readResource('premiere://project/info')).rejects.toThrow(
+        'Script failed',
+      );
     });
 
     it('should handle invalid URIs gracefully', async () => {
-      await expect(resources.readResource('invalid-uri'))
-        .rejects.toThrow('not found');
+      await expect(resources.readResource('invalid-uri')).rejects.toThrow('not found');
     });
   });
 });

@@ -125,9 +125,10 @@ export function routerVerdict(query: RouterTargetQuery): RouterVerdict {
   }
 
   if (classifySelection(resolution) === 'authority') {
-    const which = resolution.source === 'explicit'
-      ? 'PREMIERE_MCP_TOOLS names an exact allowlist'
-      : `PREMIERE_MCP_PROFILE=${resolution.profileName} is an authority boundary, not a context-cost curation`;
+    const which =
+      resolution.source === 'explicit'
+        ? 'PREMIERE_MCP_TOOLS names an exact allowlist'
+        : `PREMIERE_MCP_PROFILE=${resolution.profileName} is an authority boundary, not a context-cost curation`;
     return {
       allowed: false,
       reachedPastProfile: false,
@@ -209,7 +210,11 @@ export interface PageResult<T> {
  * Slice one page out of `items`. `pageSize <= 0` returns everything in a single page
  * with no cursor, which is the default and keeps today's behaviour byte-for-byte.
  */
-export function paginate<T>(items: T[], cursor: string | undefined, pageSize: number): PageResult<T> {
+export function paginate<T>(
+  items: T[],
+  cursor: string | undefined,
+  pageSize: number,
+): PageResult<T> {
   if (pageSize <= 0) return { page: items, invalidCursor: false };
 
   let offset = 0;

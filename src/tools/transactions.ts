@@ -59,7 +59,7 @@ export const TRANSACTION_GUARANTEES: {
     'The clip layout of the one snapshotted sequence: which clips are on which video/audio track, their start times, durations, and source in/out points.',
     'Per-clip state carried by the sequence clip: enabled/disabled, speed and reverse, clip name overrides, label colour, opacity/volume.',
     'Effects and transitions on those clips, with their parameter values and keyframes (Lumetri, Motion, Opacity, audio filters).',
-    'That sequence\'s track structure as of the snapshot: track count, track names, lock/mute/target flags.',
+    "That sequence's track structure as of the snapshot: track count, track names, lock/mute/target flags.",
     'Markers on that sequence.',
   ],
   doesNotRestore: [
@@ -69,7 +69,7 @@ export const TRANSACTION_GUARANTEES: {
     'Files on disk: exports, encodes, render/preview files, sidecars, CSV/SRT/EDL/AAF written by a tool.',
     'Media state: relinks, footage interpretation, proxy attach/detach, offline flags.',
     'Application and project preferences, scratch disks, workspaces, render settings.',
-    'Premiere\'s undo stack. This transaction never calls undo/redo; the rollback is a fresh clone of the snapshot, so the human\'s undo history after a rollback does not walk back into the pre-edit state.',
+    "Premiere's undo stack. This transaction never calls undo/redo; the rollback is a fresh clone of the snapshot, so the human's undo history after a rollback does not walk back into the pre-edit state.",
     'The sequence ID, when rollbackStrategy is "replace_original": the pre-edit content comes back under the original NAME, but as a new sequence with a new ID. Cached sequence IDs go stale.',
     'The saved state of the project on disk. Nothing here saves; if Premiere is closed without saving, both the edits and the rollback are lost together.',
     'Which sequence is open and active. This transaction makes the target sequence active before it runs a step, because a step that omits a sequence id edits whatever is active, and it leaves it active afterwards — so a human who was looking at a different sequence comes back to this one.',
@@ -114,12 +114,14 @@ function matches(name: string, patterns: readonly Pattern[]): boolean {
 const UNRESTORABLE: Array<{ category: string; reason: string; patterns: readonly Pattern[] }> = [
   {
     category: 'arbitrary_script',
-    reason: 'The argument is a program, so nothing here can tell what it will touch — it may reach the project panel, the filesystem, or another sequence.',
+    reason:
+      'The argument is a program, so nothing here can tell what it will touch — it may reach the project panel, the filesystem, or another sequence.',
     patterns: ['execute_extendscript', 'evaluate_expression', 'batch_execute'],
   },
   {
     category: 'undo_stack',
-    reason: 'Driving Premiere\'s undo stack from inside a transaction fights the transaction: the two rewind mechanisms would disagree about the current state.',
+    reason:
+      "Driving Premiere's undo stack from inside a transaction fights the transaction: the two rewind mechanisms would disagree about the current state.",
     patterns: ['undo', 'redo', 'multiple_undo'],
   },
   {
@@ -129,66 +131,154 @@ const UNRESTORABLE: Array<{ category: string; reason: string; patterns: readonly
   },
   {
     category: 'project_lifecycle',
-    reason: 'Opening, saving, closing or converting a project happens outside the snapshotted sequence and cannot be undone by restoring it.',
+    reason:
+      'Opening, saving, closing or converting a project happens outside the snapshotted sequence and cannot be undone by restoring it.',
     patterns: [
-      /^save_project/, /^close_project/, /^open_project/, /^open_fcp_xml/, 'create_project',
-      'convert_project_to_production', 'share_production', 'sync_production', 'resolve_conflict',
-      /^set_project_/, /^set_app_/, /^set_scratch/, 'set_workspace', 'set_location_copy_settings',
-      'set_encoder_xmp_options', 'set_renderer', 'set_preview_quality', 'set_render_preview_quality',
-      /^set_color_management/, 'set_log_color_management', 'set_graphics_white_luminance',
+      /^save_project/,
+      /^close_project/,
+      /^open_project/,
+      /^open_fcp_xml/,
+      'create_project',
+      'convert_project_to_production',
+      'share_production',
+      'sync_production',
+      'resolve_conflict',
+      /^set_project_/,
+      /^set_app_/,
+      /^set_scratch/,
+      'set_workspace',
+      'set_location_copy_settings',
+      'set_encoder_xmp_options',
+      'set_renderer',
+      'set_preview_quality',
+      'set_render_preview_quality',
+      /^set_color_management/,
+      'set_log_color_management',
+      'set_graphics_white_luminance',
     ],
   },
   {
     category: 'sequence_lifecycle',
-    reason: 'This creates or destroys a sequence. The snapshot covers one existing sequence, so a new sequence is outside it and a deleted one cannot be brought back by restoring a different one.',
+    reason:
+      'This creates or destroys a sequence. The snapshot covers one existing sequence, so a new sequence is outside it and a deleted one cannot be brought back by restoring a different one.',
     patterns: [
-      'delete_sequence', 'duplicate_sequence', /^create_sequence/, 'create_subsequence',
-      'create_multicam_from_clips', 'create_multicam_source_sequence', 'version_up_sequence',
-      'sequence_from_markers', 'storyboard_bin_to_sequence', 'auto_reframe_sequence',
-      /^import_sequences/, 'set_active_sequence', 'close_sequence',
+      'delete_sequence',
+      'duplicate_sequence',
+      /^create_sequence/,
+      'create_subsequence',
+      'create_multicam_from_clips',
+      'create_multicam_source_sequence',
+      'version_up_sequence',
+      'sequence_from_markers',
+      'storyboard_bin_to_sequence',
+      'auto_reframe_sequence',
+      /^import_sequences/,
+      'set_active_sequence',
+      'close_sequence',
       // Sequence SETTINGS only (frame rate, raster, audio config): changing them
       // invalidates render files on disk, which no clone brings back. In/out
       // points and selection are handled in the restorable list below.
-      'conform_sequence_settings', 'set_sequence_settings', 'set_sequence_frame_rate',
-      'set_sequence_resolution', 'set_sequence_audio_settings', 'set_sequence_display_format',
-      'set_sequence_field_type', 'set_sequence_pixel_aspect_ratio', 'set_sequence_start_timecode',
+      'conform_sequence_settings',
+      'set_sequence_settings',
+      'set_sequence_frame_rate',
+      'set_sequence_resolution',
+      'set_sequence_audio_settings',
+      'set_sequence_display_format',
+      'set_sequence_field_type',
+      'set_sequence_pixel_aspect_ratio',
+      'set_sequence_start_timecode',
     ],
   },
   {
     category: 'project_items_and_bins',
-    reason: 'Bin and project-item changes live in the project panel, which a sequence clone does not cover — and Premiere offers no verified bin delete to walk them back.',
+    reason:
+      'Bin and project-item changes live in the project panel, which a sequence clone does not cover — and Premiere offers no verified bin delete to walk them back.',
     patterns: [
-      /bin$/, /^create_bin/, /^delete_bin/, 'rename_bin', /^move_item/, /^move_items/,
-      /project_item/, /project_items/, 'create_smart_bin', 'consolidate_duplicates',
-      'create_subclip', 'create_subclips_from_markers', 'marker_to_subclip', 'log_clip',
-      'batch_log_from_csv', 'select_item', 'set_project_panel_selection', 'set_project_panel_columns',
-      'set_project_panel_metadata', 'set_item_in_out', 'clear_item_in_out', 'set_item_metadata',
-      'set_item_poster_frame', 'set_poster_frame', 'set_item_pixel_aspect_ratio', 'set_metadata',
-      'set_xmp_metadata', 'add_custom_metadata_field', 'add_metadata_schema_field',
-      'attach_custom_property', 'attach_sequence_custom_property',
+      /bin$/,
+      /^create_bin/,
+      /^delete_bin/,
+      'rename_bin',
+      /^move_item/,
+      /^move_items/,
+      /project_item/,
+      /project_items/,
+      'create_smart_bin',
+      'consolidate_duplicates',
+      'create_subclip',
+      'create_subclips_from_markers',
+      'marker_to_subclip',
+      'log_clip',
+      'batch_log_from_csv',
+      'select_item',
+      'set_project_panel_selection',
+      'set_project_panel_columns',
+      'set_project_panel_metadata',
+      'set_item_in_out',
+      'clear_item_in_out',
+      'set_item_metadata',
+      'set_item_poster_frame',
+      'set_poster_frame',
+      'set_item_pixel_aspect_ratio',
+      'set_metadata',
+      'set_xmp_metadata',
+      'add_custom_metadata_field',
+      'add_metadata_schema_field',
+      'attach_custom_property',
+      'attach_sequence_custom_property',
     ],
   },
   {
     category: 'media_and_import',
-    reason: 'Imports, relinks and interpretation changes are project-wide media state; restoring a sequence does not un-import a file or re-point a relink.',
+    reason:
+      'Imports, relinks and interpretation changes are project-wide media state; restoring a sequence does not un-import a file or re-point a relink.',
     patterns: [
-      /^import_/, /^batch_relink/, 'relink_media', 'replace_clip_media', 'index_footage',
-      'refresh_media', 'set_footage_interpretation', 'set_interpretation_frame_rate',
-      'set_override_frame_rate', 'set_override_pixel_aspect_ratio', 'set_offline',
-      'manage_proxies', 'create_proxy_qe', 'detach_proxy', 'set_proxies_enabled',
-      'set_transcode_on_ingest', 'link_media_qe', 'import_media_qe',
+      /^import_/,
+      /^batch_relink/,
+      'relink_media',
+      'replace_clip_media',
+      'index_footage',
+      'refresh_media',
+      'set_footage_interpretation',
+      'set_interpretation_frame_rate',
+      'set_override_frame_rate',
+      'set_override_pixel_aspect_ratio',
+      'set_offline',
+      'manage_proxies',
+      'create_proxy_qe',
+      'detach_proxy',
+      'set_proxies_enabled',
+      'set_transcode_on_ingest',
+      'link_media_qe',
+      'import_media_qe',
     ],
   },
   {
     category: 'files_on_disk',
-    reason: 'This writes outside the project. A rendered, exported or written file stays on disk after any rollback.',
+    reason:
+      'This writes outside the project. A rendered, exported or written file stays on disk after any rollback.',
     patterns: [
-      /^export_/, /^encode_/, /^write_/, /^start_/, /_to_csv$/, 'stem_export',
-      'render_audio', 'render_sequence_previews',
-      'add_to_render_queue', 'delete_preview_files', 'archive_master', 'consolidate_and_transfer',
-      'transcribe_to_srt', 'capture_frame', 'capture_program_output', 'send_to_after_effects',
-      'flush_sequence_cache', 'shift_srt_timing', 'snapshot_state', 'grade_snapshot',
-      'shotgrid_status_sync', 'production_sync_status',
+      /^export_/,
+      /^encode_/,
+      /^write_/,
+      /^start_/,
+      /_to_csv$/,
+      'stem_export',
+      'render_audio',
+      'render_sequence_previews',
+      'add_to_render_queue',
+      'delete_preview_files',
+      'archive_master',
+      'consolidate_and_transfer',
+      'transcribe_to_srt',
+      'capture_frame',
+      'capture_program_output',
+      'send_to_after_effects',
+      'flush_sequence_cache',
+      'shift_srt_timing',
+      'snapshot_state',
+      'grade_snapshot',
+      'shotgrid_status_sync',
+      'production_sync_status',
     ],
   },
 ];
@@ -202,56 +292,174 @@ const UNRESTORABLE: Array<{ category: string; reason: string; patterns: readonly
  */
 const RESTORABLE: readonly Pattern[] = [
   // Timeline structure and clip placement.
-  /^add_to_timeline/, /^move_clip/, /^trim_/, /^ripple_/, /^razor_/, 'roll_edit', 'slip_edit',
-  'slide_edit', 'extend_edit', /^lift_/, /^extract_/, 'remove_from_timeline',
-  'remove_selected_clips', 'close_gap_at', 'close_all_gaps', 'overwrite_clip',
-  'overwrite_from_source', 'insert_from_source', 'three_point_edit', 'duplicate_clip',
-  'replace_clip', 'batch_replace_clips', 'split_clip', 'freeze_frame', 'fit_clip_duration',
-  'rate_stretch_to_fill', 'nudge_clip', 'distribute_clips_evenly', 'snap_clips_to_grid',
-  'align_clips_spatial', 'move_clip_to_track',
+  /^add_to_timeline/,
+  /^move_clip/,
+  /^trim_/,
+  /^ripple_/,
+  /^razor_/,
+  'roll_edit',
+  'slip_edit',
+  'slide_edit',
+  'extend_edit',
+  /^lift_/,
+  /^extract_/,
+  'remove_from_timeline',
+  'remove_selected_clips',
+  'close_gap_at',
+  'close_all_gaps',
+  'overwrite_clip',
+  'overwrite_from_source',
+  'insert_from_source',
+  'three_point_edit',
+  'duplicate_clip',
+  'replace_clip',
+  'batch_replace_clips',
+  'split_clip',
+  'freeze_frame',
+  'fit_clip_duration',
+  'rate_stretch_to_fill',
+  'nudge_clip',
+  'distribute_clips_evenly',
+  'snap_clips_to_grid',
+  'align_clips_spatial',
+  'move_clip_to_track',
   // Clip properties and transforms.
-  /^set_clip_/, 'set_start_time', 'set_zero_point', 'set_sequence_zero_point', 'mute_clip_audio',
-  'enable_disable_clip', /^batch_enable_disable/, 'rename_timeline_clip', 'batch_rename_clips',
-  'set_color_label', 'batch_set_label', 'set_blend_mode', 'set_uniform_scale',
-  'toggle_uniform_scale', 'reset_transform', 'reset_motion_to_defaults', 'flip_horizontal',
-  'flip_vertical', /^set_scale_/, 'set_scale_to_frame_size', 'match_transform',
+  /^set_clip_/,
+  'set_start_time',
+  'set_zero_point',
+  'set_sequence_zero_point',
+  'mute_clip_audio',
+  'enable_disable_clip',
+  /^batch_enable_disable/,
+  'rename_timeline_clip',
+  'batch_rename_clips',
+  'set_color_label',
+  'batch_set_label',
+  'set_blend_mode',
+  'set_uniform_scale',
+  'toggle_uniform_scale',
+  'reset_transform',
+  'reset_motion_to_defaults',
+  'flip_horizontal',
+  'flip_vertical',
+  /^set_scale_/,
+  'set_scale_to_frame_size',
+  'match_transform',
   'set_anti_alias_quality',
   // Timing.
-  'speed_change', 'set_clip_speed_qe', 'bake_speed_change', 'speed_ramp_bake', 'reverse_clip',
-  'set_clip_reverse', 'remove_time_remap', /^set_time_interpolation/, /^set_frame_blend/,
+  'speed_change',
+  'set_clip_speed_qe',
+  'bake_speed_change',
+  'speed_ramp_bake',
+  'reverse_clip',
+  'set_clip_reverse',
+  'remove_time_remap',
+  /^set_time_interpolation/,
+  /^set_frame_blend/,
   // Effects and grading.
-  /^apply_/, 'batch_apply_effect', /^remove_effect/, /^remove_all_effects/, /^enable_disable_(effect|all_effects)$/,
-  'reorder_effects', /^set_effect_/, 'copy_effect_values', 'copy_effects_between_clips',
-  /^lumetri_/, 'color_correct', 'copy_grade', 'paste_grade_to_clips', 'match_shot_color',
-  'auto_white_balance', 'blur_clip', 'sharpen_clip', 'denoise_clip', 'dereverb_clip',
-  'stabilize_clip', 'crop_clip', 'set_clip_crop', 'letterbox', 'watermark_apply', 'ken_burns',
-  /^keyframe_zoom_/, 'set_color_value', 'set_color_space_override', 'set_clip_color_space',
+  /^apply_/,
+  'batch_apply_effect',
+  /^remove_effect/,
+  /^remove_all_effects/,
+  /^enable_disable_(effect|all_effects)$/,
+  'reorder_effects',
+  /^set_effect_/,
+  'copy_effect_values',
+  'copy_effects_between_clips',
+  /^lumetri_/,
+  'color_correct',
+  'copy_grade',
+  'paste_grade_to_clips',
+  'match_shot_color',
+  'auto_white_balance',
+  'blur_clip',
+  'sharpen_clip',
+  'denoise_clip',
+  'dereverb_clip',
+  'stabilize_clip',
+  'crop_clip',
+  'set_clip_crop',
+  'letterbox',
+  'watermark_apply',
+  'ken_burns',
+  /^keyframe_zoom_/,
+  'set_color_value',
+  'set_color_space_override',
+  'set_clip_color_space',
   'apply_morph_cut',
   // Keyframes.
-  /^add_keyframe/, 'add_audio_keyframes', /^remove_keyframe/, 'set_keyframe_interpolation',
-  'bake_keyframe_ease', 'set_track_volume_keyframes',
+  /^add_keyframe/,
+  'add_audio_keyframes',
+  /^remove_keyframe/,
+  'set_keyframe_interpolation',
+  'bake_keyframe_ease',
+  'set_track_volume_keyframes',
   // Transitions and fades.
-  /^add_transition/, /^batch_add_transition/, 'audio_crossfade_at_cut',
-  'batch_add_audio_crossfades', /^fade_(in|out)_(audio|video)$/, 'j_cut', 'l_cut',
+  /^add_transition/,
+  /^batch_add_transition/,
+  'audio_crossfade_at_cut',
+  'batch_add_audio_crossfades',
+  /^fade_(in|out)_(audio|video)$/,
+  'j_cut',
+  'l_cut',
   // Audio levels.
-  'adjust_audio_levels', 'normalize_clip_peaks', 'normalize_track_peaks', 'normalize_loudness',
-  'setup_ducking', 'set_compressor', 'set_limiter', 'set_parametric_eq', 'fill_room_tone',
+  'adjust_audio_levels',
+  'normalize_clip_peaks',
+  'normalize_track_peaks',
+  'normalize_loudness',
+  'setup_ducking',
+  'set_compressor',
+  'set_limiter',
+  'set_parametric_eq',
+  'fill_room_tone',
   'set_essential_sound_category',
   // Tracks (of this sequence).
-  /^add_track/, 'add_tracks', 'delete_track', 'delete_empty_tracks', 'rename_track', 'lock_track',
-  'sync_lock_track', 'toggle_track_visibility', 'mute_track', 'set_target_track',
-  'set_all_tracks_targeted', 'set_track_lock_qe',
+  /^add_track/,
+  'add_tracks',
+  'delete_track',
+  'delete_empty_tracks',
+  'rename_track',
+  'lock_track',
+  'sync_lock_track',
+  'toggle_track_visibility',
+  'mute_track',
+  'set_target_track',
+  'set_all_tracks_targeted',
+  'set_track_lock_qe',
   // Sequence markers.
-  'add_marker', 'create_marker', 'delete_marker', 'update_marker', 'set_marker_type',
-  'duration_marker_add', 'markers_from_csv', 'notes_to_markers', 'captions_to_markers',
-  'frame_io_notes_to_markers', 'copy_markers_between_sequences',
+  'add_marker',
+  'create_marker',
+  'delete_marker',
+  'update_marker',
+  'set_marker_type',
+  'duration_marker_add',
+  'markers_from_csv',
+  'notes_to_markers',
+  'captions_to_markers',
+  'frame_io_notes_to_markers',
+  'copy_markers_between_sequences',
   // Selection, playhead and other in-sequence UI state. Nothing to restore, and
   // harmless if a rollback does not restore it.
-  /^select_/, 'deselect_all_clips', 'invert_selection', 'set_clip_selection',
-  'set_sequence_selection', 'link_selection', 'unlink_selection', 'link_audio_video',
-  'set_playhead_position', /^go_to_/, 'step_frames', 'move_playhead_to_edit', 'set_work_area',
-  'clear_work_area', 'set_sequence_in_out_points', 'set_sequence_in_out_from_clips',
-  'set_sequence_in_out_qe', 'clear_sequence_in_out', 'set_source_in_out', 'set_source_in_out_qe',
+  /^select_/,
+  'deselect_all_clips',
+  'invert_selection',
+  'set_clip_selection',
+  'set_sequence_selection',
+  'link_selection',
+  'unlink_selection',
+  'link_audio_video',
+  'set_playhead_position',
+  /^go_to_/,
+  'step_frames',
+  'move_playhead_to_edit',
+  'set_work_area',
+  'clear_work_area',
+  'set_sequence_in_out_points',
+  'set_sequence_in_out_from_clips',
+  'set_sequence_in_out_qe',
+  'clear_sequence_in_out',
+  'set_source_in_out',
+  'set_source_in_out_qe',
   'refresh_ui',
 ];
 
@@ -265,18 +473,36 @@ const RESTORABLE: readonly Pattern[] = [
 const PARTIAL: Array<{ patterns: readonly Pattern[]; reason: string }> = [
   {
     patterns: [
-      'add_adjustment_layer', 'create_adjustment_layer_at', 'add_text_overlay', 'title_card',
-      'lower_third_preset', 'countdown_leader', 'create_bars_and_tone', 'timecode_burn_in',
-      'import_mogrt', 'import_mogrt_from_library', 'batch_mogrt_from_data',
-      'create_caption_track', 'nest_clips', 'unnest_sequence', 'nest_all_v1_clips',
-      'flatten_multicam', 'enable_multicam', 'pip_layout', 'grid_layout', 'split_screen_layout',
-      'detect_scene_edits', 'scene_edit_detection',
+      'add_adjustment_layer',
+      'create_adjustment_layer_at',
+      'add_text_overlay',
+      'title_card',
+      'lower_third_preset',
+      'countdown_leader',
+      'create_bars_and_tone',
+      'timecode_burn_in',
+      'import_mogrt',
+      'import_mogrt_from_library',
+      'batch_mogrt_from_data',
+      'create_caption_track',
+      'nest_clips',
+      'unnest_sequence',
+      'nest_all_v1_clips',
+      'flatten_multicam',
+      'enable_multicam',
+      'pip_layout',
+      'grid_layout',
+      'split_screen_layout',
+      'detect_scene_edits',
+      'scene_edit_detection',
     ],
-    reason: 'Creates a new project item (graphic, title, adjustment layer, caption track or nested sequence). Restoring the sequence removes the clip from the timeline but leaves that item in the project panel.',
+    reason:
+      'Creates a new project item (graphic, title, adjustment layer, caption track or nested sequence). Restoring the sequence removes the clip from the timeline but leaves that item in the project panel.',
   },
   {
     patterns: ['set_mogrt_text', 'set_mogrt_param', 'set_mogrt_color', 'remove_mogrt_clip'],
-    reason: 'Edits a Motion Graphics template instance. The clip and its parameters come back with the sequence clone, but any .mogrt asset installed into the project stays.',
+    reason:
+      'Edits a Motion Graphics template instance. The clip and its parameters come back with the sequence clone, but any .mogrt asset installed into the project stays.',
   },
 ];
 
@@ -321,7 +547,8 @@ export function classifyTransactionTool(tool: string): ToolClassification {
       tool: name,
       rollback: 'restorable',
       category: 'sequence_edit',
-      reason: 'Its whole effect lands inside the snapshotted sequence, which the checkpoint clone restores.',
+      reason:
+        'Its whole effect lands inside the snapshotted sequence, which the checkpoint clone restores.',
       readOnly: false,
     };
   }
@@ -343,7 +570,8 @@ export function classifyTransactionTool(tool: string): ToolClassification {
     tool: name,
     rollback: 'unrestorable',
     category: 'unclassified',
-    reason: 'Not on the list of tools whose effect is known to stay inside one sequence. A transaction will not wrap a tool it cannot promise to undo — run it outside the transaction, or take a recovery checkpoint by hand first.',
+    reason:
+      'Not on the list of tools whose effect is known to stay inside one sequence. A transaction will not wrap a tool it cannot promise to undo — run it outside the transaction, or take a recovery checkpoint by hand first.',
     readOnly: false,
   };
 }
@@ -441,7 +669,9 @@ export interface TransactionExecutor {
 const stepSchema = z.object({
   tool: z
     .string()
-    .describe('The tool to run for this step, e.g. "apply_video_effect". Must be a tool whose whole effect stays inside one sequence; anything else is refused before the transaction starts.'),
+    .describe(
+      'The tool to run for this step, e.g. "apply_video_effect". Must be a tool whose whole effect stays inside one sequence; anything else is refused before the transaction starts.',
+    ),
   args: z
     .record(z.string(), z.any())
     .optional()
@@ -453,18 +683,35 @@ const stepSchema = z.object({
   expectFingerprintChanged: z
     .boolean()
     .optional()
-    .describe('Assert the sequence structure did (true) or did not (false) change as a result of this step. Use true for cuts/moves/inserts. Omit for effect or property edits, which do not move clips.'),
+    .describe(
+      'Assert the sequence structure did (true) or did not (false) change as a result of this step. Use true for cuts/moves/inserts. Omit for effect or property edits, which do not move clips.',
+    ),
   verify: z
     .object({
-      tool: z.string().describe('A read-only tool that reads back what the step was supposed to do.'),
+      tool: z
+        .string()
+        .describe('A read-only tool that reads back what the step was supposed to do.'),
       args: z.record(z.string(), z.any()).optional().describe('Arguments for the read-back tool.'),
-      path: z.string().optional().describe('Dot path into the read-back result, e.g. "clip.effects.0.matchName" or "count".'),
+      path: z
+        .string()
+        .optional()
+        .describe(
+          'Dot path into the read-back result, e.g. "clip.effects.0.matchName" or "count".',
+        ),
       equals: z.any().optional().describe('The value that path must equal (deep-compared).'),
-      contains: z.string().optional().describe('Substring that the value at path (stringified) must contain.'),
-      exists: z.boolean().optional().describe('Whether the value at path must be present (true) or absent (false).'),
+      contains: z
+        .string()
+        .optional()
+        .describe('Substring that the value at path (stringified) must contain.'),
+      exists: z
+        .boolean()
+        .optional()
+        .describe('Whether the value at path must be present (true) or absent (false).'),
     })
     .optional()
-    .describe('An explicit read-back check for this step. Supply one for any tool that does not return verified:true on its own — without it the step is unverifiable, and unverifiable is treated as failure.'),
+    .describe(
+      'An explicit read-back check for this step. Supply one for any tool that does not return verified:true on its own — without it the step is unverifiable, and unverifiable is treated as failure.',
+    ),
 });
 
 export const transactSequenceEditsSchema = z.object({
@@ -472,7 +719,9 @@ export const transactSequenceEditsSchema = z.object({
     .array(stepSchema)
     .min(1)
     .max(TRANSACTION_STEP_LIMIT)
-    .describe('The plan, in order. Every step is classified BEFORE anything runs; if any step names a tool that cannot be rolled back, nothing runs at all.'),
+    .describe(
+      'The plan, in order. Every step is classified BEFORE anything runs; if any step names a tool that cannot be rolled back, nothing runs at all.',
+    ),
   label: z
     .string()
     .optional()
@@ -480,31 +729,45 @@ export const transactSequenceEditsSchema = z.object({
   sequenceId: z
     .string()
     .optional()
-    .describe('Optional guard: the sequence you believe you are editing. It must be the ACTIVE sequence, otherwise the transaction refuses to start (steps that default to the active sequence would otherwise edit the wrong timeline).'),
+    .describe(
+      'Optional guard: the sequence you believe you are editing. It must be the ACTIVE sequence, otherwise the transaction refuses to start (steps that default to the active sequence would otherwise edit the wrong timeline).',
+    ),
   onFailure: z
     .enum(['rollback', 'keep_partial'])
     .default('rollback')
-    .describe('"rollback" (default) restores the snapshot when a step fails or cannot be verified. "keep_partial" leaves the half-finished edit in place and reports exactly where it stopped — use it only when you intend to fix the state by hand.'),
+    .describe(
+      '"rollback" (default) restores the snapshot when a step fails or cannot be verified. "keep_partial" leaves the half-finished edit in place and reports exactly where it stopped — use it only when you intend to fix the state by hand.',
+    ),
   rollbackStrategy: z
     .enum(['restore_copy', 'replace_original'])
     .default('restore_copy')
-    .describe('"restore_copy" (default, non-destructive): the pre-edit state comes back as a new sequence, made active, and the half-edited sequence is left alone. "replace_original": after verifying the restore, delete the half-edited sequence and give the restored one its original name — the project ends up with one sequence again, but its sequence ID changes.'),
+    .describe(
+      '"restore_copy" (default, non-destructive): the pre-edit state comes back as a new sequence, made active, and the half-edited sequence is left alone. "replace_original": after verifying the restore, delete the half-edited sequence and give the restored one its original name — the project ends up with one sequence again, but its sequence ID changes.',
+    ),
   unverifiableStep: z
     .enum(['fail', 'accept'])
     .default('fail')
-    .describe('What to do when a step returns no verifiable signal at all. "fail" (default) treats it as a failure and rolls back. "accept" continues, and the result is reported as committed but NOT verified end to end.'),
+    .describe(
+      'What to do when a step returns no verifiable signal at all. "fail" (default) treats it as a failure and rolls back. "accept" continues, and the result is reported as committed but NOT verified end to end.',
+    ),
   allowPartialRollback: z
     .boolean()
     .default(false)
-    .describe('Permit steps that create a project item (titles, graphics, adjustment layers, nests). A rollback removes their clips but leaves the items in the project panel; the residue is listed in the result.'),
+    .describe(
+      'Permit steps that create a project item (titles, graphics, adjustment layers, nests). A rollback removes their clips but leaves the items in the project panel; the residue is listed in the result.',
+    ),
   keepCheckpointOnCommit: z
     .boolean()
     .default(false)
-    .describe('Keep the snapshot sequence after a successful commit instead of deleting it. The snapshot is ALWAYS kept when a transaction fails.'),
+    .describe(
+      'Keep the snapshot sequence after a successful commit instead of deleting it. The snapshot is ALWAYS kept when a transaction fails.',
+    ),
   dryRun: z
     .boolean()
     .default(false)
-    .describe('Classify the plan and report what would happen without touching the project — no snapshot, no steps, no calls into Premiere.'),
+    .describe(
+      'Classify the plan and report what would happen without touching the project — no snapshot, no steps, no calls into Premiere.',
+    ),
 });
 
 /** What a caller may send. Defaults are NOT assumed applied — see resolveConfig. */
@@ -530,7 +793,8 @@ export interface TransactionConfig {
 export function resolveConfig(input: TransactionInput): TransactionConfig {
   return {
     onFailure: input.onFailure === 'keep_partial' ? 'keep_partial' : 'rollback',
-    rollbackStrategy: input.rollbackStrategy === 'replace_original' ? 'replace_original' : 'restore_copy',
+    rollbackStrategy:
+      input.rollbackStrategy === 'replace_original' ? 'replace_original' : 'restore_copy',
     unverifiableStep: input.unverifiableStep === 'accept' ? 'accept' : 'fail',
     allowPartialRollback: input.allowPartialRollback === true,
     keepCheckpointOnCommit: input.keepCheckpointOnCommit === true,
@@ -664,7 +928,11 @@ export interface TransactionResult {
     deleted: boolean;
     cleanupError?: string;
   } | null;
-  preState: { fingerprint: string | null; clipCount: number | null; snapshotVerified: boolean } | null;
+  preState: {
+    fingerprint: string | null;
+    clipCount: number | null;
+    snapshotVerified: boolean;
+  } | null;
   postState: { fingerprint: string | null; clipCount: number | null } | null;
   plan: ToolClassification[];
   steps: TransactionLedgerEntry[];
@@ -1003,7 +1271,8 @@ export async function runTransaction(
 
   const postFp = await executor.fingerprint(sequenceId);
   const postState = {
-    fingerprint: postFp && postFp.success !== false && postFp.fingerprint ? postFp.fingerprint : null,
+    fingerprint:
+      postFp && postFp.success !== false && postFp.fingerprint ? postFp.fingerprint : null,
     clipCount: postFp && typeof postFp.clipCount === 'number' ? postFp.clipCount : null,
   };
 
@@ -1013,7 +1282,9 @@ export async function runTransaction(
     // fallback exists only to satisfy the compiler's indexed-access checking.
     const failedEntry = ledger[failedIndex - 1];
     const failedTool = failedEntry ? failedEntry.tool : 'unknown';
-    const failedReason = failedEntry ? failedEntry.verification.reason : 'no ledger entry was recorded';
+    const failedReason = failedEntry
+      ? failedEntry.verification.reason
+      : 'no ledger entry was recorded';
     const headline = `Step ${failedIndex} of ${steps.length} (${failedTool}) ${
       failedEntry && failedEntry.toolSuccess ? 'ran but could not be verified' : 'failed'
     }: ${failedReason}`;
@@ -1030,7 +1301,12 @@ export async function runTransaction(
         rollbackVerified: false,
         verifiedEndToEnd: false,
         sequence: { id: sequenceId, name: sequenceName },
-        checkpoint: { sequenceId: checkpointId, name: checkpointName, retained: true, deleted: false },
+        checkpoint: {
+          sequenceId: checkpointId,
+          name: checkpointName,
+          retained: true,
+          deleted: false,
+        },
         preState,
         postState,
         plan,
@@ -1097,7 +1373,12 @@ export async function runTransaction(
       rollbackVerified: rollback.verified,
       verifiedEndToEnd: false,
       sequence: { id: sequenceId, name: sequenceName },
-      checkpoint: { sequenceId: checkpointId, name: checkpointName, retained: true, deleted: false },
+      checkpoint: {
+        sequenceId: checkpointId,
+        name: checkpointName,
+        retained: true,
+        deleted: false,
+      },
       preState,
       postState,
       plan,
@@ -1116,7 +1397,9 @@ export async function runTransaction(
       },
       residualRisk: residualRisk.concat(
         rollback.verified && residualRisk.length > 0
-          ? ['The rollback removed the clips those steps added, but the project items they created remain in the project panel.']
+          ? [
+              'The rollback removed the clips those steps added, but the project items they created remain in the project panel.',
+            ]
           : [],
       ),
       guarantees: TRANSACTION_GUARANTEES,
@@ -1174,7 +1457,9 @@ export async function runTransaction(
       deleted
         ? 'The snapshot was deleted.'
         : `The snapshot sequence '${checkpointName ?? checkpointId}' is still in the project${
-            cleanupError ? ` (cleanup failed: ${cleanupError})` : ' because keepCheckpointOnCommit was set'
+            cleanupError
+              ? ` (cleanup failed: ${cleanupError})`
+              : ' because keepCheckpointOnCommit was set'
           }.`
     }`,
     note: verifiedEndToEnd
@@ -1391,7 +1676,12 @@ async function verifyStep(
       };
     }
     if (step.verify.contains !== undefined) {
-      const asText = value === undefined || value === null ? '' : typeof value === 'string' ? value : JSON.stringify(value);
+      const asText =
+        value === undefined || value === null
+          ? ''
+          : typeof value === 'string'
+            ? value
+            : JSON.stringify(value);
       if (asText.indexOf(step.verify.contains) === -1) {
         return {
           verified: false,
@@ -1477,7 +1767,11 @@ async function verifyStep(
       : ''
   }. Add a verify block to make this step checkable.`;
   if (unverifiablePolicy === 'accept') {
-    return { verified: null, basis: 'unverifiable_accepted', reason: `${reason} Accepted because unverifiableStep was "accept".` };
+    return {
+      verified: null,
+      basis: 'unverifiable_accepted',
+      reason: `${reason} Accepted because unverifiableStep was "accept".`,
+    };
   }
   return { verified: false, basis: 'unverifiable', reason };
 }
@@ -1521,9 +1815,7 @@ async function performRollback(
   try {
     restore = await executor.restoreCheckpoint(ctx.checkpointId, restoredTargetName, true);
   } catch (error) {
-    errors.push(
-      `The restore threw: ${error instanceof Error ? error.message : String(error)}.`,
-    );
+    errors.push(`The restore threw: ${error instanceof Error ? error.message : String(error)}.`);
   }
   if (!restore || restore.success === false || !restore.restoredSequenceId) {
     errors.push(
@@ -1575,7 +1867,8 @@ async function performRollback(
       verified: true,
       restoredSequenceId: restoredId,
       restoredName: restore.restoredName ?? restoredTargetName,
-      verification: 'VERIFIED: the restored sequence is clip-for-clip identical to the pre-edit snapshot.',
+      verification:
+        'VERIFIED: the restored sequence is clip-for-clip identical to the pre-edit snapshot.',
       replacedOriginal: false,
       originalDeleted: false,
       errors,

@@ -33,13 +33,20 @@ const originalTransport = process.env.PREMIERE_MCP_TRANSPORT;
 function startDirectoryWatch(): { seen: Set<string>; stop: () => void } {
   const seen = new Set<string>();
   const sample = (): void => {
-    try { for (const name of readdirSync(dir)) seen.add(name); } catch { /* removed */ }
+    try {
+      for (const name of readdirSync(dir)) seen.add(name);
+    } catch {
+      /* removed */
+    }
   };
   sample();
   const timer = setInterval(sample, 2);
   return {
     seen,
-    stop: () => { sample(); clearInterval(timer); },
+    stop: () => {
+      sample();
+      clearInterval(timer);
+    },
   };
 }
 
@@ -72,7 +79,11 @@ afterEach(async () => {
   else process.env.PREMIERE_TEMP_DIR = originalTempDir;
   if (originalTransport === undefined) delete process.env.PREMIERE_MCP_TRANSPORT;
   else process.env.PREMIERE_MCP_TRANSPORT = originalTransport;
-  try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+  try {
+    rmSync(dir, { recursive: true, force: true });
+  } catch {
+    /* best effort */
+  }
 });
 
 describe('channel selection', () => {
@@ -88,7 +99,10 @@ describe('channel selection', () => {
 
     const sim = panel();
     await sim.ready;
-    await waitFor('the bridge to see a handshaken panel', () => created.getTransportStatus().socket.panelConnected);
+    await waitFor(
+      'the bridge to see a handshaken panel',
+      () => created.getTransportStatus().socket.panelConnected,
+    );
 
     const after = created.getTransportStatus();
     expect(after.activeChannel).toBe('socket');
@@ -130,7 +144,9 @@ describe('EXACTLY ONE channel per command', () => {
     // The proof: no command file EVER existed while the socket call was in flight. Sampling rather
     // than only checking afterwards, because the file path unlinks what it wrote — a final listing
     // alone could not tell "never written" from "written and cleaned up".
-    const commandFiles = [...watch.seen].filter((name) => name.startsWith('command-') || name.startsWith('.tmp-'));
+    const commandFiles = [...watch.seen].filter(
+      (name) => name.startsWith('command-') || name.startsWith('.tmp-'),
+    );
     expect(commandFiles).toEqual([]);
 
     const status = created.getTransportStatus();
@@ -222,8 +238,11 @@ describe('no silent fallback after a published mutation', () => {
     // A warning nobody can act on is not honesty, it is noise. The message must carry the command
     // id and say what to do about it.
     await expect(inFlight).rejects.toThrow(new RegExp(command.id));
-    await expect(created.executeScript('return 2;', 800).catch((error: Error) => { throw error; }))
-      .rejects.toThrow();
+    await expect(
+      created.executeScript('return 2;', 800).catch((error: Error) => {
+        throw error;
+      }),
+    ).rejects.toThrow();
   }, 20_000);
 });
 
@@ -245,7 +264,9 @@ describe('the transport can be pinned', () => {
     // No panel is connected, so there is no socket to publish on. The operator ruled out the other
     // channel, so the honest answer is a refusal naming the setting — not a silent downgrade.
     const watch = startDirectoryWatch();
-    await expect(created.executeScript('return 1;', 800)).rejects.toThrow(/PREMIERE_MCP_TRANSPORT=socket/);
+    await expect(created.executeScript('return 1;', 800)).rejects.toThrow(
+      /PREMIERE_MCP_TRANSPORT=socket/,
+    );
     watch.stop();
     expect([...watch.seen].filter((name) => name.startsWith('command-'))).toEqual([]);
     expect(created.getTransportStatus().publications).toMatchObject({ socket: 0, file: 0 });
@@ -262,7 +283,11 @@ describe('the file channel still carries the session token', () => {
     await waitFor('the command file to appear', () => {
       const name = readdirSync(dir).find((entry) => entry.startsWith('command-'));
       if (!name) return false;
-      try { captured = JSON.parse(readFileSync(join(dir, name), 'utf8')); } catch { return false; }
+      try {
+        captured = JSON.parse(readFileSync(join(dir, name), 'utf8'));
+      } catch {
+        return false;
+      }
       return captured !== null;
     });
     await inFlight;

@@ -139,7 +139,12 @@ export class MotionLayoutTools extends MarkerTools {
     `;
   }
 
-  protected async flipClip(sequenceId: string | undefined, ti: number, ci: number, direction: 'horizontal' | 'vertical'): Promise<any> {
+  protected async flipClip(
+    sequenceId: string | undefined,
+    ti: number,
+    ci: number,
+    direction: 'horizontal' | 'vertical',
+  ): Promise<any> {
     // Premiere's Transform effect has no flip parameter (measured on 26.5.2: Anchor Point,
     // Position, Uniform Scale, Scale Height, Scale Width, Skew, Skew Axis, Rotation, Opacity,
     // shutter and sampling only), so the old path always left an inert Transform on the clip.
@@ -175,7 +180,13 @@ export class MotionLayoutTools extends MarkerTools {
     `);
   }
 
-  protected async fadeVideo(sequenceId: string | undefined, ti: number, ci: number, durationFrames: number, direction: 'in' | 'out'): Promise<any> {
+  protected async fadeVideo(
+    sequenceId: string | undefined,
+    ti: number,
+    ci: number,
+    durationFrames: number,
+    direction: 'in' | 'out',
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(sequenceId)};
@@ -226,16 +237,33 @@ export class MotionLayoutTools extends MarkerTools {
     `);
   }
 
-  protected async resetTransform(sequenceId: string | undefined, ti: number, ci: number): Promise<any> {
-    return await this.bridge.executeScript(this.motionParamScript(sequenceId, ti, ci, [
-      { index: 0, name: 'Position', value: [0.5, 0.5] },
-      { index: 1, name: 'Scale', value: 100 },
-      { index: 4, name: 'Rotation', value: 0 },
-      { index: 5, name: 'Anchor Point', value: [0.5, 0.5] },
-    ], 'reset_transform'));
+  protected async resetTransform(
+    sequenceId: string | undefined,
+    ti: number,
+    ci: number,
+  ): Promise<any> {
+    return await this.bridge.executeScript(
+      this.motionParamScript(
+        sequenceId,
+        ti,
+        ci,
+        [
+          { index: 0, name: 'Position', value: [0.5, 0.5] },
+          { index: 1, name: 'Scale', value: 100 },
+          { index: 4, name: 'Rotation', value: 0 },
+          { index: 5, name: 'Anchor Point', value: [0.5, 0.5] },
+        ],
+        'reset_transform',
+      ),
+    );
   }
 
-  protected async matchTransform(sequenceId: string | undefined, srcTi: number, srcCi: number, targets: Array<{trackIndex: number, clipIndex: number}>): Promise<any> {
+  protected async matchTransform(
+    sequenceId: string | undefined,
+    srcTi: number,
+    srcCi: number,
+    targets: Array<{ trackIndex: number; clipIndex: number }>,
+  ): Promise<any> {
     const readScript = `
       try {
         var seq = ${this.buildSeqRes(sequenceId)};
@@ -252,13 +280,29 @@ export class MotionLayoutTools extends MarkerTools {
     if (!src.success) return src;
     const results: any[] = [];
     for (const t of targets) {
-      const r = await this.bridge.executeScript(this.motionParamScript(sequenceId, t.trackIndex, t.clipIndex, [
-        { index: 0, name: 'Position', value: src.pos },
-        { index: 1, name: 'Scale', value: src.scale },
-        { index: 4, name: 'Rotation', value: src.rot },
-        { index: 5, name: 'Anchor Point', value: src.anchor },
-      ], 'match_transform'));
-      results.push({ ...t, success: r.success, verified: r.verified === true, applied: r.applied ?? 0, requested: r.requested ?? 4, error: r.error ?? null, properties: r.results ?? null });
+      const r = await this.bridge.executeScript(
+        this.motionParamScript(
+          sequenceId,
+          t.trackIndex,
+          t.clipIndex,
+          [
+            { index: 0, name: 'Position', value: src.pos },
+            { index: 1, name: 'Scale', value: src.scale },
+            { index: 4, name: 'Rotation', value: src.rot },
+            { index: 5, name: 'Anchor Point', value: src.anchor },
+          ],
+          'match_transform',
+        ),
+      );
+      results.push({
+        ...t,
+        success: r.success,
+        verified: r.verified === true,
+        applied: r.applied ?? 0,
+        requested: r.requested ?? 4,
+        error: r.error ?? null,
+        properties: r.results ?? null,
+      });
     }
     // "matched" used to count scripts that did not throw, and every individual write was
     // swallowed, so a target that received nothing still counted. It now counts targets on
@@ -269,24 +313,35 @@ export class MotionLayoutTools extends MarkerTools {
       success: matched === targets.length && targets.length > 0,
       verified: true,
       verifiedBy: 'Motion parameter getValue() readback on every target',
-      matched, requested: targets.length, partiallyApplied: partial, results,
-      error: matched === targets.length
-        ? null
-        : (targets.length === 0
-          ? 'No target clips were supplied, so no transform was copied.'
-          : `Transform fully landed on ${matched} of ${targets.length} target clips${partial ? `, and PARTIALLY on ${partial} more (those clips are in a mixed state)` : ''}. See results[].`),
+      matched,
+      requested: targets.length,
+      partiallyApplied: partial,
+      results,
+      error:
+        matched === targets.length
+          ? null
+          : targets.length === 0
+            ? 'No target clips were supplied, so no transform was copied.'
+            : `Transform fully landed on ${matched} of ${targets.length} target clips${partial ? `, and PARTIALLY on ${partial} more (those clips are in a mixed state)` : ''}. See results[].`,
     };
   }
 
-  protected async applyLetterbox(sequenceId: string | undefined, ti: number, ci: number, aspect?: string, cropPercent?: number): Promise<any> {
+  protected async applyLetterbox(
+    sequenceId: string | undefined,
+    ti: number,
+    ci: number,
+    aspect?: string,
+    cropPercent?: number,
+  ): Promise<any> {
     let crop = cropPercent;
     if (!crop && aspect) {
       const parts = aspect!.split(':');
-      const w = parseFloat(parts[0] ?? '16'); const h = parseFloat(parts[1] ?? '9');
+      const w = parseFloat(parts[0] ?? '16');
+      const h = parseFloat(parts[1] ?? '9');
       // For a 16:9 source: cropPercent = (1 - (h/w)/(9/16)) / 2 * 100
       const srcAspect = 16 / 9;
       const tgtAspect = w / h;
-      crop = Math.max(0, (1 - srcAspect / tgtAspect) / 2 * 100);
+      crop = Math.max(0, ((1 - srcAspect / tgtAspect) / 2) * 100);
     }
     if (!crop) crop = 11.25; // 2.35:1 default
     // Motion properties[8] and [10] were assumed to be CropTop/CropBottom and each write was
@@ -294,21 +349,38 @@ export class MotionLayoutTools extends MarkerTools {
     // through the name-guarded helper: if this build's Motion has no top/bottom crop
     // parameter, the tool now refuses and lists what Motion does expose, instead of writing
     // 11.25 into whatever parameter happens to sit at index 8.
-    const r: any = await this.bridge.executeScript(this.motionParamScript(sequenceId, ti, ci, [
-      { index: 8, name: 'Crop Top', aliases: ['Top', 'crop top'], value: crop },
-      { index: 10, name: 'Crop Bottom', aliases: ['Bottom', 'crop bottom'], value: crop },
-    ], 'letterbox'));
-    return { ...r, cropPercent: crop, aspect: aspect ?? null,
-      hint: r?.success === false && r?.applied === 0
-        ? 'Crop is a separate effect in Premiere, not part of Motion. Add the Crop effect with apply_effect, then set its parameters with set_effect_property.'
-        : undefined };
+    const r: any = await this.bridge.executeScript(
+      this.motionParamScript(
+        sequenceId,
+        ti,
+        ci,
+        [
+          { index: 8, name: 'Crop Top', aliases: ['Top', 'crop top'], value: crop },
+          { index: 10, name: 'Crop Bottom', aliases: ['Bottom', 'crop bottom'], value: crop },
+        ],
+        'letterbox',
+      ),
+    );
+    return {
+      ...r,
+      cropPercent: crop,
+      aspect: aspect ?? null,
+      hint:
+        r?.success === false && r?.applied === 0
+          ? 'Crop is a separate effect in Premiere, not part of Motion. Add the Crop effect with apply_effect, then set its parameters with set_effect_property.'
+          : undefined,
+    };
   }
 
   protected async kenBurns(args: any): Promise<any> {
-    const ti = args.trackIndex ?? 0; const ci = args.clipIndex ?? 0;
-    const sScale = args.startScale ?? 100; const eScale = args.endScale ?? 110;
-    const sX = args.startX ?? 0.5; const sY = args.startY ?? 0.5;
-    const eX = args.endX ?? 0.5; const eY = args.endY ?? 0.5;
+    const ti = args.trackIndex ?? 0;
+    const ci = args.clipIndex ?? 0;
+    const sScale = args.startScale ?? 100;
+    const eScale = args.endScale ?? 110;
+    const sX = args.startX ?? 0.5;
+    const sY = args.startY ?? 0.5;
+    const eX = args.endX ?? 0.5;
+    const eY = args.endY ?? 0.5;
     return await this.bridge.executeScript(`
       try {
         var seq = app.project.activeSequence;
@@ -357,7 +429,12 @@ export class MotionLayoutTools extends MarkerTools {
     `);
   }
 
-  protected async setClipScaleToFrameSize(sequenceId: string | undefined, ti: number, ci: number, enabled: boolean): Promise<any> {
+  protected async setClipScaleToFrameSize(
+    sequenceId: string | undefined,
+    ti: number,
+    ci: number,
+    enabled: boolean,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -402,7 +479,7 @@ export class MotionLayoutTools extends MarkerTools {
     enabled: boolean,
     sequenceId?: string,
     trackIndex?: number,
-    clipIds?: string[]
+    clipIds?: string[],
   ): Promise<any> {
     const idFilter = Array.isArray(clipIds) && clipIds.length ? JSON.stringify(clipIds) : 'null';
     return await this.bridge.executeScript(`
@@ -502,7 +579,12 @@ export class MotionLayoutTools extends MarkerTools {
     `);
   }
 
-  protected async setFrameBlendQe(trackIndex: number, clipIndex: number, enabled: boolean, sequenceId?: string): Promise<any> {
+  protected async setFrameBlendQe(
+    trackIndex: number,
+    clipIndex: number,
+    enabled: boolean,
+    sequenceId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       app.enableQE(); ${this.qeClipScript(trackIndex, clipIndex, sequenceId)}
       if (!__clip) return JSON.stringify({success:false,error:'Clip not found'});
@@ -511,7 +593,12 @@ export class MotionLayoutTools extends MarkerTools {
     `);
   }
 
-  protected async setClipBorderWidth(trackIndex: number, clipIndex: number, _width: number, sequenceId?: string): Promise<any> {
+  protected async setClipBorderWidth(
+    trackIndex: number,
+    clipIndex: number,
+    _width: number,
+    sequenceId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       app.enableQE(); ${this.qeClipScript(trackIndex, clipIndex, sequenceId)}
       if (!__clip) return JSON.stringify({success:false,error:'Clip not found'});
@@ -524,7 +611,17 @@ export class MotionLayoutTools extends MarkerTools {
     `);
   }
 
-  protected async cropClip(clipId: string, options: { left?: number; right?: number; top?: number; bottom?: number; zoom?: boolean; edgeFeather?: number }): Promise<any> {
+  protected async cropClip(
+    clipId: string,
+    options: {
+      left?: number;
+      right?: number;
+      top?: number;
+      bottom?: number;
+      zoom?: boolean;
+      edgeFeather?: number;
+    },
+  ): Promise<any> {
     const params: Record<string, any> = {};
     if (options.left !== undefined) params['Left'] = options.left;
     if (options.top !== undefined) params['Top'] = options.top;
@@ -711,86 +808,164 @@ export class MotionLayoutTools extends MarkerTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async pipLayout(trackIndex: number, clipIndex: number, corner: string, sizePercent: number, seqId?: string): Promise<any> {
-    const positions: Record<string, [number,number]> = {'top-left':[0.125,0.125],'top-right':[0.875,0.125],'bottom-left':[0.125,0.875],'bottom-right':[0.875,0.875]};
-    const [px,py] = positions[corner] ?? [0.875,0.125];
+  protected async pipLayout(
+    trackIndex: number,
+    clipIndex: number,
+    corner: string,
+    sizePercent: number,
+    seqId?: string,
+  ): Promise<any> {
+    const positions: Record<string, [number, number]> = {
+      'top-left': [0.125, 0.125],
+      'top-right': [0.875, 0.125],
+      'bottom-left': [0.125, 0.875],
+      'bottom-right': [0.875, 0.875],
+    };
+    const [px, py] = positions[corner] ?? [0.875, 0.125];
     const scale = sizePercent;
     // This tool already read Position and Scale back and then ignored both, returning
     // verified: true whatever they said. The helper compares them.
-    const r: any = await this.bridge.executeScript(this.motionParamScript(seqId, trackIndex, clipIndex, [
-      { index: 0, name: 'Position', value: [px, py] },
-      { index: 1, name: 'Scale', value: scale },
-    ], 'pip_layout'));
+    const r: any = await this.bridge.executeScript(
+      this.motionParamScript(
+        seqId,
+        trackIndex,
+        clipIndex,
+        [
+          { index: 0, name: 'Position', value: [px, py] },
+          { index: 1, name: 'Scale', value: scale },
+        ],
+        'pip_layout',
+      ),
+    );
     return { ...r, corner, sizePercent: scale };
   }
 
-  protected async gridLayout(clips: Array<{trackIndex:number,clipIndex:number}>, cols: number, seqId?: string): Promise<any> {
+  protected async gridLayout(
+    clips: Array<{ trackIndex: number; clipIndex: number }>,
+    cols: number,
+    seqId?: string,
+  ): Promise<any> {
     const rows = Math.ceil(clips.length / cols);
     const scale = Math.floor(100 / cols);
     const positions = clips.map((_, i) => {
-      const col = i % cols, row = Math.floor(i / cols);
+      const col = i % cols,
+        row = Math.floor(i / cols);
       return [(col + 0.5) / cols, (row + 0.5) / rows];
     });
     // The old script skipped a missing clip with `continue`, swallowed every write, and
     // still returned verified: true with clipCount = the number REQUESTED — so a grid that
     // landed on nothing reported a verified success for every tile.
-    const r: any = await this.bridge.executeScript(this.motionParamBatchScript(seqId,
-      clips.map((c, i) => ({
-        trackIndex: c.trackIndex,
-        clipIndex: c.clipIndex,
-        targets: [
-          { index: 0, name: 'Position', value: [positions[i]![0]!, positions[i]![1]!] },
-          { index: 1, name: 'Scale', value: scale },
-        ] as MotionParamTarget[],
-      })), 'grid_layout'));
+    const r: any = await this.bridge.executeScript(
+      this.motionParamBatchScript(
+        seqId,
+        clips.map((c, i) => ({
+          trackIndex: c.trackIndex,
+          clipIndex: c.clipIndex,
+          targets: [
+            { index: 0, name: 'Position', value: [positions[i]![0]!, positions[i]![1]!] },
+            { index: 1, name: 'Scale', value: scale },
+          ] as MotionParamTarget[],
+        })),
+        'grid_layout',
+      ),
+    );
     return { ...r, cols, rows, scale, clipsRequested: clips.length };
   }
 
-  protected async splitScreenLayout(clips: Array<{trackIndex:number,clipIndex:number}>, orientation: string, seqId?: string): Promise<any> {
+  protected async splitScreenLayout(
+    clips: Array<{ trackIndex: number; clipIndex: number }>,
+    orientation: string,
+    seqId?: string,
+  ): Promise<any> {
     const n = clips.length;
-    const positions = orientation === 'horizontal'
-      ? clips.map((_, i) => ({ x: (i + 0.5) / n, y: 0.5, cropLeft: i / n * 100, cropRight: (n - i - 1) / n * 100 }))
-      : clips.map((_, i) => ({ x: 0.5, y: (i + 0.5) / n, cropTop: i / n * 100, cropBottom: (n - i - 1) / n * 100 }));
+    const positions =
+      orientation === 'horizontal'
+        ? clips.map((_, i) => ({
+            x: (i + 0.5) / n,
+            y: 0.5,
+            cropLeft: (i / n) * 100,
+            cropRight: ((n - i - 1) / n) * 100,
+          }))
+        : clips.map((_, i) => ({
+            x: 0.5,
+            y: (i + 0.5) / n,
+            cropTop: (i / n) * 100,
+            cropBottom: ((n - i - 1) / n) * 100,
+          }));
     const splitScale = Math.floor(100 / n);
-    const r: any = await this.bridge.executeScript(this.motionParamBatchScript(seqId,
-      clips.map((c, i) => ({
-        trackIndex: c.trackIndex,
-        clipIndex: c.clipIndex,
-        targets: [
-          { index: 0, name: 'Position', value: [positions[i]!.x, positions[i]!.y] },
-          { index: 1, name: 'Scale', value: splitScale },
-        ] as MotionParamTarget[],
-      })), 'split_screen_layout'));
+    const r: any = await this.bridge.executeScript(
+      this.motionParamBatchScript(
+        seqId,
+        clips.map((c, i) => ({
+          trackIndex: c.trackIndex,
+          clipIndex: c.clipIndex,
+          targets: [
+            { index: 0, name: 'Position', value: [positions[i]!.x, positions[i]!.y] },
+            { index: 1, name: 'Scale', value: splitScale },
+          ] as MotionParamTarget[],
+        })),
+        'split_screen_layout',
+      ),
+    );
     // The crop halves of the layout are computed but Motion has no crop parameter to write
     // them to, so they are returned as data rather than implied to have been applied.
-    return { ...r, orientation, scale: splitScale, clipsRequested: clips.length,
+    return {
+      ...r,
+      orientation,
+      scale: splitScale,
+      clipsRequested: clips.length,
       cropsNotApplied: positions,
-      note: 'Position and Scale were applied. The per-clip crop values are returned but NOT applied: crop is a separate effect in Premiere, not a Motion parameter. Add the Crop effect with apply_effect and set them with set_effect_property.' };
+      note: 'Position and Scale were applied. The per-clip crop values are returned but NOT applied: crop is a separate effect in Premiere, not a Motion parameter. Add the Crop effect with apply_effect and set them with set_effect_property.',
+    };
   }
 
-  protected async resetMotionToDefaults(trackIndex: number, clipIndex: number, seqId?: string): Promise<any> {
+  protected async resetMotionToDefaults(
+    trackIndex: number,
+    clipIndex: number,
+    seqId?: string,
+  ): Promise<any> {
     // Eleven bare-index writes, no readback, unconditional verified: true. Indices 7..10 were
     // assumed to be crop; each target now carries the name it must be, and a parameter that is
     // not where it was expected is reported instead of written blind.
-    return await this.bridge.executeScript(this.motionParamScript(seqId, trackIndex, clipIndex, [
-      { index: 0, name: 'Position', value: [0.5, 0.5] },
-      { index: 1, name: 'Scale', value: 100 },
-      { index: 2, name: 'Scale Width', aliases: ['Scale Height'], value: 100 },
-      { index: 3, name: 'Uniform Scale', value: true },
-      { index: 4, name: 'Rotation', value: 0 },
-      { index: 5, name: 'Anchor Point', value: [0.5, 0.5] },
-      { index: 6, name: 'Anti-flicker Filter', aliases: ['Anti-flicker filter'], value: 0 },
-    ], 'reset_motion_to_defaults'));
+    return await this.bridge.executeScript(
+      this.motionParamScript(
+        seqId,
+        trackIndex,
+        clipIndex,
+        [
+          { index: 0, name: 'Position', value: [0.5, 0.5] },
+          { index: 1, name: 'Scale', value: 100 },
+          { index: 2, name: 'Scale Width', aliases: ['Scale Height'], value: 100 },
+          { index: 3, name: 'Uniform Scale', value: true },
+          { index: 4, name: 'Rotation', value: 0 },
+          { index: 5, name: 'Anchor Point', value: [0.5, 0.5] },
+          { index: 6, name: 'Anti-flicker Filter', aliases: ['Anti-flicker filter'], value: 0 },
+        ],
+        'reset_motion_to_defaults',
+      ),
+    );
   }
 
-  protected async alignClipsSpatial(clips: Array<{trackIndex:number,clipIndex:number}>, alignment: string, seqId?: string): Promise<any> {
+  protected async alignClipsSpatial(
+    clips: Array<{ trackIndex: number; clipIndex: number }>,
+    alignment: string,
+    seqId?: string,
+  ): Promise<any> {
     const axis: Record<string, [0 | 1, number]> = {
-      left: [0, 0.1], center: [0, 0.5], right: [0, 0.9],
-      top: [1, 0.1], middle: [1, 0.5], bottom: [1, 0.9],
+      left: [0, 0.1],
+      center: [0, 0.5],
+      right: [0, 0.9],
+      top: [1, 0.1],
+      middle: [1, 0.5],
+      bottom: [1, 0.9],
     };
     const target = axis[alignment];
     if (!target) {
-      return { success: false, verified: false, error: `Unrecognised alignment "${alignment}". Use one of: ${Object.keys(axis).join(', ')}.` };
+      return {
+        success: false,
+        verified: false,
+        error: `Unrecognised alignment "${alignment}". Use one of: ${Object.keys(axis).join(', ')}.`,
+      };
     }
     // Read the current Position of each clip first: alignment overrides one axis and keeps
     // the other, so the write target is not known until the current value is in hand. The
@@ -817,25 +992,51 @@ export class MotionLayoutTools extends MarkerTools {
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
     `);
     if (!read?.success) return { ...read, verified: false };
-    const entries: Array<{ trackIndex: number; clipIndex: number; targets: MotionParamTarget[] }> = [];
+    const entries: Array<{ trackIndex: number; clipIndex: number; targets: MotionParamTarget[] }> =
+      [];
     const unreadable: any[] = [];
     for (const p of read.positions ?? []) {
-      if (!p.position) { unreadable.push(p); continue; }
+      if (!p.position) {
+        unreadable.push(p);
+        continue;
+      }
       const next = [Number(p.position[0]), Number(p.position[1])];
       next[target[0]] = target[1];
-      entries.push({ trackIndex: p.trackIndex, clipIndex: p.clipIndex, targets: [{ index: 0, name: 'Position', value: next }] });
+      entries.push({
+        trackIndex: p.trackIndex,
+        clipIndex: p.clipIndex,
+        targets: [{ index: 0, name: 'Position', value: next }],
+      });
     }
     if (!entries.length) {
-      return { success: false, verified: true, alignment, requested: clips.length, aligned: 0, unreadable,
-        error: 'None of the requested clips exposed a readable Motion Position parameter, so nothing was aligned. See unreadable[].' };
+      return {
+        success: false,
+        verified: true,
+        alignment,
+        requested: clips.length,
+        aligned: 0,
+        unreadable,
+        error:
+          'None of the requested clips exposed a readable Motion Position parameter, so nothing was aligned. See unreadable[].',
+      };
     }
-    const r: any = await this.bridge.executeScript(this.motionParamBatchScript(seqId, entries, 'align_clips_spatial'));
+    const r: any = await this.bridge.executeScript(
+      this.motionParamBatchScript(seqId, entries, 'align_clips_spatial'),
+    );
     const aligned = r?.clipsFullyApplied ?? 0;
-    return { ...r, alignment, requested: clips.length, aligned, unreadable,
+    return {
+      ...r,
+      alignment,
+      requested: clips.length,
+      aligned,
+      unreadable,
       success: r?.success === true && unreadable.length === 0,
-      error: r?.success === true && unreadable.length === 0
-        ? null
-        : (r?.error ?? `Aligned ${aligned} of ${clips.length} requested clips; ${unreadable.length} had no readable Motion Position. See clips[] and unreadable[].`) };
+      error:
+        r?.success === true && unreadable.length === 0
+          ? null
+          : (r?.error ??
+            `Aligned ${aligned} of ${clips.length} requested clips; ${unreadable.length} had no readable Motion Position. See clips[] and unreadable[].`),
+    };
   }
 
   protected async safeAreaCheck(seqId?: string): Promise<any> {
@@ -846,32 +1047,72 @@ export class MotionLayoutTools extends MarkerTools {
     `);
   }
 
-  protected async setClipCrop(trackIndex: number, clipIndex: number, left: number, top: number, right: number, bottom: number, seqId?: string): Promise<any> {
-    const r: any = await this.bridge.executeScript(this.motionParamScript(seqId, trackIndex, clipIndex, [
-      { index: 7, name: 'Crop Left', aliases: ['Left'], value: left },
-      { index: 8, name: 'Crop Top', aliases: ['Top'], value: top },
-      { index: 9, name: 'Crop Right', aliases: ['Right'], value: right },
-      { index: 10, name: 'Crop Bottom', aliases: ['Bottom'], value: bottom },
-    ], 'set_clip_crop'));
-    return { ...r, left, top, right, bottom,
-      hint: r?.success === false && r?.applied === 0
-        ? 'Crop is a separate effect in Premiere, not part of Motion. Add the Crop effect with apply_effect, then set Left/Top/Right/Bottom with set_effect_property.'
-        : undefined };
+  protected async setClipCrop(
+    trackIndex: number,
+    clipIndex: number,
+    left: number,
+    top: number,
+    right: number,
+    bottom: number,
+    seqId?: string,
+  ): Promise<any> {
+    const r: any = await this.bridge.executeScript(
+      this.motionParamScript(
+        seqId,
+        trackIndex,
+        clipIndex,
+        [
+          { index: 7, name: 'Crop Left', aliases: ['Left'], value: left },
+          { index: 8, name: 'Crop Top', aliases: ['Top'], value: top },
+          { index: 9, name: 'Crop Right', aliases: ['Right'], value: right },
+          { index: 10, name: 'Crop Bottom', aliases: ['Bottom'], value: bottom },
+        ],
+        'set_clip_crop',
+      ),
+    );
+    return {
+      ...r,
+      left,
+      top,
+      right,
+      bottom,
+      hint:
+        r?.success === false && r?.applied === 0
+          ? 'Crop is a separate effect in Premiere, not part of Motion. Add the Crop effect with apply_effect, then set Left/Top/Right/Bottom with set_effect_property.'
+          : undefined,
+    };
   }
 
-  protected async toggleUniformScale(trackIndex: number, clipIndex: number, uniformScale: boolean, seqId?: string): Promise<any> {
+  protected async toggleUniformScale(
+    trackIndex: number,
+    clipIndex: number,
+    uniformScale: boolean,
+    seqId?: string,
+  ): Promise<any> {
     // Was a bare `getValue() === uniformScale` with no `before`, so an already-correct clip
     // and a successful write were indistinguishable, and a failed write reported
     // verified: false with no reason at all.
-    const r: any = await this.bridge.executeScript(this.motionParamScript(seqId, trackIndex, clipIndex, [
-      { index: 3, name: 'Uniform Scale', value: uniformScale },
-    ], 'toggle_uniform_scale'));
+    const r: any = await this.bridge.executeScript(
+      this.motionParamScript(
+        seqId,
+        trackIndex,
+        clipIndex,
+        [{ index: 3, name: 'Uniform Scale', value: uniformScale }],
+        'toggle_uniform_scale',
+      ),
+    );
     const first = r?.results?.[0];
     return { ...r, uniformScale, changed: first ? first.changed === true : undefined };
   }
 
   // Auto Reframe Implementation
-  protected async autoReframeSequence(sequenceId: string, numerator: number, denominator: number, motionPreset?: string, newName?: string): Promise<any> {
+  protected async autoReframeSequence(
+    sequenceId: string,
+    numerator: number,
+    denominator: number,
+    motionPreset?: string,
+    newName?: string,
+  ): Promise<any> {
     const preset = motionPreset || 'default';
     const script = `
       try {

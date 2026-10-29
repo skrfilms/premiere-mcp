@@ -57,10 +57,23 @@ function pollOnce(): Promise<{ dismissed?: string; error?: string }> {
       resolve({ error: String(e?.message ?? e) });
       return;
     }
-    const timer = setTimeout(() => { try { proc.kill('SIGKILL'); } catch { /* gone */ } }, 8000);
-    proc.stdout.on('data', (d) => { out += d; });
-    proc.stderr.on('data', (d) => { err += d; });
-    proc.on('error', (e) => { clearTimeout(timer); resolve({ error: e.message }); });
+    const timer = setTimeout(() => {
+      try {
+        proc.kill('SIGKILL');
+      } catch {
+        /* gone */
+      }
+    }, 8000);
+    proc.stdout.on('data', (d) => {
+      out += d;
+    });
+    proc.stderr.on('data', (d) => {
+      err += d;
+    });
+    proc.on('error', (e) => {
+      clearTimeout(timer);
+      resolve({ error: e.message });
+    });
     proc.on('close', () => {
       clearTimeout(timer);
       const name = out.trim();
@@ -103,14 +116,22 @@ function startPolling(): void {
   starter = setTimeout(() => {
     starter = undefined;
     void tick();
-    interval = setInterval(() => { void tick(); }, POLL_MS);
+    interval = setInterval(() => {
+      void tick();
+    }, POLL_MS);
   }, START_AFTER_MS);
 }
 
 function stopPollingIfIdle(): void {
   if (inFlight.size > 0) return;
-  if (starter) { clearTimeout(starter); starter = undefined; }
-  if (interval) { clearInterval(interval); interval = undefined; }
+  if (starter) {
+    clearTimeout(starter);
+    starter = undefined;
+  }
+  if (interval) {
+    clearInterval(interval);
+    interval = undefined;
+  }
 }
 
 /**
@@ -120,7 +141,10 @@ function stopPollingIfIdle(): void {
  * 2.5 s start delay and Premiere raises its Translation Report a moment AFTER, so a guard that
  * stopped with the call never saw it, and the reports piled up on screen one per import.
  */
-export async function withReportDialogGuard<T>(fn: () => Promise<T>, opts: { lingerMs?: number } = {}): Promise<{ result: T; guard: GuardOutcome }> {
+export async function withReportDialogGuard<T>(
+  fn: () => Promise<T>,
+  opts: { lingerMs?: number } = {},
+): Promise<{ result: T; guard: GuardOutcome }> {
   const guard: GuardOutcome = { dismissed: [] };
   if (!dialogGuardEnabled()) return { result: await fn(), guard };
   if (unavailable) guard.unavailable = unavailable;
@@ -135,11 +159,19 @@ export async function withReportDialogGuard<T>(fn: () => Promise<T>, opts: { lin
       inFlight.add(tail);
       // Poll now rather than after the start delay: the report is due any moment.
       if (!interval) {
-        if (starter) { clearTimeout(starter); starter = undefined; }
+        if (starter) {
+          clearTimeout(starter);
+          starter = undefined;
+        }
         void tick();
-        interval = setInterval(() => { void tick(); }, POLL_MS);
+        interval = setInterval(() => {
+          void tick();
+        }, POLL_MS);
       }
-      setTimeout(() => { inFlight.delete(tail); stopPollingIfIdle(); }, opts.lingerMs).unref?.();
+      setTimeout(() => {
+        inFlight.delete(tail);
+        stopPollingIfIdle();
+      }, opts.lingerMs).unref?.();
     } else {
       stopPollingIfIdle();
     }
@@ -147,5 +179,6 @@ export async function withReportDialogGuard<T>(fn: () => Promise<T>, opts: { lin
 }
 
 /** Tools whose Premiere call can raise a report dialog shortly after it returns. */
-export const REPORT_DIALOG_TOOLS = /fcp_?xml|_xml|aaf|omf|multicam_cut|create_multicam|open_fcp|import_sequences/;
+export const REPORT_DIALOG_TOOLS =
+  /fcp_?xml|_xml|aaf|omf|multicam_cut|create_multicam|open_fcp|import_sequences/;
 export const REPORT_LINGER_MS = 8000;

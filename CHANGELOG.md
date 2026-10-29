@@ -4,6 +4,40 @@ All notable changes are documented here. Releases use semantic versioning.
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-10-29
+
+Premiere MCP that teammates can install with one double-click, that works with no panel open,
+and that is safe to drive under timeouts: retries do not apply an edit twice, a whole call can be
+undone, hand edits in Premiere are noticed, and replies are sized to fit. New editor workflows
+(version up every shot, remove silence, sync by audio, stringout from a transcript) each come
+with a live workflow test; all nine pass on Premiere Pro 26.5.2.
+
+### Setup in one command
+
+- `npx -y premiere-mcp setup` installs the signed Premiere plugins through Adobe's own plugin
+  installer and adds the server to Claude Desktop, Claude Code, Codex, Cursor and VS Code
+  (`--clients` to choose, `--dry-run` to preview; each edited config is backed up). `doctor`
+  checks Node, the installed bridge, Premiere's heartbeat and each app. The old hand-copy route
+  (CEP developer mode) is now `setup --unsigned`.
+- The server now uses the bridge folder the background bridge watches when `PREMIERE_TEMP_DIR`
+  is not set. It used to make a private folder per session, so a server started without the
+  variable never reached Premiere. `PREMIERE_MCP_SESSION_TEMP=1` keeps the old behaviour.
+- The Claude Desktop bundle installs the signed bridge on first launch and leaves an existing
+  signed install alone (it used to hand-copy the panel and turn on developer mode every launch).
+- Packages shrink from 56 MB to 1 MB (npm) and 57 MB to 2.6 MB (`.mcpb`): design screenshots and
+  compiled tests are no longer shipped.
+- `AGENTS.md` / `CLAUDE.md`: steps for an AI agent setting this up; README and QUICKSTART
+  rewritten around `setup`.
+- Tools that write without a way to read back say so: `set_parametric_eq`, `set_compressor`
+  and `set_limiter` return `verified: false`, and fail when no parameter was accepted.
+- `stabilize_clip` wrote Smoothness into the wrong effect: Premiere inserts Warp Stabilizer ahead
+  of Lumetri, and the tool took the last effect on the clip. It now finds the stabilizer by its
+  internal name and reads Smoothness back. The Lumetri tools find their effect the same way.
+- `verify_color_grade` and `verify_effect_rendered` accepted a `sequenceId` and used the active
+  sequence; a source audit that should have caught it only read the first line of a signature.
+- Code formatted throughout (one formatting-only commit, listed in `.git-blame-ignore-revs`), and
+  formatting is now checked in CI. Stale comments fixed; out-of-date README translations removed.
+
 ### Added: safe retries and editor workflows
 
 - **"Did my last call run?"** Every call is journaled; `get_recent_calls` shows what ran,

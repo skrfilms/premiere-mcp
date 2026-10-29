@@ -39,7 +39,8 @@ export interface JournalEntry {
 const MAX_ENTRIES = 500;
 const MAX_RESULT_CHARS = 20000;
 
-const file = (): string => process.env.PREMIERE_MCP_JOURNAL_PATH || join(bridgeDir(), 'mcp-call-journal.jsonl');
+const file = (): string =>
+  process.env.PREMIERE_MCP_JOURNAL_PATH || join(bridgeDir(), 'mcp-call-journal.jsonl');
 
 function readAll(): JournalEntry[] {
   try {
@@ -50,7 +51,9 @@ function readAll(): JournalEntry[] {
       try {
         const e = JSON.parse(line) as JournalEntry;
         byId.set(e.id, { ...(byId.get(e.id) ?? {}), ...e });
-      } catch { /* torn line */ }
+      } catch {
+        /* torn line */
+      }
     }
     return [...byId.values()];
   } catch {
@@ -63,24 +66,37 @@ function append(e: Partial<JournalEntry> & { id: string }): void {
     mkdirSync(join(file(), '..'), { recursive: true });
     appendFileSync(file(), JSON.stringify(e) + '\n', { mode: 0o600 });
     compactIfLarge();
-  } catch { /* the journal must never break a tool call */ }
+  } catch {
+    /* the journal must never break a tool call */
+  }
 }
 
 let appendsSinceCompact = 0;
 function compactIfLarge(): void {
   if (++appendsSinceCompact < 200) return;
   appendsSinceCompact = 0;
-  const kept = readAll().sort((a, b) => byNewest(b, a)).slice(-MAX_ENTRIES);
+  const kept = readAll()
+    .sort((a, b) => byNewest(b, a))
+    .slice(-MAX_ENTRIES);
   writeFileSync(file(), kept.map((e) => JSON.stringify(e)).join('\n') + '\n', { mode: 0o600 });
 }
 
 let lastOrder = 0;
 const nextOrder = (): number => (lastOrder = Math.max(Date.now() * 1000, lastOrder + 1));
-const byNewest = (a: JournalEntry, b: JournalEntry): number => (b.order ?? Date.parse(b.startedAt) * 1000) - (a.order ?? Date.parse(a.startedAt) * 1000);
+const byNewest = (a: JournalEntry, b: JournalEntry): number =>
+  (b.order ?? Date.parse(b.startedAt) * 1000) - (a.order ?? Date.parse(a.startedAt) * 1000);
 
-const digest = (args: unknown): string => createHash('sha1').update(JSON.stringify(args ?? {})).digest('hex').slice(0, 12);
+const digest = (args: unknown): string =>
+  createHash('sha1')
+    .update(JSON.stringify(args ?? {}))
+    .digest('hex')
+    .slice(0, 12);
 
-export function begin(tool: string, args: Record<string, unknown>, readOnly: boolean): JournalEntry {
+export function begin(
+  tool: string,
+  args: Record<string, unknown>,
+  readOnly: boolean,
+): JournalEntry {
   const e: JournalEntry = {
     id: randomUUID(),
     tool,
@@ -90,14 +106,20 @@ export function begin(tool: string, args: Record<string, unknown>, readOnly: boo
     startedAt: new Date().toISOString(),
     order: nextOrder(),
     status: 'running',
-    ...(typeof args?.requestId === 'string' && args.requestId ? { requestId: String(args.requestId) } : {}),
+    ...(typeof args?.requestId === 'string' && args.requestId
+      ? { requestId: String(args.requestId) }
+      : {}),
   };
   append(e);
   return e;
 }
 
 export function finish(e: JournalEntry, result: unknown): void {
-  const ok = !(result && typeof result === 'object' && (result as { success?: unknown }).success === false);
+  const ok = !(
+    result &&
+    typeof result === 'object' &&
+    (result as { success?: unknown }).success === false
+  );
   const text = JSON.stringify(result ?? null);
   append({
     id: e.id,
@@ -109,20 +131,36 @@ export function finish(e: JournalEntry, result: unknown): void {
 }
 
 export function failThrown(e: JournalEntry, message: string): void {
-  append({ id: e.id, finishedAt: new Date().toISOString(), status: 'failed', summary: message.slice(0, 600) });
+  append({
+    id: e.id,
+    finishedAt: new Date().toISOString(),
+    status: 'failed',
+    summary: message.slice(0, 600),
+  });
 }
 
 /** The most recent entry carrying this requestId, if any. */
 export function byRequestId(requestId: string): JournalEntry | undefined {
-  return readAll().filter((x) => x.requestId === requestId).sort(byNewest)[0];
+  return readAll()
+    .filter((x) => x.requestId === requestId)
+    .sort(byNewest)[0];
 }
 
-export function recent(opts: { limit?: number; mutatingOnly?: boolean; sinceSeconds?: number } = {}): JournalEntry[] {
+export function recent(
+  opts: { limit?: number; mutatingOnly?: boolean; sinceSeconds?: number } = {},
+): JournalEntry[] {
   const since = opts.sinceSeconds ? Date.now() - opts.sinceSeconds * 1000 : 0;
-  return readAll()
-    // Not itself: the get_recent_calls call asking the question is always the newest entry.
-    .filter((x) => x.tool !== 'get_recent_calls' && (!opts.mutatingOnly || !x.readOnly) && (!since || Date.parse(x.startedAt) >= since))
-    .sort(byNewest)
-    .slice(0, Math.max(1, Math.min(opts.limit ?? 10, 100)))
-    .map(({ result: _r, ...rest }) => rest);
+  return (
+    readAll()
+      // Not itself: the get_recent_calls call asking the question is always the newest entry.
+      .filter(
+        (x) =>
+          x.tool !== 'get_recent_calls' &&
+          (!opts.mutatingOnly || !x.readOnly) &&
+          (!since || Date.parse(x.startedAt) >= since),
+      )
+      .sort(byNewest)
+      .slice(0, Math.max(1, Math.min(opts.limit ?? 10, 100)))
+      .map(({ result: _r, ...rest }) => rest)
+  );
 }

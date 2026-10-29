@@ -9,7 +9,12 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { ffmpegCmd, ffprobeCmd, FFMPEG_INSTALL_GUIDANCE, FFPROBE_INSTALL_GUIDANCE } from '../capture/ffmpeg.js';
+import {
+  ffmpegCmd,
+  ffprobeCmd,
+  FFMPEG_INSTALL_GUIDANCE,
+  FFPROBE_INSTALL_GUIDANCE,
+} from '../capture/ffmpeg.js';
 
 export interface FfOptions {
   timeoutMs?: number;
@@ -36,15 +41,20 @@ export function runFf(tool: 'ffmpeg' | 'ffprobe', args: string[], opts: FfOption
   if (res.error) {
     const code = (res.error as NodeJS.ErrnoException).code;
     if (code === 'ENOENT') {
-      throw new Error(`${tool} was not found (${cmd}). ${tool === 'ffmpeg' ? FFMPEG_INSTALL_GUIDANCE : FFPROBE_INSTALL_GUIDANCE}`);
+      throw new Error(
+        `${tool} was not found (${cmd}). ${tool === 'ffmpeg' ? FFMPEG_INSTALL_GUIDANCE : FFPROBE_INSTALL_GUIDANCE}`,
+      );
     }
-    if (code === 'ETIMEDOUT') throw new Error(`${tool} timed out after ${opts.timeoutMs ?? 30_000}ms`);
+    if (code === 'ETIMEDOUT')
+      throw new Error(`${tool} timed out after ${opts.timeoutMs ?? 30_000}ms`);
     throw res.error;
   }
   const stdout = res.stdout ?? '';
   const stderr = res.stderr ?? '';
   if (res.status !== 0 && !opts.allowNonZero) {
-    throw new Error(`${tool} exited with status ${res.status}: ${stderr.trim().split('\n').slice(-6).join(' | ').slice(0, 800)}`);
+    throw new Error(
+      `${tool} exited with status ${res.status}: ${stderr.trim().split('\n').slice(-6).join(' | ').slice(0, 800)}`,
+    );
   }
   return opts.mergeStderr ? stdout + stderr : stdout;
 }

@@ -23,7 +23,12 @@ const jobs = new Map<string, Job>();
 const MAX_JOBS = 100;
 
 export function startJob(tool: string, run: () => Promise<unknown>): Job {
-  const job: Job = { jobId: randomUUID(), tool, status: 'running', startedAt: new Date().toISOString() };
+  const job: Job = {
+    jobId: randomUUID(),
+    tool,
+    status: 'running',
+    startedAt: new Date().toISOString(),
+  };
   jobs.set(job.jobId, job);
   if (jobs.size > MAX_JOBS) {
     const oldestDone = [...jobs.values()].find((j) => j.status !== 'running');
@@ -31,10 +36,23 @@ export function startJob(tool: string, run: () => Promise<unknown>): Job {
   }
   run().then(
     (result) => {
-      const failed = !!(result && typeof result === 'object' && (result as { success?: unknown }).success === false);
-      Object.assign(job, { status: failed ? 'failed' : 'done', finishedAt: new Date().toISOString(), result });
+      const failed = !!(
+        result &&
+        typeof result === 'object' &&
+        (result as { success?: unknown }).success === false
+      );
+      Object.assign(job, {
+        status: failed ? 'failed' : 'done',
+        finishedAt: new Date().toISOString(),
+        result,
+      });
     },
-    (e) => Object.assign(job, { status: 'failed', finishedAt: new Date().toISOString(), error: e instanceof Error ? e.message : String(e) }),
+    (e) =>
+      Object.assign(job, {
+        status: 'failed',
+        finishedAt: new Date().toISOString(),
+        error: e instanceof Error ? e.message : String(e),
+      }),
   );
   return job;
 }

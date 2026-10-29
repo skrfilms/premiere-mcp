@@ -16,19 +16,29 @@ function diff(
   b: unknown,
 ): { added: any[]; removed: any[]; moved: any[]; retimed: any[] } {
   const tools = new PremiereProTools(noBridge) as unknown as {
-    diffTimelineData(a: unknown, b: unknown): { added: any[]; removed: any[]; moved: any[]; retimed: any[] };
+    diffTimelineData(
+      a: unknown,
+      b: unknown,
+    ): { added: any[]; removed: any[]; moved: any[]; retimed: any[] };
   };
   return tools.diffTimelineData(a, b);
 }
 
 const track = (index: number, clips: any[]) => ({ index, name: `V${index + 1}`, clips });
 const clip = (name: string, startTime: number, duration: number) => ({
-  name, startTime, duration, endTime: startTime + duration,
+  name,
+  startTime,
+  duration,
+  endTime: startTime + duration,
 });
 
 describe('diff_sequences — pure analyzer', () => {
   it('reports no changes for identical timelines', () => {
-    const seq = { frameRate: 24, videoTracks: [track(0, [clip('A', 0, 2), clip('B', 2, 2)])], audioTracks: [] };
+    const seq = {
+      frameRate: 24,
+      videoTracks: [track(0, [clip('A', 0, 2), clip('B', 2, 2)])],
+      audioTracks: [],
+    };
     const d = diff(seq, JSON.parse(JSON.stringify(seq)));
     expect(d.added).toEqual([]);
     expect(d.removed).toEqual([]);
@@ -38,7 +48,11 @@ describe('diff_sequences — pure analyzer', () => {
 
   it('detects an added clip', () => {
     const a = { frameRate: 24, videoTracks: [track(0, [clip('A', 0, 2)])], audioTracks: [] };
-    const b = { frameRate: 24, videoTracks: [track(0, [clip('A', 0, 2), clip('B', 2, 2)])], audioTracks: [] };
+    const b = {
+      frameRate: 24,
+      videoTracks: [track(0, [clip('A', 0, 2), clip('B', 2, 2)])],
+      audioTracks: [],
+    };
     const d = diff(a, b);
     expect(d.added).toHaveLength(1);
     expect(d.added[0].name).toBe('B');
@@ -46,7 +60,11 @@ describe('diff_sequences — pure analyzer', () => {
   });
 
   it('detects a removed clip', () => {
-    const a = { frameRate: 24, videoTracks: [track(0, [clip('A', 0, 2), clip('B', 2, 2)])], audioTracks: [] };
+    const a = {
+      frameRate: 24,
+      videoTracks: [track(0, [clip('A', 0, 2), clip('B', 2, 2)])],
+      audioTracks: [],
+    };
     const b = { frameRate: 24, videoTracks: [track(0, [clip('A', 0, 2)])], audioTracks: [] };
     const d = diff(a, b);
     expect(d.removed).toHaveLength(1);
@@ -78,15 +96,27 @@ describe('diff_sequences — pure analyzer', () => {
   it('does not flag a sub-half-frame jitter as moved or retimed', () => {
     const a = { frameRate: 24, videoTracks: [track(0, [clip('A', 0, 2)])], audioTracks: [] };
     const jitter = (1 / 24) * 0.4;
-    const b = { frameRate: 24, videoTracks: [track(0, [clip('A', jitter, 2 + jitter)])], audioTracks: [] };
+    const b = {
+      frameRate: 24,
+      videoTracks: [track(0, [clip('A', jitter, 2 + jitter)])],
+      audioTracks: [],
+    };
     const d = diff(a, b);
     expect(d.moved).toEqual([]);
     expect(d.retimed).toEqual([]);
   });
 
   it('keeps changes scoped to their own track', () => {
-    const a = { frameRate: 24, videoTracks: [track(0, [clip('A', 0, 2)]), track(1, [])], audioTracks: [] };
-    const b = { frameRate: 24, videoTracks: [track(0, []), track(1, [clip('A', 0, 2)])], audioTracks: [] };
+    const a = {
+      frameRate: 24,
+      videoTracks: [track(0, [clip('A', 0, 2)]), track(1, [])],
+      audioTracks: [],
+    };
+    const b = {
+      frameRate: 24,
+      videoTracks: [track(0, []), track(1, [clip('A', 0, 2)])],
+      audioTracks: [],
+    };
     // Same clip name but on a different track index: removed from V1, added on V2.
     const d = diff(a, b);
     expect(d.removed).toHaveLength(1);
@@ -113,15 +143,27 @@ describe('diff_sequences — end to end via bridge', () => {
         if (script.includes('walk(sequence.videoTracks)')) {
           if (script.includes('SEQ-A')) {
             return {
-              success: true, sequenceId: 'SEQ-A', sequenceName: 'Original', frameRate: 24,
+              success: true,
+              sequenceId: 'SEQ-A',
+              sequenceName: 'Original',
+              frameRate: 24,
               videoTracks: [{ index: 0, name: 'V1', clips: [clip('A', 0, 2), clip('B', 2, 2)] }],
               audioTracks: [],
             };
           }
           if (script.includes('SEQ-B')) {
             return {
-              success: true, sequenceId: 'SEQ-B', sequenceName: 'Edit', frameRate: 24,
-              videoTracks: [{ index: 0, name: 'V1', clips: [clip('A', 0, 2), clip('B', 5, 2), clip('C', 7, 2)] }],
+              success: true,
+              sequenceId: 'SEQ-B',
+              sequenceName: 'Edit',
+              frameRate: 24,
+              videoTracks: [
+                {
+                  index: 0,
+                  name: 'V1',
+                  clips: [clip('A', 0, 2), clip('B', 5, 2), clip('C', 7, 2)],
+                },
+              ],
               audioTracks: [],
             };
           }
@@ -133,7 +175,10 @@ describe('diff_sequences — end to end via bridge', () => {
 
   it('walks both sequences and summarizes the changes', async () => {
     const tools = new PremiereProTools(diffingBridge());
-    const result = await tools.executeTool('diff_sequences', { sequenceIdA: 'SEQ-A', sequenceIdB: 'SEQ-B' });
+    const result = await tools.executeTool('diff_sequences', {
+      sequenceIdA: 'SEQ-A',
+      sequenceIdB: 'SEQ-B',
+    });
     expect(result.success).toBe(true);
     expect(result.identical).toBe(false);
     expect(result.sequenceA.name).toBe('Original');
@@ -153,9 +198,14 @@ describe('diff_sequences — end to end via bridge', () => {
   });
 
   it('reports a read failure honestly', async () => {
-    const errBridge = { executeScript: async () => ({ success: false, error: 'Sequence not found by id: SEQ-X' }) } as never;
+    const errBridge = {
+      executeScript: async () => ({ success: false, error: 'Sequence not found by id: SEQ-X' }),
+    } as never;
     const tools = new PremiereProTools(errBridge);
-    const result = await tools.executeTool('diff_sequences', { sequenceIdA: 'SEQ-X', sequenceIdB: 'SEQ-Y' });
+    const result = await tools.executeTool('diff_sequences', {
+      sequenceIdA: 'SEQ-X',
+      sequenceIdB: 'SEQ-Y',
+    });
     expect(result.success).toBe(false);
     expect(String(result.error)).toMatch(/could not read/i);
   });

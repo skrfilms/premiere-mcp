@@ -5,4 +5,4 @@
  * compiles to CommonJS where import.meta does not parse; src/__tests__/version.test.ts
  * fails whenever this and package.json disagree, so a release cannot bump only one.
  */
-export const PACKAGE_VERSION = '1.4.0';
+export const PACKAGE_VERSION = '1.5.0';

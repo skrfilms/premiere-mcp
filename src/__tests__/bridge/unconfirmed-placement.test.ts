@@ -25,10 +25,15 @@ import { promises as fs } from 'fs';
 
 jest.mock('fs', () => ({
   promises: {
-    mkdir: jest.fn(), access: jest.fn(), readdir: jest.fn(),
-    writeFile: jest.fn(), readFile: jest.fn(), unlink: jest.fn(),
-    rename: jest.fn(), rm: jest.fn(),
-  }
+    mkdir: jest.fn(),
+    access: jest.fn(),
+    readdir: jest.fn(),
+    writeFile: jest.fn(),
+    readFile: jest.fn(),
+    unlink: jest.fn(),
+    rename: jest.fn(),
+    rm: jest.fn(),
+  },
 }));
 jest.mock('node:crypto', () => ({
   randomUUID: jest.fn(() => 'test-uuid-1234'),
@@ -52,7 +57,9 @@ describe('placement that cannot be confirmed', () => {
     mockFs.unlink.mockResolvedValue(undefined);
     mockFs.readFile.mockResolvedValue(JSON.stringify({ result: { ok: true } }));
   });
-  afterEach(() => { delete process.env.PREMIERE_TEMP_DIR; });
+  afterEach(() => {
+    delete process.env.PREMIERE_TEMP_DIR;
+  });
 
   const emitted = async (): Promise<string> => {
     const bridge = new PremiereProBridge();
@@ -103,7 +110,6 @@ describe('placement that cannot be confirmed', () => {
     expect(script).not.toMatch(/placedClip\s*=\s*track\.clips\[/);
   });
 
-
   describe('insertMode', () => {
     /**
      * The tool accepted insertMode, echoed it back in every response, and never
@@ -124,8 +130,8 @@ describe('placement that cannot be confirmed', () => {
       mockFs.unlink.mockClear();
       await bridge.addToTimeline('seq', 'item', 0, 1, true, undefined, undefined, mode);
       const call = mockFs.writeFile.mock.calls.find(
-      ([, payload]) => typeof payload === 'string' && payload.includes('"script"'),
-    );
+        ([, payload]) => typeof payload === 'string' && payload.includes('"script"'),
+      );
       return JSON.parse(call![1] as string).script as string;
     };
 
@@ -225,7 +231,9 @@ describe('bins that do not resolve', () => {
     // in bridge.importMedia, not in the tool layer, which is why the tool layer's
     // binName looked wired up while every import landed at the root.
     const realBridge = new PremiereProBridge();
-    const spy = jest.spyOn(realBridge, 'executeScript').mockResolvedValue({ success: true } as never);
+    const spy = jest
+      .spyOn(realBridge, 'executeScript')
+      .mockResolvedValue({ success: true } as never);
 
     await realBridge.importMedia('/tmp/a.mp4', undefined, '000f62fa');
     const script = spy.mock.calls[0]![0] as string;
@@ -237,12 +245,20 @@ describe('bins that do not resolve', () => {
 
   it('import_media reports the bin it read back, not the bin it was asked for', async () => {
     const fake = {
-      importMedia: async () => ({ success: true, id: 'X', binName: 'Root', treePath: '/Project/X.mp4' }),
+      importMedia: async () => ({
+        success: true,
+        id: 'X',
+        binName: 'Root',
+        treePath: '/Project/X.mp4',
+      }),
       executeScript: async () => ({ success: true }),
     };
     const t = new PremiereProTools(fake as never);
 
-    const result: any = await t.executeTool('import_media', { filePath: '/tmp/a.mp4', binName: 'SC008_0710' });
+    const result: any = await t.executeTool('import_media', {
+      filePath: '/tmp/a.mp4',
+      binName: 'SC008_0710',
+    });
 
     expect(result.binName).toBe('Root');
     expect(result.treePath).toBe('/Project/X.mp4');
@@ -251,12 +267,19 @@ describe('bins that do not resolve', () => {
   it('forwards binName and binId from the tool layer to the bridge', async () => {
     const received: unknown[] = [];
     const fake = {
-      importMedia: async (...args: unknown[]) => { received.push(...args); return { success: true }; },
+      importMedia: async (...args: unknown[]) => {
+        received.push(...args);
+        return { success: true };
+      },
       executeScript: async () => ({ success: true }),
     };
     const t = new PremiereProTools(fake as never);
 
-    await t.executeTool('import_media', { filePath: '/tmp/a.mp4', binName: 'Scenes/008', binId: '000f62fa' });
+    await t.executeTool('import_media', {
+      filePath: '/tmp/a.mp4',
+      binName: 'Scenes/008',
+      binId: '000f62fa',
+    });
 
     expect(received).toEqual(['/tmp/a.mp4', 'Scenes/008', '000f62fa']);
   });
@@ -271,13 +294,20 @@ describe('the tool layer, not just the bridge', () => {
   it('forwards insertMode from the tool to the bridge', async () => {
     let received: unknown = 'NOT PASSED';
     const fake = {
-      addToTimeline: async (...args: unknown[]) => { received = args[7]; return { success: true }; },
+      addToTimeline: async (...args: unknown[]) => {
+        received = args[7];
+        return { success: true };
+      },
       executeScript: async () => ({ success: true }),
     };
     const tools = new PremiereProTools(fake as never);
 
     await tools.executeTool('add_to_timeline', {
-      sequenceId: 'S', projectItemId: 'P', trackIndex: 0, time: 1, insertMode: 'insert',
+      sequenceId: 'S',
+      projectItemId: 'P',
+      trackIndex: 0,
+      time: 1,
+      insertMode: 'insert',
     });
 
     expect(received).toBe('insert');
@@ -286,13 +316,20 @@ describe('the tool layer, not just the bridge', () => {
   it('does not report a mode the bridge was never told about', async () => {
     let received: unknown = 'NOT PASSED';
     const fake = {
-      addToTimeline: async (...args: unknown[]) => { received = args[7]; return { success: true }; },
+      addToTimeline: async (...args: unknown[]) => {
+        received = args[7];
+        return { success: true };
+      },
       executeScript: async () => ({ success: true }),
     };
     const tools = new PremiereProTools(fake as never);
 
     const result = await tools.executeTool('add_to_timeline', {
-      sequenceId: 'S', projectItemId: 'P', trackIndex: 0, time: 1, insertMode: 'insert',
+      sequenceId: 'S',
+      projectItemId: 'P',
+      trackIndex: 0,
+      time: 1,
+      insertMode: 'insert',
     });
 
     // Echoing insert while the bridge overwrites is the defect itself.
@@ -333,7 +370,9 @@ describe('bins are resolved by walking, not by string key', () => {
     // The mock-bridge scripts above are templates without the prelude, so the
     // resolver's own behaviour is asserted where it actually lives.
     const realBridge = new PremiereProBridge();
-    const spy = jest.spyOn(realBridge, 'executeScript').mockResolvedValue({ success: true } as never);
+    const spy = jest
+      .spyOn(realBridge, 'executeScript')
+      .mockResolvedValue({ success: true } as never);
     await realBridge.importMedia('/tmp/a.mp4', 'Footage');
     const emittedScript = spy.mock.calls[0]![0] as string;
 

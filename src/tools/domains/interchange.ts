@@ -6,11 +6,15 @@
  */
 import { ColorTools } from './color.js';
 // Synchronous fs/path/os bindings for the Node-side (non-ExtendScript) tools.
-// Kept separate from the `promises as fs` import above, which is the async API.
+// The async API is the separate `promises as fs` import.
 import * as fsSync from 'node:fs';
 
 export class InterchangeTools extends ColorTools {
-  protected async vfxPullList(sequenceId: string | undefined, handles: number, trackIndex: number): Promise<any> {
+  protected async vfxPullList(
+    sequenceId: string | undefined,
+    handles: number,
+    trackIndex: number,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(sequenceId)};
@@ -44,14 +48,27 @@ export class InterchangeTools extends ColorTools {
     `);
   }
 
-  protected async cutListCsv(outputPath: string, sequenceId: string | undefined, trackIndex: number): Promise<any> {
+  protected async cutListCsv(
+    outputPath: string,
+    sequenceId: string | undefined,
+    trackIndex: number,
+  ): Promise<any> {
     const pullsResult = await this.vfxPullList(sequenceId, 0, trackIndex);
     if (!pullsResult.success) return pullsResult;
     const fs = fsSync;
-    const header = 'index,shot_name,source_path,src_in_secs,src_out_secs,seq_in_secs,seq_out_secs,duration_secs';
-    const rows = pullsResult.pulls.map((p: any) => `${p.index},${JSON.stringify(p.shotName)},${JSON.stringify(p.sourcePath)},${p.srcInSecs.toFixed(3)},${p.srcOutSecs.toFixed(3)},${p.seqInSecs.toFixed(3)},${p.seqOutSecs.toFixed(3)},${p.durationSecs.toFixed(3)}`);
+    const header =
+      'index,shot_name,source_path,src_in_secs,src_out_secs,seq_in_secs,seq_out_secs,duration_secs';
+    const rows = pullsResult.pulls.map(
+      (p: any) =>
+        `${p.index},${JSON.stringify(p.shotName)},${JSON.stringify(p.sourcePath)},${p.srcInSecs.toFixed(3)},${p.srcOutSecs.toFixed(3)},${p.seqInSecs.toFixed(3)},${p.seqOutSecs.toFixed(3)},${p.durationSecs.toFixed(3)}`,
+    );
     fs.writeFileSync(outputPath, [header, ...rows].join('\n'));
-    return { success: true, outputPath, shotCount: pullsResult.count, verified: fs.existsSync(outputPath) };
+    return {
+      success: true,
+      outputPath,
+      shotCount: pullsResult.count,
+      verified: fs.existsSync(outputPath),
+    };
   }
 
   protected async changeListReport(sequenceIdA: string, sequenceIdB: string): Promise<any> {
@@ -88,7 +105,12 @@ export class InterchangeTools extends ColorTools {
     `);
   }
 
-  protected async syncLockTrack(sequenceId: string | undefined, trackType: 'video' | 'audio', trackIndex: number, locked: boolean): Promise<any> {
+  protected async syncLockTrack(
+    sequenceId: string | undefined,
+    trackType: 'video' | 'audio',
+    trackIndex: number,
+    locked: boolean,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -131,7 +153,7 @@ export class InterchangeTools extends ColorTools {
     return await this.bridge.executeScript(`
       try {
         app.openFCPXML(${JSON.stringify(filePath)}, ${JSON.stringify(sequenceName ?? '')});
-        return JSON.stringify({success:true,filePath:${JSON.stringify(filePath)},sequenceName:${JSON.stringify(sequenceName??'')}});
+        return JSON.stringify({success:true,filePath:${JSON.stringify(filePath)},sequenceName:${JSON.stringify(sequenceName ?? '')}});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
@@ -173,13 +195,13 @@ export class InterchangeTools extends ColorTools {
         message: parsed.success
           ? `FCP XML imported successfully via ${parsed.method} — Premiere created new sequence atomically`
           : `Failed to import FCP XML — ${parsed.error || 'Premiere rejected the import'}`,
-        filePath
+        filePath,
       };
     } catch (error) {
       return {
         success: false,
         error: `Failed to import FCP XML: ${error instanceof Error ? error.message : String(error)}`,
-        filePath
+        filePath,
       };
     }
   }
@@ -195,7 +217,8 @@ export class InterchangeTools extends ColorTools {
       success: false,
       blockedBeforePremiere: true,
       filePath,
-      error: 'CMX 3600 EDL import is disabled because Premiere only exposes it through an interactive dialog that blocks CEP. Convert the EDL to FCP7 XML and use import_fcp_xml for unattended import.'
+      error:
+        'CMX 3600 EDL import is disabled because Premiere only exposes it through an interactive dialog that blocks CEP. Convert the EDL to FCP7 XML and use import_fcp_xml for unattended import.',
     };
   }
 
@@ -226,16 +249,30 @@ export class InterchangeTools extends ColorTools {
         const seqIn = block.match(/<start>(\d+)<\/start>/)?.[1];
         const seqOut = block.match(/<end>(\d+)<\/end>/)?.[1];
         if (srcIn && srcOut && seqIn && seqOut) {
-          const toTC = (f: string) => { const fr = parseInt(f); const h = Math.floor(fr/86400), rest = fr%86400, mi = Math.floor(rest/1440), s = Math.floor((rest%1440)/24), ff = (rest%1440)%24; return `${h.toString().padStart(2,'0')}:${mi.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}:${ff.toString().padStart(2,'0')}`; };
-          clips.push(`${clipNum.toString().padStart(3,'0')}  001      V     C        ${toTC(srcIn)} ${toTC(srcOut)} ${toTC(seqIn)} ${toTC(seqOut)}`);
+          const toTC = (f: string) => {
+            const fr = parseInt(f);
+            const h = Math.floor(fr / 86400),
+              rest = fr % 86400,
+              mi = Math.floor(rest / 1440),
+              s = Math.floor((rest % 1440) / 24),
+              ff = (rest % 1440) % 24;
+            return `${h.toString().padStart(2, '0')}:${mi.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}:${ff.toString().padStart(2, '0')}`;
+          };
+          clips.push(
+            `${clipNum.toString().padStart(3, '0')}  001      V     C        ${toTC(srcIn)} ${toTC(srcOut)} ${toTC(seqIn)} ${toTC(seqOut)}`,
+          );
           clipNum++;
         }
       }
       const edl = `TITLE: ${seqName}\nFCM: NON-DROP FRAME\n\n${clips.join('\n')}\n`;
       fs.writeFileSync(outputPath, edl);
-      try { fs.unlinkSync(xmlPath); } catch {}
+      try {
+        fs.unlinkSync(xmlPath);
+      } catch {}
       return { success: true, outputPath, clipCount: clips.length };
-    } catch (e: any) { return { success: false, error: e.message }; }
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
   }
 
   protected async getProductionInfo(): Promise<any> {
@@ -306,7 +343,14 @@ export class InterchangeTools extends ColorTools {
   }
 
   // Export AAF Implementation
-  protected async exportAaf(sequenceId: string, outputPath: string, mixDownVideo?: boolean, explodeToMono?: boolean, sampleRate?: number, bitsPerSample?: number): Promise<any> {
+  protected async exportAaf(
+    sequenceId: string,
+    outputPath: string,
+    mixDownVideo?: boolean,
+    explodeToMono?: boolean,
+    sampleRate?: number,
+    bitsPerSample?: number,
+  ): Promise<any> {
     // Off unless asked for. A video mixdown renders the whole sequence before the AAF is written:
     // on a 40s fixture with one MOGRT it held the ExtendScript engine for over five minutes
     // (2026-10-27), which every later call experiences as a dead host.
@@ -337,7 +381,10 @@ export class InterchangeTools extends ColorTools {
   }
 
   // Import Sequences From Project Implementation
-  protected async importSequencesFromProject(projectPath: string, sequenceIds: string[]): Promise<any> {
+  protected async importSequencesFromProject(
+    projectPath: string,
+    sequenceIds: string[],
+  ): Promise<any> {
     const script = `
       try {
         var seqIds = ${JSON.stringify(sequenceIds)};
@@ -369,7 +416,10 @@ export class InterchangeTools extends ColorTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async convertProjectToProduction(productionPath: string, description?: string): Promise<any> {
+  protected async convertProjectToProduction(
+    productionPath: string,
+    description?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();

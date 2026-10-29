@@ -1,10 +1,10 @@
-import { parse, tokenizer } from "acorn";
-import { tmpdir } from "node:os";
-import { mkdtempSync, rmSync } from "node:fs";
-import { join } from "node:path";
-import { expandedToolNames, executeExpandedTool } from "../../tools/expanded";
-import { PremiereProTools } from "../../tools/index";
-import { seedArgs } from "../helpers/schema-args";
+import { parse, tokenizer } from 'acorn';
+import { tmpdir } from 'node:os';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { expandedToolNames, executeExpandedTool } from '../../tools/expanded';
+import { PremiereProTools } from '../../tools/index';
+import { seedArgs } from '../helpers/schema-args';
 
 /**
  * The expanded tools are emitted as ExtendScript from TypeScript template
@@ -20,7 +20,7 @@ import { seedArgs } from "../helpers/schema-args";
  * So parse what is actually emitted, for every tool, rather than trusting that
  * the TypeScript compiled.
  */
-describe("generated ExtendScript is syntactically valid", () => {
+describe('generated ExtendScript is syntactically valid', () => {
   // Some fuzzed tools (e.g. consolidate_and_transfer) write files relative to
   // the process cwd when seeded with a bare relative path. Drive the whole sweep
   // from a throwaway temp dir so nothing lands in the repo root (an "x/" was
@@ -30,16 +30,20 @@ describe("generated ExtendScript is syntactically valid", () => {
   let scratchCwd: string;
   beforeAll(() => {
     originalCwd = process.cwd();
-    scratchCwd = mkdtempSync(join(tmpdir(), "skry-genscript-"));
+    scratchCwd = mkdtempSync(join(tmpdir(), 'skry-genscript-'));
     process.chdir(scratchCwd);
   });
   afterAll(() => {
     process.chdir(originalCwd);
-    try { rmSync(scratchCwd, { recursive: true, force: true }); } catch { /* best effort */ }
+    try {
+      rmSync(scratchCwd, { recursive: true, force: true });
+    } catch {
+      /* best effort */
+    }
   });
 
   const capture = async (name: string): Promise<string> => {
-    let script = "";
+    let script = '';
     const bridge = {
       executeScript: async (source: string) => {
         script = source;
@@ -71,9 +75,39 @@ describe("generated ExtendScript is syntactically valid", () => {
    */
   // ES3 future-reserved words. ExtendScript refuses them as variable names; acorn's ES3 mode
   // lets them through. `var short` in replace_clip broke the whole script on 2026-10-28.
-  const ES3_RESERVED = new Set(['abstract', 'boolean', 'byte', 'char', 'class', 'const', 'debugger', 'double', 'enum',
-    'export', 'extends', 'final', 'float', 'goto', 'implements', 'import', 'int', 'interface', 'long', 'native',
-    'package', 'private', 'protected', 'public', 'short', 'static', 'super', 'synchronized', 'throws', 'transient', 'volatile']);
+  const ES3_RESERVED = new Set([
+    'abstract',
+    'boolean',
+    'byte',
+    'char',
+    'class',
+    'const',
+    'debugger',
+    'double',
+    'enum',
+    'export',
+    'extends',
+    'final',
+    'float',
+    'goto',
+    'implements',
+    'import',
+    'int',
+    'interface',
+    'long',
+    'native',
+    'package',
+    'private',
+    'protected',
+    'public',
+    'short',
+    'static',
+    'super',
+    'synchronized',
+    'throws',
+    'transient',
+    'volatile',
+  ]);
 
   const parses = (source: string): void => {
     // allowReturnOutsideFunction mirrors the bridge, which wraps these bodies in
@@ -90,20 +124,32 @@ describe("generated ExtendScript is syntactically valid", () => {
         let inClass = false;
         for (let i = 0; i < pattern.length; i++) {
           const ch = pattern[i];
-          if (ch === '\\') { i++; continue; }
+          if (ch === '\\') {
+            i++;
+            continue;
+          }
           if (ch === '[') inClass = true;
           else if (ch === ']') inClass = false;
-          else if (ch === '/' && inClass) throw new SyntaxError(`unescaped "/" inside a regex character class: /${pattern}/ (ExtendScript ends the regex there)`);
+          else if (ch === '/' && inClass)
+            throw new SyntaxError(
+              `unescaped "/" inside a regex character class: /${pattern}/ (ExtendScript ends the regex there)`,
+            );
         }
       }
-      if ((prev === 'var' || prev === 'function') && label === 'name' && ES3_RESERVED.has(String(tok.value))) {
-        throw new SyntaxError(`"${tok.value}" is an ES3 reserved word; ExtendScript will not accept it as a name`);
+      if (
+        (prev === 'var' || prev === 'function') &&
+        label === 'name' &&
+        ES3_RESERVED.has(String(tok.value))
+      ) {
+        throw new SyntaxError(
+          `"${tok.value}" is an ES3 reserved word; ExtendScript will not accept it as a name`,
+        );
       }
       prev = label === 'var' || label === 'function' ? label : '';
     }
   };
 
-  it.each([...expandedToolNames])("%s", async (name) => {
+  it.each([...expandedToolNames])('%s', async (name) => {
     const script = await capture(name);
 
     // A handful of tools are implemented in TypeScript rather than as generated
@@ -114,20 +160,18 @@ describe("generated ExtendScript is syntactically valid", () => {
     expect(() => parses(script)).not.toThrow();
   });
 
-  it("covers the shared generated script", async () => {
+  it('covers the shared generated script', async () => {
     // If the capture shim silently stopped working, every case above would pass
     // vacuously. Pin that the bulk of the catalog really is being parsed.
-    const captured = await Promise.all(
-      [...expandedToolNames].map((n) => capture(n)),
-    );
+    const captured = await Promise.all([...expandedToolNames].map((n) => capture(n)));
     expect(captured.filter((s) => s.length > 0).length).toBeGreaterThan(100);
   });
 
-  it("rejects an escape that collapses before it reaches the host", async () => {
+  it('rejects an escape that collapses before it reaches the host', async () => {
     // Pin the specific regression: a double-quoted ExtendScript string whose
     // quotes were written as \" in the template literal. Guards the seven QE
     // fail() messages that took down all 171 tools.
-    const script = await capture("add_tracks");
+    const script = await capture('add_tracks');
     expect(script).toContain("Could not address sequence '");
     expect(script).not.toContain('Could not address sequence "" +');
   });
@@ -168,7 +212,9 @@ describe("generated ExtendScript is syntactically valid", () => {
     it('reports the sequence error rather than the generic message', async () => {
       const script = await capture('get_clip_markers');
 
-      expect(script).toContain('return fail(pendingSequenceError || "Marker collection unavailable")');
+      expect(script).toContain(
+        'return fail(pendingSequenceError || "Marker collection unavailable")',
+      );
       expect(script).not.toContain('return fail("Marker collection unavailable")');
     });
 
@@ -180,7 +226,7 @@ describe("generated ExtendScript is syntactically valid", () => {
     });
   });
 
-  describe("delete_project_item actually deletes and verifies", () => {
+  describe('delete_project_item actually deletes and verifies', () => {
     /**
      * Proven against a live 26.3.2 host: the old handler called
      * deleteBin() on a footage clip (ProjectItemType 1). deleteBin() only
@@ -190,25 +236,25 @@ describe("generated ExtendScript is syntactically valid", () => {
      * while moveBin()+deleteBin() through a temp bin removed it (deleted:true,
      * confirmed by a post-delete re-scan).
      */
-    it("routes clips through a temp bin and re-scans before claiming success", async () => {
-      const script = await capture("delete_project_item");
+    it('routes clips through a temp bin and re-scans before claiming success', async () => {
+      const script = await capture('delete_project_item');
       // the fixed path
-      expect(script).toContain("deleteProjectItemRobust");
-      expect(script).toContain("moveBin");
-      expect(script).toContain("itemStillPresent");
+      expect(script).toContain('deleteProjectItemRobust');
+      expect(script).toContain('moveBin');
+      expect(script).toContain('itemStillPresent');
       // success is gated on the item being gone, and the honest failure exists
-      expect(script).toContain("verified: true");
-      expect(script).toContain("Premiere did not remove");
+      expect(script).toContain('verified: true');
+      expect(script).toContain('Premiere did not remove');
     });
 
-    it("delete_multiple_project_items fails closed when nothing was deleted", async () => {
-      const script = await capture("delete_multiple_project_items");
-      expect(script).toContain("deleteProjectItemRobust");
-      expect(script).toContain("No items were deleted");
+    it('delete_multiple_project_items fails closed when nothing was deleted', async () => {
+      const script = await capture('delete_multiple_project_items');
+      expect(script).toContain('deleteProjectItemRobust');
+      expect(script).toContain('No items were deleted');
     });
   });
 
-  describe("setComponentProperty verifies the value actually applied", () => {
+  describe('setComponentProperty verifies the value actually applied', () => {
     /**
      * The helper read `after = prop.getValue()` but returned {ok:true}
      * unconditionally, so every set_clip_* tool routing through it (scale,
@@ -217,23 +263,23 @@ describe("generated ExtendScript is syntactically valid", () => {
      * Position/Rotation/Opacity read back exactly as requested, so a tolerant
      * compare is a real gate, not a source of false failures.
      */
-    it("gates ok on a tolerant compare of the readback to the request", async () => {
-      const script = await capture("set_clip_scale");
-      expect(script).toContain("valuesMatch");
-      expect(script).toContain("did not apply the requested value");
-      expect(script).toContain("verified: true");
+    it('gates ok on a tolerant compare of the readback to the request', async () => {
+      const script = await capture('set_clip_scale');
+      expect(script).toContain('valuesMatch');
+      expect(script).toContain('did not apply the requested value');
+      expect(script).toContain('verified: true');
     });
   });
 
   describe("setSelection verifies each clip's selection flipped", () => {
-    it("re-reads isSelected() and fails closed when nothing changed", async () => {
-      const script = await capture("select_all_clips");
-      expect(script).toContain("clip.isSelected()");
-      expect(script).toContain("Selection state did not change");
+    it('re-reads isSelected() and fails closed when nothing changed', async () => {
+      const script = await capture('select_all_clips');
+      expect(script).toContain('clip.isSelected()');
+      expect(script).toContain('Selection state did not change');
     });
   });
 
-  describe("Batch B: expanded.ts mutators verify their readback", () => {
+  describe('Batch B: expanded.ts mutators verify their readback', () => {
     /**
      * TrackItem has neither isEnabled() nor setEnabled() on 26.x -- both threw a
      * ReferenceError, so select_disabled_clips selected nothing, batch_enable_disable
@@ -241,75 +287,75 @@ describe("generated ExtendScript is syntactically valid", () => {
      * `disabled` boolean property (verified live). Every mutator below now re-reads
      * the state it just wrote and fails closed when it did not change.
      */
-    it("select_disabled_clips reads clip.disabled, not the nonexistent isEnabled()", async () => {
-      const script = await capture("select_disabled_clips");
-      expect(script).toContain("clip.disabled === true");
-      expect(script).not.toContain("!clip.isEnabled()");
+    it('select_disabled_clips reads clip.disabled, not the nonexistent isEnabled()', async () => {
+      const script = await capture('select_disabled_clips');
+      expect(script).toContain('clip.disabled === true');
+      expect(script).not.toContain('!clip.isEnabled()');
     });
 
-    it("batch_enable_disable sets clip.disabled and confirms the readback", async () => {
-      const script = await capture("batch_enable_disable");
-      expect(script).toContain(".disabled = !enableValue");
-      expect(script).toContain("did not change the enabled state of any clip");
-      expect(script).not.toContain(".setEnabled(");
+    it('batch_enable_disable sets clip.disabled and confirms the readback', async () => {
+      const script = await capture('batch_enable_disable');
+      expect(script).toContain('.disabled = !enableValue');
+      expect(script).toContain('did not change the enabled state of any clip');
+      expect(script).not.toContain('.setEnabled(');
     });
 
-    it("clipInfo.enabled derives from clip.disabled rather than isEnabled()", async () => {
-      const script = await capture("get_full_clip_info");
-      expect(script).toContain("item.enabled = !clip.disabled");
+    it('clipInfo.enabled derives from clip.disabled rather than isEnabled()', async () => {
+      const script = await capture('get_full_clip_info');
+      expect(script).toContain('item.enabled = !clip.disabled');
     });
 
-    it("set_target_track / rename_track verify then fail closed", async () => {
-      const setTarget = await capture("set_target_track");
-      expect(setTarget).toContain("targetTrack.isTargeted()");
-      expect(setTarget).toContain("did not change the track targeting");
-      const renameTrack = await capture("rename_track");
-      expect(renameTrack).toContain("did not rename the track");
+    it('set_target_track / rename_track verify then fail closed', async () => {
+      const setTarget = await capture('set_target_track');
+      expect(setTarget).toContain('targetTrack.isTargeted()');
+      expect(setTarget).toContain('did not change the track targeting');
+      const renameTrack = await capture('rename_track');
+      expect(renameTrack).toContain('did not rename the track');
     });
 
-    it("set_offline / detach_proxy confirm the state actually flipped", async () => {
-      const offline = await capture("set_offline");
-      expect(offline).toContain("offlineItem.isOffline()");
-      expect(offline).toContain("did not take");
-      const detach = await capture("detach_proxy");
-      expect(detach).toContain("proxyItem.hasProxy()");
-      expect(detach).toContain("did not detach the proxy");
+    it('set_offline / detach_proxy confirm the state actually flipped', async () => {
+      const offline = await capture('set_offline');
+      expect(offline).toContain('offlineItem.isOffline()');
+      expect(offline).toContain('did not take');
+      const detach = await capture('detach_proxy');
+      expect(detach).toContain('proxyItem.hasProxy()');
+      expect(detach).toContain('did not detach the proxy');
     });
 
-    it("ripple_delete and the selection removers go through __removeGroup", async () => {
+    it('ripple_delete and the selection removers go through __removeGroup', async () => {
       // TrackItem.remove() never ripples and never takes linked items on 26.5.2, so ripple_delete
       // goes through __removeGroup, which looks every linked item up again after removing it.
-      const ripple = await capture("ripple_delete");
-      expect(ripple).toContain("__removeGroup(rippleClip.sequence, rippleClip.clip, true)");
-      expect(ripple).toContain("is still on the timeline");
-      const removeSel = await capture("remove_selected_clips");
-      expect(removeSel).toContain("__removeGroup(selectionSeq, sc, rippleSelected)");
-      expect(removeSel).toContain("No selected clips were removed");
+      const ripple = await capture('ripple_delete');
+      expect(ripple).toContain('__removeGroup(rippleClip.sequence, rippleClip.clip, true)');
+      expect(ripple).toContain('is still on the timeline');
+      const removeSel = await capture('remove_selected_clips');
+      expect(removeSel).toContain('__removeGroup(selectionSeq, sc, rippleSelected)');
+      expect(removeSel).toContain('No selected clips were removed');
     });
 
-    it("set_clip_speed_qe / set_clip_start_time / set_zero_point verify the value", async () => {
-      const speed = await capture("set_clip_speed_qe");
-      expect(speed).toContain("applied the speed incorrectly");
-      expect(speed).toContain("qe.project.undo()");
-      const startTime = await capture("set_clip_start_time");
-      expect(startTime).toContain("did not move the clip start");
-      const zero = await capture("set_zero_point");
-      expect(zero).toContain("did not move the zero point");
+    it('set_clip_speed_qe / set_clip_start_time / set_zero_point verify the value', async () => {
+      const speed = await capture('set_clip_speed_qe');
+      expect(speed).toContain('applied the speed incorrectly');
+      expect(speed).toContain('qe.project.undo()');
+      const startTime = await capture('set_clip_start_time');
+      expect(startTime).toContain('did not move the clip start');
+      const zero = await capture('set_zero_point');
+      expect(zero).toContain('did not move the zero point');
     });
 
-    it("razor_all_tracks / batch_rename_clips / rename_clip / overwrite_clip verify", async () => {
-      const razor = await capture("razor_all_tracks");
-      expect(razor).toContain("cutsMade");
-      const batchRename = await capture("batch_rename_clips");
-      expect(batchRename).toContain("did not rename any clip");
-      const renameClip = await capture("rename_clip");
-      expect(renameClip).toContain("did not rename the clip");
-      const overwrite = await capture("overwrite_clip");
-      expect(overwrite).toContain("is not the clip covering");
+    it('razor_all_tracks / batch_rename_clips / rename_clip / overwrite_clip verify', async () => {
+      const razor = await capture('razor_all_tracks');
+      expect(razor).toContain('cutsMade');
+      const batchRename = await capture('batch_rename_clips');
+      expect(batchRename).toContain('did not rename any clip');
+      const renameClip = await capture('rename_clip');
+      expect(renameClip).toContain('did not rename the clip');
+      const overwrite = await capture('overwrite_clip');
+      expect(overwrite).toContain('is not the clip covering');
     });
   });
 
-  describe("Batch C: index.ts mutators verify their readback", () => {
+  describe('Batch C: index.ts mutators verify their readback', () => {
     /**
      * Same fake-success class as Batch B, on the TypeScript-defined index.ts handlers:
      * a mutating call followed by success:true with no state re-read. Each captured
@@ -322,10 +368,13 @@ describe("generated ExtendScript is syntactically valid", () => {
         executeScript: async () => ({ success: true }),
       } as never);
       const tool = probe.getAvailableTools().find((t) => t.name === name);
-      if (!tool) return "";
-      let script = "";
+      if (!tool) return '';
+      let script = '';
       const tools = new PremiereProTools({
-        executeScript: async (s: string) => { script = s; return { success: true }; },
+        executeScript: async (s: string) => {
+          script = s;
+          return { success: true };
+        },
       } as never);
       try {
         await tools.executeTool(name, args ?? seedArgs(tool as never));
@@ -335,95 +384,97 @@ describe("generated ExtendScript is syntactically valid", () => {
       return script;
     };
 
-    it("set_clip_properties re-reads getValue() rather than trusting setValue()", async () => {
-      const script = await captureLocal("set_clip_properties");
-      expect(script).toContain("readback mismatch or missing");
-      expect(script).toContain("done.opacity = (Math.abs");
+    it('set_clip_properties re-reads getValue() rather than trusting setValue()', async () => {
+      const script = await captureLocal('set_clip_properties');
+      expect(script).toContain('readback mismatch or missing');
+      expect(script).toContain('done.opacity = (Math.abs');
     });
 
     it("set_clip_properties_batch verifies each clip's readback", async () => {
-      const script = await captureLocal("set_clip_properties_batch");
-      expect(script).toContain("readback mismatch or missing");
-      expect(script).toContain("r.verified");
+      const script = await captureLocal('set_clip_properties_batch');
+      expect(script).toContain('readback mismatch or missing');
+      expect(script).toContain('r.verified');
     });
 
-    it("add_audio_keyframes confirms each key landed via keyExistsAtTime/getValueAtKey", async () => {
-      const script = await captureLocal("add_audio_keyframes");
-      expect(script).toContain("keyExistsAtTime");
-      expect(script).toContain("getValueAtKey");
-      expect(script).toContain("did not verify");
+    it('add_audio_keyframes confirms each key landed via keyExistsAtTime/getValueAtKey', async () => {
+      const script = await captureLocal('add_audio_keyframes');
+      expect(script).toContain('keyExistsAtTime');
+      expect(script).toContain('getValueAtKey');
+      expect(script).toContain('did not verify');
     });
 
-    it("update_marker re-reads the written attributes and fails closed on mismatch", async () => {
-      const script = await captureLocal("update_marker");
-      expect(script).toContain("did not apply on readback");
+    it('update_marker re-reads the written attributes and fails closed on mismatch', async () => {
+      const script = await captureLocal('update_marker');
+      expect(script).toContain('did not apply on readback');
     });
 
-    it("export_as_fcp_xml / export_aaf gate on File.exists", async () => {
-      const fcp = await captureLocal("export_as_fcp_xml");
-      expect(fcp).toContain("xmlFile.exists");
-      expect(fcp).toContain("no file exists at");
-      const aaf = await captureLocal("export_aaf");
-      expect(aaf).toContain("aafFile.exists");
-      expect(aaf).toContain("no file exists at");
+    it('export_as_fcp_xml / export_aaf gate on File.exists', async () => {
+      const fcp = await captureLocal('export_as_fcp_xml');
+      expect(fcp).toContain('xmlFile.exists');
+      expect(fcp).toContain('no file exists at');
+      const aaf = await captureLocal('export_aaf');
+      expect(aaf).toContain('aafFile.exists');
+      expect(aaf).toContain('no file exists at');
     });
 
-    it("set_sequence_in_out_points verifies via getInPointAsTime/getOutPointAsTime", async () => {
+    it('set_sequence_in_out_points verifies via getInPointAsTime/getOutPointAsTime', async () => {
       // A real range: the seeded in = out is now refused before any script is emitted.
-      const script = await captureLocal("set_sequence_in_out_points", { inPoint: 1, outPoint: 3 });
-      expect(script).toContain("getInPointAsTime");
-      expect(script).toContain("getOutPointAsTime");
+      const script = await captureLocal('set_sequence_in_out_points', { inPoint: 1, outPoint: 3 });
+      expect(script).toContain('getInPointAsTime');
+      expect(script).toContain('getOutPointAsTime');
     });
 
-    it("set_sequence_in_out_points refuses a collapsed range without touching the host", async () => {
+    it('set_sequence_in_out_points refuses a collapsed range without touching the host', async () => {
       // in >= out is stored by Premiere as a range reading back about -400000 s (measured 26.5.2).
-      expect(await captureLocal("set_sequence_in_out_points", { inPoint: 1, outPoint: 1 })).toBe("");
+      expect(await captureLocal('set_sequence_in_out_points', { inPoint: 1, outPoint: 1 })).toBe(
+        '',
+      );
     });
 
-    it("enable_disable_clip / duplicate_clip / replace_clip verify or fail closed", async () => {
-      const enable = await captureLocal("enable_disable_clip");
-      expect(enable).toContain("nowEnabled");
-      const dup = await captureLocal("duplicate_clip");
-      expect(dup).toContain("duplicateSourceInSeconds");
-      const replace = await captureLocal("replace_clip");
-      expect(replace).toContain("nodeId");
+    it('enable_disable_clip / duplicate_clip / replace_clip verify or fail closed', async () => {
+      const enable = await captureLocal('enable_disable_clip');
+      expect(enable).toContain('nowEnabled');
+      const dup = await captureLocal('duplicate_clip');
+      expect(dup).toContain('duplicateSourceInSeconds');
+      const replace = await captureLocal('replace_clip');
+      expect(replace).toContain('nodeId');
     });
 
-    it("mute_track / lock_track / set_color_label gate on the readback", async () => {
-      const mute = await captureLocal("mute_track");
-      expect(mute).toContain("isMuted()");
-      expect(mute).toContain("did not change the track mute state");
-      const lock = await captureLocal("lock_track");
-      expect(lock).toContain("isLocked");
-      const color = await captureLocal("set_color_label");
-      expect(color).toContain("getColorLabel");
+    it('mute_track / lock_track / set_color_label gate on the readback', async () => {
+      const mute = await captureLocal('mute_track');
+      expect(mute).toContain('isMuted()');
+      expect(mute).toContain('did not change the track mute state');
+      const lock = await captureLocal('lock_track');
+      expect(lock).toContain('isLocked');
+      const color = await captureLocal('set_color_label');
+      expect(color).toContain('getColorLabel');
     });
 
-    it("set_playhead_position / add_keyframe / remove_keyframe verify", async () => {
-      const playhead = await captureLocal("set_playhead_position");
-      expect(playhead).toContain("getPlayerPosition");
-      const addKf = await captureLocal("add_keyframe");
-      expect(addKf).toContain("keyExistsAtTime");
-      const rmKf = await captureLocal("remove_keyframe");
-      expect(rmKf).toContain("keyExistsAtTime");
+    it('set_playhead_position / add_keyframe / remove_keyframe verify', async () => {
+      const playhead = await captureLocal('set_playhead_position');
+      expect(playhead).toContain('getPlayerPosition');
+      const addKf = await captureLocal('add_keyframe');
+      expect(addKf).toContain('keyExistsAtTime');
+      const rmKf = await captureLocal('remove_keyframe');
+      expect(rmKf).toContain('keyExistsAtTime');
     });
 
-    it("reverse_clip verifies by isSpeedReversed(); refresh_media honestly reports verified:false", async () => {
+    it('reverse_clip verifies by isSpeedReversed(); refresh_media honestly reports verified:false', async () => {
       // 26.5.2 exposes TrackItem.isSpeedReversed(), so reversal is now read back, not assumed.
-      const rev = await captureLocal("reverse_clip");
-      expect(rev).toContain("isSpeedReversed()");
-      expect(rev).toContain("__setReversed(");
-      const refresh = await captureLocal("refresh_media");
-      expect(refresh).toContain("verified: false");
+      const rev = await captureLocal('reverse_clip');
+      expect(rev).toContain('isSpeedReversed()');
+      expect(rev).toContain('__setReversed(');
+      const refresh = await captureLocal('refresh_media');
+      expect(refresh).toContain('verified: false');
     });
 
-    it("save_project_as gates on the written file existing", async () => {
-      const save = await captureLocal("save_project_as");
-      expect(save).toContain(".exists");
+    it('save_project_as gates on the written file existing', async () => {
+      const save = await captureLocal('save_project_as');
+      expect(save).toContain('.exists');
     });
   });
 
-  describe("qeSequenceFor falls back only to the right sequence", () => {
+  describe('qeSequenceFor falls back only to the right sequence', () => {
     /**
      * qe.project.getSequenceAt() does not expose every sequence: one made by
      * duplicate_sequence and never opened in a timeline is invisible to it even
@@ -434,30 +485,28 @@ describe("generated ExtendScript is syntactically valid", () => {
      * The guid check is what keeps this from re-becoming the original bug,
      * where a tool resolved one sequence and then mutated whichever was active.
      */
-    it("verifies the guid before using the active sequence", async () => {
-      const script = await capture("add_tracks");
+    it('verifies the guid before using the active sequence', async () => {
+      const script = await capture('add_tracks');
 
-      expect(script).toContain("qe.project.getActiveSequence()");
-      expect(script).toContain(
-        "String(activeCandidate.guid) === String(seq.sequenceID)",
-      );
+      expect(script).toContain('qe.project.getActiveSequence()');
+      expect(script).toContain('String(activeCandidate.guid) === String(seq.sequenceID)');
     });
 
-    it("tries the indexed scan before the active sequence", async () => {
-      const script = await capture("add_tracks");
+    it('tries the indexed scan before the active sequence', async () => {
+      const script = await capture('add_tracks');
       // Scoped to the helper body: the same call appears in prose elsewhere in
       // the generated script, and a whole-script indexOf finds the comment.
-      const start = script.indexOf("function qeSequenceFor(");
-      const body = script.slice(start, script.indexOf("\n    }", start));
-      const scan = body.indexOf("qe.project.getSequenceAt(qi)");
-      const fallback = body.indexOf("qe.project.getActiveSequence()");
+      const start = script.indexOf('function qeSequenceFor(');
+      const body = script.slice(start, script.indexOf('\n    }', start));
+      const scan = body.indexOf('qe.project.getSequenceAt(qi)');
+      const fallback = body.indexOf('qe.project.getActiveSequence()');
 
       expect(scan).toBeGreaterThan(-1);
       expect(fallback).toBeGreaterThan(scan);
     });
   });
 
-  describe("the 112 tools declared in index.ts", () => {
+  describe('the 112 tools declared in index.ts', () => {
     /**
      * This suite only ever parsed expanded.ts. A collapsing \\" escape injected
      * into an index.ts generated script -- the exact failure this file
@@ -477,9 +526,12 @@ describe("generated ExtendScript is syntactically valid", () => {
 
       for (const tool of probe.getAvailableTools()) {
         if (expanded.has(tool.name)) continue;
-        let script = "";
+        let script = '';
         const tools = new PremiereProTools({
-          executeScript: async (s: string) => { script = s; return { success: true }; },
+          executeScript: async (s: string) => {
+            script = s;
+            return { success: true };
+          },
         } as never);
         try {
           await tools.executeTool(tool.name, seedArgs(tool as never));
@@ -492,7 +544,7 @@ describe("generated ExtendScript is syntactically valid", () => {
       return captured;
     };
 
-    it("emits a parseable script for every tool that generates one", async () => {
+    it('emits a parseable script for every tool that generates one', async () => {
       const captured = await localScripts();
       const broken: string[] = [];
 
@@ -508,7 +560,7 @@ describe("generated ExtendScript is syntactically valid", () => {
       // Captures and parses every local tool; the default limit is not enough.
     }, 120_000);
 
-    it("actually captures a meaningful number of them", async () => {
+    it('actually captures a meaningful number of them', async () => {
       // Without this, a broken capture would make the parse check pass vacuously
       // -- which is exactly how the expanded-only version hid the gap.
       //
@@ -523,37 +575,37 @@ describe("generated ExtendScript is syntactically valid", () => {
     }, 120_000);
   });
 
-  describe("the parser itself", () => {
+  describe('the parser itself', () => {
     /**
      * Pins the upgrade from `new Function` to acorn's ES3 mode. Without this the
      * suite could quietly regress to a modern-JavaScript parser and keep passing
      * while missing the failures it exists to catch.
      */
-    const LS = "\u2028";
+    const LS = '\u2028';
 
-    it("rejects an unescaped slash inside a regex character class (ExtendScript ends the regex)", () => {
+    it('rejects an unescaped slash inside a regex character class (ExtendScript ends the regex)', () => {
       expect(() => parses('var f = p.replace(/^.*[\\\\/]/, "");')).toThrow(/character class/);
       expect(() => parses('var f = p.replace(/^.*[\\\\\\/]/, "");')).not.toThrow();
     });
 
-    it("rejects an ES3 reserved word as a variable name", () => {
-      expect(() => parses("var short = 1;")).toThrow(/reserved/);
-      expect(() => parses("var lacking = 1;")).not.toThrow();
+    it('rejects an ES3 reserved word as a variable name', () => {
+      expect(() => parses('var short = 1;')).toThrow(/reserved/);
+      expect(() => parses('var lacking = 1;')).not.toThrow();
     });
 
-    it("rejects a raw U+2028 inside a string literal", () => {
+    it('rejects a raw U+2028 inside a string literal', () => {
       // ExtendScript is ES3, where a line terminator inside a string literal is a
       // syntax error. V8 accepts it (ES2019 made it legal), so the old check could
       // not catch a U+2028 smuggled into a generated string literal.
       expect(() => parses(`var a = "x${LS}y";`)).toThrow();
     });
 
-    it("rejects syntax that only exists after ES3", () => {
-      expect(() => parses("const a = 1;")).toThrow();
-      expect(() => parses("var o = { get x() { return 1; } };")).toThrow();
+    it('rejects syntax that only exists after ES3', () => {
+      expect(() => parses('const a = 1;')).toThrow();
+      expect(() => parses('var o = { get x() { return 1; } };')).toThrow();
     });
 
-    it("still accepts the ES3 the generator actually emits", () => {
+    it('still accepts the ES3 the generator actually emits', () => {
       expect(() => parses('var a = 1; function f(){ return "ok"; } f();')).not.toThrow();
       expect(() => parses('return JSON.stringify({ ok: true });')).not.toThrow();
     });

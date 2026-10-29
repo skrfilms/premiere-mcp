@@ -138,7 +138,9 @@ describe('srt — parse', () => {
 describe('srt — serialize + round-trip', () => {
   it('renumbers sequentially from 1 and uses comma timecodes', () => {
     const out = serializeSrt([cue(5, 6, 'b'), cue(1, 2, 'a')]);
-    expect(out).toBe('1\n00:00:05,000 --> 00:00:06,000\nb\n\n2\n00:00:01,000 --> 00:00:02,000\na\n');
+    expect(out).toBe(
+      '1\n00:00:05,000 --> 00:00:06,000\nb\n\n2\n00:00:01,000 --> 00:00:02,000\na\n',
+    );
   });
   it('serializes an empty list to an empty string', () => {
     expect(serializeSrt([])).toBe('');
@@ -240,7 +242,13 @@ describe('srt — file tools (E2E on real temp files)', () => {
     const res = await tools.readSrtFile(srtPath);
     expect(res.success).toBe(true);
     expect(res.cueCount).toBe(2);
-    expect(res.cues[0]).toMatchObject({ index: 1, start: 1, end: 2.5, startTimecode: '00:00:01,000', text: 'Hello there.' });
+    expect(res.cues[0]).toMatchObject({
+      index: 1,
+      start: 1,
+      end: 2.5,
+      startTimecode: '00:00:01,000',
+      text: 'Hello there.',
+    });
     expect(res.validation.errorCount).toBe(0);
   });
 
@@ -276,7 +284,9 @@ describe('srt — file tools (E2E on real temp files)', () => {
   });
 
   it('write_srt reports NaN timing rather than writing garbage', async () => {
-    const res = await tools.writeSrtFile(join(dir, 'x.srt'), [{ start: 'banana', end: 2, text: 'x' }]);
+    const res = await tools.writeSrtFile(join(dir, 'x.srt'), [
+      { start: 'banana', end: 2, text: 'x' },
+    ]);
     expect(res.success).toBe(false);
     expect(res.error).toMatch(/cue 1/);
   });
@@ -307,7 +317,11 @@ describe('srt — file tools (E2E on real temp files)', () => {
     expect(res.success).toBe(true);
     expect(res.insertedIndex).toBe(2);
     const back = parseSrt(await fs.readFile(srtPath, 'utf8')).cues;
-    expect(back.map((c) => c.text)).toEqual(['Hello there.', 'Wait.', 'General Kenobi.\nYou are a bold one.']);
+    expect(back.map((c) => c.text)).toEqual([
+      'Hello there.',
+      'Wait.',
+      'General Kenobi.\nYou are a bold one.',
+    ]);
   });
 
   it('remove_srt_cue deletes the addressed cue and renumbers', async () => {

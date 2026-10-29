@@ -8,7 +8,11 @@ import { GraphicsTools } from './graphics.js';
 import { TRIM_LIB } from '../trim-lib.js';
 
 export class TrimmingTools extends GraphicsTools {
-  protected async rippleTrimIn(sequenceId: string | undefined, trackIndex: number, clipIndex: number): Promise<any> {
+  protected async rippleTrimIn(
+    sequenceId: string | undefined,
+    trackIndex: number,
+    clipIndex: number,
+  ): Promise<any> {
     // Q: remove from the clip head up to the playhead and close the space. The clip stays where
     // it starts and plays from the playhead's source frame; everything after it, on every track,
     // moves left by the same amount so sync holds. See trim-lib.ts for the measured primitives.
@@ -31,7 +35,11 @@ export class TrimmingTools extends GraphicsTools {
     `);
   }
 
-  protected async rippleTrimOut(sequenceId: string | undefined, trackIndex: number, clipIndex: number): Promise<any> {
+  protected async rippleTrimOut(
+    sequenceId: string | undefined,
+    trackIndex: number,
+    clipIndex: number,
+  ): Promise<any> {
     // W: remove from the playhead to the clip tail and close the space, sync-locked.
     return await this.bridge.executeScript(`
       ${TRIM_LIB}
@@ -52,7 +60,11 @@ export class TrimmingTools extends GraphicsTools {
     `);
   }
 
-  protected async extendEdit(sequenceId: string | undefined, trackIndex: number, clipIndex: number): Promise<any> {
+  protected async extendEdit(
+    sequenceId: string | undefined,
+    trackIndex: number,
+    clipIndex: number,
+  ): Promise<any> {
     // E: move the clip's nearest edit point to the playhead. An abutting neighbour is rolled so no
     // gap or overlap opens; linked audio/video moves with it. Media handles are checked first,
     // because extending past the end of the media is accepted by the API and plays black.
@@ -81,7 +93,12 @@ export class TrimmingTools extends GraphicsTools {
     `);
   }
 
-  protected async nudgeClip(sequenceId: string | undefined, trackIndex: number, clipIndex: number, frames: number): Promise<any> {
+  protected async nudgeClip(
+    sequenceId: string | undefined,
+    trackIndex: number,
+    clipIndex: number,
+    frames: number,
+  ): Promise<any> {
     // move() takes a RELATIVE offset and moves only the item it is called on (measured on
     // 26.5.2). This used to pass the absolute new start, so a clip at 6s nudged one frame went
     // ~6s, and its linked audio stayed behind. The linked group now moves together, after every
@@ -114,7 +131,6 @@ export class TrimmingTools extends GraphicsTools {
         error: bad.length ? 'PARTIALLY APPLIED: ' + bad.join('; ') + '. Undo to restore.' : undefined});
     `);
   }
-
 
   /**
    * Shared ExtendScript for the gap tools. A gap here is a range where NO track, video or audio,
@@ -168,7 +184,10 @@ export class TrimmingTools extends GraphicsTools {
   }
 
   protected async closeGapAt(timecode: string, sequenceId?: string): Promise<any> {
-    return await this.bridge.executeScript(this.gapCloserScript(sequenceId, `
+    return await this.bridge.executeScript(
+      this.gapCloserScript(
+        sequenceId,
+        `
         var tc = ${JSON.stringify(String(timecode))};
         // Shared parser: HH:MM:SS:FF, drop-frame HH;MM;SS;FF and seconds.
         var targetStr = __timecodeToTicks(seq, tc);
@@ -181,11 +200,20 @@ export class TrimmingTools extends GraphicsTools {
         var ok = r.misplaced.length === 0;
         return JSON.stringify({success:ok,verified:ok,verifiedBy:'clip start readback',gap:r,
           error: ok ? undefined : 'PARTIALLY APPLIED: some clips did not land where expected. See gap.misplaced. Undo to restore.'});
-    `));
+    `,
+      ),
+    );
   }
 
-  protected async closeAllGaps(sequenceId?: string, trackIndex?: number, includeLeadingGap = false): Promise<any> {
-    return await this.bridge.executeScript(this.gapCloserScript(sequenceId, `
+  protected async closeAllGaps(
+    sequenceId?: string,
+    trackIndex?: number,
+    includeLeadingGap = false,
+  ): Promise<any> {
+    return await this.bridge.executeScript(
+      this.gapCloserScript(
+        sequenceId,
+        `
         var limit = ${trackIndex === undefined ? 'null' : Number(trackIndex)};
         // Empty time before the first clip is often deliberate (a slate, countdown or leader
         // offset), so it is only closed when asked for.
@@ -210,15 +238,22 @@ export class TrimmingTools extends GraphicsTools {
           trackIndexNote: limit === null ? undefined : 'trackIndex is ignored: only gaps empty on every track are closed, because closing one track alone breaks sync.',
           note: leadingNote,
           error: ok ? undefined : 'PARTIALLY APPLIED: ' + after.length + ' gap(s) remain and ' + misplaced + ' clip(s) are misplaced. Undo to restore.'});
-    `));
+    `,
+      ),
+    );
   }
 
-  protected async trimClip(clipId: string, inPoint?: number, outPoint?: number, duration?: number): Promise<any> {
+  protected async trimClip(
+    clipId: string,
+    inPoint?: number,
+    outPoint?: number,
+    duration?: number,
+  ): Promise<any> {
     if (outPoint !== undefined && duration !== undefined) {
       return {
         success: false,
         error: 'outPoint and duration cannot be used together',
-        errorCode: 'INVALID_TRIM_ARGUMENTS'
+        errorCode: 'INVALID_TRIM_ARGUMENTS',
       };
     }
     // inPoint/outPoint are SOURCE times; the trim keeps every remaining frame where it was on the
@@ -301,5 +336,4 @@ export class TrimmingTools extends GraphicsTools {
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
-
 }

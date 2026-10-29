@@ -53,7 +53,8 @@ export function validateTestCoverage(value: unknown, source: string): TestCovera
   for (const key of ['catalogueSize', 'testFileCount'] as const) {
     if (typeof raw[key] !== 'number') return fail(`${key} must be a number`);
   }
-  if (typeof raw['gitSha'] !== 'string' || !raw['gitSha']) return fail('gitSha must be a non-empty string');
+  if (typeof raw['gitSha'] !== 'string' || !raw['gitSha'])
+    return fail('gitSha must be a non-empty string');
   if (typeof raw['gitDirty'] !== 'boolean') return fail('gitDirty must be a boolean');
   const tools = raw['tools'];
   if (!Array.isArray(tools)) return fail('missing "tools" array');
@@ -61,7 +62,8 @@ export function validateTestCoverage(value: unknown, source: string): TestCovera
   const records: ToolTestRecord[] = tools.map((entry, i) => {
     if (typeof entry !== 'object' || entry === null) return fail(`tools[${i}] is not an object`);
     const t = entry as Record<string, unknown>;
-    if (typeof t['name'] !== 'string' || !t['name']) return fail(`tools[${i}].name must be a non-empty string`);
+    if (typeof t['name'] !== 'string' || !t['name'])
+      return fail(`tools[${i}].name must be a non-empty string`);
     if (seen.has(t['name'])) return fail(`tools[${i}] repeats ${t['name']}`);
     seen.add(t['name']);
     const files = t['testFiles'];
@@ -116,15 +118,25 @@ export function renderCoverageReport(inputs: CoverageInputs): string {
   L.push('# Tool coverage');
   L.push('');
   L.push('<!-- GENERATED FILE. Do not edit by hand: `npm run coverage:tools` rewrites it from');
-  L.push('     verification/test-coverage.json and verification/sweeps/*.json, and a test fails when');
+  L.push(
+    '     verification/test-coverage.json and verification/sweeps/*.json, and a test fails when',
+  );
   L.push('     this file and that data disagree. To change what it says, exercise a tool. -->');
   L.push('');
   L.push('Two independent axes, kept apart on purpose:');
   L.push('');
-  L.push('- **suite** — the test suite dispatched this tool against a mock bridge. It is reachable,');
-  L.push('  its schema accepts arguments, and it emits something. This says nothing about Premiere.');
-  L.push('- **live** — a sweep dispatched it against a running Premiere host and recorded a pass or a');
-  L.push('  fail. This is the only evidence about Premiere. See [LIVE-VERIFICATION.md](LIVE-VERIFICATION.md).');
+  L.push(
+    '- **suite** — the test suite dispatched this tool against a mock bridge. It is reachable,',
+  );
+  L.push(
+    '  its schema accepts arguments, and it emits something. This says nothing about Premiere.',
+  );
+  L.push(
+    '- **live** — a sweep dispatched it against a running Premiere host and recorded a pass or a',
+  );
+  L.push(
+    '  fail. This is the only evidence about Premiere. See [LIVE-VERIFICATION.md](LIVE-VERIFICATION.md).',
+  );
   L.push('');
   if (!inputs.coverage) {
     L.push('**No instrumented test run has been recorded.** `verification/test-coverage.json` is');
@@ -142,30 +154,42 @@ export function renderCoverageReport(inputs: CoverageInputs): string {
   L.push(`| run by the suite only (mock host) | ${suiteOnly.length} | ${pct(suiteOnly.length)}% |`);
   L.push(`| run live only | ${liveOnly.length} | ${pct(liveOnly.length)}% |`);
   L.push('');
-  L.push('A tool in the first row is shipped on the strength of a code review and a schema. It may');
+  L.push(
+    'A tool in the first row is shipped on the strength of a code review and a schema. It may',
+  );
   L.push('well work; nothing here is evidence that it does.');
   L.push('');
   if (inputs.coverage) {
     L.push('## The measured run');
     L.push('');
-    L.push(`- commit: \`${inputs.coverage.gitSha}\`${inputs.coverage.gitDirty ? ' **with uncommitted changes in the tree**' : ''}`);
+    L.push(
+      `- commit: \`${inputs.coverage.gitSha}\`${inputs.coverage.gitDirty ? ' **with uncommitted changes in the tree**' : ''}`,
+    );
     L.push(`- catalogue at measurement: ${inputs.coverage.catalogueSize}`);
     L.push(`- test files that dispatched at least one tool: ${inputs.coverage.testFileCount}`);
     L.push('');
     L.push('Measured by instrumenting the dispatcher, not by grepping test files for tool names:');
-    L.push('a name in a table of expected strings is not a call, and a name assembled at runtime is');
+    L.push(
+      'a name in a table of expected strings is not a call, and a name assembled at runtime is',
+    );
     L.push('not a literal. Both errors are silent.');
     L.push('');
     if (inputs.coverage.catalogueSize !== names.length) {
-      L.push(`The catalogue was **${inputs.coverage.catalogueSize}** tools when this was measured and is`);
-      L.push(`**${names.length}** now, so the suite axis is stale. Re-run \`npm run coverage:tools\`.`);
+      L.push(
+        `The catalogue was **${inputs.coverage.catalogueSize}** tools when this was measured and is`,
+      );
+      L.push(
+        `**${names.length}** now, so the suite axis is stale. Re-run \`npm run coverage:tools\`.`,
+      );
       L.push('');
     }
   }
   L.push('## Tools nothing has ever run');
   L.push('');
   if (!neither.length) {
-    L.push('None. Every tool in the catalogue has been dispatched by the suite, by a live sweep, or both.');
+    L.push(
+      'None. Every tool in the catalogue has been dispatched by the suite, by a live sweep, or both.',
+    );
   } else {
     for (const n of neither) L.push(`- \`${n}\``);
   }
@@ -173,9 +197,15 @@ export function renderCoverageReport(inputs: CoverageInputs): string {
   if (offCatalogue.length) {
     L.push('## Recorded names that are not tools in this catalogue');
     L.push('');
-    L.push(`The instrumented run dispatched ${offCatalogue.length} name(s) that the catalogue does not`);
-    L.push('contain. They are excluded from every count above. Expect deliberate negative paths here');
-    L.push('(an unknown name, a misspelling that exercises the suggester); anything else is a tool');
+    L.push(
+      `The instrumented run dispatched ${offCatalogue.length} name(s) that the catalogue does not`,
+    );
+    L.push(
+      'contain. They are excluded from every count above. Expect deliberate negative paths here',
+    );
+    L.push(
+      '(an unknown name, a misspelling that exercises the suggester); anything else is a tool',
+    );
     L.push('that was removed after the run, and the run is stale.');
     L.push('');
     for (const n of offCatalogue) L.push(`- \`${n}\``);

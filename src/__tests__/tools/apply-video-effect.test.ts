@@ -90,7 +90,11 @@ describe('apply_video_effect — generated script', () => {
       tool: 'apply_video_effect',
       data: {
         requestedEffectName: 'Gaussian Blur',
-        addedComponent: { displayName: 'Gaussian Blur', matchName: 'AE.ADBE Gaussian Blur 2', componentIndex: 3 },
+        addedComponent: {
+          displayName: 'Gaussian Blur',
+          matchName: 'AE.ADBE Gaussian Blur 2',
+          componentIndex: 3,
+        },
         identityConfidence: 'unique',
         verified: true,
       },

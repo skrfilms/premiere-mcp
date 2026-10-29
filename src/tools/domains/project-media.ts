@@ -7,13 +7,29 @@
 import { CaptionTools } from './caption.js';
 import { execSync } from 'child_process';
 // Synchronous fs/path/os bindings for the Node-side (non-ExtendScript) tools.
-// Kept separate from the `promises as fs` import above, which is the async API.
+// The async API is the separate `promises as fs` import.
 import * as fsSync from 'node:fs';
 import * as pathSync from 'node:path';
 import { promises as fs } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
-import { SurgeryRefusal, ProjectWriteError, applyReplacements, assertOutputWritable, assertSupportedFormat, censusDiff, censusOf, containerCanary, countOccurrences, documentSanity, readProjectFile, surgeryEnabled, writeEditedProject, PRPROJ_SUPPORTED_FORMAT_VERSIONS, SURGERY_ENV_FLAG } from '../prproj-surgery.js';
+import {
+  SurgeryRefusal,
+  ProjectWriteError,
+  applyReplacements,
+  assertOutputWritable,
+  assertSupportedFormat,
+  censusDiff,
+  censusOf,
+  containerCanary,
+  countOccurrences,
+  documentSanity,
+  readProjectFile,
+  surgeryEnabled,
+  writeEditedProject,
+  PRPROJ_SUPPORTED_FORMAT_VERSIONS,
+  SURGERY_ENV_FLAG,
+} from '../prproj-surgery.js';
 import type { ProjectFileEditArgs, ProjectFileInspectArgs } from './shared.js';
 
 export class ProjectMediaTools extends CaptionTools {
@@ -23,20 +39,37 @@ export class ProjectMediaTools extends CaptionTools {
    * assistant's context. Filtered and paged here (the walk itself stays in ExtendScript): a page
    * of `limit` items from `offset`, optionally by name, type or bin, with nextOffset to go on.
    */
-  protected async listProjectItems(includeBins = true, _includeMetadata = false, page: { limit?: number; offset?: number; nameContains?: string; type?: string; binPath?: string } = {}): Promise<any> {
+  protected async listProjectItems(
+    includeBins = true,
+    _includeMetadata = false,
+    page: {
+      limit?: number;
+      offset?: number;
+      nameContains?: string;
+      type?: string;
+      binPath?: string;
+    } = {},
+  ): Promise<any> {
     const all: any = await this.listAllProjectItems(includeBins);
     if (!all?.success) return all;
     const needle = (page.nameContains ?? '').toLowerCase();
     const bin = (page.binPath ?? '').replace(/^[\\/]+/, '').toLowerCase();
-    const keep = (it: any) => (!needle || String(it.name).toLowerCase().includes(needle))
-      && (!page.type || it.type === page.type)
-      && (!bin || String(it.treePath ?? '').replace(/\\/g, '/').toLowerCase().includes(`/${bin}/`));
+    const keep = (it: any) =>
+      (!needle || String(it.name).toLowerCase().includes(needle)) &&
+      (!page.type || it.type === page.type) &&
+      (!bin ||
+        String(it.treePath ?? '')
+          .replace(/\\/g, '/')
+          .toLowerCase()
+          .includes(`/${bin}/`));
     const items = (all.items as any[]).filter(keep);
     const limit = Math.min(Math.max(Number(page.limit) || 200, 1), 2000);
     const offset = Math.max(Number(page.offset) || 0, 0);
     const slice = items.slice(offset, offset + limit);
     const more = offset + slice.length < items.length;
-    const bins = includeBins ? (all.bins as any[]).filter((b) => !needle || String(b.name).toLowerCase().includes(needle)) : [];
+    const bins = includeBins
+      ? (all.bins as any[]).filter((b) => !needle || String(b.name).toLowerCase().includes(needle))
+      : [];
     return {
       success: true,
       items: slice,
@@ -47,7 +80,12 @@ export class ProjectMediaTools extends CaptionTools {
       offset,
       returned: slice.length,
       hasMore: more,
-      ...(more ? { nextOffset: offset + slice.length, note: `Showing ${slice.length} of ${items.length}. Pass offset ${offset + slice.length} for the next page, or narrow with nameContains, type or binPath.` } : {}),
+      ...(more
+        ? {
+            nextOffset: offset + slice.length,
+            note: `Showing ${slice.length} of ${items.length}. Pass offset ${offset + slice.length} for the next page, or narrow with nameContains, type or binPath.`,
+          }
+        : {}),
     };
   }
 
@@ -128,7 +166,7 @@ export class ProjectMediaTools extends CaptionTools {
       if (result?.success === false) {
         return {
           ...result,
-          projectPath: result.projectPath || projectPath
+          projectPath: result.projectPath || projectPath,
         };
       }
 
@@ -136,12 +174,12 @@ export class ProjectMediaTools extends CaptionTools {
         success: true,
         message: `Project "${name}" created successfully`,
         projectPath,
-        ...result
+        ...result,
       };
     } catch (error) {
       return {
         success: false,
-        error: `Failed to create project: ${error instanceof Error ? error.message : String(error)}`
+        error: `Failed to create project: ${error instanceof Error ? error.message : String(error)}`,
       };
     }
   }
@@ -152,7 +190,7 @@ export class ProjectMediaTools extends CaptionTools {
       if (result?.success === false) {
         return {
           ...result,
-          projectPath: result.projectPath || path
+          projectPath: result.projectPath || path,
         };
       }
 
@@ -160,12 +198,12 @@ export class ProjectMediaTools extends CaptionTools {
         success: true,
         message: `Project opened successfully`,
         projectPath: path,
-        ...result
+        ...result,
       };
     } catch (error) {
       return {
         success: false,
-        error: `Failed to open project: ${error instanceof Error ? error.message : String(error)}`
+        error: `Failed to open project: ${error instanceof Error ? error.message : String(error)}`,
       };
     }
   }
@@ -173,15 +211,15 @@ export class ProjectMediaTools extends CaptionTools {
   protected async saveProject(): Promise<any> {
     try {
       await this.bridge.saveProject();
-      return { 
-        success: true, 
+      return {
+        success: true,
         message: 'Project saved successfully',
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       };
     } catch (error) {
       return {
         success: false,
-        error: `Failed to save project: ${error instanceof Error ? error.message : String(error)}`
+        error: `Failed to save project: ${error instanceof Error ? error.message : String(error)}`,
       };
     }
   }
@@ -208,7 +246,7 @@ export class ProjectMediaTools extends CaptionTools {
         });
       }
     `;
-    
+
     return await this.bridge.executeScript(script);
   }
 
@@ -241,11 +279,19 @@ export class ProjectMediaTools extends CaptionTools {
   protected listRecentProjects(limit: number, excludeAutosave: boolean): any {
     try {
       const raw = execSync('mdfind -name ".prproj"', { encoding: 'utf8', timeout: 5000 });
-      const files = raw.trim().split('\n')
+      const files = raw
+        .trim()
+        .split('\n')
         .filter((f: string) => f && (!excludeAutosave || !f.includes('Auto-Save')));
       const fs = fsSync;
       const withTimes = files
-        .map((f: string) => { try { return { path: f, name: pathSync.basename(f), mtime: fs.statSync(f).mtimeMs }; } catch { return null; } })
+        .map((f: string) => {
+          try {
+            return { path: f, name: pathSync.basename(f), mtime: fs.statSync(f).mtimeMs };
+          } catch {
+            return null;
+          }
+        })
         .filter(Boolean)
         .sort((a: any, b: any) => b.mtime - a.mtime)
         .slice(0, limit)
@@ -270,13 +316,22 @@ export class ProjectMediaTools extends CaptionTools {
       this.bridge.writeClipboard(text);
       const readback = this.bridge.readClipboard();
       const verified = readback === text;
-      return { success: true, verified, length: text.length, note: verified ? undefined : 'Clipboard content after write did not match exactly.' };
+      return {
+        success: true,
+        verified,
+        length: text.length,
+        note: verified ? undefined : 'Clipboard content after write did not match exactly.',
+      };
     } catch (e: any) {
       return { success: false, error: e.message };
     }
   }
 
-  protected async addMetadataSchemaField(columnId: string, displayName: string, type: number): Promise<any> {
+  protected async addMetadataSchemaField(
+    columnId: string,
+    displayName: string,
+    type: number,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.project.addPropertyToProjectMetadataSchema(${JSON.stringify(columnId)}, ${JSON.stringify(displayName)}, ${type});
@@ -311,7 +366,28 @@ export class ProjectMediaTools extends CaptionTools {
   }
 
   protected async batchSetLabel(projectItemIds: string[], labelColor: string): Promise<any> {
-    const colorMap: Record<string, number> = { violet: 0, iris: 1, caribbean: 2, lavender: 3, cerise: 4, rose: 5, mango: 6, yellow: 7, mint: 8, forest: 9, teal: 10, cyan: 11, sky: 12, blue: 13, purple: 14, pink: 15, red: 16, orange: 17, sand: 18, lime: 19 };
+    const colorMap: Record<string, number> = {
+      violet: 0,
+      iris: 1,
+      caribbean: 2,
+      lavender: 3,
+      cerise: 4,
+      rose: 5,
+      mango: 6,
+      yellow: 7,
+      mint: 8,
+      forest: 9,
+      teal: 10,
+      cyan: 11,
+      sky: 12,
+      blue: 13,
+      purple: 14,
+      pink: 15,
+      red: 16,
+      orange: 17,
+      sand: 18,
+      lime: 19,
+    };
     const colorNum = colorMap[labelColor.toLowerCase()] ?? 1;
     const idsJson = JSON.stringify(projectItemIds);
     return await this.bridge.executeScript(`
@@ -328,7 +404,9 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async batchRenameProjectItems(renames: Array<{projectItemId: string, newName: string}>): Promise<any> {
+  protected async batchRenameProjectItems(
+    renames: Array<{ projectItemId: string; newName: string }>,
+  ): Promise<any> {
     const renamesJson = JSON.stringify(renames);
     return await this.bridge.executeScript(`
       try {
@@ -359,7 +437,12 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async renameTimelineClip(trackIndex: number, clipIndex: number, name: string, sequenceId?: string): Promise<any> {
+  protected async renameTimelineClip(
+    trackIndex: number,
+    clipIndex: number,
+    name: string,
+    sequenceId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       app.enableQE(); ${this.qeClipScript(trackIndex, clipIndex, sequenceId)}
       if (!__clip) return JSON.stringify({success:false,error:'Clip not found'});
@@ -491,7 +574,7 @@ export class ProjectMediaTools extends CaptionTools {
       if (!result.success) {
         return {
           ...result,
-          filePath: filePath
+          filePath: filePath,
         };
       }
       // binName/binId/treePath come from the bridge readback and are spread LAST
@@ -501,7 +584,7 @@ export class ProjectMediaTools extends CaptionTools {
         success: true,
         message: `Media imported successfully`,
         filePath: filePath,
-        ...result
+        ...result,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -510,14 +593,22 @@ export class ProjectMediaTools extends CaptionTools {
         success: false,
         error: `Failed to import media: ${message}`,
         filePath: filePath,
-        ...(maybeModalTimeout ? {
-          warning: 'Premiere may be showing a blocking modal dialog, such as "File format not supported". Dismiss the dialog in Premiere, then retry. For subtitle files, convert unsupported formats like .ass/.ssa to .srt before importing.'
-        } : {})
+        ...(maybeModalTimeout
+          ? {
+              warning:
+                'Premiere may be showing a blocking modal dialog, such as "File format not supported". Dismiss the dialog in Premiere, then retry. For subtitle files, convert unsupported formats like .ass/.ssa to .srt before importing.',
+            }
+          : {}),
       };
     }
   }
 
-  protected async importFolder(folderPath: string, binName?: string, recursive = false, binId?: string): Promise<any> {
+  protected async importFolder(
+    folderPath: string,
+    binName?: string,
+    recursive = false,
+    binId?: string,
+  ): Promise<any> {
     const script = `
       try {
         var folder = new Folder(${JSON.stringify(folderPath)});
@@ -588,11 +679,15 @@ export class ProjectMediaTools extends CaptionTools {
         });
       }
     `;
-    
+
     return await this.bridge.executeScript(script);
   }
 
-  protected async createBin(name: string, parentBinName?: string, parentBinId?: string): Promise<any> {
+  protected async createBin(
+    name: string,
+    parentBinName?: string,
+    parentBinId?: string,
+  ): Promise<any> {
     const script = `
       try {
         var parentBinName = ${parentBinName !== undefined ? JSON.stringify(parentBinName) : 'null'};
@@ -768,8 +863,16 @@ export class ProjectMediaTools extends CaptionTools {
       const ac = String((s.audio || {}).codec || '').toLowerCase();
       if (vc !== want && ac !== want) return false;
     }
-    if (criteria.minDurationSeconds != null && !(Number(s.durationSeconds) >= criteria.minDurationSeconds)) return false;
-    if (criteria.maxDurationSeconds != null && !(Number(s.durationSeconds) <= criteria.maxDurationSeconds)) return false;
+    if (
+      criteria.minDurationSeconds != null &&
+      !(Number(s.durationSeconds) >= criteria.minDurationSeconds)
+    )
+      return false;
+    if (
+      criteria.maxDurationSeconds != null &&
+      !(Number(s.durationSeconds) <= criteria.maxDurationSeconds)
+    )
+      return false;
     if (criteria.minWidth != null && !(Number(v.width) >= criteria.minWidth)) return false;
     if (criteria.minHeight != null && !(Number(v.height) >= criteria.minHeight)) return false;
     if (criteria.minFps != null && !(Number(v.fps) >= criteria.minFps)) return false;
@@ -813,7 +916,9 @@ export class ProjectMediaTools extends CaptionTools {
         try {
           const st = await fs.stat(full);
           out.push({ path: full, size: st.size, mtimeMs: Math.round(st.mtimeMs) });
-        } catch { /* vanished between readdir and stat -- skip */ }
+        } catch {
+          /* vanished between readdir and stat -- skip */
+        }
       }
     };
     await walk(root);
@@ -845,7 +950,8 @@ export class ProjectMediaTools extends CaptionTools {
     }
     try {
       const st = await fs.stat(rootPath);
-      if (!st.isDirectory()) return { success: false, error: `rootPath is not a folder: ${rootPath}` };
+      if (!st.isDirectory())
+        return { success: false, error: `rootPath is not a folder: ${rootPath}` };
     } catch {
       return { success: false, error: `Folder not found or unreadable: ${rootPath}` };
     }
@@ -860,7 +966,8 @@ export class ProjectMediaTools extends CaptionTools {
     }
 
     const resolvedIndexPath = this.footageIndexPath(indexPath);
-    const exts = extensions && extensions.length ? extensions : ProjectMediaTools.FOOTAGE_EXTENSIONS;
+    const exts =
+      extensions && extensions.length ? extensions : ProjectMediaTools.FOOTAGE_EXTENSIONS;
 
     // Load the existing index (tolerate absence / corruption -- start fresh).
     let existingEntries: any[] = [];
@@ -868,7 +975,9 @@ export class ProjectMediaTools extends CaptionTools {
       const raw = await fs.readFile(resolvedIndexPath, 'utf8');
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed?.entries)) existingEntries = parsed.entries;
-    } catch { /* no usable prior index */ }
+    } catch {
+      /* no usable prior index */
+    }
 
     const discovered = await this.walkMediaFiles(rootPath, recursive, exts);
     const plan = this.planFootageScan(existingEntries, discovered);
@@ -891,7 +1000,8 @@ export class ProjectMediaTools extends CaptionTools {
         mtimeMs: file.mtimeMs,
         summary: probe.summary,
       });
-      if (wasPresent) updated += 1; else added += 1;
+      if (wasPresent) updated += 1;
+      else added += 1;
     }
 
     // Optionally drop entries whose files are gone; otherwise keep them.
@@ -902,7 +1012,9 @@ export class ProjectMediaTools extends CaptionTools {
       }
     }
 
-    const mergedEntries = Array.from(byPath.values()).sort((a, b) => String(a.path).localeCompare(String(b.path)));
+    const mergedEntries = Array.from(byPath.values()).sort((a, b) =>
+      String(a.path).localeCompare(String(b.path)),
+    );
     const indexDoc = {
       version: 1,
       root: rootPath,
@@ -918,10 +1030,18 @@ export class ProjectMediaTools extends CaptionTools {
       await fs.rename(tmp, resolvedIndexPath);
       const back = JSON.parse(await fs.readFile(resolvedIndexPath, 'utf8'));
       if (!Array.isArray(back?.entries) || back.entries.length !== mergedEntries.length) {
-        return { success: false, error: 'Wrote the footage index but read-back did not match. The index may be on a full or read-only disk.', indexPath: resolvedIndexPath };
+        return {
+          success: false,
+          error:
+            'Wrote the footage index but read-back did not match. The index may be on a full or read-only disk.',
+          indexPath: resolvedIndexPath,
+        };
       }
     } catch (e) {
-      return { success: false, error: `Could not write the footage index at ${resolvedIndexPath}: ${e instanceof Error ? e.message : String(e)}` };
+      return {
+        success: false,
+        error: `Could not write the footage index at ${resolvedIndexPath}: ${e instanceof Error ? e.message : String(e)}`,
+      };
     }
 
     return {
@@ -1167,7 +1287,13 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async batchEnableDisableClips(trackIndex: number, enabled: boolean, startSecs?: number, endSecs?: number, seqId?: string): Promise<any> {
+  protected async batchEnableDisableClips(
+    trackIndex: number,
+    enabled: boolean,
+    startSecs?: number,
+    endSecs?: number,
+    seqId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq=${this.buildSeqRes(seqId)};
@@ -1175,7 +1301,7 @@ export class ProjectMediaTools extends CaptionTools {
         var count=0;
         for(var c=0;c<track.clips.numItems;c++){
           var clip=track.clips[c];
-          var inRange=${startSecs !== undefined} ? (clip.start.seconds>=${startSecs??0}&&clip.end.seconds<=${endSecs??999999}) : true;
+          var inRange=${startSecs !== undefined} ? (clip.start.seconds>=${startSecs ?? 0}&&clip.end.seconds<=${endSecs ?? 999999}) : true;
           if(inRange){clip.disabled=${!enabled};count++;}
         }
         return JSON.stringify({success:true,clipsUpdated:count,enabled:${enabled}});
@@ -1225,8 +1351,8 @@ export class ProjectMediaTools extends CaptionTools {
   protected async getBinContentsRecursive(binName?: string, binId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var req=__resolveBin(${JSON.stringify(binId??null)},${JSON.stringify(binName??null)});
-        if(req.error)return JSON.stringify({success:false,error:req.error+' Nothing was read. Omit binName/binId to list the whole project.',binName:${JSON.stringify(binName??null)},binId:${JSON.stringify(binId??null)},matchCount:req.matchCount});
+        var req=__resolveBin(${JSON.stringify(binId ?? null)},${JSON.stringify(binName ?? null)});
+        if(req.error)return JSON.stringify({success:false,error:req.error+' Nothing was read. Omit binName/binId to list the whole project.',binName:${JSON.stringify(binName ?? null)},binId:${JSON.stringify(binId ?? null)},matchCount:req.matchCount});
         var startBin=req.bin;
         var items=[];
         function walk(bin){for(var i=0;i<bin.children.numItems;i++){var c=bin.children[i];if(__isBin(c))walk(c);else items.push({name:String(c.name),nodeId:String(c.nodeId),treePath:String(c.treePath),type:c.type});}}
@@ -1260,7 +1386,10 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async setInterpretationFrameRate(projectItemId: string, frameRate: number): Promise<any> {
+  protected async setInterpretationFrameRate(
+    projectItemId: string,
+    frameRate: number,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var item=${this.findItemById(projectItemId)};
@@ -1333,7 +1462,10 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async setProjectPanelSelection(projectItemIds: string[], viewId?: string): Promise<any> {
+  protected async setProjectPanelSelection(
+    projectItemIds: string[],
+    viewId?: string,
+  ): Promise<any> {
     const ids = JSON.stringify(Array.isArray(projectItemIds) ? projectItemIds : []);
     return await this.bridge.executeScript(`
       try {
@@ -1407,7 +1539,11 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async getClipFlags(trackIndex: number, clipIndex: number, seqId?: string): Promise<any> {
+  protected async getClipFlags(
+    trackIndex: number,
+    clipIndex: number,
+    seqId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(seqId)};
@@ -1431,7 +1567,11 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async setItemPixelAspectRatio(projectItemId: string, numerator: number, denominator: number): Promise<any> {
+  protected async setItemPixelAspectRatio(
+    projectItemId: string,
+    numerator: number,
+    denominator: number,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var item = ${this.findItemById(projectItemId)};
@@ -1443,7 +1583,10 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async findItemsMatchingMediaPathTool(pathSubstring: string, ignoreSubclips: boolean): Promise<any> {
+  protected async findItemsMatchingMediaPathTool(
+    pathSubstring: string,
+    ignoreSubclips: boolean,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var matches = app.project.rootItem.findItemsMatchingMediaPath(${JSON.stringify(pathSubstring)}, ${ignoreSubclips ? 1 : 0});
@@ -1580,7 +1723,12 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async linkMediaQe(trackIndex: number, clipIndex: number, mediaPath: string, renameClip: boolean): Promise<any> {
+  protected async linkMediaQe(
+    trackIndex: number,
+    clipIndex: number,
+    mediaPath: string,
+    renameClip: boolean,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -1604,7 +1752,11 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async createProxyQe(trackIndex: number, clipIndex: number, presetPath: string): Promise<any> {
+  protected async createProxyQe(
+    trackIndex: number,
+    clipIndex: number,
+    presetPath: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -1662,7 +1814,11 @@ export class ProjectMediaTools extends CaptionTools {
   private premiereProcessRunning(): boolean | null {
     try {
       if (process.platform === 'win32') {
-        const out = execSync('tasklist /FO CSV /NH', { encoding: 'utf8', timeout: 10000, windowsHide: true });
+        const out = execSync('tasklist /FO CSV /NH', {
+          encoding: 'utf8',
+          timeout: 10000,
+          windowsHide: true,
+        });
         return /"Adobe Premiere Pro[^"]*\.exe"/i.test(out);
       }
       const out = execSync('ps -Ao comm=', { encoding: 'utf8', timeout: 10000 });
@@ -1683,7 +1839,12 @@ export class ProjectMediaTools extends CaptionTools {
    * A self-certification argument here would be the same defect as the guard that let a name stand
    * in for an identity and cost a 111-sequence cut.
    */
-  private async openProjectRealpaths(): Promise<{ known: boolean; realpaths: string[]; reason?: string; source: string }> {
+  private async openProjectRealpaths(): Promise<{
+    known: boolean;
+    realpaths: string[];
+    reason?: string;
+    source: string;
+  }> {
     let probe: any = null;
     try {
       probe = await this.bridge.executeScript(`
@@ -1706,8 +1867,19 @@ export class ProjectMediaTools extends CaptionTools {
         // .native resolves through the OS, which is what canonicalises case on macOS; the JS
         // implementation only walks symlinks and keeps whatever case the host reported.
         // A path that does not exist (yet) cannot be resolved itself, so resolve its directory.
-        try { realpaths.push(fsSync.realpathSync.native(String(p))); } catch {
-          try { realpaths.push(pathSync.join(fsSync.realpathSync.native(pathSync.dirname(String(p))), pathSync.basename(String(p)))); } catch { realpaths.push(String(p)); }
+        try {
+          realpaths.push(fsSync.realpathSync.native(String(p)));
+        } catch {
+          try {
+            realpaths.push(
+              pathSync.join(
+                fsSync.realpathSync.native(pathSync.dirname(String(p))),
+                pathSync.basename(String(p)),
+              ),
+            );
+          } catch {
+            realpaths.push(String(p));
+          }
         }
       }
       return { known: true, realpaths, source: 'app.projects via the bridge' };
@@ -1715,15 +1887,23 @@ export class ProjectMediaTools extends CaptionTools {
 
     const running = this.premiereProcessRunning();
     if (running === false) {
-      return { known: true, realpaths: [], source: 'no Premiere process is running, so no project can be open' };
+      return {
+        known: true,
+        realpaths: [],
+        source: 'no Premiere process is running, so no project can be open',
+      };
     }
     return {
       known: false,
       realpaths: [],
-      source: running === null ? 'could not determine whether Premiere is running' : 'a Premiere process is running',
-      reason: running === null
-        ? 'Could not reach the bridge panel and could not determine whether Premiere is running, so it is not possible to confirm this file is not open. Refusing.'
-        : `Premiere is running but the bridge panel did not answer${probe && probe.error ? ` (${probe.error})` : ''}, so it is not possible to confirm this file is not open. Start the MCP Bridge panel, or quit Premiere, then retry.`,
+      source:
+        running === null
+          ? 'could not determine whether Premiere is running'
+          : 'a Premiere process is running',
+      reason:
+        running === null
+          ? 'Could not reach the bridge panel and could not determine whether Premiere is running, so it is not possible to confirm this file is not open. Refusing.'
+          : `Premiere is running but the bridge panel did not answer${probe && probe.error ? ` (${probe.error})` : ''}, so it is not possible to confirm this file is not open. Start the MCP Bridge panel, or quit Premiere, then retry.`,
     };
   }
 
@@ -1734,14 +1914,23 @@ export class ProjectMediaTools extends CaptionTools {
       const canary = containerCanary(fsSync.readFileSync(file.realpath), file);
 
       const counts: Record<string, number> = {};
-      for (const needle of args.countStrings ?? []) counts[needle] = countOccurrences(file.xml, needle);
+      for (const needle of args.countStrings ?? [])
+        counts[needle] = countOccurrences(file.xml, needle);
 
       let excerpt: any;
       if (args.xmlExcerptAround) {
         const at = file.xml.indexOf(args.xmlExcerptAround);
-        excerpt = at === -1
-          ? { found: false, note: 'That literal does not appear in this project.' }
-          : { found: true, offset: at, text: file.xml.slice(Math.max(0, at - 300), at + args.xmlExcerptAround.length + 300) };
+        excerpt =
+          at === -1
+            ? { found: false, note: 'That literal does not appear in this project.' }
+            : {
+                found: true,
+                offset: at,
+                text: file.xml.slice(
+                  Math.max(0, at - 300),
+                  at + args.xmlExcerptAround.length + 300,
+                ),
+              };
       }
 
       return {
@@ -1754,7 +1943,8 @@ export class ProjectMediaTools extends CaptionTools {
         sha256: file.sha256,
         compressed: file.compressed,
         formatVersion: file.formatVersion,
-        formatSupportedForEditing: file.formatVersion !== null && PRPROJ_SUPPORTED_FORMAT_VERSIONS.has(file.formatVersion),
+        formatSupportedForEditing:
+          file.formatVersion !== null && PRPROJ_SUPPORTED_FORMAT_VERSIONS.has(file.formatVersion),
         xmlLength: file.xml.length,
         census,
         containerRoundTrip: canary,
@@ -1763,8 +1953,12 @@ export class ProjectMediaTools extends CaptionTools {
         note: 'census.definitions counts ObjectUID declarations and matches what Premiere reports (e.g. definitions.Sequence is the sequence count). census.nodes counts raw tags including cross-references, so it is higher — it exists to detect structural damage, not to be read as an inventory.',
       };
     } catch (error) {
-      if (error instanceof SurgeryRefusal) return { success: false, refused: true, code: error.code, error: error.message };
-      return { success: false, error: `project_file_inspect failed: ${error instanceof Error ? error.message : String(error)}` };
+      if (error instanceof SurgeryRefusal)
+        return { success: false, refused: true, code: error.code, error: error.message };
+      return {
+        success: false,
+        error: `project_file_inspect failed: ${error instanceof Error ? error.message : String(error)}`,
+      };
     }
   }
 
@@ -1787,19 +1981,22 @@ export class ProjectMediaTools extends CaptionTools {
 
     try {
       const { file, raw } = readProjectFile(args.sourcePath);
-      assertSupportedFormat(file);                                    // invariant 3
-      assertOutputWritable(file.realpath, args.outputPath);           // invariant 1
+      assertSupportedFormat(file); // invariant 3
+      assertOutputWritable(file.realpath, args.outputPath); // invariant 1
 
       // Invariant 4. Before touching anything: prove our writer reproduces this file exactly, so the
       // only difference in the output is the edit.
       const canary = containerCanary(raw, file);
       if (!canary.semantic) {
-        throw new SurgeryRefusal('The project XML did not survive a re-encode round trip, so this build cannot write this file losslessly. Nothing was written.', 'CANARY_SEMANTIC_FAILED');
+        throw new SurgeryRefusal(
+          'The project XML did not survive a re-encode round trip, so this build cannot write this file losslessly. Nothing was written.',
+          'CANARY_SEMANTIC_FAILED',
+        );
       }
       if (!canary.byteIdentical) {
         throw new SurgeryRefusal(
           `Re-encoding this file's untouched contents produced ${canary.reencodedBytes} bytes against the original ${file.bytes}, so it was written by a compressor this build has not been verified against. ` +
-          'Refusing: the safe interpretation of an unfamiliar writer is to leave its files alone.',
+            'Refusing: the safe interpretation of an unfamiliar writer is to leave its files alone.',
           'CANARY_BYTE_MISMATCH',
         );
       }
@@ -1807,18 +2004,32 @@ export class ProjectMediaTools extends CaptionTools {
       // Invariant 2. Neither file may be open in Premiere — and if that cannot be established, refuse.
       const open = await this.openProjectRealpaths();
       if (!open.known) {
-        throw new SurgeryRefusal(open.reason || 'Could not determine which projects are open in Premiere.', 'OPEN_STATE_UNKNOWN');
+        throw new SurgeryRefusal(
+          open.reason || 'Could not determine which projects are open in Premiere.',
+          'OPEN_STATE_UNKNOWN',
+        );
       }
       // The output does not exist yet, so resolve its directory instead: a host reporting
       // /private/var/... must still collide with an output given as /var/....
       const outputLexical = pathSync.resolve(args.outputPath);
       let outputResolved = outputLexical;
-      try { outputResolved = pathSync.join(fsSync.realpathSync.native(pathSync.dirname(outputLexical)), pathSync.basename(outputLexical)); } catch { /* keep the lexical form */ }
+      try {
+        outputResolved = pathSync.join(
+          fsSync.realpathSync.native(pathSync.dirname(outputLexical)),
+          pathSync.basename(outputLexical),
+        );
+      } catch {
+        /* keep the lexical form */
+      }
       // macOS and Windows volumes are case-insensitive by default, so "Cut.prproj" open in Premiere is
       // the same file as "cut.prproj" here. Over-matching on a case-sensitive volume only refuses.
       const caseless = process.platform === 'darwin' || process.platform === 'win32';
-      const samePath = (a: string, b: string) => (caseless ? a.toLowerCase() === b.toLowerCase() : a === b);
-      const collision = open.realpaths.find((p) => samePath(p, file.realpath) || samePath(p, outputResolved) || samePath(p, outputLexical));
+      const samePath = (a: string, b: string) =>
+        caseless ? a.toLowerCase() === b.toLowerCase() : a === b;
+      const collision = open.realpaths.find(
+        (p) =>
+          samePath(p, file.realpath) || samePath(p, outputResolved) || samePath(p, outputLexical),
+      );
       if (collision) {
         throw new SurgeryRefusal(
           `"${collision}" is currently open in Premiere. Editing a project file underneath the application means Premiere's in-memory copy wins the moment anyone saves, and the edit is silently lost. Close it in Premiere first.`,
@@ -1852,7 +2063,7 @@ export class ProjectMediaTools extends CaptionTools {
       if (diff.length > 0 && args.allowCensusChange !== true) {
         throw new SurgeryRefusal(
           `The edit changed the structural node census, which a pure text substitution should not do: ${diff.join('; ')}. ` +
-          'Nothing was written. If adding or removing structure is genuinely what you intend, pass allowCensusChange: true.',
+            'Nothing was written. If adding or removing structure is genuinely what you intend, pass allowCensusChange: true.',
           'CENSUS_CHANGED',
         );
       }
@@ -1863,7 +2074,11 @@ export class ProjectMediaTools extends CaptionTools {
         sourceSha256: file.sha256,
         sourceBytes: file.bytes,
         formatVersion: file.formatVersion,
-        replacementsApplied: applied.map((a) => ({ find: a.find, replace: a.replace, matches: a.matches })),
+        replacementsApplied: applied.map((a) => ({
+          find: a.find,
+          replace: a.replace,
+          matches: a.matches,
+        })),
         censusBefore,
         censusAfter,
         censusDiff: diff,
@@ -1877,7 +2092,8 @@ export class ProjectMediaTools extends CaptionTools {
           success: true,
           dryRun: true,
           verified: false,
-          verifiedBy: 'nothing was written — every invariant was checked against the source file only',
+          verifiedBy:
+            'nothing was written — every invariant was checked against the source file only',
           ...common,
           wrote: false,
           wouldWrite: pathSync.resolve(args.outputPath),
@@ -1892,13 +2108,17 @@ export class ProjectMediaTools extends CaptionTools {
       wroteOutput = written.outputPath;
       const sourceAfter = readProjectFile(file.realpath).file.sha256;
 
-      const readbackOk = written.readbackMatches && written.readbackCensusDiff.length === 0 && !written.readbackError;
+      const readbackOk =
+        written.readbackMatches &&
+        written.readbackCensusDiff.length === 0 &&
+        !written.readbackError;
       const sourceUntouched = sourceAfter === file.sha256;
 
       return {
         success: readbackOk && sourceUntouched,
         verified: readbackOk && sourceUntouched,
-        verifiedBy: 'the written file was re-read from disk and its XML and census compared; the source was re-hashed to prove it was untouched',
+        verifiedBy:
+          'the written file was re-read from disk and its XML and census compared; the source was re-hashed to prove it was untouched',
         ...common,
         // Every refusal path reports wrote:false, so this has to be set here too. A caller that
         // branches on `wrote` would otherwise read undefined on the one path that did write.
@@ -1915,19 +2135,35 @@ export class ProjectMediaTools extends CaptionTools {
         // cannot make for itself.
         premiereWillLoad: 'unverified',
         premiereWillLoadNote: `Whether Premiere accepts this file has NOT been verified — that requires opening it. To verify: open_project with "${written.outputPath}", then read the edited value back (get_bin_tree, list_sequences, or get_project_info). A file written by this tool has been opened successfully on Premiere 26.3, with the edited value read back from Premiere's own project model — but that is evidence about the writer, not about this file.`,
-        ...(readbackOk && sourceUntouched ? {} : { error: !sourceUntouched ? 'The source file changed during the edit — treat the output as suspect.' : 'The file written to disk did not read back as the document that was intended.' }),
+        ...(readbackOk && sourceUntouched
+          ? {}
+          : {
+              error: !sourceUntouched
+                ? 'The source file changed during the edit — treat the output as suspect.'
+                : 'The file written to disk did not read back as the document that was intended.',
+            }),
       };
     } catch (error) {
       if (error instanceof SurgeryRefusal) {
         // A refusal can come AFTER the write: the post-write source re-hash re-reads the source,
         // which refuses if it vanished mid-call. The output exists then, so say so.
         return {
-          success: false, refused: true, code: error.code, error: error.message, wrote: wroteOutput !== null,
+          success: false,
+          refused: true,
+          code: error.code,
+          error: error.message,
+          wrote: wroteOutput !== null,
           ...(wroteOutput !== null ? { outputPath: wroteOutput, outputSuspect: true } : {}),
         };
       }
       if (error instanceof ProjectWriteError) {
-        return { success: false, code: 'WRITE_FAILED', error: error.message, wrote: error.outputCreated, ...(error.outputCreated ? { outputPath: error.outputPath, outputSuspect: true } : {}) };
+        return {
+          success: false,
+          code: 'WRITE_FAILED',
+          error: error.message,
+          wrote: error.outputCreated,
+          ...(error.outputCreated ? { outputPath: error.outputPath, outputSuspect: true } : {}),
+        };
       }
       return {
         success: false,
@@ -1953,8 +2189,10 @@ export class ProjectMediaTools extends CaptionTools {
   // Batch variant of setClipProperties: apply Motion values to many clips in ONE round-trip.
   // Same per-clip loop as the single version (opacity/scale/rotation/position), collapsing N
   // file round-trips into 1. Returns a per-clip result array.
-  protected async setClipPropertiesBatch(items: Array<{ clipId: string; properties: any }>): Promise<any> {
-    const specs = items.map(it => ({
+  protected async setClipPropertiesBatch(
+    items: Array<{ clipId: string; properties: any }>,
+  ): Promise<any> {
+    const specs = items.map((it) => ({
       clipId: it.clipId,
       opacity: it.properties?.opacity === undefined ? null : it.properties.opacity,
       scale: it.properties?.scale === undefined ? null : it.properties.scale,
@@ -2220,7 +2458,11 @@ export class ProjectMediaTools extends CaptionTools {
   }
 
   // Set Footage Interpretation Implementation
-  protected async setFootageInterpretation(projectItemId: string, frameRate?: number, pixelAspectRatio?: number): Promise<any> {
+  protected async setFootageInterpretation(
+    projectItemId: string,
+    frameRate?: number,
+    pixelAspectRatio?: number,
+  ): Promise<any> {
     const setFrameRate = frameRate !== undefined;
     const setPar = pixelAspectRatio !== undefined;
     const script = `

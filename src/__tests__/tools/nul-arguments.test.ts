@@ -17,7 +17,10 @@ const NUL = '\u0000';
 
 const toolsWith = (capture: { script?: string }): PremiereProTools =>
   new PremiereProTools({
-    executeScript: async (s: string) => { capture.script = s; return { success: true }; },
+    executeScript: async (s: string) => {
+      capture.script = s;
+      return { success: true };
+    },
   } as never);
 
 describe('arguments containing a NUL', () => {

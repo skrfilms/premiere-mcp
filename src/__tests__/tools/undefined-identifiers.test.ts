@@ -43,16 +43,43 @@ beforeAll(() => {
 });
 afterAll(() => {
   process.chdir(originalCwd);
-  try { rmSync(scratchCwd, { recursive: true, force: true }); } catch { /* best effort */ }
+  try {
+    rmSync(scratchCwd, { recursive: true, force: true });
+  } catch {
+    /* best effort */
+  }
 });
 
 /**
  * Names the ExtendScript host itself provides. These genuinely have to be listed by hand.
  */
 const HOST_BUILTINS = [
-  'app', 'qe', 'JSON', 'Sequence', 'File', 'Folder', 'Time', 'String', 'Number', 'Boolean',
-  'Math', 'Date', 'Array', 'Object', 'RegExp', 'Error', 'parseInt', 'parseFloat',
-  'isFinite', 'isNaN', 'undefined', 'NaN', 'Infinity', '$', 'XMPMeta', 'ExternalObject',
+  'app',
+  'qe',
+  'JSON',
+  'Sequence',
+  'File',
+  'Folder',
+  'Time',
+  'String',
+  'Number',
+  'Boolean',
+  'Math',
+  'Date',
+  'Array',
+  'Object',
+  'RegExp',
+  'Error',
+  'parseInt',
+  'parseFloat',
+  'isFinite',
+  'isNaN',
+  'undefined',
+  'NaN',
+  'Infinity',
+  '$',
+  'XMPMeta',
+  'ExternalObject',
 ];
 
 /**
@@ -88,7 +115,10 @@ const ARBITRARY_CODE_TOOLS = new Set([
 
 type Node = Record<string, any>;
 
-interface Scope { parent: Scope | null; names: Set<string> }
+interface Scope {
+  parent: Scope | null;
+  names: Set<string>;
+}
 
 const newScope = (parent: Scope | null): Scope => ({ parent, names: new Set() });
 
@@ -154,7 +184,8 @@ function walk(node: Node, scope: Scope, offenders: Set<string>, parent?: Node, k
   }
 
   if (node.type === 'Identifier') {
-    const isProperty = parent?.type === 'MemberExpression' && key === 'property' && !parent.computed;
+    const isProperty =
+      parent?.type === 'MemberExpression' && key === 'property' && !parent.computed;
     const isKey = parent?.type === 'Property' && key === 'key';
     if (!isProperty && !isKey && !resolves(scope, node.name)) offenders.add(node.name);
     return;
@@ -172,10 +203,16 @@ function walk(node: Node, scope: Scope, offenders: Set<string>, parent?: Node, k
 }
 
 describe('generated scripts declare everything they reference', () => {
-  const capture = async (tool: { name: string }, args: Record<string, unknown>): Promise<string[]> => {
+  const capture = async (
+    tool: { name: string },
+    args: Record<string, unknown>,
+  ): Promise<string[]> => {
     const scripts: string[] = [];
     const tools = new PremiereProTools({
-      executeScript: async (s: string) => { scripts.push(s); return { success: true }; },
+      executeScript: async (s: string) => {
+        scripts.push(s);
+        return { success: true };
+      },
     } as never);
     try {
       await tools.executeTool(tool.name, args);
@@ -199,7 +236,7 @@ describe('generated scripts declare everything they reference', () => {
       // where the branch taken when the caller omits that key is never emitted.
       const argumentSets = [seedArgs(tool as never), seedRequiredArgs(tool as never)];
       const scripts: string[] = [];
-      for (const args of argumentSets) scripts.push(...await capture(tool, args));
+      for (const args of argumentSets) scripts.push(...(await capture(tool, args)));
 
       for (const script of scripts) {
         checked++;

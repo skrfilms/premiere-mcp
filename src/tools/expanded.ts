@@ -201,13 +201,13 @@ export function getExpandedTools(existingNames: Set<string>): MCPTool[] {
         return {
           name,
           description: spec.description,
-          inputSchema: buildExpandedInputSchema(spec)
+          inputSchema: buildExpandedInputSchema(spec),
         };
       }
       return {
         name,
         description: `Premiere Pro expanded operation: ${name.replace(/_/g, ' ')}.`,
-        inputSchema: z.record(z.string(), z.any())
+        inputSchema: z.record(z.string(), z.any()),
       };
     });
 }
@@ -219,7 +219,7 @@ export function isExpandedTool(name: string): boolean {
 export async function executeExpandedTool(
   bridge: PremiereProTransport,
   name: string,
-  args: Record<string, any>
+  args: Record<string, any>,
 ): Promise<any> {
   try {
     if (name === 'create_bars_and_tone') {
@@ -245,9 +245,17 @@ export async function executeExpandedTool(
       }
       // A raw script can do anything the panel can. The ones that delete, close or quit get a
       // confirmation step, the same as the dedicated delete tools.
-      const risky = /\b(deleteSequence|deleteBin|closeDocument|app\.quit|\.remove\s*\(|removeEmptyTracks|\bFile\([^)]*\)\.remove|Folder\([^)]*\)\.remove)/.exec(script);
+      const risky =
+        /\b(deleteSequence|deleteBin|closeDocument|app\.quit|\.remove\s*\(|removeEmptyTracks|\bFile\([^)]*\)\.remove|Folder\([^)]*\)\.remove)/.exec(
+          script,
+        );
       if (risky && args.confirm !== true) {
-        return { success: false, needsConfirmation: true, confirmPrompt: `Run a raw script that calls ${risky[1]}? It can delete or close things in Premiere.`, error: `This script calls ${risky[1]}, which can delete or close things. Nothing was run; call again with confirm:true to go ahead.` };
+        return {
+          success: false,
+          needsConfirmation: true,
+          confirmPrompt: `Run a raw script that calls ${risky[1]}? It can delete or close things in Premiere.`,
+          error: `This script calls ${risky[1]}, which can delete or close things. Nothing was run; call again with confirm:true to go ahead.`,
+        };
       }
       // Caller-authored: pass the source through verbatim.
       return await bridge.executeScript(script, undefined, true);
@@ -259,7 +267,7 @@ export async function executeExpandedTool(
     return {
       success: false,
       tool: name,
-      error: error instanceof Error ? error.message : String(error)
+      error: error instanceof Error ? error.message : String(error),
     };
   }
 }
@@ -284,7 +292,11 @@ function pngChunk(type: string, data: Buffer): Buffer {
   return Buffer.concat([length, typeBuffer, data, crc]);
 }
 
-function encodeRgbaPng(width: number, height: number, pixelAt: (x: number, y: number) => [number, number, number, number]): Buffer {
+function encodeRgbaPng(
+  width: number,
+  height: number,
+  pixelAt: (x: number, y: number) => [number, number, number, number],
+): Buffer {
   const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(width, 0);
@@ -313,11 +325,16 @@ function encodeRgbaPng(width: number, height: number, pixelAt: (x: number, y: nu
     signature,
     pngChunk('IHDR', ihdr),
     pngChunk('IDAT', deflateSync(raw)),
-    pngChunk('IEND', Buffer.alloc(0))
+    pngChunk('IEND', Buffer.alloc(0)),
   ]);
 }
 
-async function writeGeneratedPng(fileName: string, width: number, height: number, pixelAt: (x: number, y: number) => [number, number, number, number]): Promise<string> {
+async function writeGeneratedPng(
+  fileName: string,
+  width: number,
+  height: number,
+  pixelAt: (x: number, y: number) => [number, number, number, number],
+): Promise<string> {
   const outputDir = generatedAssetsDir();
   await fs.mkdir(outputDir, { recursive: true });
   const filePath = join(outputDir, fileName);
@@ -325,7 +342,10 @@ async function writeGeneratedPng(fileName: string, width: number, height: number
   return filePath;
 }
 
-async function createGeneratedBarsAndTone(bridge: PremiereProTransport, args: Record<string, any>): Promise<any> {
+async function createGeneratedBarsAndTone(
+  bridge: PremiereProTransport,
+  args: Record<string, any>,
+): Promise<any> {
   const width = Number(args.width || 1280);
   const height = Number(args.height || 720);
   const colors: Array<[number, number, number, number]> = [
@@ -335,9 +355,15 @@ async function createGeneratedBarsAndTone(bridge: PremiereProTransport, args: Re
     [0, 191, 0, 255],
     [191, 0, 191, 255],
     [191, 0, 0, 255],
-    [0, 0, 191, 255]
+    [0, 0, 191, 255],
   ];
-  const filePath = await writeGeneratedPng(`bars-${Date.now()}.png`, width, height, (x) => colors[Math.min(colors.length - 1, Math.floor((x / width) * colors.length))] ?? colors[0]!);
+  const filePath = await writeGeneratedPng(
+    `bars-${Date.now()}.png`,
+    width,
+    height,
+    (x) =>
+      colors[Math.min(colors.length - 1, Math.floor((x / width) * colors.length))] ?? colors[0]!,
+  );
   const imported = await bridge.importMedia(filePath);
   return {
     success: true,
@@ -349,19 +375,33 @@ async function createGeneratedBarsAndTone(bridge: PremiereProTransport, args: Re
       path: filePath,
       width,
       height,
-      toneGenerated: false
-    }
+      toneGenerated: false,
+    },
   };
 }
 
-async function createGeneratedAdjustmentLayer(bridge: PremiereProTransport, args: Record<string, any>): Promise<any> {
+async function createGeneratedAdjustmentLayer(
+  bridge: PremiereProTransport,
+  args: Record<string, any>,
+): Promise<any> {
   const width = Number(args.width || 1920);
   const height = Number(args.height || 1080);
-  const filePath = await writeGeneratedPng(`adjustment-layer-${Date.now()}.png`, width, height, () => [0, 0, 0, 0]);
+  const filePath = await writeGeneratedPng(
+    `adjustment-layer-${Date.now()}.png`,
+    width,
+    height,
+    () => [0, 0, 0, 0],
+  );
   const imported = await bridge.importMedia(filePath);
   let placement: any = null;
   if (args.sequenceId) {
-    placement = await bridge.addToTimeline(String(args.sequenceId), imported.id, Number(args.trackIndex || 1), Number(args.time || args.start || 0), false);
+    placement = await bridge.addToTimeline(
+      String(args.sequenceId),
+      imported.id,
+      Number(args.trackIndex || 1),
+      Number(args.time || args.start || 0),
+      false,
+    );
   }
 
   // A placed still gets Premiere's default still-image duration (typically 5s), so a
@@ -370,7 +410,13 @@ async function createGeneratedAdjustmentLayer(bridge: PremiereProTransport, args
   // trim_clip uses (clip.end = start + duration) — reporting whether it took.
   let durationResult: any = null;
   const requestedDuration = args.duration !== undefined ? Number(args.duration) : undefined;
-  if (placement && placement.id && requestedDuration !== undefined && isFinite(requestedDuration) && requestedDuration > 0) {
+  if (
+    placement &&
+    placement.id &&
+    requestedDuration !== undefined &&
+    isFinite(requestedDuration) &&
+    requestedDuration > 0
+  ) {
     durationResult = await bridge.executeScript(`
       try {
         var info = __findClip(${JSON.stringify(String(placement.id))});
@@ -406,22 +452,34 @@ async function createGeneratedAdjustmentLayer(bridge: PremiereProTransport, args
             durationApplied: durationResult ? durationResult.success === true : false,
             actualDuration: durationResult ? durationResult.actualDuration : undefined,
             ...(durationResult && durationResult.success !== true
-              ? { durationWarning: durationResult.error || 'Duration could not be verified; layer kept its default length.' }
+              ? {
+                  durationWarning:
+                    durationResult.error ||
+                    'Duration could not be verified; layer kept its default length.',
+                }
               : {}),
-            ...(!placement ? { durationWarning: 'Duration ignored: no sequenceId given, so the layer was imported but not placed on a timeline.' } : {})
+            ...(!placement
+              ? {
+                  durationWarning:
+                    'Duration ignored: no sequenceId given, so the layer was imported but not placed on a timeline.',
+                }
+              : {}),
           }
-        : {})
-    }
+        : {}),
+    },
   };
 }
 
-async function consolidateAndTransfer(bridge: PremiereProTransport, args: Record<string, any>): Promise<any> {
+async function consolidateAndTransfer(
+  bridge: PremiereProTransport,
+  args: Record<string, any>,
+): Promise<any> {
   const outputPath = String(args.outputPath || args.path || '');
   if (!outputPath) {
     return {
       success: false,
       tool: 'consolidate_and_transfer',
-      error: 'consolidate_and_transfer requires outputPath or path.'
+      error: 'consolidate_and_transfer requires outputPath or path.',
     };
   }
 
@@ -456,7 +514,7 @@ async function consolidateAndTransfer(bridge: PremiereProTransport, args: Record
       success: false,
       tool: 'consolidate_and_transfer',
       error: mediaResult?.error || 'Failed to read project media paths',
-      details: mediaResult
+      details: mediaResult,
     };
   }
 
@@ -489,14 +547,19 @@ async function consolidateAndTransfer(bridge: PremiereProTransport, args: Record
         source,
         nodeId: item.nodeId,
         name: item.name,
-        reason: error instanceof Error ? error.message : String(error)
+        reason: error instanceof Error ? error.message : String(error),
       });
     }
   }
 
   let projectCopy: any = null;
   if (args.saveProjectCopy !== false) {
-    const projectPath = join(outputPath, `${String(args.projectName || mediaResult.projectName || 'consolidated-project').replace(/[\\/]+/g, '_').replace(/\\.prproj$/i, '')}.prproj`);
+    const projectPath = join(
+      outputPath,
+      `${String(args.projectName || mediaResult.projectName || 'consolidated-project')
+        .replace(/[\\/]+/g, '_')
+        .replace(/\\.prproj$/i, '')}.prproj`,
+    );
     const saveScript = `
       try {
         app.project.saveAs(${JSON.stringify(projectPath)});
@@ -509,12 +572,19 @@ async function consolidateAndTransfer(bridge: PremiereProTransport, args: Record
   }
 
   const manifestPath = join(outputPath, 'consolidate-manifest.json');
-  await fs.writeFile(manifestPath, JSON.stringify({
-    projectName: mediaResult.projectName,
-    copied,
-    skipped,
-    projectCopy
-  }, null, 2));
+  await fs.writeFile(
+    manifestPath,
+    JSON.stringify(
+      {
+        projectName: mediaResult.projectName,
+        copied,
+        skipped,
+        projectCopy,
+      },
+      null,
+      2,
+    ),
+  );
 
   return {
     success: projectCopy?.success !== false,
@@ -527,12 +597,15 @@ async function consolidateAndTransfer(bridge: PremiereProTransport, args: Record
       copied,
       skipped,
       projectCopy,
-      manifestPath
-    }
+      manifestPath,
+    },
   };
 }
 
-async function deletePreviewFilesOnDisk(bridge: PremiereProTransport, args: Record<string, any>): Promise<any> {
+async function deletePreviewFilesOnDisk(
+  bridge: PremiereProTransport,
+  args: Record<string, any>,
+): Promise<any> {
   const infoScript = `
     try {
       var projectPath = "";
@@ -553,7 +626,7 @@ async function deletePreviewFilesOnDisk(bridge: PremiereProTransport, args: Reco
       success: false,
       tool: 'delete_preview_files',
       error: info?.error || 'Failed to inspect active project',
-      details: info
+      details: info,
     };
   }
 
@@ -564,7 +637,7 @@ async function deletePreviewFilesOnDisk(bridge: PremiereProTransport, args: Reco
     join(projectDir, 'Adobe Premiere Pro Video Previews'),
     join(projectDir, 'Adobe Premiere Pro Audio Previews'),
     join(projectDir, `${String(info.projectName || '').replace(/\\.prproj$/i, '')} Video Previews`),
-    join(projectDir, `${String(info.projectName || '').replace(/\\.prproj$/i, '')} Audio Previews`)
+    join(projectDir, `${String(info.projectName || '').replace(/\\.prproj$/i, '')} Audio Previews`),
   ].filter(Boolean);
 
   const deleted: string[] = [];
@@ -583,7 +656,10 @@ async function deletePreviewFilesOnDisk(bridge: PremiereProTransport, args: Reco
     }
     const dirLooksLikePreview = isExplicit || /preview/i.test(basename(dir));
     if (!dirLooksLikePreview) {
-      skipped.push({ path: dir, reason: 'Directory name does not look like a Premiere preview directory' });
+      skipped.push({
+        path: dir,
+        reason: 'Directory name does not look like a Premiere preview directory',
+      });
       return;
     }
     for (const entry of entries) {
@@ -595,14 +671,20 @@ async function deletePreviewFilesOnDisk(bridge: PremiereProTransport, args: Reco
           await fs.unlink(fullPath);
           deleted.push(fullPath);
         } catch (error) {
-          skipped.push({ path: fullPath, reason: error instanceof Error ? error.message : String(error) });
+          skipped.push({
+            path: fullPath,
+            reason: error instanceof Error ? error.message : String(error),
+          });
         }
       }
     }
   }
 
   for (const candidate of candidates) {
-    await walkPreviewDir(candidate, Boolean(explicitDir && String(candidate) === String(explicitDir)));
+    await walkPreviewDir(
+      candidate,
+      Boolean(explicitDir && String(candidate) === String(explicitDir)),
+    );
   }
 
   return {
@@ -616,8 +698,8 @@ async function deletePreviewFilesOnDisk(bridge: PremiereProTransport, args: Reco
       deletedCount: deleted.length,
       skippedCount: skipped.length,
       deleted,
-      skipped
-    }
+      skipped,
+    },
   };
 }
 

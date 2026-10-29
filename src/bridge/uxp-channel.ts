@@ -11,7 +11,16 @@
  * The directory is fixed because a UXP panel cannot read the environment. There is no socket:
  * nothing here is reachable from another machine.
  */
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -20,7 +29,8 @@ import { join } from 'node:path';
  * Must match uxp-probe/main.js: /tmp on POSIX, %LOCALAPPDATA%\\Temp on Windows (os.tmpdir()). The
  * override exists for tests only.
  */
-export const UXP_DIR_DEFAULT = process.platform === 'win32' ? join(tmpdir(), 'premiere-mcp-uxp') : '/tmp/premiere-mcp-uxp';
+export const UXP_DIR_DEFAULT =
+  process.platform === 'win32' ? join(tmpdir(), 'premiere-mcp-uxp') : '/tmp/premiere-mcp-uxp';
 const dir = (): string => process.env.PREMIERE_MCP_UXP_DIR || UXP_DIR_DEFAULT;
 /** The panel writes a heartbeat every poll (300 ms); older than this means it is not running. */
 const STALE_MS = 5000;
@@ -54,10 +64,16 @@ function sweepTaken(): void {
   try {
     for (const n of readdirSync(dir())) {
       if (n.startsWith('command-') && n.endsWith('.taken')) {
-        try { unlinkSync(`${dir()}/${n}`); } catch { /* raced */ }
+        try {
+          unlinkSync(`${dir()}/${n}`);
+        } catch {
+          /* raced */
+        }
       }
     }
-  } catch { /* no directory yet */ }
+  } catch {
+    /* no directory yet */
+  }
 }
 
 /**
@@ -67,7 +83,11 @@ function sweepTaken(): void {
  * and its executeTransaction inside one project.lockedAccess callback.
  */
 export async function runUxp(code: string, timeoutMs = 20000, label?: string): Promise<UxpResult> {
-  if (!uxpAvailable()) return { ok: false, error: 'The MCP UXP Probe panel is not running (npm run uxp:install, then restart Premiere).' };
+  if (!uxpAvailable())
+    return {
+      ok: false,
+      error: 'The MCP UXP Probe panel is not running (npm run uxp:install, then restart Premiere).',
+    };
   ensureDir();
   sweepTaken();
   const d = dir();
@@ -82,12 +102,24 @@ export async function runUxp(code: string, timeoutMs = 20000, label?: string): P
       // The panel may have no rename and write in place; tolerate a read that lands mid-write.
       try {
         const parsed = JSON.parse(readFileSync(responsePath, 'utf8'));
-        try { unlinkSync(responsePath); } catch { /* already gone */ }
-        return parsed.ok ? { ok: true, result: parsed.result } : { ok: false, error: String(parsed.error ?? 'unknown UXP error') };
-      } catch { /* partial; retry */ }
+        try {
+          unlinkSync(responsePath);
+        } catch {
+          /* already gone */
+        }
+        return parsed.ok
+          ? { ok: true, result: parsed.result }
+          : { ok: false, error: String(parsed.error ?? 'unknown UXP error') };
+      } catch {
+        /* partial; retry */
+      }
     }
     await new Promise((r) => setTimeout(r, 60));
   }
-  try { unlinkSync(`${d}/command-${id}.json`); } catch { /* the panel took it */ }
+  try {
+    unlinkSync(`${d}/command-${id}.json`);
+  } catch {
+    /* the panel took it */
+  }
   return { ok: false, error: `The UXP panel did not answer within ${timeoutMs / 1000}s.` };
 }

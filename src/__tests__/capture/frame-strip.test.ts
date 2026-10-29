@@ -34,7 +34,11 @@ describe('planFrameTimes', () => {
     expect(plan.error).toBeUndefined();
     expect(plan.frames.map((f) => f.frame)).toEqual([0, 6, 12, 18, 24]);
     expect(plan.frames.map((f) => f.timecode)).toEqual([
-      '00:00:00:00', '00:00:00:06', '00:00:00:12', '00:00:00:18', '00:00:01:00',
+      '00:00:00:00',
+      '00:00:00:06',
+      '00:00:00:12',
+      '00:00:00:18',
+      '00:00:01:00',
     ]);
   });
 
@@ -58,8 +62,12 @@ describe('planFrameTimes', () => {
   });
 
   it('rejects a backwards range and a nonsense frame rate', () => {
-    expect(planFrameTimes({ startSeconds: 2, endSeconds: 1, fps: 24, count: 3 }).error).toMatch(/before startSeconds/);
-    expect(planFrameTimes({ startSeconds: 0, endSeconds: 1, fps: 0, count: 3 }).error).toMatch(/positive frame rate/);
+    expect(planFrameTimes({ startSeconds: 2, endSeconds: 1, fps: 24, count: 3 }).error).toMatch(
+      /before startSeconds/,
+    );
+    expect(planFrameTimes({ startSeconds: 0, endSeconds: 1, fps: 0, count: 3 }).error).toMatch(
+      /positive frame rate/,
+    );
   });
 
   it('collapses duplicate samples and says it did, instead of capturing the same frame twice', () => {
@@ -69,7 +77,13 @@ describe('planFrameTimes', () => {
   });
 
   it('caps the plan and warns rather than queueing hundreds of host round trips', () => {
-    const plan = planFrameTimes({ startSeconds: 0, endSeconds: 60, fps: 24, everyNFrames: 1, maxFrames: 10 });
+    const plan = planFrameTimes({
+      startSeconds: 0,
+      endSeconds: 60,
+      fps: 24,
+      everyNFrames: 1,
+      maxFrames: 10,
+    });
     expect(plan.frames).toHaveLength(10);
     expect(plan.warnings.join(' ')).toMatch(/trimmed from 1441 to the 10-frame cap/);
   });
@@ -89,26 +103,45 @@ describe('planContactSheetGrid', () => {
 
 describe('ffmpeg argument builders', () => {
   it('escapes the colons in a timecode so drawtext does not read them as option separators', () => {
-    const argv = buildBurnInArgs({ inputPath: '/in.png', outputPath: '/out.png', fontFile: '/System/Library/Fonts/Menlo.ttc', text: '00:00:04:12  f108' });
+    const argv = buildBurnInArgs({
+      inputPath: '/in.png',
+      outputPath: '/out.png',
+      fontFile: '/System/Library/Fonts/Menlo.ttc',
+      text: '00:00:04:12  f108',
+    });
     const filter = argv[argv.indexOf('-vf') + 1] as string;
     expect(filter).toContain("text='00\\:00\\:04\\:12  f108'");
     expect(filter).toContain("fontfile='/System/Library/Fonts/Menlo.ttc'");
   });
 
-  it('escapes a Windows font path\'s backslashes', () => {
-    const argv = buildBurnInArgs({ inputPath: '/in.png', outputPath: '/out.png', fontFile: 'C:\\Windows\\Fonts\\consola.ttf', text: 'x' });
+  it("escapes a Windows font path's backslashes", () => {
+    const argv = buildBurnInArgs({
+      inputPath: '/in.png',
+      outputPath: '/out.png',
+      fontFile: 'C:\\Windows\\Fonts\\consola.ttf',
+      text: 'x',
+    });
     const filter = argv[argv.indexOf('-vf') + 1] as string;
     expect(filter).toContain('C\\:\\\\\\\\Windows');
   });
 
   it('tiles the sheet at the requested grid and writes a single image', () => {
-    const argv = buildContactSheetArgs({ inputPattern: '/tmp/s_%04d.png', outputPath: '/tmp/sheet.png', columns: 3, rows: 2 });
+    const argv = buildContactSheetArgs({
+      inputPattern: '/tmp/s_%04d.png',
+      outputPath: '/tmp/sheet.png',
+      columns: 3,
+      rows: 2,
+    });
     expect(argv.join(' ')).toContain('tile=3x2:margin=6:padding=6:color=black');
     expect(argv).toContain('-update');
   });
 
   it('pads the review clip to even dimensions so h264 can encode it', () => {
-    const argv = buildMotionClipArgs({ inputPattern: '/tmp/s_%04d.png', outputPath: '/tmp/r.mp4', framerate: 8 });
+    const argv = buildMotionClipArgs({
+      inputPattern: '/tmp/s_%04d.png',
+      outputPath: '/tmp/r.mp4',
+      framerate: 8,
+    });
     expect(argv.join(' ')).toContain('pad=ceil(iw/2)*2:ceil(ih/2)*2');
     expect(argv[argv.indexOf('-framerate') + 1]).toBe('8');
   });
@@ -122,14 +155,29 @@ describe('renderTapFrameSource', () => {
       return { success: true, outputPath };
     }, 'SEQ-1');
     expect(source.tap).toBe('render');
-    const res = await source.capture({ index: 0, seconds: 1.5, frame: 36, timecode: '00:00:01:12', outputPath: '/tmp/a.png' });
+    const res = await source.capture({
+      index: 0,
+      seconds: 1.5,
+      frame: 36,
+      timecode: '00:00:01:12',
+      outputPath: '/tmp/a.png',
+    });
     expect(res.success).toBe(true);
     expect(calls[0]).toEqual({ time: 1.5, path: '/tmp/a.png' });
   });
 
-  it('surfaces Premiere\'s own reason when it returns no frame', async () => {
-    const source = renderTapFrameSource(async () => ({ success: false, error: 'QE frame export is inert on this build' }), 'SEQ-1');
-    const res = await source.capture({ index: 0, seconds: 0, frame: 0, timecode: '00:00:00:00', outputPath: '/tmp/a.png' });
+  it("surfaces Premiere's own reason when it returns no frame", async () => {
+    const source = renderTapFrameSource(
+      async () => ({ success: false, error: 'QE frame export is inert on this build' }),
+      'SEQ-1',
+    );
+    const res = await source.capture({
+      index: 0,
+      seconds: 0,
+      frame: 0,
+      timecode: '00:00:00:00',
+      outputPath: '/tmp/a.png',
+    });
     expect(res.success).toBe(false);
     expect(res.error).toMatch(/inert on this build/);
   });
@@ -140,7 +188,9 @@ describe('mediaFileFrameSource labelling', () => {
     expect(mediaFileFrameSource('/media/a.mov').tap).toBe('media-file');
     expect(mediaFileFrameSource('/media/a.mov').description).toMatch(/no timeline composite/);
     expect(mediaFileFrameSource('/renders/seq.mp4', 'export-file').tap).toBe('export-file');
-    expect(mediaFileFrameSource('/renders/seq.mp4', 'export-file').description).toMatch(/composited render/);
+    expect(mediaFileFrameSource('/renders/seq.mp4', 'export-file').description).toMatch(
+      /composited render/,
+    );
   });
 });
 
@@ -169,7 +219,7 @@ describe('captureFrameStrip — failures are reported, not smoothed over', () =>
     await fs.rm(dir, { recursive: true, force: true });
   }, 60_000);
 
-  it('fails outright, with the source\'s reason, when no frame at all lands', async () => {
+  it("fails outright, with the source's reason, when no frame at all lands", async () => {
     const dir = await fs.mkdtemp(join(tmpdir(), 'premiere-mcp-strip-none-'));
     const source: FrameSource = {
       tap: 'render',
@@ -185,16 +235,25 @@ describe('captureFrameStrip — failures are reported, not smoothed over', () =>
 
   it('refuses an empty or invalid plan', async () => {
     const dir = join(tmpdir(), 'unused');
-    const source: FrameSource = { tap: 'render', description: 'stub', capture: async () => ({ success: true, path: '/x' }) };
-    const bad = await captureFrameStrip({ source, plan: planFrameTimes({ startSeconds: 0, endSeconds: 1, fps: 24 }), workDir: dir });
+    const source: FrameSource = {
+      tap: 'render',
+      description: 'stub',
+      capture: async () => ({ success: true, path: '/x' }),
+    };
+    const bad = await captureFrameStrip({
+      source,
+      plan: planFrameTimes({ startSeconds: 0, endSeconds: 1, fps: 24 }),
+      workDir: dir,
+    });
     expect(bad.success).toBe(false);
     expect(bad.error).toMatch(/Neither is defaulted/);
   });
 });
 
 describe('captureFrameStrip — end to end with real ffmpeg', () => {
-  const ffmpegAvailable = spawnSync('ffmpeg', ['-version']).status === 0
-    && spawnSync('ffprobe', ['-version']).status === 0;
+  const ffmpegAvailable =
+    spawnSync('ffmpeg', ['-version']).status === 0 &&
+    spawnSync('ffprobe', ['-version']).status === 0;
   const maybe = ffmpegAvailable ? describe : describe.skip;
 
   maybe('over synthesised media', () => {
@@ -207,15 +266,29 @@ describe('captureFrameStrip — end to end with real ffmpeg', () => {
       movingClip = join(dir, 'moving.mp4');
       frozenClip = join(dir, 'frozen.mp4');
       const moving = spawnSync('ffmpeg', [
-        '-y', '-loglevel', 'error', '-f', 'lavfi',
-        '-i', 'testsrc2=size=320x180:rate=24:duration=3',
-        '-pix_fmt', 'yuv420p', movingClip,
+        '-y',
+        '-loglevel',
+        'error',
+        '-f',
+        'lavfi',
+        '-i',
+        'testsrc2=size=320x180:rate=24:duration=3',
+        '-pix_fmt',
+        'yuv420p',
+        movingClip,
       ]);
       expect(moving.status).toBe(0);
       const frozen = spawnSync('ffmpeg', [
-        '-y', '-loglevel', 'error', '-f', 'lavfi',
-        '-i', 'color=c=blue:size=320x180:rate=24:duration=3',
-        '-pix_fmt', 'yuv420p', frozenClip,
+        '-y',
+        '-loglevel',
+        'error',
+        '-f',
+        'lavfi',
+        '-i',
+        'color=c=blue:size=320x180:rate=24:duration=3',
+        '-pix_fmt',
+        'yuv420p',
+        frozenClip,
       ]);
       expect(frozen.status).toBe(0);
     }, 120_000);
@@ -247,7 +320,12 @@ describe('captureFrameStrip — end to end with real ffmpeg', () => {
         expect(frame.caveats.join(' ')).toMatch(/no timeline composite/);
       }
       // Timecodes are real and ascending.
-      expect(res.frames.map((f) => f.at.timecode)).toEqual(['00:00:00:00', '00:00:00:16', '00:00:01:08', '00:00:02:00']);
+      expect(res.frames.map((f) => f.at.timecode)).toEqual([
+        '00:00:00:00',
+        '00:00:00:16',
+        '00:00:01:08',
+        '00:00:02:00',
+      ]);
       expect(res.frames.map((f) => f.at.frame)).toEqual([0, 16, 32, 48]);
 
       // Artifacts landed and are measurable.

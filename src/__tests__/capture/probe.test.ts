@@ -134,8 +134,18 @@ describe('tapCapabilities — honesty invariants', () => {
   it('every unavailable tap carries install guidance', () => {
     const all = [
       ...macAvailable,
-      ...tapCapabilities({ os: 'darwin', screen: unavailableScreen, premiereConnected: false, ffmpegAvailable: false }),
-      ...tapCapabilities({ os: 'win32', screen: unavailableScreen, premiereConnected: false, ffmpegAvailable: true }),
+      ...tapCapabilities({
+        os: 'darwin',
+        screen: unavailableScreen,
+        premiereConnected: false,
+        ffmpegAvailable: false,
+      }),
+      ...tapCapabilities({
+        os: 'win32',
+        screen: unavailableScreen,
+        premiereConnected: false,
+        ffmpegAvailable: true,
+      }),
     ];
     for (const tap of all.filter((t) => !t.available)) {
       // Platform-impossible taps explain themselves in `reason` instead; the rest must say how to fix it.
@@ -153,14 +163,24 @@ describe('tapCapabilities — honesty invariants', () => {
     expect(ndi?.requiresNativeModule).toBe(true);
     expect(ndi?.reason).toMatch(/native addon/);
     expect(syphon?.requiresNativeModule).toBe(true);
-    const win = tapCapabilities({ os: 'win32', screen: availableScreen, premiereConnected: true, ffmpegAvailable: true });
+    const win = tapCapabilities({
+      os: 'win32',
+      screen: availableScreen,
+      premiereConnected: true,
+      ffmpegAvailable: true,
+    });
     expect(win.find((t) => t.tap === 'spout')?.requiresNativeModule).toBe(true);
   });
 
   it('does not offer Spout on macOS or Syphon on Windows', () => {
     expect(macAvailable.find((t) => t.tap === 'spout')?.available).toBe(false);
     expect(macAvailable.find((t) => t.tap === 'spout')?.reason).toMatch(/Windows-only/);
-    const win = tapCapabilities({ os: 'win32', screen: availableScreen, premiereConnected: true, ffmpegAvailable: true });
+    const win = tapCapabilities({
+      os: 'win32',
+      screen: availableScreen,
+      premiereConnected: true,
+      ffmpegAvailable: true,
+    });
     expect(win.find((t) => t.tap === 'syphon')?.reason).toMatch(/macOS-only/);
   });
 
@@ -179,14 +199,24 @@ describe('tapCapabilities — honesty invariants', () => {
   });
 
   it('marks the render and export taps unavailable when Premiere is not connected', () => {
-    const offline = tapCapabilities({ os: 'darwin', screen: availableScreen, premiereConnected: false, ffmpegAvailable: true });
+    const offline = tapCapabilities({
+      os: 'darwin',
+      screen: availableScreen,
+      premiereConnected: false,
+      ffmpegAvailable: true,
+    });
     expect(offline.find((t) => t.tap === 'render')?.available).toBe(false);
     expect(offline.find((t) => t.tap === 'export-file')?.available).toBe(false);
     expect(offline.find((t) => t.tap === 'render')?.install).toMatch(/MCP Bridge/);
   });
 
   it('kills the screen tap when ffmpeg is missing, and says why', () => {
-    const noFfmpeg = tapCapabilities({ os: 'darwin', screen: availableScreen, premiereConnected: true, ffmpegAvailable: false });
+    const noFfmpeg = tapCapabilities({
+      os: 'darwin',
+      screen: availableScreen,
+      premiereConnected: true,
+      ffmpegAvailable: false,
+    });
     const screen = noFfmpeg.find((t) => t.tap === 'screen');
     expect(screen?.available).toBe(false);
     expect(screen?.reason).toMatch(/ffmpeg/);
@@ -194,7 +224,9 @@ describe('tapCapabilities — honesty invariants', () => {
   });
 
   it('never labels a screen or GPU tap as composited, even when available', () => {
-    for (const tap of macAvailable.filter((t) => ['screen', 'ndi', 'syphon', 'spout'].includes(t.tap))) {
+    for (const tap of macAvailable.filter((t) =>
+      ['screen', 'ndi', 'syphon', 'spout'].includes(t.tap),
+    )) {
       expect(tap.composited).toBe('unverifiable');
       expect(tap.provenance).not.toBe('composited-render');
     }
@@ -203,27 +235,42 @@ describe('tapCapabilities — honesty invariants', () => {
 
 describe('recommendTaps', () => {
   it('prefers a composited tap for trust and the export tap for motion', () => {
-    const taps = tapCapabilities({ os: 'darwin', screen: availableScreen, premiereConnected: true, ffmpegAvailable: true });
+    const taps = tapCapabilities({
+      os: 'darwin',
+      screen: availableScreen,
+      premiereConnected: true,
+      ffmpegAvailable: true,
+    });
     const rec = recommendTaps(taps);
     expect(rec.bestCompositedTap).toBe('render');
     expect(rec.bestMotionTap).toBe('export-file');
   });
 
   it('falls back to the real-time screen tap for motion when Premiere is absent', () => {
-    const taps = tapCapabilities({ os: 'darwin', screen: availableScreen, premiereConnected: false, ffmpegAvailable: true });
+    const taps = tapCapabilities({
+      os: 'darwin',
+      screen: availableScreen,
+      premiereConnected: false,
+      ffmpegAvailable: true,
+    });
     const rec = recommendTaps(taps);
     expect(rec.bestCompositedTap).toBeNull();
     expect(rec.bestMotionTap).toBe('screen');
   });
 
   it('recommends nothing at all when nothing is available', () => {
-    const taps = tapCapabilities({ os: 'darwin', screen: unavailableScreen, premiereConnected: false, ffmpegAvailable: false });
+    const taps = tapCapabilities({
+      os: 'darwin',
+      screen: unavailableScreen,
+      premiereConnected: false,
+      ffmpegAvailable: false,
+    });
     expect(recommendTaps(taps)).toEqual({ bestCompositedTap: null, bestMotionTap: null });
   });
 });
 
 describe('programMonitorGeometryCapability', () => {
-  it('reports that Premiere\'s Program monitor cannot be located automatically, with the workaround', () => {
+  it("reports that Premiere's Program monitor cannot be located automatically, with the workaround", () => {
     const mac = programMonitorGeometryCapability('darwin');
     expect(mac.available).toBe(false);
     expect(mac.reason).toMatch(/accessibility/);
@@ -239,28 +286,36 @@ describe('probeCaptureCapability — live', () => {
   const ffmpegAvailable = spawnSync('ffmpeg', ['-version']).status === 0;
   const maybe = ffmpegAvailable ? it : it.skip;
 
-  maybe('reports what this machine can genuinely capture', async () => {
-    const report = await probeCaptureCapability();
-    expect(report.ffmpeg.available).toBe(true);
-    expect(report.ffmpeg.envOverride).toBe('PREMIERE_MCP_FFMPEG_CMD');
-    // Premiere connectivity was not asserted, so the composited taps must be off.
-    expect(report.taps.find((t) => t.tap === 'render')?.available).toBe(false);
-    expect(report.bestCompositedTap).toBeNull();
-    if (report.os === 'darwin') {
-      expect(report.screen.inputFormat).toBe('avfoundation');
-      expect(report.screen.available).toBe(true);
-      expect(report.screen.displays.length).toBeGreaterThan(0);
-      expect(report.bestMotionTap).toBe('screen');
-    }
-    // Never claimed as available: they need a native module we do not ship.
-    for (const tap of ['ndi', 'syphon', 'spout'] as const) {
-      expect(report.taps.find((t) => t.tap === tap)?.available).toBe(false);
-    }
-    expect(report.programMonitorGeometry.available).toBe(false);
-  }, 60_000);
+  maybe(
+    'reports what this machine can genuinely capture',
+    async () => {
+      const report = await probeCaptureCapability();
+      expect(report.ffmpeg.available).toBe(true);
+      expect(report.ffmpeg.envOverride).toBe('PREMIERE_MCP_FFMPEG_CMD');
+      // Premiere connectivity was not asserted, so the composited taps must be off.
+      expect(report.taps.find((t) => t.tap === 'render')?.available).toBe(false);
+      expect(report.bestCompositedTap).toBeNull();
+      if (report.os === 'darwin') {
+        expect(report.screen.inputFormat).toBe('avfoundation');
+        expect(report.screen.available).toBe(true);
+        expect(report.screen.displays.length).toBeGreaterThan(0);
+        expect(report.bestMotionTap).toBe('screen');
+      }
+      // Never claimed as available: they need a native module we do not ship.
+      for (const tap of ['ndi', 'syphon', 'spout'] as const) {
+        expect(report.taps.find((t) => t.tap === tap)?.available).toBe(false);
+      }
+      expect(report.programMonitorGeometry.available).toBe(false);
+    },
+    60_000,
+  );
 
-  maybe('does not grab the screen unless asked to', async () => {
-    const report = await probeCaptureCapability();
-    expect(report.screen.permissionVerified).toBe('not-tested');
-  }, 60_000);
+  maybe(
+    'does not grab the screen unless asked to',
+    async () => {
+      const report = await probeCaptureCapability();
+      expect(report.screen.permissionVerified).toBe('not-tested');
+    },
+    60_000,
+  );
 });

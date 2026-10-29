@@ -7,7 +7,7 @@
 import { AudioTools } from './audio.js';
 import { spawn } from 'child_process';
 // Synchronous fs/path/os bindings for the Node-side (non-ExtendScript) tools.
-// Kept separate from the `promises as fs` import above, which is the async API.
+// The async API is the separate `promises as fs` import.
 import * as fsSync from 'node:fs';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import { basename, dirname, extname, isAbsolute, join } from 'node:path';
@@ -49,11 +49,22 @@ export class CaptionTools extends AudioTools {
     const fs = fsSync;
     const lines: string[] = [];
     for (const cue of result.cues) {
-      const fmt = (s: number) => { const h=Math.floor(s/3600),m=Math.floor(s%3600/60),sec=Math.floor(s%60),ms=Math.round((s%1)*1000); return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')},${String(ms).padStart(3,'0')}`; };
+      const fmt = (s: number) => {
+        const h = Math.floor(s / 3600),
+          m = Math.floor((s % 3600) / 60),
+          sec = Math.floor(s % 60),
+          ms = Math.round((s % 1) * 1000);
+        return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')},${String(ms).padStart(3, '0')}`;
+      };
       lines.push(`${cue.index}\n${fmt(cue.startSecs)} --> ${fmt(cue.endSecs)}\n${cue.text}\n`);
     }
     fs.writeFileSync(outputPath, lines.join('\n'), 'utf8');
-    return { success: true, verified: fs.existsSync(outputPath), outputPath, cueCount: result.cues.length };
+    return {
+      success: true,
+      verified: fs.existsSync(outputPath),
+      outputPath,
+      cueCount: result.cues.length,
+    };
   }
 
   protected captionQcReport(srtPath: string, maxCps: number, maxLineLength: number): any {
@@ -69,25 +80,63 @@ export class CaptionTools extends AudioTools {
         const text = lines.slice(2).join(' ');
         const tc = (tcLine ?? '').match(/(\d+:\d+:\d+[,.:]\d+)\s*-->\s*(\d+:\d+:\d+[,.:]\d+)/);
         if (!tc) continue;
-        const toSecs = (t: string) => { const p = t.replace(',','.').split(':'); return +(p[0]||'0')*3600 + +(p[1]||'0')*60 + +(p[2]||'0'); };
+        const toSecs = (t: string) => {
+          const p = t.replace(',', '.').split(':');
+          return +(p[0] || '0') * 3600 + +(p[1] || '0') * 60 + +(p[2] || '0');
+        };
         const dur = toSecs(tc[2]!) - toSecs(tc[1]!);
         const cps = dur > 0 ? text.length / dur : 0;
-        if (cps > maxCps) violations.push({ type: 'cps', cps: Math.round(cps*10)/10, maxCps, text: text.slice(0,40) });
-        for (const l of lines.slice(2)) { if (l.length > maxLineLength) violations.push({ type: 'line_length', length: l.length, max: maxLineLength, line: l.slice(0,40) }); }
+        if (cps > maxCps)
+          violations.push({
+            type: 'cps',
+            cps: Math.round(cps * 10) / 10,
+            maxCps,
+            text: text.slice(0, 40),
+          });
+        for (const l of lines.slice(2)) {
+          if (l.length > maxLineLength)
+            violations.push({
+              type: 'line_length',
+              length: l.length,
+              max: maxLineLength,
+              line: l.slice(0, 40),
+            });
+        }
       }
-      return { success: true, cueCount: blocks.length, violationCount: violations.length, violations };
-    } catch (e: any) { return { success: false, error: e.message }; }
+      return {
+        success: true,
+        cueCount: blocks.length,
+        violationCount: violations.length,
+        violations,
+      };
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
   }
 
-  protected captionQcFix(srtPath: string, outputPath: string | undefined, _maxCps: number, _minGapMs: number): any {
+  protected captionQcFix(
+    srtPath: string,
+    outputPath: string | undefined,
+    _maxCps: number,
+    _minGapMs: number,
+  ): any {
     const fs = fsSync;
     const out = outputPath ?? srtPath;
     try {
       const content = fs.readFileSync(srtPath, 'utf8');
       // Pass through — basic implementation: re-number and write back
       const blocks = content.trim().split(/\n\n+/).filter(Boolean);
-      const toSecs = (t: string) => { const p = t.replace(',','.').split(':'); return +(p[0]||'0')*3600 + +(p[1]||'0')*60 + +(p[2]||'0'); };
-      const toTc = (s: number) => { const h=Math.floor(s/3600),m=Math.floor(s%3600/60),sec=Math.floor(s%60),ms=Math.round((s%1)*1000); return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')},${String(ms).padStart(3,'0')}`; };
+      const toSecs = (t: string) => {
+        const p = t.replace(',', '.').split(':');
+        return +(p[0] || '0') * 3600 + +(p[1] || '0') * 60 + +(p[2] || '0');
+      };
+      const toTc = (s: number) => {
+        const h = Math.floor(s / 3600),
+          m = Math.floor((s % 3600) / 60),
+          sec = Math.floor(s % 60),
+          ms = Math.round((s % 1) * 1000);
+        return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')},${String(ms).padStart(3, '0')}`;
+      };
       const fixed: string[] = [];
       let n = 1;
       for (const block of blocks) {
@@ -95,75 +144,136 @@ export class CaptionTools extends AudioTools {
         if (lines.length < 3) continue;
         const tc = (lines[1] ?? '').match(/(\d+:\d+:\d+[,.:]\d+)\s*-->\s*(\d+:\d+:\d+[,.:]\d+)/);
         if (!tc) continue;
-        const start = toSecs(tc[1]!); const end = toSecs(tc[2]!);
+        const start = toSecs(tc[1]!);
+        const end = toSecs(tc[2]!);
         const text = lines.slice(2).join('\n');
         fixed.push(`${n}\n${toTc(start)} --> ${toTc(end)}\n${text}`);
         n++;
       }
       fs.writeFileSync(out, fixed.join('\n\n') + '\n', 'utf8');
       return { success: true, outputPath: out, cueCount: fixed.length };
-    } catch (e: any) { return { success: false, error: e.message }; }
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
   }
 
-  protected captionsFromTranscriptJson(jsonPath: string, outputPath: string, maxCps: number, maxLineLength: number): any {
+  protected captionsFromTranscriptJson(
+    jsonPath: string,
+    outputPath: string,
+    maxCps: number,
+    maxLineLength: number,
+  ): any {
     const fs = fsSync;
     try {
       const transcript = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
-      const words: Array<{word: string, start: number, end: number}> = (transcript.words ?? transcript.segments?.flatMap((s: any) => s.words ?? []) ?? []) as Array<{word: string, start: number, end: number}>;
-      if (!words.length) return { success: false, error: 'No word-level timestamps found in transcript JSON' };
-      const toTc = (s: number) => { const h=Math.floor(s/3600),m=Math.floor(s%3600/60),sec=Math.floor(s%60),ms=Math.round((s%1)*1000); return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')},${String(ms).padStart(3,'0')}`; };
+      const words: Array<{ word: string; start: number; end: number }> = (transcript.words ??
+        transcript.segments?.flatMap((s: any) => s.words ?? []) ??
+        []) as Array<{ word: string; start: number; end: number }>;
+      if (!words.length)
+        return { success: false, error: 'No word-level timestamps found in transcript JSON' };
+      const toTc = (s: number) => {
+        const h = Math.floor(s / 3600),
+          m = Math.floor((s % 3600) / 60),
+          sec = Math.floor(s % 60),
+          ms = Math.round((s % 1) * 1000);
+        return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')},${String(ms).padStart(3, '0')}`;
+      };
       const cues: string[] = [];
       let cueWords: typeof words = [];
       let n = 1;
       for (const word of words) {
         cueWords.push(word);
-        const text = cueWords.map(w => w.word).join(' ');
-        const lastWord = cueWords[cueWords.length-1];
+        const text = cueWords.map((w) => w.word).join(' ');
+        const lastWord = cueWords[cueWords.length - 1];
         const firstWord = cueWords[0];
-        const dur = ((lastWord?.end ?? 0)) - ((firstWord?.start ?? 0));
+        const dur = (lastWord?.end ?? 0) - (firstWord?.start ?? 0);
         const cps = dur > 0 ? text.length / dur : 0;
         if (cps > maxCps || text.length > maxLineLength) {
-          const prev = cueWords.slice(0,-1);
+          const prev = cueWords.slice(0, -1);
           if (prev.length > 0) {
-            const t = prev.map(w=>w.word).join(' ');
-            cues.push(`${n}\n${toTc(prev[0]?.start ?? 0)} --> ${toTc(prev[prev.length-1]?.end ?? 0)}\n${t}`);
+            const t = prev.map((w) => w.word).join(' ');
+            cues.push(
+              `${n}\n${toTc(prev[0]?.start ?? 0)} --> ${toTc(prev[prev.length - 1]?.end ?? 0)}\n${t}`,
+            );
             n++;
             cueWords = [word];
           }
         }
       }
       if (cueWords.length > 0) {
-        const t = cueWords.map(w=>w.word).join(' ');
-        cues.push(`${n}\n${toTc(cueWords[0]?.start ?? 0)} --> ${toTc(cueWords[cueWords.length-1]?.end ?? 0)}\n${t}`);
+        const t = cueWords.map((w) => w.word).join(' ');
+        cues.push(
+          `${n}\n${toTc(cueWords[0]?.start ?? 0)} --> ${toTc(cueWords[cueWords.length - 1]?.end ?? 0)}\n${t}`,
+        );
       }
       fs.writeFileSync(outputPath, cues.join('\n\n') + '\n', 'utf8');
       return { success: true, outputPath, cueCount: cues.length };
-    } catch (e: any) { return { success: false, error: e.message }; }
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
   }
 
   protected srtDiff(srtPathA: string, srtPathB: string): any {
     const fs = fsSync;
     try {
-      const parse = (p: string) => fs.readFileSync(p,'utf8').trim().split(/\n\n+/).map((b: string) => { const l=b.trim().split('\n'); return { tc: l[1]??'', text: l.slice(2).join('\n') }; });
-      const a = parse(srtPathA); const b = parse(srtPathB);
-      const added: any[] = [], removed: any[] = [], changed: any[] = [];
+      const parse = (p: string) =>
+        fs
+          .readFileSync(p, 'utf8')
+          .trim()
+          .split(/\n\n+/)
+          .map((b: string) => {
+            const l = b.trim().split('\n');
+            return { tc: l[1] ?? '', text: l.slice(2).join('\n') };
+          });
+      const a = parse(srtPathA);
+      const b = parse(srtPathB);
+      const added: any[] = [],
+        removed: any[] = [],
+        changed: any[] = [];
       const maxLen = Math.max(a.length, b.length);
-      for (let i=0; i<maxLen; i++) {
-        if (!a[i]) { added.push({index:i+1,...b[i]}); }
-        else if (!b[i]) { removed.push({index:i+1,...a[i]}); }
-        else { const ai = a[i]; const bi = b[i]; if (ai && bi && (ai.text !== bi.text || ai.tc !== bi.tc)) { changed.push({index:i+1,before:{tc:ai.tc,text:ai.text},after:{tc:bi.tc,text:bi.text}}); } }
+      for (let i = 0; i < maxLen; i++) {
+        if (!a[i]) {
+          added.push({ index: i + 1, ...b[i] });
+        } else if (!b[i]) {
+          removed.push({ index: i + 1, ...a[i] });
+        } else {
+          const ai = a[i];
+          const bi = b[i];
+          if (ai && bi && (ai.text !== bi.text || ai.tc !== bi.tc)) {
+            changed.push({
+              index: i + 1,
+              before: { tc: ai.tc, text: ai.text },
+              after: { tc: bi.tc, text: bi.text },
+            });
+          }
+        }
       }
-      return { success: true, added: added.length, removed: removed.length, changed: changed.length, diff: { added, removed, changed } };
-    } catch (e: any) { return { success: false, error: e.message }; }
+      return {
+        success: true,
+        added: added.length,
+        removed: removed.length,
+        changed: changed.length,
+        diff: { added, removed, changed },
+      };
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
   }
 
-  protected async captionsToMarkers(srtPath: string, sequenceId: string | undefined, markerType: string): Promise<any> {
+  protected async captionsToMarkers(
+    srtPath: string,
+    sequenceId: string | undefined,
+    markerType: string,
+  ): Promise<any> {
     const fs = fsSync;
     try {
       const content = fs.readFileSync(srtPath, 'utf8');
       const blocks = content.trim().split(/\n\n+/).filter(Boolean);
-      const cues: Array<{start: number, text: string}> = [];
-      const toSecs = (t: string) => { const p = t.replace(',','.').split(':'); return +(p[0]||'0')*3600 + +(p[1]||'0')*60 + +(p[2]||'0'); };
+      const cues: Array<{ start: number; text: string }> = [];
+      const toSecs = (t: string) => {
+        const p = t.replace(',', '.').split(':');
+        return +(p[0] || '0') * 3600 + +(p[1] || '0') * 60 + +(p[2] || '0');
+      };
       for (const block of blocks) {
         const lines = block.trim().split('\n');
         if (lines.length < 3) continue;
@@ -186,7 +296,9 @@ export class CaptionTools extends AudioTools {
         } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
       `);
       return result;
-    } catch (e: any) { return { success: false, error: e.message }; }
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
   }
 
   protected async readSequenceCaptions(sequenceId?: string): Promise<any> {
@@ -316,7 +428,11 @@ export class CaptionTools extends AudioTools {
   }
 
   /** Distill a cue list's validation into counts plus the issues themselves. */
-  private srtValidationReport(cues: SrtCue[]): { errorCount: number; warningCount: number; issues: SrtValidationIssue[] } {
+  private srtValidationReport(cues: SrtCue[]): {
+    errorCount: number;
+    warningCount: number;
+    issues: SrtValidationIssue[];
+  } {
     const issues = validateCues(cues);
     return {
       errorCount: issues.filter((x) => x.severity === 'error').length,
@@ -337,16 +453,25 @@ export class CaptionTools extends AudioTools {
       return { ok: false, error: 'srtPath is required.' };
     }
     if (!isAbsolute(srtPath)) {
-      return { ok: false, error: `srtPath must be an absolute path (got ${JSON.stringify(srtPath)}).` };
+      return {
+        ok: false,
+        error: `srtPath must be an absolute path (got ${JSON.stringify(srtPath)}).`,
+      };
     }
     let raw: string;
     try {
       raw = await fs.readFile(srtPath, 'utf8');
     } catch (e: any) {
       if (e && e.code === 'ENOENT') {
-        return { ok: false, error: `No file at ${srtPath}. Check the path, or create it with write_srt.` };
+        return {
+          ok: false,
+          error: `No file at ${srtPath}. Check the path, or create it with write_srt.`,
+        };
       }
-      return { ok: false, error: `Could not read ${srtPath}: ${e instanceof Error ? e.message : String(e)}` };
+      return {
+        ok: false,
+        error: `Could not read ${srtPath}: ${e instanceof Error ? e.message : String(e)}`,
+      };
     }
     const parsed = parseSrt(raw);
     return { ok: true, cues: parsed.cues, malformed: parsed.malformed };
@@ -390,7 +515,10 @@ export class CaptionTools extends AudioTools {
         };
       }
     } catch (e) {
-      return { ok: false, error: `Could not write ${srtPath}: ${e instanceof Error ? e.message : String(e)}` };
+      return {
+        ok: false,
+        error: `Could not write ${srtPath}: ${e instanceof Error ? e.message : String(e)}`,
+      };
     }
     return { ok: true };
   }
@@ -436,9 +564,13 @@ export class CaptionTools extends AudioTools {
     allowInvalid?: boolean,
   ): Promise<any> {
     if (typeof srtPath !== 'string' || !isAbsolute(srtPath)) {
-      return { success: false, error: `srtPath must be an absolute path (got ${JSON.stringify(srtPath)}).` };
+      return {
+        success: false,
+        error: `srtPath must be an absolute path (got ${JSON.stringify(srtPath)}).`,
+      };
     }
-    if (!Array.isArray(cuesIn)) return { success: false, error: 'cues must be an array of { start, end, text }.' };
+    if (!Array.isArray(cuesIn))
+      return { success: false, error: 'cues must be an array of { start, end, text }.' };
     const cues: SrtCue[] = [];
     for (let i = 0; i < cuesIn.length; i++) {
       const c = cuesIn[i] || ({} as any);
@@ -455,7 +587,12 @@ export class CaptionTools extends AudioTools {
     const report = this.srtValidationReport(cues);
     const wrote = await this.persistSrt(srtPath, cues, allowInvalid);
     if (!wrote.ok) {
-      return { success: false, error: wrote.error, validation: report, ...(wrote.errors ? { errors: wrote.errors } : {}) };
+      return {
+        success: false,
+        error: wrote.error,
+        validation: report,
+        ...(wrote.errors ? { errors: wrote.errors } : {}),
+      };
     }
     return {
       success: true,
@@ -479,7 +616,10 @@ export class CaptionTools extends AudioTools {
     if (!loaded.ok) return { success: false, error: loaded.error };
     const cues = loaded.cues;
     if (!Number.isInteger(index) || index < 1 || index > cues.length) {
-      return { success: false, error: `cue index ${index} is out of range (file has ${cues.length} cue${cues.length === 1 ? '' : 's'}; indices are 1-based, valid range is 1..${cues.length}).` };
+      return {
+        success: false,
+        error: `cue index ${index} is out of range (file has ${cues.length} cue${cues.length === 1 ? '' : 's'}; indices are 1-based, valid range is 1..${cues.length}).`,
+      };
     }
     if (patch.start === undefined && patch.end === undefined && patch.text === undefined) {
       return { success: false, error: 'Provide at least one of start, end, or text to change.' };
@@ -488,12 +628,20 @@ export class CaptionTools extends AudioTools {
     const resolved: Partial<SrtCue> = {};
     if (patch.start !== undefined) {
       const s = coerceSeconds(patch.start);
-      if (Number.isNaN(s)) return { success: false, error: `start must be seconds or "HH:MM:SS,mmm" (got ${JSON.stringify(patch.start)}).` };
+      if (Number.isNaN(s))
+        return {
+          success: false,
+          error: `start must be seconds or "HH:MM:SS,mmm" (got ${JSON.stringify(patch.start)}).`,
+        };
       resolved.start = s;
     }
     if (patch.end !== undefined) {
       const e = coerceSeconds(patch.end);
-      if (Number.isNaN(e)) return { success: false, error: `end must be seconds or "HH:MM:SS,mmm" (got ${JSON.stringify(patch.end)}).` };
+      if (Number.isNaN(e))
+        return {
+          success: false,
+          error: `end must be seconds or "HH:MM:SS,mmm" (got ${JSON.stringify(patch.end)}).`,
+        };
       resolved.end = e;
     }
     if (patch.text !== undefined) resolved.text = patch.text;
@@ -518,7 +666,10 @@ export class CaptionTools extends AudioTools {
       before,
       after: this.srtCueOut(next[index - 1] as SrtCue, index - 1),
       validation: report,
-      note: report.errorCount > 0 ? `Applied, but ${report.errorCount} cue(s) now have structural errors — see validation.` : undefined,
+      note:
+        report.errorCount > 0
+          ? `Applied, but ${report.errorCount} cue(s) now have structural errors — see validation.`
+          : undefined,
     };
   }
 
@@ -533,13 +684,19 @@ export class CaptionTools extends AudioTools {
     const s = coerceSeconds(start);
     const e = coerceSeconds(end);
     if (Number.isNaN(s) || Number.isNaN(e)) {
-      return { success: false, error: `start and end must each be seconds or an "HH:MM:SS,mmm" timecode (got start=${JSON.stringify(start)}, end=${JSON.stringify(end)}).` };
+      return {
+        success: false,
+        error: `start and end must each be seconds or an "HH:MM:SS,mmm" timecode (got start=${JSON.stringify(start)}, end=${JSON.stringify(end)}).`,
+      };
     }
     const cues = loaded.cues;
     // Mirror insertCue's placement rule to report where the cue landed.
     let at = cues.length;
     for (let i = 0; i < cues.length; i++) {
-      if ((cues[i] as SrtCue).start > s) { at = i; break; }
+      if ((cues[i] as SrtCue).start > s) {
+        at = i;
+        break;
+      }
     }
     const insertedIndex = at + 1;
     const next = insertCue(cues, { start: s, end: e, text: typeof text === 'string' ? text : '' });
@@ -553,7 +710,10 @@ export class CaptionTools extends AudioTools {
       insertedIndex,
       inserted: this.srtCueOut(next[insertedIndex - 1] as SrtCue, insertedIndex - 1),
       validation: report,
-      note: report.errorCount > 0 ? `Inserted, but ${report.errorCount} cue(s) now have structural errors — see validation.` : undefined,
+      note:
+        report.errorCount > 0
+          ? `Inserted, but ${report.errorCount} cue(s) now have structural errors — see validation.`
+          : undefined,
     };
   }
 
@@ -562,7 +722,10 @@ export class CaptionTools extends AudioTools {
     if (!loaded.ok) return { success: false, error: loaded.error };
     const cues = loaded.cues;
     if (!Number.isInteger(index) || index < 1 || index > cues.length) {
-      return { success: false, error: `cue index ${index} is out of range (file has ${cues.length} cue${cues.length === 1 ? '' : 's'}; indices are 1-based, valid range is 1..${cues.length}).` };
+      return {
+        success: false,
+        error: `cue index ${index} is out of range (file has ${cues.length} cue${cues.length === 1 ? '' : 's'}; indices are 1-based, valid range is 1..${cues.length}).`,
+      };
     }
     const removed = this.srtCueOut(cues[index - 1] as SrtCue, index - 1);
     let next: SrtCue[];
@@ -575,7 +738,14 @@ export class CaptionTools extends AudioTools {
     // Removing a cue can only fix or preserve validity, so it never needs allowInvalid.
     const wrote = await this.persistSrt(srtPath, next, true);
     if (!wrote.ok) return { success: false, error: wrote.error, validation: report };
-    return { success: true, srtPath, cueCount: next.length, removedIndex: index, removed, validation: report };
+    return {
+      success: true,
+      srtPath,
+      cueCount: next.length,
+      removedIndex: index,
+      removed,
+      validation: report,
+    };
   }
 
   protected async shiftSrtTiming(
@@ -589,7 +759,16 @@ export class CaptionTools extends AudioTools {
     if (!loaded.ok) return { success: false, error: loaded.error };
     let cues = loaded.cues;
     if (cues.length === 0) {
-      return { success: true, srtPath, cueCount: 0, offsetSeconds: offsetSeconds || 0, scaleFactor: scaleFactor ?? null, cues: [], validation: this.srtValidationReport(cues), note: 'File has no cues; nothing to shift.' };
+      return {
+        success: true,
+        srtPath,
+        cueCount: 0,
+        offsetSeconds: offsetSeconds || 0,
+        scaleFactor: scaleFactor ?? null,
+        cues: [],
+        validation: this.srtValidationReport(cues),
+        note: 'File has no cues; nothing to shift.',
+      };
     }
     if (scaleFactor !== undefined) {
       try {
@@ -617,7 +796,10 @@ export class CaptionTools extends AudioTools {
       toIndex: toIndex ?? cues.length,
       cues: cues.map((c, i) => this.srtCueOut(c, i)),
       validation: report,
-      note: report.errorCount > 0 ? `Retimed, but ${report.errorCount} cue(s) now have structural errors (e.g. timing clamped to 0) — see validation.` : undefined,
+      note:
+        report.errorCount > 0
+          ? `Retimed, but ${report.errorCount} cue(s) now have structural errors (e.g. timing clamped to 0) — see validation.`
+          : undefined,
     };
   }
 
@@ -679,9 +861,12 @@ export class CaptionTools extends AudioTools {
 
     const whisperArgs = [
       resolvedPath,
-      '--model', model,
-      '--output_format', 'srt',
-      '--output_dir', targetDir,
+      '--model',
+      model,
+      '--output_format',
+      'srt',
+      '--output_dir',
+      targetDir,
     ];
     if (language && language.trim()) whisperArgs.push('--language', language.trim());
     if (translateToEnglish) whisperArgs.push('--task', 'translate');
@@ -697,12 +882,20 @@ export class CaptionTools extends AudioTools {
       const proc = spawn(whisperCmd, whisperArgs);
       let stderr = '';
       let stdout = '';
-      proc.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
-      proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+      proc.stdout.on('data', (chunk) => {
+        stdout += chunk.toString();
+      });
+      proc.stderr.on('data', (chunk) => {
+        stderr += chunk.toString();
+      });
 
       const timeoutMs = Math.max(1, timeoutSeconds) * 1000;
       const timer = setTimeout(() => {
-        try { proc.kill('SIGKILL'); } catch { /* already gone */ }
+        try {
+          proc.kill('SIGKILL');
+        } catch {
+          /* already gone */
+        }
         finish({
           success: false,
           error: `Whisper transcription exceeded the ${timeoutSeconds}s timeout and was stopped. Nothing was reported as captions. Try a smaller --model, a shorter clip, or a larger timeoutSeconds.`,
@@ -712,7 +905,11 @@ export class CaptionTools extends AudioTools {
 
       proc.on('error', (err) => {
         clearTimeout(timer);
-        finish({ success: false, error: `Failed to run Whisper ('${whisperCmd}'): ${err.message}`, mediaPath: resolvedPath });
+        finish({
+          success: false,
+          error: `Failed to run Whisper ('${whisperCmd}'): ${err.message}`,
+          mediaPath: resolvedPath,
+        });
       });
 
       proc.on('close', async (code) => {
@@ -741,16 +938,22 @@ export class CaptionTools extends AudioTools {
           task: translateToEnglish ? 'translate' : 'transcribe',
           mediaPath: resolvedPath,
           empty: cueCount === 0,
-          note: cueCount === 0
-            ? 'Whisper produced an .srt with no cues (no detectable speech, or the wrong language hint). The file exists but is empty of captions.'
-            : 'Import this srtPath with import_media, then pass the resulting project item id to create_caption_track to lay the captions onto a sequence.',
+          note:
+            cueCount === 0
+              ? 'Whisper produced an .srt with no cues (no detectable speech, or the wrong language hint). The file exists but is empty of captions.'
+              : 'Import this srtPath with import_media, then pass the resulting project item id to create_caption_track to lay the captions onto a sequence.',
         });
       });
     });
   }
 
   // Caption Track Implementation
-  protected async createCaptionTrack(sequenceId: string, projectItemId: string, startTime?: number, captionFormat?: string): Promise<any> {
+  protected async createCaptionTrack(
+    sequenceId: string,
+    projectItemId: string,
+    startTime?: number,
+    captionFormat?: string,
+  ): Promise<any> {
     const startTimeVal = startTime || 0;
     // createCaptionTrack's optional 3rd arg is a Sequence.CAPTION_FORMAT_* integer
     // constant, NOT a free-form string. Passing a string ("Subtitle Default") raised
@@ -758,22 +961,22 @@ export class CaptionTools extends AudioTools {
     // constant suffix; omit the arg entirely when none is given (defaults to subtitle,
     // which is correct for .srt and matches Adobe's own PProPanel sample).
     const formatMap: Record<string, string> = {
-      'subtitle': 'CAPTION_FORMAT_SUBTITLE',
+      subtitle: 'CAPTION_FORMAT_SUBTITLE',
       'subtitle default': 'CAPTION_FORMAT_SUBTITLE',
-      'srt': 'CAPTION_FORMAT_SUBTITLE',
+      srt: 'CAPTION_FORMAT_SUBTITLE',
       'open captions': 'CAPTION_FORMAT_SUBTITLE',
       '608': 'CAPTION_FORMAT_608',
       'cea-608': 'CAPTION_FORMAT_608',
       '708': 'CAPTION_FORMAT_708',
       'cea-708': 'CAPTION_FORMAT_708',
-      'teletext': 'CAPTION_FORMAT_TELETEXT',
+      teletext: 'CAPTION_FORMAT_TELETEXT',
       'open ebu': 'CAPTION_FORMAT_OPEN_EBU',
-      'ebu': 'CAPTION_FORMAT_OPEN_EBU',
-      'op42': 'CAPTION_FORMAT_OP42',
-      'op47': 'CAPTION_FORMAT_OP47'
+      ebu: 'CAPTION_FORMAT_OPEN_EBU',
+      op42: 'CAPTION_FORMAT_OP42',
+      op47: 'CAPTION_FORMAT_OP47',
     };
     const requested = captionFormat ? captionFormat.trim().toLowerCase() : '';
-    const constName = requested ? (formatMap[requested] || 'CAPTION_FORMAT_SUBTITLE') : '';
+    const constName = requested ? formatMap[requested] || 'CAPTION_FORMAT_SUBTITLE' : '';
     const script = `
       try {
         var sequence = __findSequence(${JSON.stringify(sequenceId)});

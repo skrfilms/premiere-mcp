@@ -19,7 +19,12 @@ import { executeExpandedTool } from '../../tools/expanded.js';
 describe('copy_effects_between_clips across sequences', () => {
   const scriptFor = async (args: Record<string, unknown>): Promise<string> => {
     let script = '';
-    const bridge = { executeScript: async (s: string) => { script = s; return { success: true }; } };
+    const bridge = {
+      executeScript: async (s: string) => {
+        script = s;
+        return { success: true };
+      },
+    };
     await executeExpandedTool(bridge as never, 'copy_effects_between_clips', args);
     return script;
   };

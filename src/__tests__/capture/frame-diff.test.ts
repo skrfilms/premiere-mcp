@@ -33,9 +33,12 @@ lavfi.signalstats.YAVG=0
 lavfi.signalstats.YMAX=0
 `;
 
-const PSNR_LINE = '[Parsed_psnr_0 @ 0x600003884000] PSNR r:11.115953 g:12.675107 b:14.550950 average:12.559171 min:12.559171 max:12.559171';
-const PSNR_INF_LINE = '[Parsed_psnr_0 @ 0x60000025c600] PSNR r:inf g:inf b:inf average:inf min:inf max:inf';
-const SSIM_LINE = '[Parsed_ssim_0 @ 0x600002d00180] SSIM R:0.694177 (5.145296) G:0.761907 (6.232531) B:0.745252 (5.938886) All:0.733778 (5.747568)';
+const PSNR_LINE =
+  '[Parsed_psnr_0 @ 0x600003884000] PSNR r:11.115953 g:12.675107 b:14.550950 average:12.559171 min:12.559171 max:12.559171';
+const PSNR_INF_LINE =
+  '[Parsed_psnr_0 @ 0x60000025c600] PSNR r:inf g:inf b:inf average:inf min:inf max:inf';
+const SSIM_LINE =
+  '[Parsed_ssim_0 @ 0x600002d00180] SSIM R:0.694177 (5.145296) G:0.761907 (6.232531) B:0.745252 (5.938886) All:0.733778 (5.747568)';
 
 describe('parseSignalstatsMetadata', () => {
   it('reads one record per frame with the mean and peak difference', () => {
@@ -74,8 +77,14 @@ describe('parsePsnrSummary / parseSsimSummary', () => {
 });
 
 describe('classifyDifference', () => {
-  const metrics = (meanAbsDiff: DiffMetrics['meanAbsDiff'], maxAbsDiff: DiffMetrics['maxAbsDiff']): DiffMetrics => ({
-    meanAbsDiff, maxAbsDiff, psnrAverage: 'unknown', ssimAll: 'unknown',
+  const metrics = (
+    meanAbsDiff: DiffMetrics['meanAbsDiff'],
+    maxAbsDiff: DiffMetrics['maxAbsDiff'],
+  ): DiffMetrics => ({
+    meanAbsDiff,
+    maxAbsDiff,
+    psnrAverage: 'unknown',
+    ssimAll: 'unknown',
   });
 
   it('calls a zero difference identical', () => {
@@ -104,14 +113,24 @@ describe('classifyDifference', () => {
   });
 
   it('honours caller thresholds', () => {
-    expect(classifyDifference(metrics(0.4, 4), { nearIdenticalMeanAbsDiff: 0.1, nearIdenticalMaxAbsDiff: 8 }).verdict).toBe('changed');
+    expect(
+      classifyDifference(metrics(0.4, 4), {
+        nearIdenticalMeanAbsDiff: 0.1,
+        nearIdenticalMaxAbsDiff: 8,
+      }).verdict,
+    ).toBe('changed');
   });
 });
 
 describe('summarizeMotion', () => {
   const pair = (i: number, verdict: MotionPair['verdict'], mean: number): MotionPair => ({
-    fromIndex: i, toIndex: i + 1, from: `/f${i}.png`, to: `/f${i + 1}.png`,
-    meanAbsDiff: mean, maxAbsDiff: mean * 10, verdict,
+    fromIndex: i,
+    toIndex: i + 1,
+    from: `/f${i}.png`,
+    to: `/f${i + 1}.png`,
+    meanAbsDiff: mean,
+    maxAbsDiff: mean * 10,
+    verdict,
   });
 
   it('says the picture moved when any measured pair differs', () => {
@@ -136,7 +155,11 @@ describe('summarizeMotion', () => {
   });
 
   it('averages only the pairs it could measure', () => {
-    const summary = summarizeMotion([pair(0, 'changed', 10), pair(1, 'changed', 20), pair(2, 'unknown', 999)]);
+    const summary = summarizeMotion([
+      pair(0, 'changed', 10),
+      pair(1, 'changed', 20),
+      pair(2, 'unknown', 999),
+    ]);
     expect(summary.meanOfMeans).toBe(15);
   });
 
@@ -148,8 +171,9 @@ describe('summarizeMotion', () => {
 });
 
 describe('diffFrames / analyzeMotion — end to end with real ffmpeg', () => {
-  const ffmpegAvailable = spawnSync('ffmpeg', ['-version']).status === 0
-    && spawnSync('ffprobe', ['-version']).status === 0;
+  const ffmpegAvailable =
+    spawnSync('ffmpeg', ['-version']).status === 0 &&
+    spawnSync('ffprobe', ['-version']).status === 0;
   const maybe = ffmpegAvailable ? describe : describe.skip;
 
   maybe('against a synthesised clip', () => {
@@ -165,14 +189,34 @@ describe('diffFrames / analyzeMotion — end to end with real ffmpeg', () => {
       const clip = join(dir, 'moving.mp4');
       // testsrc2 has a moving element, so consecutive frames genuinely differ.
       const gen = spawnSync('ffmpeg', [
-        '-y', '-loglevel', 'error', '-f', 'lavfi',
-        '-i', 'testsrc2=size=320x180:rate=24:duration=2',
-        '-pix_fmt', 'yuv420p', clip,
+        '-y',
+        '-loglevel',
+        'error',
+        '-f',
+        'lavfi',
+        '-i',
+        'testsrc2=size=320x180:rate=24:duration=2',
+        '-pix_fmt',
+        'yuv420p',
+        clip,
       ]);
       expect(gen.status).toBe(0);
 
       const grab = (t: string, out: string) => {
-        const res = spawnSync('ffmpeg', ['-y', '-loglevel', 'error', '-ss', t, '-i', clip, '-frames:v', '1', '-update', '1', out]);
+        const res = spawnSync('ffmpeg', [
+          '-y',
+          '-loglevel',
+          'error',
+          '-ss',
+          t,
+          '-i',
+          clip,
+          '-frames:v',
+          '1',
+          '-update',
+          '1',
+          out,
+        ]);
         expect(res.status).toBe(0);
       };
       moving0 = join(dir, 'f0.png');
@@ -186,7 +230,18 @@ describe('diffFrames / analyzeMotion — end to end with real ffmpeg', () => {
       await fs.copyFile(moving0, copyOfMoving0);
 
       smaller = join(dir, 'small.png');
-      const shrink = spawnSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', moving0, '-vf', 'scale=160:90', '-update', '1', smaller]);
+      const shrink = spawnSync('ffmpeg', [
+        '-y',
+        '-loglevel',
+        'error',
+        '-i',
+        moving0,
+        '-vf',
+        'scale=160:90',
+        '-update',
+        '1',
+        smaller,
+      ]);
       expect(shrink.status).toBe(0);
     }, 120_000);
 

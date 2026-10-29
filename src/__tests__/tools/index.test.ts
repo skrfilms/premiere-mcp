@@ -10,7 +10,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PremiereProTools, evaluateTextInjectionResult } from '../../tools/index.js';
 import { PremiereProBridge } from '../../bridge/index.js';
-import { executeExpandedTool, expandedToolNames, unimplementedExpandedToolNames } from '../../tools/expanded.js';
+import {
+  executeExpandedTool,
+  expandedToolNames,
+  unimplementedExpandedToolNames,
+} from '../../tools/expanded.js';
 
 jest.mock('../../bridge/index.js');
 jest.mock('child_process');
@@ -36,7 +40,9 @@ function fakeMissingFfmpegProcess(): any {
   return proc;
 }
 
-async function createTempPreset(name = 'Test Preset'): Promise<{ root: string; presetPath: string; outputPath: string }> {
+async function createTempPreset(
+  name = 'Test Preset',
+): Promise<{ root: string; presetPath: string; outputPath: string }> {
   const root = await fs.mkdtemp(join(tmpdir(), 'premiere-tools-test-'));
   const presetPath = join(root, `${name}.epr`);
   await fs.writeFile(presetPath, `<Preset><PresetName>${name}</PresetName></Preset>`, 'utf8');
@@ -130,15 +136,24 @@ describe('PremiereProTools', () => {
       // Premiere's setColorByIndex() order, verified against 26.0.2 by writing
       // each index and reading the rendered colour back off the timeline.
       const EXPECTED_INDEX: Array<[string, number]> = [
-        ['green', 0], ['red', 1], ['purple', 2], ['orange', 3],
-        ['yellow', 4], ['white', 5], ['blue', 6], ['cyan', 7],
+        ['green', 0],
+        ['red', 1],
+        ['purple', 2],
+        ['orange', 3],
+        ['yellow', 4],
+        ['white', 5],
+        ['blue', 6],
+        ['cyan', 7],
       ];
 
       it.each(EXPECTED_INDEX)('maps %s to index %i', async (name, index) => {
         mockBridge.executeScript.mockResolvedValue({ success: true });
 
         await tools.executeTool('add_marker', {
-          sequenceId: 'seq', time: 1, name: 'm', color: name,
+          sequenceId: 'seq',
+          time: 1,
+          name: 'm',
+          color: name,
         });
 
         const script = mockBridge.executeScript.mock.calls[0][0] as string;
@@ -149,7 +164,10 @@ describe('PremiereProTools', () => {
         mockBridge.executeScript.mockResolvedValue({ success: true });
 
         await tools.executeTool('add_marker', {
-          sequenceId: 'seq', time: 1, name: 'm', color: 5,
+          sequenceId: 'seq',
+          time: 1,
+          name: 'm',
+          color: 5,
         });
 
         expect(mockBridge.executeScript.mock.calls[0][0]).toContain('setColorByIndex(5)');
@@ -159,13 +177,16 @@ describe('PremiereProTools', () => {
         mockBridge.executeScript.mockResolvedValue({ success: true });
 
         await tools.executeTool('add_marker', {
-          sequenceId: 'seq', time: 1, name: 'm', color: '  PuRPle ',
+          sequenceId: 'seq',
+          time: 1,
+          name: 'm',
+          color: '  PuRPle ',
         });
 
         expect(mockBridge.executeScript.mock.calls[0][0]).toContain('setColorByIndex(2)');
       });
 
-      it('leaves the marker at Premiere\'s default when no colour is given', async () => {
+      it("leaves the marker at Premiere's default when no colour is given", async () => {
         mockBridge.executeScript.mockResolvedValue({ success: true });
 
         await tools.executeTool('add_marker', { sequenceId: 'seq', time: 1, name: 'm' });
@@ -183,7 +204,10 @@ describe('PremiereProTools', () => {
         ['a non-integer index', 3.5],
       ])('rejects %s rather than silently defaulting', async (_label, color) => {
         const result = await tools.executeTool('add_marker', {
-          sequenceId: 'seq', time: 1, name: 'm', color,
+          sequenceId: 'seq',
+          time: 1,
+          name: 'm',
+          color,
         });
 
         expect(result.success).toBe(false);
@@ -195,7 +219,9 @@ describe('PremiereProTools', () => {
         mockBridge.executeScript.mockResolvedValue({ success: true });
 
         await tools.executeTool('update_marker', {
-          sequenceId: 'seq', markerId: 'guid', color: 'cyan',
+          sequenceId: 'seq',
+          markerId: 'guid',
+          color: 'cyan',
         });
 
         expect(mockBridge.executeScript.mock.calls[0][0]).toContain('setColorByIndex(7)');
@@ -205,7 +231,9 @@ describe('PremiereProTools', () => {
         mockBridge.executeScript.mockResolvedValue({ success: true });
 
         await tools.executeTool('update_marker', {
-          sequenceId: 'seq', markerId: 'guid', name: 'renamed',
+          sequenceId: 'seq',
+          markerId: 'guid',
+          name: 'renamed',
         });
 
         expect(mockBridge.executeScript.mock.calls[0][0]).not.toContain('setColorByIndex');
@@ -217,7 +245,10 @@ describe('PremiereProTools', () => {
         // Some MCP clients stringify every argument; without this the caller
         // silently loses index input.
         await tools.executeTool('add_marker', {
-          sequenceId: 'seq', time: 1, name: 'm', color: '3',
+          sequenceId: 'seq',
+          time: 1,
+          name: 'm',
+          color: '3',
         });
 
         expect(mockBridge.executeScript.mock.calls[0][0]).toContain('setColorByIndex(3)');
@@ -226,23 +257,31 @@ describe('PremiereProTools', () => {
       it.each([
         ['name', 'marker.name = ""'],
         ['comment', 'marker.comments = ""'],
-      ])('update_marker applies an empty %s instead of silently ignoring it', async (field, expected) => {
-        mockBridge.executeScript.mockResolvedValue({ success: true });
+      ])(
+        'update_marker applies an empty %s instead of silently ignoring it',
+        async (field, expected) => {
+          mockBridge.executeScript.mockResolvedValue({ success: true });
 
-        // Same truthiness class the colour fix removed: `updates.name ? ...`
-        // treated "" as absent, so the call reported success and changed nothing.
-        await tools.executeTool('update_marker', {
-          sequenceId: 'seq', markerId: 'guid', [field]: '',
-        });
+          // Same truthiness class the colour fix removed: `updates.name ? ...`
+          // treated "" as absent, so the call reported success and changed nothing.
+          await tools.executeTool('update_marker', {
+            sequenceId: 'seq',
+            markerId: 'guid',
+            [field]: '',
+          });
 
-        expect(mockBridge.executeScript.mock.calls[0][0]).toContain(expected);
-      });
+          expect(mockBridge.executeScript.mock.calls[0][0]).toContain(expected);
+        },
+      );
 
       it('add_marker_to_project_item applies colour rather than dropping it', async () => {
         mockBridge.executeScript.mockResolvedValue({ success: true });
 
         await executeExpandedTool(mockBridge, 'add_marker_to_project_item', {
-          projectItemId: 'item', time: 1, name: 'm', color: 'cyan',
+          projectItemId: 'item',
+          time: 1,
+          name: 'm',
+          color: 'cyan',
         });
 
         const script = mockBridge.executeScript.mock.calls[0][0] as string;
@@ -256,7 +295,10 @@ describe('PremiereProTools', () => {
         mockBridge.executeScript.mockResolvedValue({ success: true });
 
         await executeExpandedTool(mockBridge, 'add_marker_to_project_item', {
-          projectItemId: 'item', time: 1, name: 'm', color: 'chartreuse',
+          projectItemId: 'item',
+          time: 1,
+          name: 'm',
+          color: 'chartreuse',
         });
 
         const script = mockBridge.executeScript.mock.calls[0][0] as string;
@@ -319,9 +361,15 @@ describe('PremiereProTools', () => {
           mockBridge.executeScript.mockResolvedValue({ success: true });
 
           const args: Record<string, unknown> = {
-            sequenceId: 'seq', clipId: 'clip', time: 0, outputPath: '/tmp/a.png',
-            transitionName: 'Cross Dissolve', effectName: 'Gain', lutPath: '/tmp/a.cube',
-            name: 'bin', [param]: payload,
+            sequenceId: 'seq',
+            clipId: 'clip',
+            time: 0,
+            outputPath: '/tmp/a.png',
+            transitionName: 'Cross Dissolve',
+            effectName: 'Gain',
+            lutPath: '/tmp/a.cube',
+            name: 'bin',
+            [param]: payload,
           };
           await tools.executeTool(tool, args);
           if (!mockBridge.executeScript.mock.calls.length) continue;
@@ -333,27 +381,31 @@ describe('PremiereProTools', () => {
           expect(script).toContain(JSON.stringify(payload));
         }
       });
-
     });
 
     describe('schema validation output', () => {
       /** Swap one tool's schema in the catalog executeTool actually reads. */
       function withSchema(toolName: string, schema: unknown) {
         const catalog = tools.getAvailableTools();
-        jest.spyOn(tools, 'getAvailableTools').mockReturnValue(
-          catalog.map((t) => (t.name === toolName ? { ...t, inputSchema: schema as never } : t)),
-        );
+        jest
+          .spyOn(tools, 'getAvailableTools')
+          .mockReturnValue(
+            catalog.map((t) => (t.name === toolName ? { ...t, inputSchema: schema as never } : t)),
+          );
       }
 
       it('passes the validated value to the handler, not the raw args', async () => {
         mockBridge.executeScript.mockResolvedValue({ success: true });
         // parse() used to run and have its result discarded, so every
         // .transform(), .default() and z.coerce() in this file was inert.
-        withSchema('add_marker', z.object({
-          sequenceId: z.string(),
-          time: z.number(),
-          name: z.string().transform((v) => `${v}-transformed`),
-        }));
+        withSchema(
+          'add_marker',
+          z.object({
+            sequenceId: z.string(),
+            time: z.number(),
+            name: z.string().transform((v) => `${v}-transformed`),
+          }),
+        );
 
         await tools.executeTool('add_marker', { sequenceId: 'seq', time: 1, name: 'probe' });
 
@@ -362,11 +414,14 @@ describe('PremiereProTools', () => {
 
       it('applies a schema default for an argument the caller omitted', async () => {
         mockBridge.executeScript.mockResolvedValue({ success: true });
-        withSchema('add_marker', z.object({
-          sequenceId: z.string(),
-          time: z.number(),
-          name: z.string().default('defaulted-name'),
-        }));
+        withSchema(
+          'add_marker',
+          z.object({
+            sequenceId: z.string(),
+            time: z.number(),
+            name: z.string().default('defaulted-name'),
+          }),
+        );
 
         await tools.executeTool('add_marker', { sequenceId: 'seq', time: 1 });
 
@@ -390,8 +445,12 @@ describe('PremiereProTools', () => {
       // These declare inputSchema: z.record(z.any()), so schema-layer rejection
       // is unavailable — the guard has to live in the generated script.
       it.each([
-        'add_tracks', 'razor_all_tracks', 'get_timeline_gaps',
-        'get_next_edit_point', 'set_all_tracks_targeted', 'nest_clips',
+        'add_tracks',
+        'razor_all_tracks',
+        'get_timeline_gaps',
+        'get_next_edit_point',
+        'set_all_tracks_targeted',
+        'nest_clips',
       ])('%s guards before acting', async (tool) => {
         mockBridge.executeScript.mockResolvedValue({ success: true });
 
@@ -418,7 +477,9 @@ describe('PremiereProTools', () => {
         //
         // 1. The alias fallback must not treat "" as absent, or an empty id
         //    takes the omitted-id path and lands on the active sequence.
-        expect(script).toContain('if (requested === undefined || requested === null) requested = args.sequence_id;');
+        expect(script).toContain(
+          'if (requested === undefined || requested === null) requested = args.sequence_id;',
+        );
         expect(script).not.toContain('String(requested) === "") requested = args.sequence_id');
         // 2. This lives in a template literal, where \s collapses to a bare "s".
         //    The emitted regex must strip whitespace, not the letter s.
@@ -431,7 +492,8 @@ describe('PremiereProTools', () => {
         // An omitted id must still mean "the active sequence" — that is the
         // documented contract, and only a supplied-but-unresolvable id is an error.
         const src = require('fs').readFileSync(
-          require('path').join(__dirname, '../../tools/expanded.ts'), 'utf8',
+          require('path').join(__dirname, '../../tools/expanded.ts'),
+          'utf8',
         ) as string;
         expect(src).toContain('if (requested === undefined || requested === null) return null;');
         expect(src).toMatch(/function targetSequence\(\)[\s\S]{0,200}activeSequence\(\)/);
@@ -439,7 +501,8 @@ describe('PremiereProTools', () => {
 
       it('no silent fallback remains anywhere in the expanded dispatcher', () => {
         const src = require('fs').readFileSync(
-          require('path').join(__dirname, '../../tools/expanded.ts'), 'utf8',
+          require('path').join(__dirname, '../../tools/expanded.ts'),
+          'utf8',
         ) as string;
         expect(src).not.toContain('targetSequence() || activeSequence()');
       });
@@ -457,7 +520,9 @@ describe('PremiereProTools', () => {
         // a populated one returned success, echoed the requested sequenceId,
         // and wrote the empty sequence's black frame.
         const script = await scriptFor({
-          sequenceId: 'seq-guid', time: 15, outputPath: '/tmp/f.png',
+          sequenceId: 'seq-guid',
+          time: 15,
+          outputPath: '/tmp/f.png',
         });
 
         expect(script).toContain('var qeSequence = __qeSequenceOpening(sequence);');
@@ -470,7 +535,9 @@ describe('PremiereProTools', () => {
         // exportFramePNG appends "." + format to whatever path it is given, so
         // passing "shot.png" through wrote "shot.png.png".
         const script = await scriptFor({
-          sequenceId: 'seq-guid', time: 15, outputPath: '/tmp/shot.png',
+          sequenceId: 'seq-guid',
+          time: 15,
+          outputPath: '/tmp/shot.png',
         });
 
         expect(script).toContain('var exportStem = requestedPath;');
@@ -481,7 +548,9 @@ describe('PremiereProTools', () => {
 
       it('reports the path it actually wrote rather than the one requested', async () => {
         const script = await scriptFor({
-          sequenceId: 'seq-guid', time: 15, outputPath: '/tmp/shot.png',
+          sequenceId: 'seq-guid',
+          time: 15,
+          outputPath: '/tmp/shot.png',
         });
 
         expect(script).toContain('outputPath: actualPath');
@@ -490,7 +559,9 @@ describe('PremiereProTools', () => {
 
       it('fails when the export call throws nothing but writes nothing', async () => {
         const script = await scriptFor({
-          sequenceId: 'seq-guid', time: 15, outputPath: '/tmp/shot.png',
+          sequenceId: 'seq-guid',
+          time: 15,
+          outputPath: '/tmp/shot.png',
         });
 
         expect(script).toContain('if (!exported || !actualPath)');
@@ -499,7 +570,10 @@ describe('PremiereProTools', () => {
 
       it('picks the extension from the format, not the supplied path', async () => {
         const jpg = await scriptFor({
-          sequenceId: 'seq-guid', time: 1, outputPath: '/tmp/shot.png', format: 'jpg',
+          sequenceId: 'seq-guid',
+          time: 1,
+          outputPath: '/tmp/shot.png',
+          format: 'jpg',
         });
 
         expect(jpg).toContain('=== "jpg"');
@@ -511,16 +585,29 @@ describe('PremiereProTools', () => {
         // exportFrameTIFF, so "exportFrameTiff" resolved to undefined and every
         // TIFF export failed the typeof-function guard. Confirmed live on 26.3.2.
         const tiff = await scriptFor({
-          sequenceId: 'seq-guid', time: 1, outputPath: '/tmp/shot.tiff', format: 'tiff',
+          sequenceId: 'seq-guid',
+          time: 1,
+          outputPath: '/tmp/shot.tiff',
+          format: 'tiff',
         });
         expect(tiff).toContain('methodName = "exportFrameTIFF"');
       });
 
       it('wires the DPX and Targa exporters that QE actually exposes', async () => {
-        const dpx = await scriptFor({ sequenceId: 'seq-guid', time: 1, outputPath: '/tmp/shot.dpx', format: 'dpx' });
+        const dpx = await scriptFor({
+          sequenceId: 'seq-guid',
+          time: 1,
+          outputPath: '/tmp/shot.dpx',
+          format: 'dpx',
+        });
         expect(dpx).toContain('exportFrameDPX');
         expect(dpx).toContain('".dpx"');
-        const tga = await scriptFor({ sequenceId: 'seq-guid', time: 1, outputPath: '/tmp/shot.tga', format: 'tga' });
+        const tga = await scriptFor({
+          sequenceId: 'seq-guid',
+          time: 1,
+          outputPath: '/tmp/shot.tga',
+          format: 'tga',
+        });
         expect(tga).toContain('exportFrameTarga');
         expect(tga).toContain('".tga"');
       });
@@ -528,7 +615,12 @@ describe('PremiereProTools', () => {
       it('strips alias extensions (.tiff/.jpeg/.targa) so no double extension is written', async () => {
         // A caller passing the alias ".tiff" must still get a single canonical
         // ".tif" file, never "shot.tiff.tif". Confirmed live.
-        const tiff = await scriptFor({ sequenceId: 'seq-guid', time: 1, outputPath: '/tmp/shot.tiff', format: 'tiff' });
+        const tiff = await scriptFor({
+          sequenceId: 'seq-guid',
+          time: 1,
+          outputPath: '/tmp/shot.tiff',
+          format: 'tiff',
+        });
         expect(tiff).toContain('formatExts');
         expect(tiff).toContain('".tiff"');
       });
@@ -571,7 +663,8 @@ describe('PremiereProTools', () => {
 
           const args: Record<string, unknown> = { sequenceId: 'seq-guid' };
           if (tool === 'add_track') Object.assign(args, { trackType: 'video' });
-          if (tool === 'apply_audio_effect_to_all_clips') Object.assign(args, { effectName: 'Gain' });
+          if (tool === 'apply_audio_effect_to_all_clips')
+            Object.assign(args, { effectName: 'Gain' });
           if (tool === 'razor_timeline_at_time') Object.assign(args, { time: 1 });
 
           await tools.executeTool(tool, args);
@@ -600,7 +693,8 @@ describe('PremiereProTools', () => {
         mockBridge.executeScript.mockResolvedValue({ success: true });
 
         await tools.executeTool('apply_audio_effect_to_all_clips', {
-          sequenceId: 'seq-guid', effectName: 'Gain" + (2*2) + "',
+          sequenceId: 'seq-guid',
+          effectName: 'Gain" + (2*2) + "',
         });
 
         const script = mockBridge.executeScript.mock.calls[0][0] as string;
@@ -623,7 +717,9 @@ describe('PremiereProTools', () => {
       // itself go stale — a literal here would just relocate the lie into the suite.
       const { PremiereProResources } = await import('../../resources/index.js');
       const { PremiereProPrompts } = await import('../../prompts/index.js');
-      const liveResourceCount = new PremiereProResources(mockBridge as never).getAvailableResources().length;
+      const liveResourceCount = new PremiereProResources(
+        mockBridge as never,
+      ).getAvailableResources().length;
       const livePromptCount = new PremiereProPrompts().getAvailablePrompts().length;
       expect(result.catalog.resources.count).toBe(liveResourceCount);
       expect(result.catalog.prompts.count).toBe(livePromptCount);
@@ -713,7 +809,7 @@ describe('PremiereProTools', () => {
       mockBridge.executeScript.mockResolvedValue({
         success: true,
         tool: 'ping',
-        data: { connected: true }
+        data: { connected: true },
       });
 
       const result = await tools.executeTool('ping', {});
@@ -729,7 +825,7 @@ describe('PremiereProTools', () => {
         status: 'connected',
         bridge: 'responsive',
         premiere: { version: '26.0', build: '123' },
-        readOnly: true
+        readOnly: true,
       });
 
       const result = await tools.executeTool('verify_premiere_connection', {});
@@ -746,12 +842,12 @@ describe('PremiereProTools', () => {
       mockBridge.executeScript.mockResolvedValue({
         success: false,
         tool: 'add_tracks',
-        error: 'Premiere did not add the requested tracks'
+        error: 'Premiere did not add the requested tracks',
       });
 
       const result = await tools.executeTool('add_tracks', {
         sequenceId: 'seq-123',
-        videoTracks: 1
+        videoTracks: 1,
       });
 
       expect(result.success).toBe(false);
@@ -760,11 +856,16 @@ describe('PremiereProTools', () => {
     });
 
     it('keeps the expanded dispatcher fail-closed for missing handlers and placeholder reads', async () => {
-      mockBridge.executeScript.mockResolvedValue({ success: false, error: 'not executed in unit test' });
+      mockBridge.executeScript.mockResolvedValue({
+        success: false,
+        error: 'not executed in unit test',
+      });
 
       await executeExpandedTool(mockBridge, 'ripple_delete', { clipId: 'clip-123' });
       const missingHandlerScript = mockBridge.executeScript.mock.calls[0][0];
-      expect(missingHandlerScript).toContain('Expanded tool is advertised but has no implemented handler');
+      expect(missingHandlerScript).toContain(
+        'Expanded tool is advertised but has no implemented handler',
+      );
       expect(missingHandlerScript).not.toContain('accepted: true');
 
       // capture_frame used to be a placeholder read that faked completion; it is now a
@@ -775,7 +876,9 @@ describe('PremiereProTools', () => {
       expect(captureFrameScript).toContain('capture_frame requires outputPath');
       expect(captureFrameScript).toContain('frameWritten');
       expect(captureFrameScript).not.toContain('Read operation completed');
-      expect(captureFrameScript).not.toContain('not implemented with a verifiable Premiere DOM readback yet');
+      expect(captureFrameScript).not.toContain(
+        'not implemented with a verifiable Premiere DOM readback yet',
+      );
     });
   });
 
@@ -784,12 +887,12 @@ describe('PremiereProTools', () => {
       mockBridge.createProject = jest.fn().mockResolvedValue({
         success: false,
         error: 'Premiere Pro did not create or activate the requested project',
-        projectPath: '/tmp/Test.prproj'
+        projectPath: '/tmp/Test.prproj',
       } as any);
 
       const result = await tools.executeTool('create_project', {
         name: 'Test',
-        location: '/tmp'
+        location: '/tmp',
       });
 
       expect(result.success).toBe(false);
@@ -802,11 +905,11 @@ describe('PremiereProTools', () => {
         success: false,
         error: 'Premiere Pro did not activate the requested project',
         projectPath: '/tmp/Target.prproj',
-        actualPath: '/tmp/AlreadyOpen.prproj'
+        actualPath: '/tmp/AlreadyOpen.prproj',
       } as any);
 
       const result = await tools.executeTool('open_project', {
-        path: '/tmp/Target.prproj'
+        path: '/tmp/Target.prproj',
       });
 
       expect(result.success).toBe(false);
@@ -815,12 +918,15 @@ describe('PremiereProTools', () => {
     });
 
     it('manage_proxies attach verifies with hasProxy() and refuses to fake success', async () => {
-      mockBridge.executeScript.mockResolvedValue({ success: false, error: 'not executed in unit test' });
+      mockBridge.executeScript.mockResolvedValue({
+        success: false,
+        error: 'not executed in unit test',
+      });
 
       await tools.executeTool('manage_proxies', {
         projectItemId: 'item-1',
         action: 'attach',
-        proxyPath: '/tmp/proxy.mp4'
+        proxyPath: '/tmp/proxy.mp4',
       });
 
       const script = mockBridge.executeScript.mock.calls[0][0] as string;
@@ -840,7 +946,7 @@ describe('PremiereProTools', () => {
 
       const result = await tools.executeTool('create_sequence', {
         name: 'Possibly Created Sequence',
-        presetPath: '/tmp/sequence.sqpreset'
+        presetPath: '/tmp/sequence.sqpreset',
       });
 
       expect(result.success).toBe(false);
@@ -850,11 +956,13 @@ describe('PremiereProTools', () => {
     });
 
     it('surfaces create_sequence bridge failures without timeout recovery guidance', async () => {
-      mockBridge.createSequence = jest.fn().mockRejectedValue(new Error('Premiere rejected the preset'));
+      mockBridge.createSequence = jest
+        .fn()
+        .mockRejectedValue(new Error('Premiere rejected the preset'));
 
       const result = await tools.executeTool('create_sequence', {
         name: 'Missing Sequence',
-        presetPath: '/tmp/sequence.sqpreset'
+        presetPath: '/tmp/sequence.sqpreset',
       });
 
       expect(result.success).toBe(false);
@@ -864,7 +972,7 @@ describe('PremiereProTools', () => {
 
     it('rejects dialog-prone sequence creation without a preset before calling Premiere', async () => {
       const result = await tools.executeTool('create_sequence', {
-        name: 'No Dialog Sequence'
+        name: 'No Dialog Sequence',
       });
 
       expect(result.success).toBe(false);
@@ -873,7 +981,9 @@ describe('PremiereProTools', () => {
     });
 
     it('applies and reports a requested frameRate on the new sequence', async () => {
-      mockBridge.createSequence = jest.fn().mockResolvedValue({ success: true, id: 'seq-42', name: 'FR Seq' });
+      mockBridge.createSequence = jest
+        .fn()
+        .mockResolvedValue({ success: true, id: 'seq-42', name: 'FR Seq' });
       // setSequenceSettings reads the rate back through executeScript.
       mockBridge.executeScript.mockResolvedValue({
         success: true,
@@ -897,7 +1007,9 @@ describe('PremiereProTools', () => {
     });
 
     it('surfaces a frameRateWarning when Premiere refuses the requested rate', async () => {
-      mockBridge.createSequence = jest.fn().mockResolvedValue({ success: true, id: 'seq-43', name: 'FR Seq2' });
+      mockBridge.createSequence = jest
+        .fn()
+        .mockResolvedValue({ success: true, id: 'seq-43', name: 'FR Seq2' });
       mockBridge.executeScript.mockResolvedValue({
         success: false,
         error: 'Premiere accepted the assignment but did not apply: frameRate',
@@ -916,7 +1028,9 @@ describe('PremiereProTools', () => {
     });
 
     it('does not touch sequence settings when no frameRate is requested', async () => {
-      mockBridge.createSequence = jest.fn().mockResolvedValue({ success: true, id: 'seq-44', name: 'Plain Seq' });
+      mockBridge.createSequence = jest
+        .fn()
+        .mockResolvedValue({ success: true, id: 'seq-44', name: 'Plain Seq' });
 
       const result = await tools.executeTool('create_sequence', {
         name: 'Plain Seq',
@@ -930,7 +1044,7 @@ describe('PremiereProTools', () => {
 
     it('blocks EDL import before calling Premiere because it requires an interactive dialog', async () => {
       const result = await tools.executeTool('import_edl', {
-        filePath: '/tmp/edit.edl'
+        filePath: '/tmp/edit.edl',
       });
 
       expect(result.success).toBe(false);
@@ -940,15 +1054,21 @@ describe('PremiereProTools', () => {
     });
 
     it('requests Premiere UI suppression for FCP XML imports', async () => {
-      mockBridge.executeScript.mockResolvedValue({ success: true, imported: true, method: 'importFiles(suppressUI=true)' });
+      mockBridge.executeScript.mockResolvedValue({
+        success: true,
+        imported: true,
+        method: 'importFiles(suppressUI=true)',
+      });
 
       const result = await tools.executeTool('import_fcp_xml', {
-        filePath: '/tmp/edit.xml'
+        filePath: '/tmp/edit.xml',
       });
 
       expect(result.success).toBe(true);
       const script = mockBridge.executeScript.mock.calls[0][0];
-      expect(script).toContain('app.project.importFiles(["/tmp/edit.xml"], true, app.project.rootItem, false)');
+      expect(script).toContain(
+        'app.project.importFiles(["/tmp/edit.xml"], true, app.project.rootItem, false)',
+      );
       expect(script).not.toContain('app.openFCPXML');
     });
 
@@ -958,14 +1078,18 @@ describe('PremiereProTools', () => {
         id: 'item-123',
         name: 'video.mp4',
         type: 'footage',
-        mediaPath: '/path/to/video.mp4'
+        mediaPath: '/path/to/video.mp4',
       });
 
       const result = await tools.executeTool('import_media', {
-        filePath: '/path/to/video.mp4'
+        filePath: '/path/to/video.mp4',
       });
 
-      expect(mockBridge.importMedia).toHaveBeenCalledWith('/path/to/video.mp4', undefined, undefined);
+      expect(mockBridge.importMedia).toHaveBeenCalledWith(
+        '/path/to/video.mp4',
+        undefined,
+        undefined,
+      );
       expect(result.success).toBe(true);
       expect(result.id).toBe('item-123');
     });
@@ -973,11 +1097,11 @@ describe('PremiereProTools', () => {
     it('surfaces import failures instead of claiming success', async () => {
       mockBridge.importMedia = jest.fn().mockResolvedValue({
         success: false,
-        error: 'Import failed'
+        error: 'Import failed',
       } as any);
 
       const result = await tools.executeTool('import_media', {
-        filePath: '/path/to/video.mp4'
+        filePath: '/path/to/video.mp4',
       });
 
       expect(result.success).toBe(false);
@@ -988,7 +1112,7 @@ describe('PremiereProTools', () => {
       mockBridge.importMedia = jest.fn().mockRejectedValue(new Error('Bridge response timeout'));
 
       const result = await tools.executeTool('import_media', {
-        filePath: '/path/to/captions.ass'
+        filePath: '/path/to/captions.ass',
       });
 
       expect(result.success).toBe(false);
@@ -1000,14 +1124,14 @@ describe('PremiereProTools', () => {
       mockBridge.addToTimeline = jest.fn().mockResolvedValue({
         success: true,
         id: 'clip-123',
-        name: 'video.mp4'
+        name: 'video.mp4',
       } as any);
 
       const result = await tools.executeTool('add_to_timeline', {
         sequenceId: 'seq-123',
         projectItemId: 'item-456',
         trackIndex: 0,
-        time: 0
+        time: 0,
       });
 
       expect(result.success).toBe(true);
@@ -1017,14 +1141,14 @@ describe('PremiereProTools', () => {
     it('surfaces timeline placement failures instead of claiming success', async () => {
       mockBridge.addToTimeline = jest.fn().mockResolvedValue({
         success: false,
-        error: 'Track not found'
+        error: 'Track not found',
       } as any);
 
       const result = await tools.executeTool('add_to_timeline', {
         sequenceId: 'seq-123',
         projectItemId: 'item-456',
         trackIndex: 99,
-        time: 0
+        time: 0,
       });
 
       expect(result.success).toBe(false);
@@ -1046,7 +1170,7 @@ describe('PremiereProTools', () => {
       mockSpawn.mockReturnValueOnce(fakeMissingFfmpegProcess());
 
       const result = await tools.executeTool('detect_silence', {
-        mediaPath: '/tmp/some-clip.mp4'
+        mediaPath: '/tmp/some-clip.mp4',
       });
 
       expect(result.success).toBe(false);
@@ -1060,7 +1184,7 @@ describe('PremiereProTools', () => {
         '[silencedetect @ 0x0] silence_start: 1.999977',
         '[silencedetect @ 0x0] silence_end: 5.000045 | silence_duration: 3.000068',
         '[silencedetect @ 0x0] silence_start: 6.999977',
-        '[silencedetect @ 0x0] silence_end: 10.000000 | silence_duration: 3.000023'
+        '[silencedetect @ 0x0] silence_end: 10.000000 | silence_duration: 3.000023',
       ].join('\n');
 
       // Dispatch on the actual args ffmpeg was invoked with, rather than call order --
@@ -1073,13 +1197,13 @@ describe('PremiereProTools', () => {
       const result = await tools.executeTool('detect_silence', {
         mediaPath: '/tmp/some-clip.mp4',
         noiseThresholdDb: -30,
-        minDurationSeconds: 1
+        minDurationSeconds: 1,
       });
 
       expect(result.success).toBe(true);
       expect(result.silenceIntervals).toEqual([
         { start: 1.999977, end: 5.000045, duration: 3 },
-        { start: 6.999977, end: 10, duration: 3 }
+        { start: 6.999977, end: 10, duration: 3 },
       ]);
       expect(result.note).toContain('Detection only');
     });
@@ -1087,12 +1211,12 @@ describe('PremiereProTools', () => {
     it('resolves a projectItemId to a media path via the bridge before running ffmpeg', async () => {
       mockBridge.executeScript.mockResolvedValueOnce({
         success: true,
-        mediaPath: '/Volumes/Footage/session.mp4'
+        mediaPath: '/Volumes/Footage/session.mp4',
       });
       mockSpawn.mockImplementation(() => fakeFfmpegProcess('', 0));
 
       const result = await tools.executeTool('detect_silence', {
-        projectItemId: 'item-789'
+        projectItemId: 'item-789',
       });
 
       expect(mockBridge.executeScript).toHaveBeenCalledTimes(1);
@@ -1104,11 +1228,11 @@ describe('PremiereProTools', () => {
     it('surfaces a clear error when the project item cannot be resolved to a media path', async () => {
       mockBridge.executeScript.mockResolvedValueOnce({
         success: false,
-        error: 'Project item has no media path (is it a sequence or bin?)'
+        error: 'Project item has no media path (is it a sequence or bin?)',
       });
 
       const result = await tools.executeTool('detect_silence', {
-        projectItemId: 'item-a-bin'
+        projectItemId: 'item-a-bin',
       });
 
       expect(result.success).toBe(false);
@@ -1119,11 +1243,13 @@ describe('PremiereProTools', () => {
     it('reports a clear failure when ffmpeg cannot read the file at all', async () => {
       mockSpawn.mockImplementation((_cmd: any, spawnArgs: any) => {
         const isVersionCheck = Array.isArray(spawnArgs) && spawnArgs.includes('-version');
-        return isVersionCheck ? fakeFfmpegProcess('', 0) : fakeFfmpegProcess('Error opening input file', 254);
+        return isVersionCheck
+          ? fakeFfmpegProcess('', 0)
+          : fakeFfmpegProcess('Error opening input file', 254);
       });
 
       const result = await tools.executeTool('detect_silence', {
-        mediaPath: '/tmp/does-not-exist.mp4'
+        mediaPath: '/tmp/does-not-exist.mp4',
       });
 
       expect(result.success).toBe(false);
@@ -1147,9 +1273,9 @@ describe('PremiereProTools', () => {
             propIndex: 0,
             requestedText: 'TREETOP TRANSMISSIONS',
             ok: false,
-            error: 'Both JSON parse strategies failed'
-          }
-        ]
+            error: 'Both JSON parse strategies failed',
+          },
+        ],
       });
 
       const result = await tools.executeTool('add_text_overlay', {
@@ -1158,7 +1284,7 @@ describe('PremiereProTools', () => {
         startTime: 1,
         duration: 7,
         mogrtPath: '/templates/Basic Title.mogrt',
-        text: 'TREETOP TRANSMISSIONS'
+        text: 'TREETOP TRANSMISSIONS',
       });
 
       expect(result.success).toBe(false);
@@ -1176,12 +1302,12 @@ describe('PremiereProTools', () => {
           clipId: 'graphic-rollback',
           premiereVersion: '26.0',
           textRequestedCount: 1,
-          textInjectionResults: [{ textIndex: 0, compIndex: 3, propIndex: 0, ok: false }]
+          textInjectionResults: [{ textIndex: 0, compIndex: 3, propIndex: 0, ok: false }],
         })
         .mockResolvedValueOnce({
           success: true,
           timelineGraphicRemoved: true,
-          note: 'The imported project item may remain in the Project panel.'
+          note: 'The imported project item may remain in the Project panel.',
         });
 
       const result = await tools.executeTool('add_text_overlay', {
@@ -1191,7 +1317,7 @@ describe('PremiereProTools', () => {
         duration: 7,
         mogrtPath: '/templates/Basic Title.mogrt',
         text: 'TREETOP TRANSMISSIONS',
-        rollbackOnTextFailure: true
+        rollbackOnTextFailure: true,
       });
 
       expect(result.success).toBe(false);
@@ -1201,7 +1327,7 @@ describe('PremiereProTools', () => {
       expect(result.removedClipId).toBe('graphic-rollback');
       expect(mockBridge.executeScript).toHaveBeenCalledTimes(2);
       expect(mockBridge.executeScript.mock.calls[1][0]).toContain(
-        '__findClip("graphic-rollback", "seq-123")'
+        '__findClip("graphic-rollback", "seq-123")',
       );
       expect(mockBridge.executeScript.mock.calls[1][0]).toContain('info.clip.remove(false, true)');
     });
@@ -1214,8 +1340,8 @@ describe('PremiereProTools', () => {
         textInjectionResults: [
           { _strategy: 'getMGTComponent', textCompsFound: 2 },
           { textIndex: 0, ok: true },
-          { textIndex: 1, ok: false, error: 'readback mismatch' }
-        ]
+          { textIndex: 1, ok: false, error: 'readback mismatch' },
+        ],
       });
 
       const result = await tools.executeTool('add_text_overlay', {
@@ -1225,7 +1351,7 @@ describe('PremiereProTools', () => {
         duration: 7,
         mogrtPath: '/templates/Lower Third.mogrt',
         text: 'Title',
-        text2: 'Subtitle'
+        text2: 'Subtitle',
       });
 
       expect(result.success).toBe(true);
@@ -1241,8 +1367,8 @@ describe('PremiereProTools', () => {
         textRequestedCount: 2,
         textInjectionResults: [
           { textIndex: 0, ok: true },
-          { textIndex: 1, ok: false }
-        ]
+          { textIndex: 1, ok: false },
+        ],
       });
 
       const result = await tools.executeTool('add_text_overlay', {
@@ -1253,7 +1379,7 @@ describe('PremiereProTools', () => {
         mogrtPath: '/templates/Lower Third.mogrt',
         text: 'Title',
         text2: 'Subtitle',
-        rollbackOnTextFailure: true
+        rollbackOnTextFailure: true,
       });
 
       expect(result.textInjectionStatus).toBe('partial');
@@ -1267,12 +1393,12 @@ describe('PremiereProTools', () => {
           clipId: 'graphic-stuck',
           premiereVersion: '26.0',
           textRequestedCount: 1,
-          textInjectionResults: [{ textIndex: 0, ok: false }]
+          textInjectionResults: [{ textIndex: 0, ok: false }],
         })
         .mockResolvedValueOnce({
           success: false,
           timelineGraphicRemoved: false,
-          error: 'Track item is locked'
+          error: 'Track item is locked',
         });
 
       const result = await tools.executeTool('add_text_overlay', {
@@ -1282,7 +1408,7 @@ describe('PremiereProTools', () => {
         duration: 7,
         mogrtPath: '/templates/Basic Title.mogrt',
         text: 'Title',
-        rollbackOnTextFailure: true
+        rollbackOnTextFailure: true,
       });
 
       expect(result.success).toBe(false);
@@ -1298,11 +1424,11 @@ describe('PremiereProTools', () => {
         .mockResolvedValueOnce({
           success: false,
           error: 'Unexpected property access failure',
-          clipId: 'graphic-hard-failure'
+          clipId: 'graphic-hard-failure',
         })
         .mockResolvedValueOnce({
           success: true,
-          timelineGraphicRemoved: true
+          timelineGraphicRemoved: true,
         });
 
       const result = await tools.executeTool('add_text_overlay', {
@@ -1312,7 +1438,7 @@ describe('PremiereProTools', () => {
         duration: 7,
         mogrtPath: '/templates/Basic Title.mogrt',
         text: 'Title',
-        rollbackOnTextFailure: true
+        rollbackOnTextFailure: true,
       });
 
       expect(result.success).toBe(false);
@@ -1326,7 +1452,7 @@ describe('PremiereProTools', () => {
       const result = evaluateTextInjectionResult({
         success: true,
         textRequestedCount: 0,
-        textInjectionResults: [{ _strategy: 'components_fallback', textCompsFound: 0 }]
+        textInjectionResults: [{ _strategy: 'components_fallback', textCompsFound: 0 }],
       });
 
       expect(result.success).toBe(true);
@@ -1340,7 +1466,7 @@ describe('PremiereProTools', () => {
         items: [],
         bins: [],
         totalItems: 0,
-        totalBins: 0
+        totalBins: 0,
       });
 
       const result = await tools.executeTool('list_project_items', {});
@@ -1352,12 +1478,12 @@ describe('PremiereProTools', () => {
     it('uses current argument names for split_clip', async () => {
       mockBridge.executeScript.mockResolvedValue({
         success: true,
-        clips: ['clip-a', 'clip-b']
+        clips: ['clip-a', 'clip-b'],
       });
 
       const result = await tools.executeTool('split_clip', {
         clipId: 'clip-123',
-        splitTime: 5.5
+        splitTime: 5.5,
       });
 
       expect(mockBridge.executeScript).toHaveBeenCalled();
@@ -1371,14 +1497,14 @@ describe('PremiereProTools', () => {
         time: 12.5,
         timecode: '00:00:12:15',
         cutVideoTracks: [0, 1],
-        cutAudioTracks: [0, 2, 3]
+        cutAudioTracks: [0, 2, 3],
       });
 
       const result = await tools.executeTool('razor_timeline_at_time', {
         sequenceId: 'seq-123',
         time: 12.5,
         videoTrackIndices: [0, 1],
-        audioTrackIndices: [0, 2, 3]
+        audioTrackIndices: [0, 2, 3],
       });
 
       expect(mockBridge.executeScript).toHaveBeenCalled();
@@ -1390,7 +1516,7 @@ describe('PremiereProTools', () => {
     it('validates crop_clip bounds before calling the bridge', async () => {
       const result = await tools.executeTool('crop_clip', {
         clipId: 'clip-123',
-        left: 101
+        left: 101,
       });
 
       expect(result.success).toBe(false);
@@ -1405,21 +1531,23 @@ describe('PremiereProTools', () => {
         addedComponent: {
           displayName: 'Lumetri Color',
           componentIndex: 2,
-          identificationStrategy: 'unique ordered component fingerprint insertion'
-        }
+          identificationStrategy: 'unique ordered component fingerprint insertion',
+        },
       });
 
       const result = await tools.executeTool('apply_effect', {
         clipId: 'clip-123',
         effectName: 'Lumetri Color',
-        parameters: { Exposure: 0 }
+        parameters: { Exposure: 0 },
       });
 
       expect(result.success).toBe(true);
       const script = mockBridge.executeScript.mock.calls[0][0];
       expect(script).toContain('var beforeComponents = snapshotComponents(clip)');
       expect(script).toContain('var afterInfo = __findClip("clip-123")');
-      expect(script).toContain('if (afterIndex !== candidateIndex) withoutCandidate.push(afterComponents[afterIndex])');
+      expect(script).toContain(
+        'if (afterIndex !== candidateIndex) withoutCandidate.push(afterComponents[afterIndex])',
+      );
       expect(script).toContain('if (candidateIndices.length !== 1)');
       expect(script).toContain('no parameters were written');
       expect(script).toContain('effectAdded: true');
@@ -1430,20 +1558,22 @@ describe('PremiereProTools', () => {
     it('requires apply_effect parameter readback to verify or demonstrably change', async () => {
       mockBridge.executeScript.mockResolvedValue({
         success: false,
-        error: 'One or more effect parameters could not be set'
+        error: 'One or more effect parameters could not be set',
       });
 
       await tools.executeTool('apply_effect', {
         clipId: 'clip-123',
         effectName: 'Lumetri Color',
-        parameters: { Exposure: -5.7 }
+        parameters: { Exposure: -5.7 },
       });
 
       const script = mockBridge.executeScript.mock.calls[0][0];
       expect(script).toContain('verification: verified ? "verified"');
       expect(script).toContain('var resultOk = verified || acceptedWithWarning');
       expect(script).toContain('Premiere changed the property but readback differs');
-      expect(script).toContain('Premiere accepted setValue but the resulting value could not be read back');
+      expect(script).toContain(
+        'Premiere accepted setValue but the resulting value could not be read back',
+      );
       expect(script).toContain('if (!valuesEquivalent(actual[vai], requested[vai]))');
       expect(script).toContain('warnings: paramWarnings');
       expect(script).toContain('if (!paramResults[pr].ok)');
@@ -1453,7 +1583,7 @@ describe('PremiereProTools', () => {
       const result = await tools.executeTool('delete_track', {
         sequenceId: 'seq-123',
         trackType: 'caption',
-        trackIndex: 0
+        trackIndex: 0,
       });
 
       expect(result.success).toBe(false);
@@ -1469,15 +1599,15 @@ describe('PremiereProTools', () => {
         effectAdded: true,
         paramResults: [
           { requestedName: 'Left', ok: true, valueAfter: 12 },
-          { requestedName: 'Bottom', ok: true, valueAfter: 25 }
-        ]
+          { requestedName: 'Bottom', ok: true, valueAfter: 25 },
+        ],
       });
 
       const result = await tools.executeTool('crop_clip', {
         clipId: 'clip-123',
         left: 12,
         bottom: 25,
-        zoom: true
+        zoom: true,
       });
 
       expect(result.success).toBe(true);
@@ -1494,14 +1624,14 @@ describe('PremiereProTools', () => {
     it('uses current argument names for add_transition', async () => {
       mockBridge.executeScript.mockResolvedValue({
         success: true,
-        transitionId: 'trans-123'
+        transitionId: 'trans-123',
       });
 
       const result = await tools.executeTool('add_transition', {
         clipId1: 'clip-1',
         clipId2: 'clip-2',
         transitionName: 'Cross Dissolve',
-        duration: 0.75
+        duration: 0.75,
       });
 
       expect(mockBridge.executeScript).toHaveBeenCalled();
@@ -1511,12 +1641,12 @@ describe('PremiereProTools', () => {
     it('verifies trim_clip duration writes instead of trusting a silent Premiere no-op', async () => {
       mockBridge.executeScript.mockResolvedValue({
         success: true,
-        newDuration: 2.5
+        newDuration: 2.5,
       });
 
       const result = await tools.executeTool('trim_clip', {
         clipId: 'clip-123',
-        duration: 2.5
+        duration: 2.5,
       });
 
       expect(result.success).toBe(true);
@@ -1534,7 +1664,7 @@ describe('PremiereProTools', () => {
       const result = await tools.executeTool('trim_clip', {
         clipId: 'clip-123',
         outPoint: 8,
-        duration: 2.5
+        duration: 2.5,
       });
 
       expect(result.success).toBe(false);
@@ -1549,10 +1679,18 @@ describe('PremiereProTools', () => {
       const ticksPerSecond = 254016000000;
       class FakeTime {
         private value = 0;
-        get seconds() { return this.value; }
-        set seconds(value: number) { this.value = value; }
-        get ticks() { return String(Math.round(this.value * ticksPerSecond)); }
-        set ticks(value: string) { this.value = Number(value) / ticksPerSecond; }
+        get seconds() {
+          return this.value;
+        }
+        set seconds(value: number) {
+          this.value = value;
+        }
+        get ticks() {
+          return String(Math.round(this.value * ticksPerSecond));
+        }
+        set ticks(value: string) {
+          this.value = Number(value) / ticksPerSecond;
+        }
       }
       const at = (seconds: number) => {
         const time = new FakeTime();
@@ -1563,23 +1701,33 @@ describe('PremiereProTools', () => {
       const clip: any = {
         inPoint: at(3599.9964),
         start: at(0),
-        duration: at(4.97163333333333)
+        duration: at(4.97163333333333),
       };
       let sourceOut = at(3604.96803333333);
       const timelineEnd = at(4.97163333333333);
       Object.defineProperty(clip, 'outPoint', {
         get: () => sourceOut,
-        set: (value) => { outPointWrites++; sourceOut = value; }
+        set: (value) => {
+          outPointWrites++;
+          sourceOut = value;
+        },
       });
       Object.defineProperty(clip, 'end', {
         get: () => timelineEnd,
-        set: () => { /* Premiere silently ignores this native Graphic extension. */ }
+        set: () => {
+          /* Premiere silently ignores this native Graphic extension. */
+        },
       });
       const runScript = new Function('__findClip', 'Time', script);
-      const parsed = JSON.parse(runScript(
-        () => ({ clip, sequence: { timebase: String(Math.round(ticksPerSecond * 1001 / 30000)) } }),
-        FakeTime
-      ));
+      const parsed = JSON.parse(
+        runScript(
+          () => ({
+            clip,
+            sequence: { timebase: String(Math.round((ticksPerSecond * 1001) / 30000)) },
+          }),
+          FakeTime,
+        ),
+      );
 
       expect(parsed.success).toBe(false);
       expect(parsed.errorCode).toBe('TRIM_UNSUPPORTED_FOR_CLIP');
@@ -1596,10 +1744,18 @@ describe('PremiereProTools', () => {
       const ticksPerSecond = 254016000000;
       class FakeTime {
         private value = 0;
-        get seconds() { return this.value; }
-        set seconds(value: number) { this.value = value; }
-        get ticks() { return String(Math.round(this.value * ticksPerSecond)); }
-        set ticks(value: string) { this.value = Number(value) / ticksPerSecond; }
+        get seconds() {
+          return this.value;
+        }
+        set seconds(value: number) {
+          this.value = value;
+        }
+        get ticks() {
+          return String(Math.round(this.value * ticksPerSecond));
+        }
+        set ticks(value: string) {
+          this.value = Number(value) / ticksPerSecond;
+        }
       }
       const at = (seconds: number) => {
         const time = new FakeTime();
@@ -1613,16 +1769,23 @@ describe('PremiereProTools', () => {
       let timelineEnd = at(5);
       Object.defineProperty(clip, 'end', {
         get: () => timelineEnd,
-        set: () => { timelineEnd = at(7.007); }
+        set: () => {
+          timelineEnd = at(7.007);
+        },
       });
       Object.defineProperty(clip, 'duration', {
-        get: () => at(timelineEnd.seconds - clip.start.seconds)
+        get: () => at(timelineEnd.seconds - clip.start.seconds),
       });
       const runScript = new Function('__findClip', 'Time', script);
-      const parsed = JSON.parse(runScript(
-        () => ({ clip, sequence: { timebase: String(Math.round(ticksPerSecond * 1001 / 30000)) } }),
-        FakeTime
-      ));
+      const parsed = JSON.parse(
+        runScript(
+          () => ({
+            clip,
+            sequence: { timebase: String(Math.round((ticksPerSecond * 1001) / 30000)) },
+          }),
+          FakeTime,
+        ),
+      );
 
       expect(parsed.success).toBe(true);
       expect(parsed.newDuration).toBeCloseTo(7.007);
@@ -1636,20 +1799,43 @@ describe('PremiereProTools', () => {
       const ticksPerSecond = 254016000000;
       class FakeTime {
         private value = 0;
-        get seconds() { return this.value; }
-        set seconds(value: number) { this.value = value; }
-        get ticks() { return String(Math.round(this.value * ticksPerSecond)); }
-        set ticks(value: string) { this.value = Number(value) / ticksPerSecond; }
+        get seconds() {
+          return this.value;
+        }
+        set seconds(value: number) {
+          this.value = value;
+        }
+        get ticks() {
+          return String(Math.round(this.value * ticksPerSecond));
+        }
+        set ticks(value: string) {
+          this.value = Number(value) / ticksPerSecond;
+        }
       }
-      const at = (seconds: number) => { const t = new FakeTime(); t.seconds = seconds; return t; };
+      const at = (seconds: number) => {
+        const t = new FakeTime();
+        t.seconds = seconds;
+        return t;
+      };
       let endWrites = 0;
       let timelineEnd = at(5);
       const clip: any = { inPoint: at(0), start: at(0) };
-      Object.defineProperty(clip, 'end', { get: () => timelineEnd, set: (v) => { endWrites++; timelineEnd = v; } });
-      const parsed = JSON.parse(new Function('__findClip', 'Time', script)(
-        () => ({ clip, sequence: { timebase: String(Math.round(ticksPerSecond * 1001 / 30000)) } }),
-        FakeTime
-      ));
+      Object.defineProperty(clip, 'end', {
+        get: () => timelineEnd,
+        set: (v) => {
+          endWrites++;
+          timelineEnd = v;
+        },
+      });
+      const parsed = JSON.parse(
+        new Function('__findClip', 'Time', script)(
+          () => ({
+            clip,
+            sequence: { timebase: String(Math.round((ticksPerSecond * 1001) / 30000)) },
+          }),
+          FakeTime,
+        ),
+      );
       // One frame at 29.97 is within any "close enough" window, so a fuzzy no-op test would skip
       // this write. It must be written.
       expect(endWrites).toBe(1);
@@ -1664,13 +1850,13 @@ describe('PremiereProTools', () => {
         readyForExport: true,
         errors: [],
         warnings: [],
-        summary: { videoClipCount: 1 }
+        summary: { videoClipCount: 1 },
       });
 
       const result = await tools.executeTool('validate_project_for_export', {
         sequenceId: 'seq-1',
         outputPath: '/tmp/output.mp4',
-        presetPath: '/tmp/export.epr'
+        presetPath: '/tmp/export.epr',
       });
 
       expect(result.success).toBe(true);
@@ -1689,13 +1875,13 @@ describe('PremiereProTools', () => {
         readyForExport: true,
         errors: [],
         warnings: [],
-        summary: { videoClipCount: 1 }
+        summary: { videoClipCount: 1 },
       });
 
       await tools.executeTool('validate_project_for_export', {
         sequenceId: 'seq-1',
         outputPath: '/tmp/output.mp4',
-        presetPath: '/tmp/export.epr'
+        presetPath: '/tmp/export.epr',
       });
 
       const script = mockBridge.executeScript.mock.calls[0][0] as string;
@@ -1709,7 +1895,9 @@ describe('PremiereProTools', () => {
       const extracted = script.match(/ {8}function secondsOf\(value\) \{[\s\S]*?\n {8}\}/);
       expect(extracted).not.toBeNull();
       // eslint-disable-next-line @typescript-eslint/no-implied-eval
-      const secondsOf = new Function(`${extracted![0]}\nreturn secondsOf;`)() as (value: unknown) => number;
+      const secondsOf = new Function(`${extracted![0]}\nreturn secondsOf;`)() as (
+        value: unknown,
+      ) => number;
 
       const TICKS_PER_SECOND = 254016000000;
 
@@ -1737,20 +1925,22 @@ describe('PremiereProTools', () => {
 
       await tools.executeTool('list_sequences', {});
 
-      expect(mockBridge.executeScript.mock.calls[0][0] as string).toContain('__ticksToSeconds(seq.end)');
+      expect(mockBridge.executeScript.mock.calls[0][0] as string).toContain(
+        '__ticksToSeconds(seq.end)',
+      );
     });
 
     it('uses verifiable QE transition calls for add_transition', async () => {
       mockBridge.executeScript.mockResolvedValue({
         success: true,
-        transitionId: 'trans-123'
+        transitionId: 'trans-123',
       });
 
       const result = await tools.executeTool('add_transition', {
         clipId1: 'clip-1',
         clipId2: 'clip-2',
         transitionName: 'Cross Dissolve',
-        duration: 0.75
+        duration: 0.75,
       });
 
       expect(result.success).toBe(true);
@@ -1761,31 +1951,35 @@ describe('PremiereProTools', () => {
       expect(script).toContain('qeClip.addTransition(transition, atStart, String(frames), "0"');
       expect(script).not.toContain('frames + ":00"');
       expect(script).toContain('__qeTransitionsAt(qeTrack, cutSecs)');
-      expect(script).toContain('Transition call completed but Premiere Pro did not expose a verified transition change');
+      expect(script).toContain(
+        'Transition call completed but Premiere Pro did not expose a verified transition change',
+      );
     });
 
     it('distinguishes verified, accepted-unverified, and failed add_transition_to_clip results', async () => {
       mockBridge.executeScript.mockResolvedValue({
         success: true,
         status: 'accepted_unverified',
-        verified: false
+        verified: false,
       });
 
       const result = await tools.executeTool('add_transition_to_clip', {
         clipId: 'clip-1',
         transitionName: 'Cross Dissolve',
         position: 'start',
-        duration: 0.5
+        duration: 0.5,
       });
 
       expect(result).toMatchObject({
         success: true,
         status: 'accepted_unverified',
-        verified: false
+        verified: false,
       });
       const script = mockBridge.executeScript.mock.calls[0][0];
       expect(script).toContain('var qeVerified = __transitionWasVerified(before, after)');
-      expect(script).toContain('var xmlVerified = __transitionWasVerifiedByXml(beforeXml, afterXml)');
+      expect(script).toContain(
+        'var xmlVerified = __transitionWasVerifiedByXml(beforeXml, afterXml)',
+      );
       expect(script).toContain('if (!qeVerified && !xmlVerified)');
       expect(script).toContain('status: "accepted_unverified"');
       expect(script).toContain('verified: false');
@@ -1794,28 +1988,34 @@ describe('PremiereProTools', () => {
       expect(script).toContain('transitionEnumeration: {');
       expect(script).toContain('finalCutProXml: {');
       expect(script).toContain('beforeError: beforeXml.error');
-      expect(script).toContain('warning: "Transition command accepted; result could not be independently verified."');
+      expect(script).toContain(
+        'warning: "Transition command accepted; result could not be independently verified."',
+      );
       expect(script).toContain('status: "failed"');
       expect(script).not.toContain('applied: true');
-      expect(script).not.toContain('Transition call completed but Premiere Pro did not expose a verified transition change');
+      expect(script).not.toContain(
+        'Transition call completed but Premiere Pro did not expose a verified transition change',
+      );
       expect(script).toContain('new Date().getTime()');
       expect(script).not.toContain('Date.now()');
 
-      const tool = tools.getAvailableTools().find((candidate) => candidate.name === 'add_transition_to_clip');
+      const tool = tools
+        .getAvailableTools()
+        .find((candidate) => candidate.name === 'add_transition_to_clip');
       expect(tool?.description).toContain('do not retry automatically');
     });
 
     it('fails batch_add_transitions when no transition is verifiably added', async () => {
       mockBridge.executeScript.mockResolvedValue({
         success: false,
-        error: 'No transitions were verifiably added'
+        error: 'No transitions were verifiably added',
       });
 
       const result = await tools.executeTool('batch_add_transitions', {
         sequenceId: 'seq-123',
         trackIndex: 0,
         transitionName: 'Cross Dissolve',
-        duration: 0.5
+        duration: 0.5,
       });
 
       expect(result.success).toBe(false);
@@ -1830,11 +2030,13 @@ describe('PremiereProTools', () => {
 
       const result = await tools.executeTool('get_clip_properties', {
         clipId: 'clip-123',
-        sequenceId: 'seq-456'
+        sequenceId: 'seq-456',
       });
 
       expect(result.success).toBe(true);
-      expect(mockBridge.executeScript).toHaveBeenCalledWith(expect.stringContaining('__findClip("clip-123", "seq-456")'));
+      expect(mockBridge.executeScript).toHaveBeenCalledWith(
+        expect.stringContaining('__findClip("clip-123", "seq-456")'),
+      );
     });
 
     it('removes clips from the requested sequence', async () => {
@@ -1843,12 +2045,16 @@ describe('PremiereProTools', () => {
       const result = await tools.executeTool('remove_from_timeline', {
         clipId: 'clip-123',
         sequenceId: 'seq-456',
-        deleteMode: 'lift'
+        deleteMode: 'lift',
       });
 
       expect(result.success).toBe(true);
-      expect(mockBridge.executeScript).toHaveBeenCalledWith(expect.stringContaining('__findClip("clip-123", "seq-456")'));
-      expect(mockBridge.executeScript).toHaveBeenCalledWith(expect.stringContaining('var isRipple = "lift" === "ripple";'));
+      expect(mockBridge.executeScript).toHaveBeenCalledWith(
+        expect.stringContaining('__findClip("clip-123", "seq-456")'),
+      );
+      expect(mockBridge.executeScript).toHaveBeenCalledWith(
+        expect.stringContaining('var isRipple = "lift" === "ripple";'),
+      );
     });
   });
 
@@ -1859,8 +2065,11 @@ describe('PremiereProTools', () => {
     const markerCalls: Array<{ tool: string; args: Record<string, any> }> = [
       { tool: 'add_marker', args: { sequenceId: 'seq-target', time: 3, name: 'Cue' } },
       { tool: 'delete_marker', args: { sequenceId: 'seq-target', markerId: 'marker-1' } },
-      { tool: 'update_marker', args: { sequenceId: 'seq-target', markerId: 'marker-1', name: 'Renamed' } },
-      { tool: 'list_markers', args: { sequenceId: 'seq-target' } }
+      {
+        tool: 'update_marker',
+        args: { sequenceId: 'seq-target', markerId: 'marker-1', name: 'Renamed' },
+      },
+      { tool: 'list_markers', args: { sequenceId: 'seq-target' } },
     ];
 
     it.each(markerCalls)('resolves the requested sequence for $tool', async ({ tool, args }) => {
@@ -1873,23 +2082,31 @@ describe('PremiereProTools', () => {
       expect(script).not.toContain('app.project.activeSequence');
     });
 
-    it.each(markerCalls)('returns a truthful error instead of retargeting for $tool', async ({ tool, args }) => {
-      mockBridge.executeScript.mockResolvedValue({ success: true });
+    it.each(markerCalls)(
+      'returns a truthful error instead of retargeting for $tool',
+      async ({ tool, args }) => {
+        mockBridge.executeScript.mockResolvedValue({ success: true });
 
-      await tools.executeTool(tool, args);
+        await tools.executeTool(tool, args);
 
-      const script = mockBridge.executeScript.mock.calls[0][0] as string;
-      expect(script).toContain('"Sequence not found by id: "');
-      expect(script).toContain('Use list_sequences or get_active_sequence to obtain a valid sequence ID.');
-    });
+        const script = mockBridge.executeScript.mock.calls[0][0] as string;
+        expect(script).toContain('"Sequence not found by id: "');
+        expect(script).toContain(
+          'Use list_sequences or get_active_sequence to obtain a valid sequence ID.',
+        );
+      },
+    );
 
-    it.each(markerCalls)('rejects an empty sequenceId for $tool before touching the bridge', async ({ tool, args }) => {
-      const result = await tools.executeTool(tool, { ...args, sequenceId: '' });
+    it.each(markerCalls)(
+      'rejects an empty sequenceId for $tool before touching the bridge',
+      async ({ tool, args }) => {
+        const result = await tools.executeTool(tool, { ...args, sequenceId: '' });
 
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('Invalid arguments');
-      expect(mockBridge.executeScript).not.toHaveBeenCalled();
-    });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('Invalid arguments');
+        expect(mockBridge.executeScript).not.toHaveBeenCalled();
+      },
+    );
 
     it('escapes quoted sequence ids so they cannot break out of the generated script', async () => {
       mockBridge.executeScript.mockResolvedValue({ success: true });
@@ -1917,9 +2134,18 @@ describe('PremiereProTools', () => {
     // app.project.activeSequence, or resolved the id and silently fell back to the active
     // sequence when it did not match.
     const trackCalls: Array<{ tool: string; args: Record<string, any> }> = [
-      { tool: 'lock_track', args: { sequenceId: 'seq-target', trackType: 'video', trackIndex: 0, locked: true } },
-      { tool: 'toggle_track_visibility', args: { sequenceId: 'seq-target', trackIndex: 0, visible: false } },
-      { tool: 'delete_track', args: { sequenceId: 'seq-target', trackType: 'video', trackIndex: 1 } }
+      {
+        tool: 'lock_track',
+        args: { sequenceId: 'seq-target', trackType: 'video', trackIndex: 0, locked: true },
+      },
+      {
+        tool: 'toggle_track_visibility',
+        args: { sequenceId: 'seq-target', trackIndex: 0, visible: false },
+      },
+      {
+        tool: 'delete_track',
+        args: { sequenceId: 'seq-target', trackType: 'video', trackIndex: 1 },
+      },
     ];
 
     it('fails truthfully instead of falling back for list_sequence_tracks', async () => {
@@ -1945,18 +2171,27 @@ describe('PremiereProTools', () => {
       expect(script).toContain('"Sequence not found by id: "');
     });
 
-    it.each(trackCalls)('rejects an empty sequenceId for $tool before touching the bridge', async ({ tool, args }) => {
-      const result = await tools.executeTool(tool, { ...args, sequenceId: '' });
+    it.each(trackCalls)(
+      'rejects an empty sequenceId for $tool before touching the bridge',
+      async ({ tool, args }) => {
+        const result = await tools.executeTool(tool, { ...args, sequenceId: '' });
 
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('Invalid arguments');
-      expect(mockBridge.executeScript).not.toHaveBeenCalled();
-    });
+        expect(result.success).toBe(false);
+        expect(result.error).toContain('Invalid arguments');
+        expect(mockBridge.executeScript).not.toHaveBeenCalled();
+      },
+    );
 
     it.each([
       { tool: 'list_sequence_tracks', args: { sequenceId: 'seq-target' } },
-      { tool: 'lock_track', args: { sequenceId: 'seq-target', trackType: 'video', trackIndex: 0, locked: true } },
-      { tool: 'toggle_track_visibility', args: { sequenceId: 'seq-target', trackIndex: 0, visible: false } }
+      {
+        tool: 'lock_track',
+        args: { sequenceId: 'seq-target', trackType: 'video', trackIndex: 0, locked: true },
+      },
+      {
+        tool: 'toggle_track_visibility',
+        args: { sequenceId: 'seq-target', trackIndex: 0, visible: false },
+      },
     ])('never falls back to the active sequence for $tool', async ({ tool, args }) => {
       mockBridge.executeScript.mockResolvedValue({ success: true });
 
@@ -1983,7 +2218,11 @@ describe('PremiereProTools', () => {
       // target to be active refused work QE can actually do.
       mockBridge.executeScript.mockResolvedValue({ success: true });
 
-      await tools.executeTool('delete_track', { sequenceId: 'seq-target', trackType: 'video', trackIndex: 1 });
+      await tools.executeTool('delete_track', {
+        sequenceId: 'seq-target',
+        trackType: 'video',
+        trackIndex: 1,
+      });
 
       const script = mockBridge.executeScript.mock.calls[0][0] as string;
       expect(script).toContain('var qeSeq = __qeSequenceOpening(sequence);');
@@ -1994,20 +2233,24 @@ describe('PremiereProTools', () => {
     it('reports a sequence QE cannot address instead of deleting from the wrong one', async () => {
       mockBridge.executeScript.mockResolvedValue({ success: true });
 
-      await tools.executeTool('delete_track', { sequenceId: 'seq-target', trackType: 'video', trackIndex: 1 });
+      await tools.executeTool('delete_track', {
+        sequenceId: 'seq-target',
+        trackType: 'video',
+        trackIndex: 1,
+      });
 
       const script = mockBridge.executeScript.mock.calls[0][0] as string;
       expect(script).toContain('requiresOpenSequence: true');
       // The refusal has to name the sequence, so a caller can tell which one
       // needs opening rather than guessing.
-      expect(script).toContain("cannot address sequence '\" + sequence.name + \"'");
+      expect(script).toContain('cannot address sequence \'" + sequence.name + "\'');
     });
 
     it('still reports caption track deletion as unsupported without touching the bridge', async () => {
       const result = await tools.executeTool('delete_track', {
         sequenceId: 'seq-target',
         trackType: 'caption',
-        trackIndex: 0
+        trackIndex: 0,
       });
 
       expect(result.success).toBe(false);
@@ -2034,7 +2277,7 @@ describe('PremiereProTools', () => {
         .mockResolvedValue({ success: true, videoTracks: [], audioTracks: [] });
 
       const result = await tools.executeTool('build_motion_graphics_demo', {
-        sequenceName: 'Demo Sequence'
+        sequenceName: 'Demo Sequence',
       });
 
       expect(result.success).toBe(true);
@@ -2051,8 +2294,20 @@ describe('PremiereProTools', () => {
         .mockResolvedValueOnce({ success: true, id: 'item-b', name: 'b.mp4' } as any);
       mockBridge.addToTimeline = jest
         .fn()
-        .mockResolvedValueOnce({ success: true, id: 'clip-a', name: 'a.mp4', inPoint: 0, outPoint: 4 } as any)
-        .mockResolvedValueOnce({ success: true, id: 'clip-b', name: 'b.mp4', inPoint: 4, outPoint: 8 } as any);
+        .mockResolvedValueOnce({
+          success: true,
+          id: 'clip-a',
+          name: 'a.mp4',
+          inPoint: 0,
+          outPoint: 4,
+        } as any)
+        .mockResolvedValueOnce({
+          success: true,
+          id: 'clip-b',
+          name: 'b.mp4',
+          inPoint: 4,
+          outPoint: 8,
+        } as any);
       mockBridge.executeScript
         .mockResolvedValueOnce({ success: true, id: 'seq-2', name: 'Product Spot' })
         .mockResolvedValue({ success: true, videoTracks: [], audioTracks: [] });
@@ -2061,7 +2316,7 @@ describe('PremiereProTools', () => {
         sequenceName: 'Product Spot',
         assetPaths: ['/a.mp4', '/b.mp4'],
         clipDuration: 4,
-        motionStyle: 'alternate'
+        motionStyle: 'alternate',
       });
 
       expect(result.success).toBe(true);
@@ -2077,8 +2332,20 @@ describe('PremiereProTools', () => {
         .mockResolvedValueOnce({ success: true, id: 'item-b', name: 'b.mp4' } as any);
       mockBridge.addToTimeline = jest
         .fn()
-        .mockResolvedValueOnce({ success: true, id: 'clip-a', name: 'a.mp4', inPoint: 1.5, outPoint: 3.5 } as any)
-        .mockResolvedValueOnce({ success: true, id: 'clip-b', name: 'b.mp4', inPoint: 3.6, outPoint: 6.6 } as any);
+        .mockResolvedValueOnce({
+          success: true,
+          id: 'clip-a',
+          name: 'a.mp4',
+          inPoint: 1.5,
+          outPoint: 3.5,
+        } as any)
+        .mockResolvedValueOnce({
+          success: true,
+          id: 'clip-b',
+          name: 'b.mp4',
+          inPoint: 3.6,
+          outPoint: 6.6,
+        } as any);
       mockBridge.executeScript
         .mockResolvedValueOnce({ success: true, id: 'seq-2b', name: 'Directed Spot' })
         .mockResolvedValue({ success: true, videoTracks: [], audioTracks: [] });
@@ -2088,16 +2355,36 @@ describe('PremiereProTools', () => {
         assetPaths: ['/a.mp4', '/b.mp4'],
         clipPlan: [
           { assetIndex: 0, time: 1.5, trackIndex: 1, transitionAfter: { name: 'none' } },
-          { assetIndex: 1, time: 3.6, trackIndex: 2 }
-        ]
+          { assetIndex: 1, time: 3.6, trackIndex: 2 },
+        ],
       });
 
       expect(result.success).toBe(true);
       expect(result.message).toContain('directed clip plan');
       expect(result.transitions).toHaveLength(0);
       expect(result.animations).toHaveLength(0);
-      expect(mockBridge.addToTimeline).toHaveBeenNthCalledWith(1, 'seq-2b', 'item-a', 1, 1.5, true, undefined, undefined, 'overwrite');
-      expect(mockBridge.addToTimeline).toHaveBeenNthCalledWith(2, 'seq-2b', 'item-b', 2, 3.6, true, undefined, undefined, 'overwrite');
+      expect(mockBridge.addToTimeline).toHaveBeenNthCalledWith(
+        1,
+        'seq-2b',
+        'item-a',
+        1,
+        1.5,
+        true,
+        undefined,
+        undefined,
+        'overwrite',
+      );
+      expect(mockBridge.addToTimeline).toHaveBeenNthCalledWith(
+        2,
+        'seq-2b',
+        'item-b',
+        2,
+        3.6,
+        true,
+        undefined,
+        undefined,
+        'overwrite',
+      );
     });
 
     it('builds a brand spot from assets without requiring a mogrt', async () => {
@@ -2107,15 +2394,27 @@ describe('PremiereProTools', () => {
         .mockResolvedValueOnce({ success: true, id: 'item-b', name: 'b.mp4' } as any);
       mockBridge.addToTimeline = jest
         .fn()
-        .mockResolvedValueOnce({ success: true, id: 'clip-a', name: 'a.mp4', inPoint: 0, outPoint: 4 } as any)
-        .mockResolvedValueOnce({ success: true, id: 'clip-b', name: 'b.mp4', inPoint: 4, outPoint: 8 } as any);
+        .mockResolvedValueOnce({
+          success: true,
+          id: 'clip-a',
+          name: 'a.mp4',
+          inPoint: 0,
+          outPoint: 4,
+        } as any)
+        .mockResolvedValueOnce({
+          success: true,
+          id: 'clip-b',
+          name: 'b.mp4',
+          inPoint: 4,
+          outPoint: 8,
+        } as any);
       mockBridge.executeScript
         .mockResolvedValueOnce({ success: true, id: 'seq-3', name: 'Brand Spot' })
         .mockResolvedValue({ success: true, videoTracks: [], audioTracks: [] });
 
       const result = await tools.executeTool('build_brand_spot_from_mogrt_and_assets', {
         sequenceName: 'Brand Spot',
-        assetPaths: ['/a.mp4', '/b.mp4']
+        assetPaths: ['/a.mp4', '/b.mp4'],
       });
 
       expect(result.success).toBe(true);
@@ -2129,7 +2428,11 @@ describe('PremiereProTools', () => {
   describe('setup_ducking', () => {
     it('emits 4 keyframes per duck window plus boundaries (sustained-base curve)', async () => {
       // Bridge.executeScript is what addAudioKeyframes ultimately invokes; capture and inspect.
-      mockBridge.executeScript.mockResolvedValue({ success: true, addedKeyframes: [], failedKeyframes: [] });
+      mockBridge.executeScript.mockResolvedValue({
+        success: true,
+        addedKeyframes: [],
+        failedKeyframes: [],
+      });
 
       const result = await tools.executeTool('setup_ducking', {
         clipId: 'music-1',
@@ -2177,7 +2480,11 @@ describe('PremiereProTools', () => {
     });
 
     it('handles empty duckingWindows (sustained baseDb only, 2 boundary keyframes)', async () => {
-      mockBridge.executeScript.mockResolvedValue({ success: true, addedKeyframes: [], failedKeyframes: [] });
+      mockBridge.executeScript.mockResolvedValue({
+        success: true,
+        addedKeyframes: [],
+        failedKeyframes: [],
+      });
 
       const result = await tools.executeTool('setup_ducking', {
         clipId: 'music-empty',
@@ -2195,7 +2502,11 @@ describe('PremiereProTools', () => {
     });
 
     it('clamps pre-fade to clipStartTime when window starts before fadeSeconds', async () => {
-      mockBridge.executeScript.mockResolvedValue({ success: true, addedKeyframes: [], failedKeyframes: [] });
+      mockBridge.executeScript.mockResolvedValue({
+        success: true,
+        addedKeyframes: [],
+        failedKeyframes: [],
+      });
 
       const result = await tools.executeTool('setup_ducking', {
         clipId: 'music-clamp',
@@ -2222,7 +2533,11 @@ describe('PremiereProTools', () => {
       const presetDir = join(root, '26.0', 'Presets');
       await fs.mkdir(presetDir, { recursive: true });
       const presetPath = join(presetDir, 'YouTube UHD 4K.epr');
-      await fs.writeFile(presetPath, '<Preset><PresetName>YouTube UHD 4K Custom</PresetName></Preset>', 'utf8');
+      await fs.writeFile(
+        presetPath,
+        '<Preset><PresetName>YouTube UHD 4K Custom</PresetName></Preset>',
+        'utf8',
+      );
       await fs.writeFile(join(presetDir, 'ignore.txt'), 'not a preset', 'utf8');
 
       const result = await tools.executeTool('get_encoder_presets', {
@@ -2232,12 +2547,14 @@ describe('PremiereProTools', () => {
       expect(result).toMatchObject({
         success: true,
         count: 1,
-        presets: [{
-          name: 'YouTube UHD 4K Custom',
-          path: presetPath,
-          source: 'user',
-          ameVersion: '26.0',
-        }],
+        presets: [
+          {
+            name: 'YouTube UHD 4K Custom',
+            path: presetPath,
+            source: 'user',
+            ameVersion: '26.0',
+          },
+        ],
         factoryPresets: {
           supported: false,
         },
@@ -2336,12 +2653,10 @@ describe('PremiereProTools', () => {
       expect(result.sourceRange).toBe('entire');
       expect(result.encoderRangeConstant).toBe('ENCODE_ENTIRE');
       expect(result.message).toMatch(/queued in Adobe Media Encoder/);
-      expect(mockBridge.renderSequence).toHaveBeenCalledWith(
-        'seq-1',
-        outputPath,
-        presetPath,
-        { sourceRange: 'entire', removeOnCompletion: true },
-      );
+      expect(mockBridge.renderSequence).toHaveBeenCalledWith('seq-1', outputPath, presetPath, {
+        sourceRange: 'entire',
+        removeOnCompletion: true,
+      });
     });
 
     it('passes requested sourceRange and removeOnCompletion to the bridge', async () => {
@@ -2366,12 +2681,10 @@ describe('PremiereProTools', () => {
 
       expect(result.success).toBe(true);
       expect(result.resolvedRange).toEqual({ in: 0, out: 5, inMarked: false, outMarked: true });
-      expect(mockBridge.renderSequence).toHaveBeenCalledWith(
-        'seq-1',
-        outputPath,
-        presetPath,
-        { sourceRange: 'in_out', removeOnCompletion: false },
-      );
+      expect(mockBridge.renderSequence).toHaveBeenCalledWith('seq-1', outputPath, presetPath, {
+        sourceRange: 'in_out',
+        removeOnCompletion: false,
+      });
     });
 
     it('rejects non-absolute, unreadable, and existing output paths before queueing', async () => {
@@ -2385,9 +2698,9 @@ describe('PremiereProTools', () => {
       });
 
       expect(result.success).toBe(false);
-      expect(result.errors).toEqual(expect.arrayContaining([
-        expect.objectContaining({ code: 'OUTPUT_EXISTS' }),
-      ]));
+      expect(result.errors).toEqual(
+        expect.arrayContaining([expect.objectContaining({ code: 'OUTPUT_EXISTS' })]),
+      );
       expect(mockBridge.renderSequence).not.toHaveBeenCalled();
     });
 
@@ -2396,15 +2709,17 @@ describe('PremiereProTools', () => {
       const toolsAny = tools as any;
       jest.spyOn(toolsAny, 'getEncoderPresets').mockResolvedValue({
         success: true,
-        presets: [
-          { name: 'Named Preset', path: presetPath, source: 'user', ameVersion: '26.0' },
-        ],
+        presets: [{ name: 'Named Preset', path: presetPath, source: 'user', ameVersion: '26.0' }],
         count: 1,
         searchedDirectories: ['/presets'],
         errors: [],
         factoryPresets: { supported: false, note: 'unsupported' },
       });
-      mockBridge.renderSequence.mockResolvedValue({ success: true, queued: true, jobID: 'job-name' });
+      mockBridge.renderSequence.mockResolvedValue({
+        success: true,
+        queued: true,
+        jobID: 'job-name',
+      });
 
       const result = await tools.executeTool('export_sequence', {
         sequenceId: 'seq-1',
@@ -2419,7 +2734,12 @@ describe('PremiereProTools', () => {
         success: true,
         presets: [
           { name: 'Duplicate', path: presetPath, source: 'user', ameVersion: '26.0' },
-          { name: 'Duplicate', path: presetPath.replace('.epr', '-2.epr'), source: 'user', ameVersion: '26.0' },
+          {
+            name: 'Duplicate',
+            path: presetPath.replace('.epr', '-2.epr'),
+            source: 'user',
+            ameVersion: '26.0',
+          },
         ],
         count: 2,
         searchedDirectories: ['/presets'],
@@ -2517,7 +2837,11 @@ describe('PremiereProTools', () => {
     it('extends the placed layer to the requested duration and reports it', async () => {
       mockBridge.importMedia = jest.fn().mockResolvedValue({ id: 'pi-adj', name: 'adj.png' });
       mockBridge.addToTimeline = jest.fn().mockResolvedValue({ success: true, id: 'clip-adj' });
-      mockBridge.executeScript.mockResolvedValue({ success: true, requestedDuration: 30, actualDuration: 30 });
+      mockBridge.executeScript.mockResolvedValue({
+        success: true,
+        requestedDuration: 30,
+        actualDuration: 30,
+      });
 
       const result: any = await tools.executeTool('add_adjustment_layer', {
         sequenceId: 'seq-1',
@@ -2591,7 +2915,11 @@ describe('PremiereProTools', () => {
 
       expect(result.success).toBe(true);
       expect(result.mode).toBe('append');
-      expect(mockBridge.addToTimelineBatch).toHaveBeenCalledWith('seq-1', expect.any(Array), 'append');
+      expect(mockBridge.addToTimelineBatch).toHaveBeenCalledWith(
+        'seq-1',
+        expect.any(Array),
+        'append',
+      );
     });
 
     it('rejects an absolute-mode clip that is missing its time before calling the bridge', async () => {
@@ -2612,7 +2940,12 @@ describe('PremiereProTools', () => {
 
     it('passes absolute mode through when every clip has a time', async () => {
       mockBridge.addToTimelineBatch = jest.fn().mockResolvedValue({
-        success: true, status: 'success', placed: 1, failed: 0, total: 1, results: [],
+        success: true,
+        status: 'success',
+        placed: 1,
+        failed: 0,
+        total: 1,
+        results: [],
       });
 
       const result = await tools.executeTool('add_to_timeline_batch', {
@@ -2622,7 +2955,11 @@ describe('PremiereProTools', () => {
 
       expect(result.success).toBe(true);
       expect(result.mode).toBe('absolute');
-      expect(mockBridge.addToTimelineBatch).toHaveBeenCalledWith('seq-1', expect.any(Array), 'absolute');
+      expect(mockBridge.addToTimelineBatch).toHaveBeenCalledWith(
+        'seq-1',
+        expect.any(Array),
+        'absolute',
+      );
     });
   });
 });

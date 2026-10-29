@@ -40,7 +40,10 @@ describe('footage index — pure helpers', () => {
       ];
       const plan = priv().planFootageScan(existing, discovered);
       expect(plan.unchanged).toEqual(['/m/a.mov']);
-      expect(plan.toProbe.map((f: { path: string }) => f.path).sort()).toEqual(['/m/b.mov', '/m/c.mov']);
+      expect(plan.toProbe.map((f: { path: string }) => f.path).sort()).toEqual([
+        '/m/b.mov',
+        '/m/c.mov',
+      ]);
       expect(plan.missing).toEqual(['/m/gone.mov']);
     });
 
@@ -56,11 +59,32 @@ describe('footage index — pure helpers', () => {
 
   describe('matchFootageEntry / queryFootageIndex', () => {
     const entries = [
-      entry('/proj/hero_4k.mov', { durationSeconds: 12, videoStreamCount: 1, audioStreamCount: 1, video: { codec: 'prores', width: 3840, height: 2160, fps: 24 }, audio: { codec: 'pcm_s24le' } }),
-      entry('/proj/broll_hd.mp4', { durationSeconds: 3, videoStreamCount: 1, audioStreamCount: 0, video: { codec: 'h264', width: 1920, height: 1080, fps: 30 }, audio: null }),
-      entry('/proj/vo_take1.wav', { durationSeconds: 45, videoStreamCount: 0, audioStreamCount: 1, video: null, audio: { codec: 'pcm_s16le' } }),
+      entry('/proj/hero_4k.mov', {
+        durationSeconds: 12,
+        videoStreamCount: 1,
+        audioStreamCount: 1,
+        video: { codec: 'prores', width: 3840, height: 2160, fps: 24 },
+        audio: { codec: 'pcm_s24le' },
+      }),
+      entry('/proj/broll_hd.mp4', {
+        durationSeconds: 3,
+        videoStreamCount: 1,
+        audioStreamCount: 0,
+        video: { codec: 'h264', width: 1920, height: 1080, fps: 30 },
+        audio: null,
+      }),
+      entry('/proj/vo_take1.wav', {
+        durationSeconds: 45,
+        videoStreamCount: 0,
+        audioStreamCount: 1,
+        video: null,
+        audio: { codec: 'pcm_s16le' },
+      }),
     ];
-    const q = (c: Record<string, unknown>) => priv().queryFootageIndex(entries, c).map((e: { path: string }) => e.path);
+    const q = (c: Record<string, unknown>) =>
+      priv()
+        .queryFootageIndex(entries, c)
+        .map((e: { path: string }) => e.path);
 
     it('filters by filename substring (case-insensitive)', () => {
       expect(q({ query: 'HERO' })).toEqual(['/proj/hero_4k.mov']);
@@ -74,7 +98,10 @@ describe('footage index — pure helpers', () => {
       expect(q({ codec: 'pcm_s16le' })).toEqual(['/proj/vo_take1.wav']);
     });
     it('filters by duration and resolution ranges', () => {
-      expect(q({ minDurationSeconds: 10 }).sort()).toEqual(['/proj/hero_4k.mov', '/proj/vo_take1.wav']);
+      expect(q({ minDurationSeconds: 10 }).sort()).toEqual([
+        '/proj/hero_4k.mov',
+        '/proj/vo_take1.wav',
+      ]);
       expect(q({ minWidth: 3000 })).toEqual(['/proj/hero_4k.mov']);
     });
     it('filters by frame-rate range', () => {
@@ -95,7 +122,14 @@ describe('footage index — pure helpers', () => {
       const parsed = {
         format: { duration: '5.5', format_name: 'mov', size: '1000', bit_rate: '2000' },
         streams: [
-          { codec_type: 'video', codec_name: 'h264', width: 1920, height: 1080, r_frame_rate: '30000/1001', pix_fmt: 'yuv420p' },
+          {
+            codec_type: 'video',
+            codec_name: 'h264',
+            width: 1920,
+            height: 1080,
+            r_frame_rate: '30000/1001',
+            pix_fmt: 'yuv420p',
+          },
           { codec_type: 'audio', codec_name: 'aac', sample_rate: '48000', channels: 2 },
         ],
       };
@@ -130,8 +164,20 @@ describe('search_footage — end to end', () => {
       root: '/proj',
       entryCount: 2,
       entries: [
-        entry('/proj/hero_4k.mov', { durationSeconds: 12, videoStreamCount: 1, audioStreamCount: 1, video: { codec: 'prores', width: 3840, height: 2160, fps: 24 }, audio: { codec: 'pcm_s24le' } }),
-        entry('/proj/broll_hd.mp4', { durationSeconds: 3, videoStreamCount: 1, audioStreamCount: 0, video: { codec: 'h264', width: 1920, height: 1080, fps: 30 }, audio: null }),
+        entry('/proj/hero_4k.mov', {
+          durationSeconds: 12,
+          videoStreamCount: 1,
+          audioStreamCount: 1,
+          video: { codec: 'prores', width: 3840, height: 2160, fps: 24 },
+          audio: { codec: 'pcm_s24le' },
+        }),
+        entry('/proj/broll_hd.mp4', {
+          durationSeconds: 3,
+          videoStreamCount: 1,
+          audioStreamCount: 0,
+          video: { codec: 'h264', width: 1920, height: 1080, fps: 30 },
+          audio: null,
+        }),
       ],
     };
     await fs.writeFile(indexPath, JSON.stringify(doc), 'utf8');
@@ -157,7 +203,9 @@ describe('search_footage — end to end', () => {
 
   it('fails honestly when no index exists', async () => {
     const tools = new PremiereProTools(noBridge);
-    const result = await tools.executeTool('search_footage', { indexPath: join(tmpdir(), 'premiere-mcp-no-such-index.json') });
+    const result = await tools.executeTool('search_footage', {
+      indexPath: join(tmpdir(), 'premiere-mcp-no-such-index.json'),
+    });
     expect(result.success).toBe(false);
     expect(String(result.error)).toMatch(/no footage index/i);
   });
@@ -173,7 +221,9 @@ describe('index_footage — end to end', () => {
 
   it('rejects a rootPath that does not exist', async () => {
     const tools = new PremiereProTools(noBridge);
-    const result = await tools.executeTool('index_footage', { rootPath: join(tmpdir(), 'premiere-mcp-nope-dir-xyz') });
+    const result = await tools.executeTool('index_footage', {
+      rootPath: join(tmpdir(), 'premiere-mcp-nope-dir-xyz'),
+    });
     expect(result.success).toBe(false);
     expect(String(result.error)).toMatch(/not found|unreadable/i);
   });
@@ -185,7 +235,14 @@ describe('index_footage — end to end', () => {
     const dir = await fs.mkdtemp(join(tmpdir(), 'premiere-mcp-realfootage-'));
     const clip = join(dir, 'testclip.mov');
     // Generate a tiny real clip so ffprobe returns genuine metadata.
-    const gen = spawnSync('ffmpeg', ['-y', '-f', 'lavfi', '-i', 'testsrc=duration=1:size=320x240:rate=25', clip]);
+    const gen = spawnSync('ffmpeg', [
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'testsrc=duration=1:size=320x240:rate=25',
+      clip,
+    ]);
     if (gen.status !== 0) return; // ffmpeg present but lavfi unavailable — nothing to assert
     const indexPath = join(dir, 'idx.json');
 

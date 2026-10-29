@@ -34,7 +34,12 @@ import {
 } from './ffmpeg.js';
 import { escapeDrawtextValue, resolveFontFile } from './screen-tap.js';
 import { makeEvidence, secondsToTimecode, timePosition } from './provenance.js';
-import { analyzeMotion, DEFAULT_DIFF_THRESHOLDS, type DiffThresholds, type MotionSummary } from './frame-diff.js';
+import {
+  analyzeMotion,
+  DEFAULT_DIFF_THRESHOLDS,
+  type DiffThresholds,
+  type MotionSummary,
+} from './frame-diff.js';
 import type { CaptureEvidence, CaptureTapKind, Known } from './types.js';
 import { UNKNOWN } from './types.js';
 
@@ -84,16 +89,37 @@ export function planFrameTimes(opts: {
   const maxFrames = opts.maxFrames ?? 64;
 
   if (!Number.isFinite(fps) || fps <= 0) {
-    return { frames: [], fps: 0, warnings, error: 'A positive frame rate is required to snap capture times onto real frames.' };
+    return {
+      frames: [],
+      fps: 0,
+      warnings,
+      error: 'A positive frame rate is required to snap capture times onto real frames.',
+    };
   }
   if (!Number.isFinite(startSeconds) || !Number.isFinite(endSeconds)) {
-    return { frames: [], fps, warnings, error: 'startSeconds and endSeconds must both be finite numbers.' };
+    return {
+      frames: [],
+      fps,
+      warnings,
+      error: 'startSeconds and endSeconds must both be finite numbers.',
+    };
   }
   if (endSeconds < startSeconds) {
-    return { frames: [], fps, warnings, error: `endSeconds (${endSeconds}) is before startSeconds (${startSeconds}).` };
+    return {
+      frames: [],
+      fps,
+      warnings,
+      error: `endSeconds (${endSeconds}) is before startSeconds (${startSeconds}).`,
+    };
   }
   if (opts.count === undefined && opts.everyNFrames === undefined) {
-    return { frames: [], fps, warnings, error: 'Specify either count (how many frames to sample over the range) or everyNFrames (a fixed frame stride). Neither is defaulted.' };
+    return {
+      frames: [],
+      fps,
+      warnings,
+      error:
+        'Specify either count (how many frames to sample over the range) or everyNFrames (a fixed frame stride). Neither is defaulted.',
+    };
   }
 
   const startFrame = Math.round(startSeconds * fps);
@@ -104,18 +130,30 @@ export function planFrameTimes(opts: {
   if (opts.everyNFrames !== undefined) {
     const stride = Math.trunc(opts.everyNFrames);
     if (!Number.isFinite(stride) || stride < 1) {
-      return { frames: [], fps, warnings, error: `everyNFrames must be a whole number >= 1 (got ${String(opts.everyNFrames)}).` };
+      return {
+        frames: [],
+        fps,
+        warnings,
+        error: `everyNFrames must be a whole number >= 1 (got ${String(opts.everyNFrames)}).`,
+      };
     }
     for (let f = startFrame; f <= endFrame; f += stride) frameNumbers.push(f);
   } else {
     const count = Math.trunc(opts.count as number);
     if (!Number.isFinite(count) || count < 1) {
-      return { frames: [], fps, warnings, error: `count must be a whole number >= 1 (got ${String(opts.count)}).` };
+      return {
+        frames: [],
+        fps,
+        warnings,
+        error: `count must be a whole number >= 1 (got ${String(opts.count)}).`,
+      };
     }
     if (count === 1) {
       frameNumbers = [startFrame];
     } else if (spanFrames === 0) {
-      warnings.push(`The range is a single frame (${startFrame}), so ${count} samples collapse to 1.`);
+      warnings.push(
+        `The range is a single frame (${startFrame}), so ${count} samples collapse to 1.`,
+      );
       frameNumbers = [startFrame];
     } else {
       for (let i = 0; i < count; i += 1) {
@@ -127,12 +165,16 @@ export function planFrameTimes(opts: {
   // Snapping can collide when the stride is finer than one frame.
   const deduped = [...new Set(frameNumbers)].sort((a, b) => a - b);
   if (deduped.length !== frameNumbers.length) {
-    warnings.push(`${frameNumbers.length - deduped.length} requested sample(s) landed on a frame already being captured and were dropped: at ${fps}fps this range only contains ${spanFrames + 1} distinct frame(s).`);
+    warnings.push(
+      `${frameNumbers.length - deduped.length} requested sample(s) landed on a frame already being captured and were dropped: at ${fps}fps this range only contains ${spanFrames + 1} distinct frame(s).`,
+    );
   }
 
   let final = deduped;
   if (final.length > maxFrames) {
-    warnings.push(`Plan trimmed from ${final.length} to the ${maxFrames}-frame cap. Raise maxFrames deliberately, or capture a shorter range.`);
+    warnings.push(
+      `Plan trimmed from ${final.length} to the ${maxFrames}-frame cap. Raise maxFrames deliberately, or capture a shorter range.`,
+    );
     final = final.slice(0, maxFrames);
   }
 
@@ -149,7 +191,10 @@ export function planFrameTimes(opts: {
 }
 
 /** Pure: choose a contact-sheet grid. Columns first, rows follow. */
-export function planContactSheetGrid(frameCount: number, columns?: number): { columns: number; rows: number } {
+export function planContactSheetGrid(
+  frameCount: number,
+  columns?: number,
+): { columns: number; rows: number } {
   const n = Math.max(1, Math.trunc(frameCount));
   const cols = columns && columns > 0 ? Math.trunc(columns) : Math.min(n, Math.ceil(Math.sqrt(n)));
   return { columns: cols, rows: Math.ceil(n / cols) };
@@ -179,7 +224,21 @@ export function buildBurnInArgs(opts: {
     'boxcolor=black@0.75',
     `boxborderw=${Math.max(2, Math.round(size / 4))}`,
   ].join(':');
-  return ['-hide_banner', '-loglevel', 'error', '-i', opts.inputPath, '-vf', filter, '-frames:v', '1', '-update', '1', '-y', opts.outputPath];
+  return [
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-i',
+    opts.inputPath,
+    '-vf',
+    filter,
+    '-frames:v',
+    '1',
+    '-update',
+    '1',
+    '-y',
+    opts.outputPath,
+  ];
 }
 
 /** Pure: argv to tile a numbered PNG sequence into one contact sheet. */
@@ -195,10 +254,21 @@ export function buildContactSheetArgs(opts: {
   const margin = opts.margin ?? 6;
   const padding = opts.padding ?? 6;
   return [
-    '-hide_banner', '-loglevel', 'error',
-    '-framerate', '1', '-i', opts.inputPattern,
-    '-vf', `tile=${opts.columns}x${opts.rows}:margin=${margin}:padding=${padding}:color=black`,
-    '-frames:v', '1', '-update', '1', '-y', opts.outputPath,
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-framerate',
+    '1',
+    '-i',
+    opts.inputPattern,
+    '-vf',
+    `tile=${opts.columns}x${opts.rows}:margin=${margin}:padding=${padding}:color=black`,
+    '-frames:v',
+    '1',
+    '-update',
+    '1',
+    '-y',
+    opts.outputPath,
   ];
 }
 
@@ -210,10 +280,19 @@ export function buildMotionClipArgs(opts: {
   framerate?: number | undefined;
 }): string[] {
   return [
-    '-hide_banner', '-loglevel', 'error',
-    '-framerate', String(opts.framerate ?? 6), '-i', opts.inputPattern,
-    '-vf', 'pad=ceil(iw/2)*2:ceil(ih/2)*2',
-    '-pix_fmt', 'yuv420p', '-y', opts.outputPath,
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-framerate',
+    String(opts.framerate ?? 6),
+    '-i',
+    opts.inputPattern,
+    '-vf',
+    'pad=ceil(iw/2)*2:ceil(ih/2)*2',
+    '-pix_fmt',
+    'yuv420p',
+    '-y',
+    opts.outputPath,
   ];
 }
 
@@ -250,7 +329,12 @@ export interface FrameSource {
  * this module free of any dependency on the tool layer or the bridge.
  */
 export function renderTapFrameSource(
-  exportFrameFn: (sequenceId: string, time: number, outputPath: string, format: string) => Promise<any>,
+  exportFrameFn: (
+    sequenceId: string,
+    time: number,
+    outputPath: string,
+    format: string,
+  ) => Promise<any>,
   sequenceId: string,
   format: 'png' | 'jpg' | 'tiff' = 'png',
 ): FrameSource {
@@ -262,7 +346,10 @@ export function renderTapFrameSource(
       if (res && res.success) {
         return { success: true, path: res.outputPath || req.outputPath };
       }
-      return { success: false, error: (res && res.error) || `Premiere returned no frame for t=${req.seconds}s.` };
+      return {
+        success: false,
+        error: (res && res.error) || `Premiere returned no frame for t=${req.seconds}s.`,
+      };
     },
   };
 }
@@ -281,24 +368,40 @@ export function mediaFileFrameSource(
 ): FrameSource {
   return {
     tap,
-    description: tap === 'export-file'
-      ? `Frames decoded from the Premiere export at ${mediaPath} (composited render, read back off disk)`
-      : `Frames decoded from the source media at ${mediaPath} (no timeline composite)`,
+    description:
+      tap === 'export-file'
+        ? `Frames decoded from the Premiere export at ${mediaPath} (composited render, read back off disk)`
+        : `Frames decoded from the source media at ${mediaPath} (no timeline composite)`,
     async capture(req) {
-      const res = await runBinary(ffmpegCmd(), [
-        '-hide_banner', '-loglevel', 'error',
-        // -ss before -i is the fast seek; ffmpeg then decodes the frame at that
-        // point. Accurate for our purposes because we ask for keyframe-accurate
-        // decode with -accurate_seek (default when -ss precedes -i for files).
-        '-accurate_seek', '-ss', String(req.seconds),
-        '-i', mediaPath,
-        '-frames:v', '1', '-update', '1', '-y', req.outputPath,
-      ], 60_000);
+      const res = await runBinary(
+        ffmpegCmd(),
+        [
+          '-hide_banner',
+          '-loglevel',
+          'error',
+          // -ss before -i is the fast seek; ffmpeg then decodes the frame at that
+          // point. Accurate for our purposes because we ask for keyframe-accurate
+          // decode with -accurate_seek (default when -ss precedes -i for files).
+          '-accurate_seek',
+          '-ss',
+          String(req.seconds),
+          '-i',
+          mediaPath,
+          '-frames:v',
+          '1',
+          '-update',
+          '1',
+          '-y',
+          req.outputPath,
+        ],
+        60_000,
+      );
       const size = await fileSize(req.outputPath);
       if (typeof size === 'number' && size > 0) return { success: true, path: req.outputPath };
       return {
         success: false,
-        error: `ffmpeg wrote no frame at t=${req.seconds}s from ${mediaPath} (exit ${res.code}). ${res.stderr.slice(-300)}`.trim(),
+        error:
+          `ffmpeg wrote no frame at t=${req.seconds}s from ${mediaPath} (exit ${res.code}). ${res.stderr.slice(-300)}`.trim(),
       };
     },
   };
@@ -362,7 +465,14 @@ export async function captureFrameStrip(opts: {
     return { success: false, error: opts.plan.error, frames, failures, burnedIn: false, notes };
   }
   if (opts.plan.frames.length === 0) {
-    return { success: false, error: 'The frame plan is empty, so there is nothing to capture.', frames, failures, burnedIn: false, notes };
+    return {
+      success: false,
+      error: 'The frame plan is empty, so there is nothing to capture.',
+      frames,
+      failures,
+      burnedIn: false,
+      notes,
+    };
   }
 
   const ffmpeg = ffmpegCmd();
@@ -372,26 +482,40 @@ export async function captureFrameStrip(opts: {
 
   // 1. Capture the raw frames.
   for (const planned of opts.plan.frames) {
-    const outPath = join(opts.workDir, `${prefix}_raw_${String(planned.index).padStart(4, '0')}.png`);
+    const outPath = join(
+      opts.workDir,
+      `${prefix}_raw_${String(planned.index).padStart(4, '0')}.png`,
+    );
     const res = await opts.source.capture({ ...planned, outputPath: outPath });
     if (!res.success || !res.path) {
-      failures.push({ index: planned.index, seconds: planned.seconds, timecode: planned.timecode, error: res.error || 'The frame source reported no frame and no reason.' });
+      failures.push({
+        index: planned.index,
+        seconds: planned.seconds,
+        timecode: planned.timecode,
+        error: res.error || 'The frame source reported no frame and no reason.',
+      });
       continue;
     }
     const [dims, size] = await Promise.all([
-      ffmpegOk ? probeDimensions(res.path) : Promise.resolve({ width: UNKNOWN as Known<number>, height: UNKNOWN as Known<number> }),
+      ffmpegOk
+        ? probeDimensions(res.path)
+        : Promise.resolve({ width: UNKNOWN as Known<number>, height: UNKNOWN as Known<number> }),
       fileSize(res.path),
     ]);
-    frames.push(makeEvidence({
-      tap: opts.source.tap,
-      path: res.path,
-      width: dims.width,
-      height: dims.height,
-      at: timePosition(planned.seconds, opts.plan.fps),
-      moving: false,
-      sizeBytes: size,
-      caveats: ffmpegOk ? [] : ['Resolution is unknown: ffprobe was not runnable, so the frame was not measured.'],
-    }));
+    frames.push(
+      makeEvidence({
+        tap: opts.source.tap,
+        path: res.path,
+        width: dims.width,
+        height: dims.height,
+        at: timePosition(planned.seconds, opts.plan.fps),
+        moving: false,
+        sizeBytes: size,
+        caveats: ffmpegOk
+          ? []
+          : ['Resolution is unknown: ffprobe was not runnable, so the frame was not measured.'],
+      }),
+    );
   }
 
   if (frames.length === 0) {
@@ -407,7 +531,9 @@ export async function captureFrameStrip(opts: {
     };
   }
   if (failures.length) {
-    notes.push(`${failures.length} of ${opts.plan.frames.length} planned frame(s) failed and are absent from the sheet. The gaps are real, not cosmetic.`);
+    notes.push(
+      `${failures.length} of ${opts.plan.frames.length} planned frame(s) failed and are absent from the sheet. The gaps are real, not cosmetic.`,
+    );
   }
 
   // 2. Measure motion on the RAW frames, before anything is drawn on them.
@@ -430,7 +556,10 @@ export async function captureFrameStrip(opts: {
       failures,
       motion,
       burnedIn: false,
-      notes: [...notes, `ffmpeg ('${ffmpeg}') is not runnable, so no burn-in, contact sheet or review clip was produced. The raw frames above are still real.`],
+      notes: [
+        ...notes,
+        `ffmpeg ('${ffmpeg}') is not runnable, so no burn-in, contact sheet or review clip was produced. The raw frames above are still real.`,
+      ],
       install: FFMPEG_INSTALL_GUIDANCE,
     };
   }
@@ -450,20 +579,28 @@ export async function captureFrameStrip(opts: {
         evidence.at.timecode === UNKNOWN ? 'tc unknown' : evidence.at.timecode,
         evidence.at.frame === UNKNOWN ? '' : `  f${evidence.at.frame}`,
       ].join('');
-      const res = await runBinary(ffmpeg, buildBurnInArgs({ inputPath: src, outputPath: seqPath, fontFile, text }), 60_000);
+      const res = await runBinary(
+        ffmpeg,
+        buildBurnInArgs({ inputPath: src, outputPath: seqPath, fontFile, text }),
+        60_000,
+      );
       const size = await fileSize(seqPath);
       if (res.ok && typeof size === 'number' && size > 0) {
         burnedIn = true;
         sheetInputs.push(seqPath);
         continue;
       }
-      notes.push(`Burn-in failed for frame ${i} (${evidence.at.timecode}); the unlabelled frame was used instead.`);
+      notes.push(
+        `Burn-in failed for frame ${i} (${evidence.at.timecode}); the unlabelled frame was used instead.`,
+      );
     }
     await fs.copyFile(src, seqPath);
     sheetInputs.push(seqPath);
   }
   if (!fontFile && !opts.skipBurnIn) {
-    notes.push('No usable font file was found, so the contact sheet is UNLABELLED: the frame order is the plan order, but no timecode is drawn on the pixels. Set PREMIERE_MCP_CAPTURE_FONT to a .ttf/.ttc to get burn-ins.');
+    notes.push(
+      'No usable font file was found, so the contact sheet is UNLABELLED: the frame order is the plan order, but no timecode is drawn on the pixels. Set PREMIERE_MCP_CAPTURE_FONT to a .ttf/.ttc to get burn-ins.',
+    );
   }
 
   const pattern = join(opts.workDir, `${prefix}_sheet_%04d.png`);
@@ -472,12 +609,16 @@ export async function captureFrameStrip(opts: {
   let contactSheet: CaptureEvidence | undefined;
   const grid = planContactSheetGrid(sheetInputs.length, opts.columns);
   const sheetPath = join(opts.workDir, `${prefix}_contactsheet.png`);
-  const sheetRes = await runBinary(ffmpeg, buildContactSheetArgs({
-    inputPattern: pattern,
-    outputPath: sheetPath,
-    columns: grid.columns,
-    rows: grid.rows,
-  }), 120_000);
+  const sheetRes = await runBinary(
+    ffmpeg,
+    buildContactSheetArgs({
+      inputPattern: pattern,
+      outputPath: sheetPath,
+      columns: grid.columns,
+      rows: grid.rows,
+    }),
+    120_000,
+  );
   const sheetSize = await fileSize(sheetPath);
   if (typeof sheetSize === 'number' && sheetSize > 0) {
     const dims = await probeDimensions(sheetPath);
@@ -498,7 +639,9 @@ export async function captureFrameStrip(opts: {
       ],
     });
   } else {
-    notes.push(`The contact sheet could not be assembled (ffmpeg exit ${sheetRes.code}): ${sheetRes.stderr.slice(-300)}`);
+    notes.push(
+      `The contact sheet could not be assembled (ffmpeg exit ${sheetRes.code}): ${sheetRes.stderr.slice(-300)}`,
+    );
   }
 
   // 5. Review clip.
@@ -506,7 +649,11 @@ export async function captureFrameStrip(opts: {
   if (!opts.skipMotionClip && sheetInputs.length >= 2) {
     const clipPath = join(opts.workDir, `${prefix}_review.mp4`);
     const reviewFps = opts.reviewFps ?? 6;
-    const clipRes = await runBinary(ffmpeg, buildMotionClipArgs({ inputPattern: pattern, outputPath: clipPath, framerate: reviewFps }), 120_000);
+    const clipRes = await runBinary(
+      ffmpeg,
+      buildMotionClipArgs({ inputPattern: pattern, outputPath: clipPath, framerate: reviewFps }),
+      120_000,
+    );
     const clipSize = await fileSize(clipPath);
     if (typeof clipSize === 'number' && clipSize > 0) {
       const dims = await probeDimensions(clipPath);
@@ -524,7 +671,9 @@ export async function captureFrameStrip(opts: {
         ],
       });
     } else {
-      notes.push(`The review clip could not be assembled (ffmpeg exit ${clipRes.code}): ${clipRes.stderr.slice(-300)}`);
+      notes.push(
+        `The review clip could not be assembled (ffmpeg exit ${clipRes.code}): ${clipRes.stderr.slice(-300)}`,
+      );
     }
   }
 

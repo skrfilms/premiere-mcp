@@ -32,19 +32,36 @@ export class AudioTools extends ExportRenderTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async jCut(sequenceId: string | undefined, videoTrackIndex: number, clipIndex: number, frames: number): Promise<any> {
+  protected async jCut(
+    sequenceId: string | undefined,
+    videoTrackIndex: number,
+    clipIndex: number,
+    frames: number,
+  ): Promise<any> {
     // J-cut: the clip's linked audio starts \`frames\` earlier than its picture. The audio edit
     // point rolls, so the previous audio clip on that track (if it abuts) gives up the same span.
     return await this.audioRoll(sequenceId, videoTrackIndex, clipIndex, frames, 'head', 'j_cut');
   }
 
-  protected async lCut(sequenceId: string | undefined, videoTrackIndex: number, clipIndex: number, frames: number): Promise<any> {
+  protected async lCut(
+    sequenceId: string | undefined,
+    videoTrackIndex: number,
+    clipIndex: number,
+    frames: number,
+  ): Promise<any> {
     // L-cut: the clip's linked audio runs \`frames\` past the end of its picture, rolling the next
     // audio clip's head if it abuts.
     return await this.audioRoll(sequenceId, videoTrackIndex, clipIndex, frames, 'tail', 'l_cut');
   }
 
-  private async audioRoll(sequenceId: string | undefined, videoTrackIndex: number, clipIndex: number, frames: number, edge: 'head' | 'tail', type: string): Promise<any> {
+  private async audioRoll(
+    sequenceId: string | undefined,
+    videoTrackIndex: number,
+    clipIndex: number,
+    frames: number,
+    edge: 'head' | 'tail',
+    type: string,
+  ): Promise<any> {
     // The old versions wrote the audio inPoint/outPoint and waited for the timeline to follow.
     // inPoint only slips and outPoint does nothing visible (see trim-lib.ts), so they could only
     // ever report a half-applied edit or nothing at all.
@@ -68,7 +85,13 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected async fadeAudio(sequenceId: string | undefined, ati: number, ci: number, durationFrames: number, direction: 'in' | 'out'): Promise<any> {
+  protected async fadeAudio(
+    sequenceId: string | undefined,
+    ati: number,
+    ci: number,
+    durationFrames: number,
+    direction: 'in' | 'out',
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(sequenceId)};
@@ -120,7 +143,12 @@ export class AudioTools extends ExportRenderTools {
    * wrote raw dB into it — which, once an Amplify was present, would have written e.g. 6 into a
    * 0..1 field.
    */
-  protected async setClipGain(sequenceId: string | undefined, ati: number, ci: number, gainDb: number): Promise<any> {
+  protected async setClipGain(
+    sequenceId: string | undefined,
+    ati: number,
+    ci: number,
+    gainDb: number,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var wantDb = Number(${JSON.stringify(gainDb)});
@@ -163,7 +191,12 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected async audioCrossfadeAtCut(sequenceId: string | undefined, ati: number, clipIndex: number, durationFrames: number): Promise<any> {
+  protected async audioCrossfadeAtCut(
+    sequenceId: string | undefined,
+    ati: number,
+    clipIndex: number,
+    durationFrames: number,
+  ): Promise<any> {
     // Was "Invalid parameter" on every call, for two reasons in one line:
     //
     //   clip.addTransition(transition, 2, durTicks, false)
@@ -232,7 +265,12 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected async muteClipAudio(sequenceId: string | undefined, ti: number, ci: number, mute: boolean): Promise<any> {
+  protected async muteClipAudio(
+    sequenceId: string | undefined,
+    ti: number,
+    ci: number,
+    mute: boolean,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(sequenceId)};
@@ -272,7 +310,25 @@ export class AudioTools extends ExportRenderTools {
   protected loudnessReport(filePath: string): any {
     try {
       // ebur128 prints its summary at the end of stderr.
-      const result = runFf('ffmpeg', ['-hide_banner', '-nostats', '-i', filePath, '-vn', '-filter_complex', 'ebur128=peak=true', '-f', 'null', '-'], { timeoutMs: 180000, mergeStderr: true }).split('\n').slice(-20).join('\n');
+      const result = runFf(
+        'ffmpeg',
+        [
+          '-hide_banner',
+          '-nostats',
+          '-i',
+          filePath,
+          '-vn',
+          '-filter_complex',
+          'ebur128=peak=true',
+          '-f',
+          'null',
+          '-',
+        ],
+        { timeoutMs: 180000, mergeStderr: true },
+      )
+        .split('\n')
+        .slice(-20)
+        .join('\n');
       const lufsMatch = result.match(/I:\s*([-\d.]+)\s*LUFS/);
       const peakMatch = result.match(/Peak:\s*([-\d.]+)/);
       const lraMatch = result.match(/LRA:\s*([-\d.]+)\s*LU/);
@@ -282,14 +338,19 @@ export class AudioTools extends ExportRenderTools {
         integratedLufs: lufsMatch?.[1] ? parseFloat(lufsMatch[1]) : null,
         truePeakDbfs: peakMatch?.[1] ? parseFloat(peakMatch[1]) : null,
         lra: lraMatch?.[1] ? parseFloat(lraMatch[1]) : null,
-        rawOutput: result.slice(-500)
+        rawOutput: result.slice(-500),
       };
     } catch (e: any) {
       return { success: false, error: e.message };
     }
   }
 
-  protected async normalizeClipPeaks(sequenceId: string | undefined, ati: number, ci: number, targetDbfs: number): Promise<any> {
+  protected async normalizeClipPeaks(
+    sequenceId: string | undefined,
+    ati: number,
+    ci: number,
+    targetDbfs: number,
+  ): Promise<any> {
     // Get the source media path first
     const pathResult = await this.bridge.executeScript(`
       try {
@@ -299,10 +360,26 @@ export class AudioTools extends ExportRenderTools {
         return JSON.stringify({success:true,path:clip.projectItem ? String(clip.projectItem.getMediaPath()) : null,name:String(clip.name)});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
-    if (!pathResult.success || !pathResult.path) return { success: false, error: 'Could not get media path' };
+    if (!pathResult.success || !pathResult.path)
+      return { success: false, error: 'Could not get media path' };
     // Analyze peak
     try {
-      const vol = runFf('ffmpeg', ['-hide_banner', '-nostats', '-i', String(pathResult.path), '-vn', '-filter:a', 'volumedetect', '-f', 'null', '-'], { timeoutMs: 60000, mergeStderr: true });
+      const vol = runFf(
+        'ffmpeg',
+        [
+          '-hide_banner',
+          '-nostats',
+          '-i',
+          String(pathResult.path),
+          '-vn',
+          '-filter:a',
+          'volumedetect',
+          '-f',
+          'null',
+          '-',
+        ],
+        { timeoutMs: 60000, mergeStderr: true },
+      );
       const maxVol = vol.match(/max_volume:\s*([-\d.]+)/);
       if (!maxVol) return { success: false, error: 'Could not detect peak volume' };
       const currentPeakDb = parseFloat(maxVol[1] ?? 'NaN');
@@ -324,7 +401,13 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected async applyAudioEffectQe(trackIndex: number, clipIndex: number, effectName: string, audioTrack: boolean, sequenceId?: string): Promise<any> {
+  protected async applyAudioEffectQe(
+    trackIndex: number,
+    clipIndex: number,
+    effectName: string,
+    audioTrack: boolean,
+    sequenceId?: string,
+  ): Promise<any> {
     const remapped = AudioTools.OBSOLETE_AUDIO_EFFECTS[effectName];
     const requested = effectName;
     const target = remapped ?? effectName;
@@ -378,11 +461,19 @@ export class AudioTools extends ExportRenderTools {
     return result;
   }
 
-  protected async denoiseClip(trackIndex: number, clipIndex: number, sequenceId?: string): Promise<any> {
+  protected async denoiseClip(
+    trackIndex: number,
+    clipIndex: number,
+    sequenceId?: string,
+  ): Promise<any> {
     return await this.applyAudioEffectQe(trackIndex, clipIndex, 'DeNoise', true, sequenceId);
   }
 
-  protected async listAudioEffectsOnClip(trackIndex: number, clipIndex: number, sequenceId?: string): Promise<any> {
+  protected async listAudioEffectsOnClip(
+    trackIndex: number,
+    clipIndex: number,
+    sequenceId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -407,20 +498,50 @@ export class AudioTools extends ExportRenderTools {
     try {
       // Whole-file astats summary from stderr. The old amovie= source put the path inside a
       // filtergraph through a shell, and reset=1 reported only the first 20 audio frames.
-      const out = runFf('ffmpeg', ['-hide_banner', '-nostats', '-i', filePath, '-vn', '-af', 'astats=measure_perchannel=none', '-f', 'null', '-'], { timeoutMs: 180000, mergeStderr: true });
+      const out = runFf(
+        'ffmpeg',
+        [
+          '-hide_banner',
+          '-nostats',
+          '-i',
+          filePath,
+          '-vn',
+          '-af',
+          'astats=measure_perchannel=none',
+          '-f',
+          'null',
+          '-',
+        ],
+        { timeoutMs: 180000, mergeStderr: true },
+      );
       // The Overall block follows the per-channel ones; read its fields only.
       const overall = out.slice(out.lastIndexOf('Overall'));
       const field = (label: string): number | null => {
         const m = overall.match(new RegExp(label + ':\\s*(-?[\\d.]+)'));
         return m?.[1] !== undefined ? parseFloat(m[1]) : null;
       };
-      const res = { peakDb: field('Peak level dB'), rmsDb: field('RMS level dB'), crestFactor: field('Crest factor'), dcOffset: field('DC offset') };
-      if (res.peakDb === null && res.rmsDb === null) return { success: false, error: 'ffmpeg reported no audio statistics; the file may have no audio stream.' };
+      const res = {
+        peakDb: field('Peak level dB'),
+        rmsDb: field('RMS level dB'),
+        crestFactor: field('Crest factor'),
+        dcOffset: field('DC offset'),
+      };
+      if (res.peakDb === null && res.rmsDb === null)
+        return {
+          success: false,
+          error: 'ffmpeg reported no audio statistics; the file may have no audio stream.',
+        };
       return { success: true, filePath, ...res };
-    } catch (e: any) { return { success: false, error: e.message }; }
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
   }
 
-  protected async setTrackVolumeKeyframes(trackIndex: number, keyframes: Array<{timeSecs: number, level: number}>, sequenceId?: string): Promise<any> {
+  protected async setTrackVolumeKeyframes(
+    trackIndex: number,
+    keyframes: Array<{ timeSecs: number; level: number }>,
+    sequenceId?: string,
+  ): Promise<any> {
     const kfJson = JSON.stringify(keyframes);
     return await this.bridge.executeScript(`
       try {
@@ -445,7 +566,10 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected async batchAddAudioCrossfades(durationSeconds: number, sequenceId?: string): Promise<any> {
+  protected async batchAddAudioCrossfades(
+    durationSeconds: number,
+    sequenceId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -502,7 +626,9 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  private parseSilenceIntervals(stderr: string): Array<{ start: number; end: number; duration: number }> {
+  private parseSilenceIntervals(
+    stderr: string,
+  ): Array<{ start: number; end: number; duration: number }> {
     const starts: number[] = [];
     const ends: number[] = [];
     const startRe = /silence_start:\s*(-?[\d.]+)/g;
@@ -532,7 +658,7 @@ export class AudioTools extends ExportRenderTools {
     mediaPath?: string,
     projectItemId?: string,
     noiseThresholdDb = -30,
-    minDurationSeconds = 1.5
+    minDurationSeconds = 1.5,
   ): Promise<any> {
     let resolvedPath = mediaPath;
 
@@ -552,15 +678,20 @@ export class AudioTools extends ExportRenderTools {
     if (!ffmpegAvailable) {
       return {
         success: false,
-        error: 'ffmpeg was not found on PATH. detect_silence analyzes audio via ffmpeg\'s silencedetect filter, not Premiere\'s scripting API (which cannot read audio levels at all). Install ffmpeg (e.g. `brew install ffmpeg` on macOS) and try again.'
+        error:
+          "ffmpeg was not found on PATH. detect_silence analyzes audio via ffmpeg's silencedetect filter, not Premiere's scripting API (which cannot read audio levels at all). Install ffmpeg (e.g. `brew install ffmpeg` on macOS) and try again.",
       };
     }
 
     return new Promise((resolve) => {
       const ffmpegArgs = [
-        '-i', resolvedPath as string,
-        '-af', `silencedetect=noise=${noiseThresholdDb}dB:d=${minDurationSeconds}`,
-        '-f', 'null', '-'
+        '-i',
+        resolvedPath as string,
+        '-af',
+        `silencedetect=noise=${noiseThresholdDb}dB:d=${minDurationSeconds}`,
+        '-f',
+        'null',
+        '-',
       ];
       const proc = spawn('ffmpeg', ffmpegArgs);
       let stderr = '';
@@ -579,7 +710,7 @@ export class AudioTools extends ExportRenderTools {
             success: false,
             error: `ffmpeg exited with code ${code} and produced no silence data. This usually means the file couldn't be read.`,
             mediaPath: resolvedPath,
-            ffmpegStderr: stderr.slice(-2000)
+            ffmpegStderr: stderr.slice(-2000),
           });
           return;
         }
@@ -590,7 +721,7 @@ export class AudioTools extends ExportRenderTools {
           noiseThresholdDb,
           minDurationSeconds,
           silenceIntervals,
-          note: 'Detection only -- nothing was cut. Use split_clip/ripple_delete/razor_timeline_at_time on a sequence to remove any of these intervals.'
+          note: 'Detection only -- nothing was cut. Use split_clip/ripple_delete/razor_timeline_at_time on a sequence to remove any of these intervals.',
         });
       });
     });
@@ -607,8 +738,14 @@ export class AudioTools extends ExportRenderTools {
     const steps: number[] = [];
     let remaining = speed;
     // Factor down while too fast (>2), and up while too slow (<0.5).
-    while (remaining > 2.0 + 1e-9) { steps.push(2.0); remaining /= 2.0; }
-    while (remaining < 0.5 - 1e-9) { steps.push(0.5); remaining *= 2.0; }
+    while (remaining > 2.0 + 1e-9) {
+      steps.push(2.0);
+      remaining /= 2.0;
+    }
+    while (remaining < 0.5 - 1e-9) {
+      steps.push(0.5);
+      remaining *= 2.0;
+    }
     steps.push(Math.round(remaining * 1e6) / 1e6);
     return steps.map((s) => `atempo=${s}`).join(',');
   }
@@ -637,7 +774,8 @@ export class AudioTools extends ExportRenderTools {
       if (resolved.error) return { success: false, error: resolved.error };
       resolvedPath = resolved.path;
     }
-    if (!resolvedPath) return { success: false, error: 'Provide either mediaPath or projectItemId' };
+    if (!resolvedPath)
+      return { success: false, error: 'Provide either mediaPath or projectItemId' };
 
     try {
       await fs.access(resolvedPath, fsConstants.R_OK);
@@ -656,29 +794,50 @@ export class AudioTools extends ExportRenderTools {
 
     const loudnormBase = `I=${targetLufs}:TP=${truePeakDb}:LRA=${loudnessRange}`;
     const ext = extname(resolvedPath) || '.wav';
-    const outFile = (outputPath && outputPath.trim())
-      || join(dirname(resolvedPath), `${basename(resolvedPath, extname(resolvedPath))}_norm${targetLufs}LUFS${ext}`);
+    const outFile =
+      (outputPath && outputPath.trim()) ||
+      join(
+        dirname(resolvedPath),
+        `${basename(resolvedPath, extname(resolvedPath))}_norm${targetLufs}LUFS${ext}`,
+      );
 
     // Pass 1: measure. loudnorm prints a JSON blob to stderr in print_format=json.
     const measured = await new Promise<{ ok: boolean; data?: any; stderr: string }>((resolve) => {
-      const argv = ['-i', resolvedPath as string, '-af', `loudnorm=${loudnormBase}:print_format=json`, '-f', 'null', '-'];
+      const argv = [
+        '-i',
+        resolvedPath as string,
+        '-af',
+        `loudnorm=${loudnormBase}:print_format=json`,
+        '-f',
+        'null',
+        '-',
+      ];
       const proc = spawn(ffmpeg, argv);
       let stderr = '';
-      proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+      proc.stderr.on('data', (chunk) => {
+        stderr += chunk.toString();
+      });
       proc.on('error', () => resolve({ ok: false, stderr }));
       proc.on('close', () => {
         // The JSON is the last {...} block in stderr.
         const match = stderr.match(/\{[\s\S]*?\}/g);
-        if (!match || match.length === 0) { resolve({ ok: false, stderr }); return; }
-        try { resolve({ ok: true, data: JSON.parse(match[match.length - 1] as string), stderr }); }
-        catch { resolve({ ok: false, stderr }); }
+        if (!match || match.length === 0) {
+          resolve({ ok: false, stderr });
+          return;
+        }
+        try {
+          resolve({ ok: true, data: JSON.parse(match[match.length - 1] as string), stderr });
+        } catch {
+          resolve({ ok: false, stderr });
+        }
       });
     });
 
     if (!measured.ok || !measured.data) {
       return {
         success: false,
-        error: 'ffmpeg could not measure the source loudness (loudnorm pass 1 produced no JSON). The file may have no audio stream or be unreadable.',
+        error:
+          'ffmpeg could not measure the source loudness (loudnorm pass 1 produced no JSON). The file may have no audio stream or be unreadable.',
         mediaPath: resolvedPath,
         ffmpegStderr: measured.stderr.slice(-2000),
       };
@@ -695,9 +854,15 @@ export class AudioTools extends ExportRenderTools {
       const argv = ['-y', '-i', resolvedPath as string, '-af', loudnormApply, outFile];
       const proc = spawn(ffmpeg, argv);
       let stderr = '';
-      proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+      proc.stderr.on('data', (chunk) => {
+        stderr += chunk.toString();
+      });
       proc.on('error', (err) => {
-        resolve({ success: false, error: `Failed to run ffmpeg ('${ffmpeg}'): ${err.message}`, mediaPath: resolvedPath });
+        resolve({
+          success: false,
+          error: `Failed to run ffmpeg ('${ffmpeg}'): ${err.message}`,
+          mediaPath: resolvedPath,
+        });
       });
       proc.on('close', async (code) => {
         let sizeBytes = 0;
@@ -764,11 +929,12 @@ export class AudioTools extends ExportRenderTools {
     duckingWindows: Array<{ startTime: number; endTime: number; duckedDb: number }>,
     fadeSeconds: number = 0.2,
     clipStartTime?: number,
-    clipEndTime?: number
+    clipEndTime?: number,
   ): Promise<any> {
     const fade = fadeSeconds ?? 0.2;
     const start = clipStartTime ?? 0;
-    const lastWindow = duckingWindows.length > 0 ? duckingWindows[duckingWindows.length - 1] : undefined;
+    const lastWindow =
+      duckingWindows.length > 0 ? duckingWindows[duckingWindows.length - 1] : undefined;
     const end = clipEndTime ?? (lastWindow ? lastWindow.endTime + 1 : start + 1);
 
     // Collect all keyframes and dedupe-by-time (later writes win for same time)
@@ -914,14 +1080,18 @@ export class AudioTools extends ExportRenderTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async addAudioKeyframes(clipId: string, keyframes: Array<{time: number, level: number}>): Promise<any> {
+  protected async addAudioKeyframes(
+    clipId: string,
+    keyframes: Array<{ time: number; level: number }>,
+  ): Promise<any> {
     // CALIBRATION (matches adjustAudioLevels): Premiere's clip Volume Level property is linear amplitude.
     // The displayed "0 dB" in Effects Controls corresponds to internal linear value ~0.17783.
     // Relationship: linear = 10^((dB - 15) / 20). Verified empirically on Premiere Pro 2026 macOS es_ES.
     const DB_CALIBRATION_OFFSET = 15;
-    const keyframeCode = keyframes.map(kf => {
-      const linearValue = Math.pow(10, (kf.level - DB_CALIBRATION_OFFSET) / 20);
-      return `
+    const keyframeCode = keyframes
+      .map((kf) => {
+        const linearValue = Math.pow(10, (kf.level - DB_CALIBRATION_OFFSET) / 20);
+        return `
         try {
           levelProp.addKey(${kf.time});
           levelProp.setValueAtKey(${kf.time}, ${linearValue}, true);
@@ -938,7 +1108,8 @@ export class AudioTools extends ExportRenderTools {
           failedKeyframes.push({ time: ${kf.time}, level: ${kf.level}, error: e2.toString() });
         }
     `;
-    }).join('\n');
+      })
+      .join('\n');
 
     const script = `
       try {
@@ -1078,14 +1249,22 @@ export class AudioTools extends ExportRenderTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async applyAudioEffect(clipId: string, effectName: string, parameters?: any): Promise<any> {
+  protected async applyAudioEffect(
+    clipId: string,
+    effectName: string,
+    parameters?: any,
+  ): Promise<any> {
     return await this.applyEffect(clipId, effectName, parameters);
   }
 
   // BULK helper: apply same audio effect + parameters to all audio clips of a sequence in ONE
   // ExtendScript round-trip. Activates the target sequence first (QE DOM operates on active).
   // Returns per-clip results with valueAfter readback for the SET parameters.
-  protected async applyAudioEffectToAllClips(sequenceId: string, effectName: string, parameters?: Record<string, any>): Promise<any> {
+  protected async applyAudioEffectToAllClips(
+    sequenceId: string,
+    effectName: string,
+    parameters?: Record<string, any>,
+  ): Promise<any> {
     const paramJson = JSON.stringify(parameters || {});
     const script = `
       try {
@@ -1213,7 +1392,15 @@ export class AudioTools extends ExportRenderTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async setParametricEq(seqId: string|undefined, trackIndex: number, clipIndex: number, band: number, frequency?: number, gain?: number, q?: number): Promise<any> {
+  protected async setParametricEq(
+    seqId: string | undefined,
+    trackIndex: number,
+    clipIndex: number,
+    band: number,
+    frequency?: number,
+    gain?: number,
+    q?: number,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -1236,12 +1423,23 @@ export class AudioTools extends ExportRenderTools {
             }
           } catch(ec) { break; }
         }
-        return JSON.stringify({success:true,paramsSet:set,band:${band},frequency:${frequency??null},gain:${gain??null},q:${q??null}});
+        // No readback exists for these QE params, so the honest claim is only "the writes were
+        // accepted"; none accepted is a failure, not a success with paramsSet 0.
+        if (set === 0) return JSON.stringify({success:false,verified:false,paramsSet:0,error:'No EQ parameter was accepted on this clip (is a Parametric EQ applied?). Nothing was changed.'});
+        return JSON.stringify({success:true,verified:false,verifiedBy:'none: QE accepted the writes but they cannot be read back',paramsSet:set,band:${band},frequency:${frequency ?? null},gain:${gain ?? null},q:${q ?? null}});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
 
-  protected async setCompressor(seqId: string|undefined, trackIndex: number, clipIndex: number, threshold?: number, ratio?: number, attack?: number, release?: number): Promise<any> {
+  protected async setCompressor(
+    seqId: string | undefined,
+    trackIndex: number,
+    clipIndex: number,
+    threshold?: number,
+    ratio?: number,
+    attack?: number,
+    release?: number,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -1261,12 +1459,18 @@ export class AudioTools extends ExportRenderTools {
             }
           } catch(ec) { break; }
         }
-        return JSON.stringify({success:true,paramsSet:set});
+        if (set === 0) return JSON.stringify({success:false,verified:false,paramsSet:0,error:'No compressor parameter was accepted on this clip (is a compressor applied?). Nothing was changed.'});
+        return JSON.stringify({success:true,verified:false,verifiedBy:'none: QE accepted the writes but they cannot be read back',paramsSet:set});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
 
-  protected async setLimiter(seqId: string|undefined, trackIndex: number, clipIndex: number, ceiling: number): Promise<any> {
+  protected async setLimiter(
+    seqId: string | undefined,
+    trackIndex: number,
+    clipIndex: number,
+    ceiling: number,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -1278,7 +1482,7 @@ export class AudioTools extends ExportRenderTools {
             var list = String(comp.getParamList());
             if (list.indexOf('Ceiling') >= 0 || list.indexOf('Maximum') >= 0) {
               comp.setParamValue('Maximum Amplitude', '${ceiling}');
-              return JSON.stringify({success:true,ceiling:${ceiling}});
+              return JSON.stringify({success:true,verified:false,verifiedBy:'none: QE accepted the write but it cannot be read back',ceiling:${ceiling}});
             }
           } catch(ec) { break; }
         }
@@ -1287,7 +1491,12 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected async dereverbClip(seqId: string|undefined, trackIndex: number, clipIndex: number, amount: number): Promise<any> {
+  protected async dereverbClip(
+    seqId: string | undefined,
+    trackIndex: number,
+    clipIndex: number,
+    amount: number,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -1311,7 +1520,11 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected async normalizeTrackPeaks(seqId: string|undefined, trackIndex: number, targetDbfs: number): Promise<any> {
+  protected async normalizeTrackPeaks(
+    seqId: string | undefined,
+    trackIndex: number,
+    targetDbfs: number,
+  ): Promise<any> {
     // Node.js side: get clips, probe each, set gain
     return await this.bridge.executeScript(`
       try {
@@ -1339,7 +1552,13 @@ export class AudioTools extends ExportRenderTools {
    * without a word. Now: refuse unless the span is empty on that track, then lay audio-only
    * subclips cut to fit, looping the source when the gap is longer than the media.
    */
-  protected async fillRoomTone(seqId: string|undefined, trackIndex: number, gapStart: number, gapDuration: number, roomToneItemId: string): Promise<any> {
+  protected async fillRoomTone(
+    seqId: string | undefined,
+    trackIndex: number,
+    gapStart: number,
+    gapDuration: number,
+    roomToneItemId: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(seqId)};
@@ -1396,8 +1615,14 @@ export class AudioTools extends ExportRenderTools {
    * raised "Illegal Parameter type" anyway: AudioTrack.setMute takes 1/0, not a boolean
    * (measured on 26.5.2). The original mute state of every track is put back, even on failure.
    */
-  protected async stemExport(seqId: string|undefined, trackIndices: number[], outputDir: string, format: string): Promise<any> {
-    if (!Array.isArray(trackIndices) || trackIndices.length === 0) return { success: false, error: 'trackIndices needs at least one audio track index.' };
+  protected async stemExport(
+    seqId: string | undefined,
+    trackIndices: number[],
+    outputDir: string,
+    format: string,
+  ): Promise<any> {
+    if (!Array.isArray(trackIndices) || trackIndices.length === 0)
+      return { success: false, error: 'trackIndices needs at least one audio track index.' };
     const ext = format === 'aac' ? 'aac' : 'wav';
     await fs.mkdir(outputDir, { recursive: true });
     const state: any = await this.bridge.executeScript(`
@@ -1409,7 +1634,8 @@ export class AudioTools extends ExportRenderTools {
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
     if (!state?.success) return state;
-    const setMutes = (values: number[]) => this.bridge.executeScript(`
+    const setMutes = (values: number[]) =>
+      this.bridge.executeScript(`
       try {
         var seq = __findSequence(${JSON.stringify(state.sequenceId)});
         var v = ${JSON.stringify(values)};
@@ -1420,20 +1646,45 @@ export class AudioTools extends ExportRenderTools {
     const stems: any[] = [];
     try {
       for (const target of trackIndices) {
-        if (!(target >= 0 && target < state.muted.length)) { stems.push({ track: target, success: false, error: 'no such audio track' }); continue; }
+        if (!(target >= 0 && target < state.muted.length)) {
+          stems.push({ track: target, success: false, error: 'no such audio track' });
+          continue;
+        }
         await setMutes(state.muted.map((_: number, t: number) => (t === target ? 0 : 1)));
         const outputPath = join(outputDir, `stem_A${target + 1}.${ext}`);
-        const r: any = await (this as any).executeTool('export_audio_only', { outputPath, format: ext, sequenceId: state.sequenceId });
+        const r: any = await (this as any).executeTool('export_audio_only', {
+          outputPath,
+          format: ext,
+          sequenceId: state.sequenceId,
+        });
         let size = 0;
-        try { size = (await fs.stat(outputPath)).size; } catch { /* not written */ }
-        stems.push({ track: target, outputPath, success: r?.success !== false && size > 0, bytes: size, error: r?.success === false ? r.error : (size > 0 ? undefined : 'no file was written') });
+        try {
+          size = (await fs.stat(outputPath)).size;
+        } catch {
+          /* not written */
+        }
+        stems.push({
+          track: target,
+          outputPath,
+          success: r?.success !== false && size > 0,
+          bytes: size,
+          error: r?.success === false ? r.error : size > 0 ? undefined : 'no file was written',
+        });
       }
     } finally {
       await setMutes(state.muted);
     }
     const ok = stems.filter((x) => x.success).length;
-    return { success: ok === stems.length, verified: true, verifiedBy: 'each stem file exists and is non-empty', stems, exported: ok,
-      mutesRestored: true, error: ok === stems.length ? undefined : `${stems.length - ok} of ${stems.length} stems failed.` };
+    return {
+      success: ok === stems.length,
+      verified: true,
+      verifiedBy: 'each stem file exists and is non-empty',
+      stems,
+      exported: ok,
+      mutesRestored: true,
+      error:
+        ok === stems.length ? undefined : `${stems.length - ok} of ${stems.length} stems failed.`,
+    };
   }
 
   protected async channelRemapReport(seqId?: string): Promise<any> {
@@ -1458,12 +1709,39 @@ export class AudioTools extends ExportRenderTools {
 
   protected audioSilenceScan(filePath: string, noiseDb: number, minDuration: number): any {
     try {
-      const out = runFf('ffmpeg', ['-hide_banner', '-nostats', '-i', filePath, '-vn', '-af', `silencedetect=noise=${Number(noiseDb)}dB:d=${Number(minDuration)}`, '-f', 'null', '-'], { timeoutMs: 120000, mergeStderr: true });
+      const out = runFf(
+        'ffmpeg',
+        [
+          '-hide_banner',
+          '-nostats',
+          '-i',
+          filePath,
+          '-vn',
+          '-af',
+          `silencedetect=noise=${Number(noiseDb)}dB:d=${Number(minDuration)}`,
+          '-f',
+          'null',
+          '-',
+        ],
+        { timeoutMs: 120000, mergeStderr: true },
+      );
       const ranges: any[] = [];
       let current: any = null;
       for (const line of out.split('\n')) {
-        if (line.includes('silence_start')) { const m = line.match(/silence_start: ([\d.]+)/); if (m?.[1]) current = { start: parseFloat(m[1]) }; }
-        if (line.includes('silence_end') && current) { const m = line.match(/silence_end: ([\d.]+)/); if (m?.[1]) { current.end = parseFloat(m[1]); const dm = line.match(/silence_duration: ([\d.]+)/); if (dm?.[1]) current.duration = parseFloat(dm[1]); ranges.push(current); current = null; } }
+        if (line.includes('silence_start')) {
+          const m = line.match(/silence_start: ([\d.]+)/);
+          if (m?.[1]) current = { start: parseFloat(m[1]) };
+        }
+        if (line.includes('silence_end') && current) {
+          const m = line.match(/silence_end: ([\d.]+)/);
+          if (m?.[1]) {
+            current.end = parseFloat(m[1]);
+            const dm = line.match(/silence_duration: ([\d.]+)/);
+            if (dm?.[1]) current.duration = parseFloat(dm[1]);
+            ranges.push(current);
+            current = null;
+          }
+        }
       }
       return { success: true, silenceRangeCount: ranges.length, ranges };
     } catch (e: any) {

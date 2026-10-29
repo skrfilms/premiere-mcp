@@ -6,7 +6,7 @@
  */
 import { ReviewDeliveryTools } from './review-delivery.js';
 // Synchronous fs/path/os bindings for the Node-side (non-ExtendScript) tools.
-// Kept separate from the `promises as fs` import above, which is the async API.
+// The async API is the separate `promises as fs` import.
 import * as fsSync from 'node:fs';
 import * as pathSync from 'node:path';
 import { runFf } from '../ff-exec.js';
@@ -21,12 +21,16 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
         item = findById(root, ${JSON.stringify(projectItemId)});
         if (!item) return JSON.stringify({ success: false, error: 'Project item not found: ' + ${JSON.stringify(projectItemId)} });
         app.sourceMonitor.openProjectItem(item);
-        ${timecode ? `
+        ${
+          timecode
+            ? `
         // Cue to timecode if provided
         try {
           app.enableQE();
           qe.source.clip.setInPoint(${JSON.stringify(timecode)});
-        } catch(eCue) {}` : ''}
+        } catch(eCue) {}`
+            : ''
+        }
         var loaded = app.sourceMonitor.getProjectItem();
         var verified = loaded && loaded.nodeId === ${JSON.stringify(projectItemId)};
         return JSON.stringify({ success: true, verified: verified, projectItemId: ${JSON.stringify(projectItemId)}, itemName: loaded ? String(loaded.name) : null, timecode: ${JSON.stringify(timecode ?? null)} });
@@ -35,7 +39,13 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async logClip(projectItemId: string, inPoint?: string, outPoint?: string, name?: string, labelColor?: number): Promise<any> {
+  protected async logClip(
+    projectItemId: string,
+    inPoint?: string,
+    outPoint?: string,
+    name?: string,
+    labelColor?: number,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var item=${this.findItemById(projectItemId)};
@@ -45,7 +55,7 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
         ${outPoint ? `try{app.enableQE();qe.source.clip.setOutPoint(${JSON.stringify(outPoint)});}catch(eo){}` : ''}
         ${name ? `try{item.name=${JSON.stringify(name)};}catch(en){}` : ''}
         ${labelColor !== undefined ? `try{item.setColorLabel(${labelColor});}catch(el){}` : ''}
-        return JSON.stringify({success:true,itemName:String(item.name),inPoint:${JSON.stringify(inPoint??null)},outPoint:${JSON.stringify(outPoint??null)}});
+        return JSON.stringify({success:true,itemName:String(item.name),inPoint:${JSON.stringify(inPoint ?? null)},outPoint:${JSON.stringify(outPoint ?? null)}});
       }catch(e){return JSON.stringify({success:false,error:e.toString()});}
     `);
   }
@@ -74,20 +84,54 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
   }
 
   protected hoverScrubFrames(mediaPath: string, count: number, outputDir: string): any {
-    const fs = fsSync, path = pathSync;
+    const fs = fsSync,
+      path = pathSync;
     try {
       if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
       // Get duration first
-      const dur = parseFloat(runFf('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=nw=1:nk=1', mediaPath], { timeoutMs: 10000 }).trim());
+      const dur = parseFloat(
+        runFf(
+          'ffprobe',
+          [
+            '-v',
+            'error',
+            '-show_entries',
+            'format=duration',
+            '-of',
+            'default=nw=1:nk=1',
+            mediaPath,
+          ],
+          { timeoutMs: 10000 },
+        ).trim(),
+      );
       const paths: string[] = [];
       for (let i = 0; i < count; i++) {
         const t = (dur / (count + 1)) * (i + 1);
-        const outPath = path.join(outputDir, `scrub_${i.toString().padStart(3,'0')}.jpg`);
-        runFf('ffmpeg', ['-y', '-ss', t.toFixed(3), '-i', mediaPath, '-frames:v', '1', '-update', '1', '-q:v', '3', outPath], { timeoutMs: 10000 });
+        const outPath = path.join(outputDir, `scrub_${i.toString().padStart(3, '0')}.jpg`);
+        runFf(
+          'ffmpeg',
+          [
+            '-y',
+            '-ss',
+            t.toFixed(3),
+            '-i',
+            mediaPath,
+            '-frames:v',
+            '1',
+            '-update',
+            '1',
+            '-q:v',
+            '3',
+            outPath,
+          ],
+          { timeoutMs: 10000 },
+        );
         if (fs.existsSync(outPath)) paths.push(outPath);
       }
       return { success: true, count: paths.length, paths };
-    } catch (e: any) { return { success: false, error: e.message }; }
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
   }
 
   /**
@@ -111,13 +155,36 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
     fsSync.mkdirSync(outputDir, { recursive: true });
     const frames: any[] = [];
     for (const [n, take] of (info.takes as any[]).entries()) {
-      if (!take.path || !fsSync.existsSync(take.path)) return { success: false, error: `"${take.name}" has no media file on disk to take a frame from.` };
+      if (!take.path || !fsSync.existsSync(take.path))
+        return {
+          success: false,
+          error: `"${take.name}" has no media file on disk to take a frame from.`,
+        };
       let dur = NaN;
-      try { dur = Number(runFf('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', take.path], { timeoutMs: 30000 }).trim()); } catch { /* reported below */ }
-      if (!(dur > 0)) return { success: false, error: `Could not read the duration of "${take.name}".` };
-      const out = pathSync.join(outputDir, `take${n + 1}_${String(take.name).replace(/[^A-Za-z0-9_-]+/g, '_')}_mid.png`);
-      runFf('ffmpeg', ['-v', 'error', '-y', '-ss', String(dur / 2), '-i', take.path, '-frames:v', '1', out], { timeoutMs: 60000 });
-      if (!fsSync.existsSync(out)) return { success: false, error: `ffmpeg wrote no frame for "${take.name}".` };
+      try {
+        dur = Number(
+          runFf(
+            'ffprobe',
+            ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', take.path],
+            { timeoutMs: 30000 },
+          ).trim(),
+        );
+      } catch {
+        /* reported below */
+      }
+      if (!(dur > 0))
+        return { success: false, error: `Could not read the duration of "${take.name}".` };
+      const out = pathSync.join(
+        outputDir,
+        `take${n + 1}_${String(take.name).replace(/[^A-Za-z0-9_-]+/g, '_')}_mid.png`,
+      );
+      runFf(
+        'ffmpeg',
+        ['-v', 'error', '-y', '-ss', String(dur / 2), '-i', take.path, '-frames:v', '1', out],
+        { timeoutMs: 60000 },
+      );
+      if (!fsSync.existsSync(out))
+        return { success: false, error: `ffmpeg wrote no frame for "${take.name}".` };
       frames.push({ take: take.name, atSecs: dur / 2, path: out });
     }
     return { success: true, verified: true, verifiedBy: 'both frame files written', frames };
@@ -137,8 +204,20 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
   protected async batchLogFromCsv(csvPath: string): Promise<any> {
     const fs = fsSync;
     try {
-      const lines = fs.readFileSync(csvPath, 'utf8').split('\n').filter((l: string) => l.trim() && !l.startsWith('#'));
-      const rows = lines.slice(1).map((l: string) => { const parts = l.split(','); return { name: parts[0]?.trim(), inTC: parts[1]?.trim(), outTC: parts[2]?.trim(), label: parseInt(parts[3]?.trim() || '0'), comment: parts[4]?.trim() }; });
+      const lines = fs
+        .readFileSync(csvPath, 'utf8')
+        .split('\n')
+        .filter((l: string) => l.trim() && !l.startsWith('#'));
+      const rows = lines.slice(1).map((l: string) => {
+        const parts = l.split(',');
+        return {
+          name: parts[0]?.trim(),
+          inTC: parts[1]?.trim(),
+          outTC: parts[2]?.trim(),
+          label: parseInt(parts[3]?.trim() || '0'),
+          comment: parts[4]?.trim(),
+        };
+      });
       const rowsJson = JSON.stringify(rows);
       return await this.bridge.executeScript(`
         try {
@@ -156,7 +235,9 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
           return JSON.stringify({success:true,rowsProcessed:applied,totalRows:rows.length});
         }catch(e){return JSON.stringify({success:false,error:e.toString()});}
       `);
-    } catch (e: any) { return { success: false, error: e.message }; }
+    } catch (e: any) {
+      return { success: false, error: e.message };
+    }
   }
 
   /**
@@ -165,12 +246,17 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
    * wrong bin onto the timeline and reported success. The shared __resolveBin prelude helper
    * refuses an ambiguous bare name instead of guessing, and also accepts a path or an id.
    */
-  protected async storyboardBinToSequence(binName: string, seqId?: string, startAtSecs = 0, binId?: string): Promise<any> {
+  protected async storyboardBinToSequence(
+    binName: string,
+    seqId?: string,
+    startAtSecs = 0,
+    binId?: string,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq=${this.buildSeqRes(seqId)};
-        var req=__resolveBin(${JSON.stringify(binId??null)},${JSON.stringify(binName)});
-        if(req.error)return JSON.stringify({success:false,error:req.error+' Nothing was placed on the timeline.',binName:${JSON.stringify(binName)},binId:${JSON.stringify(binId??null)},matchCount:req.matchCount});
+        var req=__resolveBin(${JSON.stringify(binId ?? null)},${JSON.stringify(binName)});
+        if(req.error)return JSON.stringify({success:false,error:req.error+' Nothing was placed on the timeline.',binName:${JSON.stringify(binName)},binId:${JSON.stringify(binId ?? null)},matchCount:req.matchCount});
         var bin=req.bin;
         var pos=new Time();pos.seconds=${startAtSecs};
         var placed=0;
@@ -242,7 +328,15 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
   }
 
   // Subclip Implementation
-  protected async createSubclip(projectItemId: string, name: string, startTime: number, endTime: number, hasHardBoundaries?: boolean, takeAudio?: boolean, takeVideo?: boolean): Promise<any> {
+  protected async createSubclip(
+    projectItemId: string,
+    name: string,
+    startTime: number,
+    endTime: number,
+    hasHardBoundaries?: boolean,
+    takeAudio?: boolean,
+    takeVideo?: boolean,
+  ): Promise<any> {
     const hardBounds = hasHardBoundaries ? 1 : 0;
     const audio = takeAudio !== false ? 1 : 0;
     const video = takeVideo !== false ? 1 : 0;
@@ -282,7 +376,10 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
   }
 
   protected async stepSourceMonitor(frames: number): Promise<any> {
-    const tc = frames >= 0 ? `00:00:00:${Math.abs(frames).toString().padStart(2,'0')}` : `-00:00:00:${Math.abs(frames).toString().padStart(2,'0')}`;
+    const tc =
+      frames >= 0
+        ? `00:00:00:${Math.abs(frames).toString().padStart(2, '0')}`
+        : `-00:00:00:${Math.abs(frames).toString().padStart(2, '0')}`;
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -322,7 +419,10 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
     `);
   }
 
-  protected async setSourceInOutQe(inPoint?: string | null, outPoint?: string | null): Promise<any> {
+  protected async setSourceInOutQe(
+    inPoint?: string | null,
+    outPoint?: string | null,
+  ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
