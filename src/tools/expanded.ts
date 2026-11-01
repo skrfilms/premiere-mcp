@@ -3120,12 +3120,25 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
               var batchRefuse = batchClips[bai].trackType === "video" ? "" : __crashProneAudioFx(batchClips[bai].clip, String(args.effectName || args.name));
               if (batchRefuse) batchResults.push({ clipId: batchClips[bai].clip.nodeId, ok: false, skipped: true, error: batchRefuse });
               else if (!batchEffect || !qeBatchClip) batchResults.push({ clipId: batchClips[bai].clip.nodeId, ok: false, error: "QE clip/effect unavailable" });
-              else { qeBatchClip.addVideoEffect ? (batchClips[bai].trackType === "video" ? qeBatchClip.addVideoEffect(batchEffect) : qeBatchClip.addAudioEffect(batchEffect)) : qeBatchClip.addAudioEffect(batchEffect); batchResults.push({ clipId: batchClips[bai].clip.nodeId, ok: true }); }
+              else {
+                var batchBefore = batchClips[bai].clip.components.numItems;
+                if (batchClips[bai].trackType === "video") qeBatchClip.addVideoEffect(batchEffect); else qeBatchClip.addAudioEffect(batchEffect);
+                if (batchClips[bai].clip.components.numItems > batchBefore) batchResults.push({ clipId: batchClips[bai].clip.nodeId, ok: true });
+                else batchResults.push({ clipId: batchClips[bai].clip.nodeId, ok: false, error: "the effect add ran but the clip effect count did not rise" });
+              }
             } catch (batchError) {
               batchResults.push({ clipId: batchClips[bai].clip.nodeId, ok: false, error: batchError.toString() });
             }
           }
-          return ok({ effectName: String(args.effectName || args.name), results: batchResults });
+          // A batch that left any clip out is reported as partial, never as a plain success.
+          var batchOk = 0, batchSkipped = 0, batchFailed = 0;
+          for (var bri = 0; bri < batchResults.length; bri++) {
+            if (batchResults[bri].ok) batchOk++; else if (batchResults[bri].skipped) batchSkipped++; else batchFailed++;
+          }
+          var batchSummary = { effectName: String(args.effectName || args.name), appliedCount: batchOk, skippedCount: batchSkipped, failedCount: batchFailed, results: batchResults };
+          if (batchSkipped === 0 && batchFailed === 0) return ok(batchSummary);
+          batchSummary.partial = batchOk > 0;
+          return fail("Added to " + batchOk + " of " + batchResults.length + " clips" + (batchSkipped ? "; " + batchSkipped + " skipped to avoid a crash (nested or multicam)" : "") + (batchFailed ? "; " + batchFailed + " failed" : "") + ". See details.results.", batchSummary);
 
         case "set_blend_mode":
           if (!args.clipId && !args.node_id && !args.nodeId) return fail("set_blend_mode requires clipId.");
@@ -3263,12 +3276,16 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
             var panRaw = typeof args.pan !== "undefined" ? args.pan : args.value;
             var panWanted = Number(typeof panRaw === "undefined" ? 0 : panRaw);
             if (isNaN(panWanted) || panWanted < -100 || panWanted > 100) return fail("pan must be a number from -100 (full left) to 100 (full right).");
-            var panBefore, panAfter;
+            var panBefore, panAfter, panSetRan = false;
             try {
               panBefore = Number(panComp.getParamValue("Pan"));
               panComp.setParamValue("Pan", String(panWanted));
+              panSetRan = true;
               panAfter = Number(panComp.getParamValue("Pan"));
             } catch (ePan) {
+              // The set went through but the read-back threw: the pan may have changed, so say so
+              // instead of claiming nothing did.
+              if (panSetRan) return fail("The pan was set to " + panWanted + " but could not be read back (" + ePan + "), so it may have changed and is unconfirmed. Check it in the Audio Clip Mixer.", { changed: null, requested: panWanted, before: panBefore });
               // Measured 2026-10-29: a nested-sequence clip's pan component throws "Unknown error
               // exception" on read. Its audio is mixed inside the nested sequence.
               var panNested = false; try { panNested = !!(transformClip.clip.projectItem && transformClip.clip.projectItem.isSequence()); } catch (eN) {}

@@ -4,20 +4,48 @@ All notable changes are documented here. Releases use semantic versioning.
 
 ## [Unreleased]
 
-- DeNoise and DeReverb on a nested sequence or multicam clip crash Premiere 26.5.2. Every tool
-  that adds them (`denoise_clip`, `dereverb_clip`, `apply_audio_effect_qe`, `apply_effect`,
-  `apply_audio_effect_to_all_clips`, and the effect carry-over in `replace_clip`) now refuses on
-  those clips and says why, instead of
-  taking Premiere down. Found with the new crash matrix (`scripts/crash-matrix.mjs`), which runs
-  each risky tool on its own fresh sequence against seven kinds of clip and relaunches Premiere
-  if it dies.
-- `reorder_effects` no longer claims a reorder: Premiere's scripting cannot move an effect within
-  the stack, so it changes nothing, returns `success: false` and says how to do it by hand.
+- **DeNoise and DeReverb no longer crash Premiere on nested or multicam clips.** On 26.5.2,
+  adding either to a clip whose source is a sequence crashes Premiere. The 10-29 live sweep hit
+  it with `denoise_clip` on a nested clip, and it reproduced there; multicam clips are sequences
+  too and are refused the same way as a precaution. Every tool that adds them now checks first
+  and leaves those clips alone with the reason: `denoise_clip`, `dereverb_clip`,
+  `apply_audio_effect_qe` (on either track kind), `apply_effect`, `apply_audio_effect`,
+  `apply_audio_effect_to_all_clips` and `batch_apply_effect`. `replace_clip` refuses before it
+  touches anything when the old clip carries one of them and the new media is a sequence. The
+  check matches the name in any case and the obsolete "Adaptive Noise Reduction", and refuses
+  when it cannot read the clip's source. It is not tied to a version: it stays on until a build is
+  measured safe.
+- **Batch tools report what they skipped.** `apply_audio_effect_to_all_clips` reported
+  `allOk: true` whatever happened (it used `Array.every`, which this ExtendScript engine lacks),
+  and `batch_apply_effect` returned plain success. Both now return `success: false` with
+  `partial`, `appliedCount`, `skippedCount` and `failedCount` when any clip was left out, and
+  check that each effect was actually added.
+- **`replace_clip` and `stem_export` work under the default profile.** Their internal steps
+  (`copy_effects_between_clips`, `export_audio_only`) are not in `core`, so they were refused:
+  `replace_clip` reported success with effect values at their defaults, and every stem failed.
+  Internal steps now run past the profile, as transaction steps do, and `replace_clip` fails if
+  the effect values were not copied.
+- **`freeze_frame` on an image sequence** (EXR/DPX/PNG plates) holds the frame at the requested
+  time, picked from the sequence's own files, instead of always the first frame. Single stills
+  are read without a seek; animated GIFs seek as video does.
+- **`set_qe_component_param`** reads the value back. A value that went to `nan`, or did not
+  move, is put back and reported as refused; a change that reads back in another form
+  (a checkbox as `true`, a menu as a label) is kept and reported `verified: false` instead of
+  being undone.
+- **`reorder_effects`** cannot reorder (Premiere's scripting has no call that moves an effect),
+  so it now reads the stack, returns `success: false, changed: false` with the current order and
+  any requested names not on the clip, and counts as read-only inside a transaction.
+- `set_clip_pan` refuses nested clips with the reason, and says the pan may have changed if
+  the write went through but the read-back failed. `normalize_clip_peaks` refuses nested clips.
+- New `scripts/crash-matrix.mjs`: runs each risky tool on its own fresh sequence against seven
+  kinds of clip, re-checks before every case that only the scratch project is open, records a
+  crash with its report's top frames, relaunches Premiere and carries on, and saves as it goes.
+- New live workflow W10 covers the above against a running Premiere.
 - Internals: the 20-level chain of tool classes is now one class per domain on a shared base,
-  with cross-domain calls typed (four untyped calls had broken silently and only the live
-  workflow tests caught them; a test now forbids them). The tool catalogue is built once per
-  process instead of two to three times per call. The ExtendScript helper library has its own
-  file (`src/bridge/extendscript-helpers.ts`).
+  with cross-domain calls typed. Flattening it would have broken four untyped
+  `(this as any).executeTool` calls; the live workflow tests caught them before commit, and a
+  test now forbids the pattern. The ExtendScript helper library has its own file
+  (`src/bridge/extendscript-helpers.ts`).
 
 ## [1.5.0] - 2026-10-29
 

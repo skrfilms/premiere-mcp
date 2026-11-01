@@ -52,30 +52,24 @@ export class EffectsTools extends ToolsBase {
     const orderJson = JSON.stringify(newOrder);
     return await this.bridge.executeScript(`
       try {
-        app.enableQE();
-        var seq = ${this.buildQSeqResolver(sequenceId)};
-        var qeClip = __qeClipByIndex(seq, 'video', ${trackIndex}, ${clipIndex});
         var domSeq = ${this.buildSeqRes(sequenceId)};
         var domClip = domSeq.videoTracks[${trackIndex}].clips[${clipIndex}];
+        if (!domClip) return JSON.stringify({success:false,changed:false,error:'Clip not found'});
         var newOrder = ${orderJson};
-        // Serialize all component params
-        var comps = [];
-        for (var i = 0; i < domClip.components.numItems; i++) {
-          var domComp = domClip.components[i];
-          var qeComp = qeClip.getComponentAt(i);
-          var entry = { name: String(domComp.displayName), matchName: String(domComp.matchName), params: {} };
-          if (qeComp) { try { var pl=qeComp.getParamList(); var pns=String(pl).split(',').map(function(s){return s.replace(/^\\s+|\\s+$/g,'');}).filter(function(s){return s;}); for(var j=0;j<pns.length;j++){try{entry.params[pns[j]]=String(qeComp.getParamValue(pns[j]));}catch(ep){}} } catch(e){} }
-          comps.push(entry);
+        // Read only: Premiere's scripting has no call that moves an effect in the stack, and
+        // removing and re-adding would lose keyframes. So this reports the current and requested
+        // order and changes nothing, rather than claiming a reorder that did not happen.
+        var current = [];
+        for (var i = 0; i < domClip.components.numItems; i++) current.push(String(domClip.components[i].displayName));
+        var notOnClip = [];
+        for (var oi = 0; oi < newOrder.length; oi++) {
+          var hit = false;
+          for (var ci = 0; ci < current.length; ci++) if (current[ci] === String(newOrder[oi])) { hit = true; break; }
+          if (!hit) notOnClip.push(String(newOrder[oi]));
         }
-        // Build order map
-        var ordered = [];
-        for (var oi=0;oi<newOrder.length;oi++) { for (var ci=0;ci<comps.length;ci++) { if (comps[ci].name===newOrder[oi]){ordered.push(comps[ci]);break;} } }
-        // Premiere's scripting has no call that moves an effect in the stack, and removing and
-        // re-adding would lose keyframes. So this reports the current and requested order and
-        // changes nothing, rather than claiming a reorder that did not happen.
         return JSON.stringify({success:false,verified:true,changed:false,
           error:'Effects cannot be reordered by script in this Premiere version, so nothing was changed. Drag them in the Effect Controls panel, or remove_effect_at_index and apply_effect again (keyframes on a removed effect are lost).',
-          currentOrder:comps.map(function(c){return c.name;}),requestedOrder:ordered.map(function(c){return c.name;})});
+          currentOrder:current,requestedOrder:newOrder,notOnClip:notOnClip});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }

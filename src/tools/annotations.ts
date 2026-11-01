@@ -151,6 +151,9 @@ const OVERRIDES: Record<string, Partial<ToolAnnotations>> = {
   scene_edit_detection: { readOnlyHint: false, destructiveHint: false, openWorldHint: true },
   // "check" prefix but it mutates offline state.
   check_offline_media: { readOnlyHint: true },
+  // Named like an edit, but Premiere's scripting cannot move an effect: it only reports the
+  // current and requested order (success:false, changed:false).
+  reorder_effects: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
   // Trim/split are additive-in-place edits, recoverable by undo, but they DO discard
   // frames from the timeline, so the destructive hint is honest.
   // (listed here only to document the intent; the prefix table already covers them)

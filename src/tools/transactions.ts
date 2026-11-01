@@ -362,7 +362,6 @@ const RESTORABLE: readonly Pattern[] = [
   /^remove_effect/,
   /^remove_all_effects/,
   /^enable_disable_(effect|all_effects)$/,
-  'reorder_effects',
   /^set_effect_/,
   'copy_effect_values',
   'copy_effects_between_clips',

@@ -20,9 +20,9 @@ process.env.PREMIERE_TEMP_DIR ||= '/tmp/premiere-mcp-bridge';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { requireScratchProject } from './lib/require-scratch-project.mjs';
+import { checkStillScratch, requireScratchProject } from './lib/require-scratch-project.mjs';
 import { buildContext, ensureSideFixtures, synthesizeArgs } from './lib/synthesize-args.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -32,6 +32,17 @@ const BRIDGE = process.env.PREMIERE_TEMP_DIR;
 const REPORTS = join(homedir(), 'Library', 'Logs', 'DiagnosticReports');
 mkdirSync(OUT, { recursive: true });
 
+// This runs the compiled build, so refuse a dist/ older than src/: a stale build would test code
+// that is no longer the code under review.
+{
+  const newest = (dir) => readdirSync(dir, { withFileTypes: true }).reduce((m, e) => {
+    const p = join(dir, e.name);
+    return Math.max(m, e.isDirectory() ? newest(p) : statSync(p).mtimeMs);
+  }, 0);
+  const built = existsSync(join(ROOT, 'dist', 'tools', 'index.js')) ? statSync(join(ROOT, 'dist', 'tools', 'index.js')).mtimeMs : 0;
+  if (built < newest(join(ROOT, 'src'))) { console.error('crash-matrix: dist/ is older than src/. Run npm run build first.'); process.exit(2); }
+}
+
 const { PremiereProBridge } = await import('../dist/bridge/index.js');
 const { PremiereProTools } = await import('../dist/tools/index.js');
 
@@ -39,7 +50,7 @@ const heartbeatAge = () => {
   try { return Date.now() - JSON.parse(readFileSync(join(BRIDGE, 'bridge-heartbeat.json'), 'utf8')).ts; } catch { return Infinity; }
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const premiereRunning = () => spawnSync('pgrep', ['-f', 'MacOS/Adobe Premiere Pro 2026$']).status === 0;
+const premiereRunning = () => spawnSync('pgrep', ['-f', 'Adobe Premiere Pro[^/]*\\.app/Contents/MacOS/']).status === 0;
 
 async function waitAlive(maxMs) {
   for (let t = 0; t < maxMs; t += 2000) { if (heartbeatAge() < 5000) return true; await sleep(2000); }
@@ -56,8 +67,8 @@ function crashSince(since) {
     const d = JSON.parse(readFileSync(f, 'utf8').split('\n').slice(1).join('\n'));
     const th = d.threads[d.faultingThread ?? 0];
     const frames = th.frames.map((fr) => fr.symbol).filter((s) => s && !/^(__pthread_kill|pthread_kill|abort|_sigtramp)$/.test(s) && !/SignalHandler|config::Abort/.test(s)).slice(0, 6);
-    return { report: f, exception: d.exception?.type, frames };
-  } catch { return { report: f }; }
+    return { report: basename(f), exception: d.exception?.type, frames };
+  } catch { return { report: basename(f) }; }
 }
 
 async function relaunch() {
@@ -75,7 +86,7 @@ async function connect() {
 }
 
 await connect();
-await requireScratchProject(bridge, 'crash-matrix');
+const pinned = await requireScratchProject(bridge, 'crash-matrix');
 ensureSideFixtures();
 
 const q = JSON.stringify;
@@ -156,18 +167,57 @@ const SET = setAt >= 0 && process.argv[setAt + 1] === 'destructive' ? DESTRUCTIV
 const names = wanted.filter((w, i) => w !== '--set' && process.argv[process.argv.indexOf(w) - 1] !== '--set');
 const ops = Object.entries(SET).filter(([n]) => !names.length || names.includes(n));
 const results = [];
+// Written after every case, so a run that stops early (or dies) keeps what it found.
+const file = join(OUT, `crash-matrix-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
+const save = () => writeFileSync(file, JSON.stringify({ ranAt: new Date().toISOString(), results }, null, 2));
+const record = (row) => { results.push(row); save(); };
+function stop(code, why) {
+  console.error(`crash-matrix stopped: ${why}`);
+  record({ outcome: 'stopped', detail: why });
+  console.log(`results so far: ${file}`);
+  process.exit(code);
+}
+/**
+ * This harness crashes Premiere on purpose, so it must only ever act on the pinned scratch
+ * project: re-checked before every case, after every relaunch, and right before each tool call
+ * (the user may open their own project at any point, and a relaunch may reopen another one).
+ */
+async function ensureScratch(when) {
+  const { ok, reason } = await checkStillScratch(bridge, pinned);
+  if (!ok) stop(3, `${when}: ${reason}`);
+}
+/** Relaunch, reconnect, and re-check the project; stops the run if Premiere does not come back. */
+async function recover(when) {
+  if (!(await relaunch())) stop(4, `${when}: Premiere did not come back after a relaunch`);
+  await connect();
+  await ensureScratch(`after relaunch (${when})`);
+}
+/** Alive, slow or gone: a stale heartbeat with the process still running is a long render, not a crash. */
+async function settle() {
+  for (let t = 0; t < 120_000; t += 2000) {
+    if (heartbeatAge() < 5000) return 'alive';
+    if (!premiereRunning()) return 'gone';
+    await sleep(2000);
+  }
+  return premiereRunning() ? 'hung' : 'gone';
+}
 
 for (const [op, spec] of ops) {
   for (const [kind, getItem] of Object.entries(KINDS)) {
     if (spec.kind === 'video' && kind === 'audio only') continue;
     if (spec.kind === 'audio' && kind === 'still image') continue;
     const label = `${op} on ${kind}`;
-    if (heartbeatAge() > 5000 && !(await relaunch())) { results.push({ op, kind, outcome: 'premiere_unavailable' }); continue; }
+    if (heartbeatAge() > 5000) {
+      const state = await settle();
+      if (state === 'hung') stop(5, `before ${label}: Premiere is running but its bridge has not answered for 2 minutes`);
+      if (state === 'gone') await recover(`before ${label}`);
+    }
+    await ensureScratch(`before ${label}`);
     const id = await getItem();
-    if (!id) { results.push({ op, kind, outcome: 'no_fixture' }); console.log(`skip  ${label}: no fixture`); continue; }
+    if (!id) { record({ op, kind, outcome: 'no_fixture' }); console.log(`skip  ${label}: no fixture`); continue; }
     const seq = await tools.executeTool('create_sequence_from_clips', { projectItemIds: [id], name: `crash_${op}_${kind.replace(/\W+/g, '_')}` });
     const sid = seq?.sequenceId ?? seq?.data?.sequenceId;
-    if (!sid) { results.push({ op, kind, outcome: 'setup_failed', detail: seq?.error }); continue; }
+    if (!sid) { record({ op, kind, outcome: 'setup_failed', detail: seq?.error }); continue; }
     await tools.executeTool('set_active_sequence', { sequenceId: sid });
     const clipId = (await bridge.executeScript(`var s=__findSequence(${q(sid)});var t=s.${spec.kind === 'audio' ? 'audioTracks' : 'videoTracks'}[0];return JSON.stringify({id:t.clips.numItems?String(t.clips[0].nodeId):null});`)).id;
     const started = Date.now();
@@ -177,27 +227,27 @@ for (const [op, spec] of ops) {
     const def = tools.getAvailableTools().find((x) => x.name === toolName);
     let synth = {};
     try { synth = synthesizeArgs(def, await buildContext(bridge))?.args ?? {}; } catch { /* fall back to the basics */ }
+    await ensureScratch(`right before ${label}`);
     try {
       r = await tools.executeTool(toolName, { ...synth, sequenceId: sid, trackIndex: 0, clipIndex: 0, clipId, ...(spec.args ?? {}) }, { allowUnexposed: true });
     } catch (e) { error = String(e?.message ?? e); }
     await sleep(4000);
-    const alive = heartbeatAge() < 5000 && premiereRunning();
-    if (!alive) {
+    const state = heartbeatAge() < 5000 ? 'alive' : await settle();
+    if (state === 'hung') stop(5, `after ${label}: Premiere is running but its bridge has not answered for 2 minutes`);
+    if (state === 'gone') {
       await sleep(3000);
       const crash = crashSince(started - 1000);
-      results.push({ op, kind, outcome: 'CRASHED', crash, error });
+      record({ op, kind, outcome: 'CRASHED', crash, error });
       console.log(`CRASH ${label}: ${crash?.frames?.slice(0, 3).join(' < ') ?? 'no report found'}`);
-      await relaunch();
-      await connect();
+      await recover(`after the crash in ${label}`);
       continue;
     }
     const ok = r && r.success !== false;
-    results.push({ op, kind, outcome: ok ? 'ok' : 'refused', verified: r?.verified, detail: (r?.error ?? error ?? '').slice(0, 200) });
+    record({ op, kind, outcome: ok ? 'ok' : 'refused', verified: r?.verified, detail: (r?.error ?? error ?? '').slice(0, 200) });
     console.log(`${ok ? 'ok   ' : 'no   '} ${label}${ok ? '' : `: ${(r?.error ?? error ?? '').slice(0, 120)}`}`);
   }
 }
 
-const file = join(OUT, `crash-matrix-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
-writeFileSync(file, JSON.stringify({ ranAt: new Date().toISOString(), results }, null, 2));
+save();
 console.log(`\n${results.filter((x) => x.outcome === 'CRASHED').length} crash(es); results: ${file}`);
 process.exit(0);

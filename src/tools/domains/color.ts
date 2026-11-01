@@ -650,12 +650,11 @@ export class ColorTools extends ToolsBase {
     const work = fsSync.mkdtempSync(pathSync.join(osSync.tmpdir(), 'premiere-mcp-lut-'));
     const capture = async (name: string) => {
       const out = pathSync.join(work, `${name}.png`);
-      const r: any = await this.peers.executeTool('capture_program_output', {
-        sequenceId: prep.sequenceId,
-        time: prep.at,
-        format: 'png',
-        outputPath: out,
-      });
+      const r: any = await this.peers.executeTool(
+        'capture_program_output',
+        { sequenceId: prep.sequenceId, time: prep.at, format: 'png', outputPath: out },
+        { allowUnexposed: true },
+      );
       return r && r.success !== false && fsSync.existsSync(out) ? out : null;
     };
     const psnr = (a: string, b: string): number => {

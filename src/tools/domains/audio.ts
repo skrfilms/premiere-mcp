@@ -449,11 +449,11 @@ export class AudioTools extends ToolsBase {
         }
         if (!exact) return JSON.stringify({success:false,error:'Effect not found on this build: '+wanted});
 
-        if (${audioTrack}) {
-          var __dom = null; try { __dom = ${this.buildSeqRes(sequenceId)}.audioTracks[${trackIndex}].clips[${clipIndex}]; } catch (eD) {}
-          var __refuse = __crashProneAudioFx(__dom, exact);
-          if (__refuse) return JSON.stringify({success:false,verified:true,refusedToAvoidCrash:true,error:__refuse});
-        }
+        // Guarded on both track kinds: addAudioEffect on a video-track clip still reaches the
+        // linked audio, and the guard only reads the clip's project item.
+        var __dom = null; try { var __ds = ${this.buildSeqRes(sequenceId)}; __dom = (${audioTrack} ? __ds.audioTracks : __ds.videoTracks)[${trackIndex}].clips[${clipIndex}]; } catch (eD) {}
+        var __refuse = __crashProneAudioFx(__dom, exact);
+        if (__refuse) return JSON.stringify({success:false,verified:true,refusedToAvoidCrash:true,changed:false,error:__refuse});
         var eff = qe.project.getAudioEffectByName(exact);
         if (!eff) return JSON.stringify({success:false,error:'getAudioEffectByName returned nothing for: '+exact});
         var domSeq = ${this.buildSeqRes(sequenceId)};
@@ -1300,7 +1300,12 @@ export class AudioTools extends ToolsBase {
             var __refuse = __crashProneAudioFx(clip, ${JSON.stringify(effectName)});
             if (__refuse) { perClip.push({ trackIndex: t, clipIndex: c, ok: false, skipped: true, error: __refuse }); continue; }
             try {
+              var __compsBefore = clip.components.numItems;
               qeClip.addAudioEffect(effect);
+              if (clip.components.numItems <= __compsBefore) {
+                perClip.push({ clipIndex: c, trackIndex: t, clipId: String(clip.nodeId), name: String(clip.name), ok: false, error: "addAudioEffect ran but the clip's effect count did not rise, so the effect was not added" });
+                continue;
+              }
               var newCompIdx = clip.components.numItems - 1;
               var newComp = clip.components[newCompIdx];
               var paramResults = [];
@@ -1341,13 +1346,25 @@ export class AudioTools extends ToolsBase {
           }
         }
 
+        // Counted by hand: Array.prototype.every does not exist in this ExtendScript engine,
+        // and the old fallback reported allOk:true whatever happened.
+        var __okCount = 0, __skipped = 0, __failed = 0;
+        for (var r = 0; r < perClip.length; r++) {
+          if (perClip[r].ok) __okCount++; else if (perClip[r].skipped) __skipped++; else __failed++;
+        }
+        var __allOk = __skipped === 0 && __failed === 0;
         return JSON.stringify({
-          success: true,
+          success: __allOk,
+          partial: !__allOk && __okCount > 0,
           sequenceId: ${JSON.stringify(sequenceId)},
           sequenceName: String(seq.name),
           effectName: ${JSON.stringify(effectName)},
           totalClipsProcessed: perClip.length,
-          allOk: perClip.every ? perClip.every(function(r){return r.ok;}) : true,
+          appliedCount: __okCount,
+          skippedCount: __skipped,
+          failedCount: __failed,
+          allOk: __allOk,
+          error: __allOk ? undefined : ('Added to ' + __okCount + ' of ' + perClip.length + ' clips' + (__skipped ? '; ' + __skipped + ' skipped to avoid a crash (nested or multicam)' : '') + (__failed ? '; ' + __failed + ' failed' : '') + '. See perClip.'),
           perClip: perClip
         });
       } catch (e) {
@@ -1662,11 +1679,13 @@ export class AudioTools extends ToolsBase {
         }
         await setMutes(state.muted.map((_: number, t: number) => (t === target ? 0 : 1)));
         const outputPath = join(outputDir, `stem_A${target + 1}.${ext}`);
-        const r: any = await this.peers.executeTool('export_audio_only', {
-          outputPath,
-          format: ext,
-          sequenceId: state.sequenceId,
-        });
+        // allowUnexposed: a step inside stem_export (the authority gate); the default profile
+        // does not advertise export_audio_only, so every stem used to be refused.
+        const r: any = await this.peers.executeTool(
+          'export_audio_only',
+          { outputPath, format: ext, sequenceId: state.sequenceId },
+          { allowUnexposed: true },
+        );
         let size = 0;
         try {
           size = (await fs.stat(outputPath)).size;

@@ -286,16 +286,31 @@ function __mcpParse(text) {
 }
 JSON.parse = __mcpParse;
 // Premiere 26.5.2 crashes (SIGABRT in AccusonusBaseFilter::SetupSTFT, a null window buffer)
-// when DeNoise or DeReverb is added to a clip whose source is a sequence: a nested sequence or
-// a multicam clip. Measured 2026-10-29: both work on file-based video and audio-only clips, and
-// both crash on a nested one, every time. Returns a refusal message, or '' when it is safe.
+// when DeNoise or DeReverb is added to a clip whose source is a sequence. Measured 2026-10-29:
+// the live sweep's denoise_clip took Premiere down on a nested clip, and it reproduced on a
+// nested clip; both effects work on file-based video and audio-only clips. Multicam clips are
+// sequences too and are refused the same way as a precaution (not measured separately).
+// No version check: refused on every build until a build is measured safe.
+//
+// Fails closed: if the clip's source cannot be read, the effect is refused rather than risked.
+// Names match in any case, and the obsolete "Adaptive Noise Reduction" counts, because adding
+// it offers to swap in DeNoise. Returns a refusal message, or '' when it is safe.
 function __crashProneAudioFx(domClip, effectName) {
   var n = String(effectName || '');
-  if (n.indexOf('DeNoise') < 0 && n.indexOf('DeReverb') < 0) return '';
-  var nested = false;
-  try { nested = !!(domClip && domClip.projectItem && domClip.projectItem.isSequence()); } catch (e) {}
-  if (!nested) return '';
-  return n + ' on a nested sequence or multicam clip crashes Premiere 26.5.2, so it was not added and nothing was changed. Apply it to the clips inside that sequence instead.';
+  var low = n.toLowerCase();
+  if (low.indexOf('denoise') < 0 && low.indexOf('dereverb') < 0 && low.indexOf('adaptive noise reduction') < 0) return '';
+  var item = null, nested = false, multicam = false, known = false;
+  try {
+    item = domClip ? domClip.projectItem : null;
+    if (item) {
+      nested = !!item.isSequence();
+      try { multicam = !!item.isMulticamClip(); } catch (eM) {}
+      known = true;
+    }
+  } catch (e) {}
+  if (!known) return n + ' was not added: could not confirm that this clip comes from a media file, and on a nested sequence or multicam clip it crashes Premiere. Nothing was changed.';
+  if (!nested && !multicam) return '';
+  return n + ' on a nested sequence or multicam clip crashes Premiere, so it was not added and nothing was changed. Apply it to the clips inside that sequence instead.';
 }
 
 function __findSequence(id) {
