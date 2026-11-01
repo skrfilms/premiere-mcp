@@ -49,7 +49,14 @@ function check(label, ok, detail) {
   console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? '  — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 220) : ''}`);
   return !!ok;
 }
+/** Every tool each workflow calls, for the verification ledger. */
+const used = (name, args) => {
+  if (!current) return;
+  (current.tools ||= new Set()).add(name);
+  if (name === 'call_tool' && args?.name) current.tools.add(String(args.name));
+};
 async function tool(name, args) {
+  used(name, args);
   const r = await tools.executeTool(name, args);
   return r && r.data && r.success !== false && r.tool ? { success: true, ...r.data } : r;
 }
@@ -110,7 +117,7 @@ function loudness(file, from, dur) {
   const m = /mean_volume: ([-0-9.]+) dB/.exec(r.stderr || ''); return m ? Number(m[1]) : null;
 }
 
-const wanted = new Set(process.argv.slice(2));
+const wanted = new Set(process.argv.slice(2).filter((a) => !a.startsWith('--')));
 const run = (id) => wanted.size === 0 || wanted.has(id);
 
 // ------------------------------------------------------------------- W1: version up a shot
@@ -415,7 +422,7 @@ async function mcpClient() {
     return JSON.parse(line ? line.slice(5) : text);
   };
   await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'workflow-tests', version: '1' } });
-  return async (name, args) => { const r = await rpc('tools/call', { name, arguments: args }); return r.result ? JSON.parse(r.result.content[0].text) : { success: false, error: r.error?.message }; };
+  return async (name, args) => { used(name, args); const r = await rpc('tools/call', { name, arguments: args }); return r.result ? JSON.parse(r.result.content[0].text) : { success: false, error: r.error?.message }; };
 }
 
 if (run('W9')) try {
@@ -586,5 +593,22 @@ if (run('W10')) try {
 // ------------------------------------------------------------------- summary
 console.log('\n================ WORKFLOWS ================');
 for (const w of results) console.log(`${w.ok ? 'PASS' : 'FAIL'}  ${w.name}  (${w.steps.filter((s) => s.ok).length}/${w.steps.length} steps)`);
-writeFileSync(join(OUT, 'workflow-results.json'), JSON.stringify(results, null, 2));
+writeFileSync(join(OUT, 'workflow-results.json'), JSON.stringify(results, (k, v) => (v instanceof Set ? [...v] : v), 2));
+
+// Into the verification ledger: a tool counts as passing when every workflow that called it
+// passed its independent checks (frames, levels, readbacks), and as failing, with the workflow
+// named, when one did not. Only a full run (no workflow ids given) is recorded.
+if (wanted.size === 0 && !process.argv.includes('--no-ledger')) {
+  const { collectEnvironment, recordSweep } = await import('./lib/verification-ledger.mjs');
+  const per = new Map();
+  for (const w of results) for (const name of w.tools ?? []) {
+    if (!per.has(name)) per.set(name, { ok: [], bad: [] });
+    per.get(name)[w.ok ? 'ok' : 'bad'].push(w.name.split(/\s+/)[0]);
+  }
+  const rows = [...per].map(([name, { ok, bad }]) => bad.length
+    ? { name, outcome: 'fail', detail: `in a failing workflow: ${bad.join(', ')}` }
+    : { name, outcome: 'pass', detail: `workflows ${ok.join(', ')}` });
+  const environment = await collectEnvironment({ tools, harness: 'workflow-tests', mode: 'mutate' });
+  console.log(`ledger entry: ${recordSweep({ environment, tools: rows })}`);
+}
 process.exit(results.every((w) => w.ok) ? 0 : 1);

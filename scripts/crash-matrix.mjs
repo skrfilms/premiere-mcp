@@ -23,6 +23,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkStillScratch, requireScratchProject } from './lib/require-scratch-project.mjs';
+import { collectEnvironment, recordSweep } from './lib/verification-ledger.mjs';
 import { buildContext, ensureSideFixtures, synthesizeArgs } from './lib/synthesize-args.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -194,7 +195,7 @@ const DESTRUCTIVE = {
 const wanted = process.argv.slice(2);
 const setAt = process.argv.indexOf('--set');
 const SET = setAt >= 0 && process.argv[setAt + 1] === 'destructive' ? DESTRUCTIVE : OPS;
-const names = wanted.filter((w, i) => w !== '--set' && process.argv[process.argv.indexOf(w) - 1] !== '--set');
+const names = wanted.filter((w) => !w.startsWith('--') && process.argv[process.argv.indexOf(w) - 1] !== '--set');
 const ops = Object.entries(SET).filter(([n]) => !names.length || names.includes(n));
 const results = [];
 // Written after every case, so a run that stops early (or dies) keeps what it found.
@@ -280,5 +281,29 @@ for (const [op, spec] of ops) {
 }
 
 save();
+
+// Into the verification ledger, one row per tool, so docs/LIVE-VERIFICATION.md counts what this
+// harness ran (the smoke sweep skips these tools by design). A crash on any kind of clip is a
+// fail; otherwise a pass needs at least one kind where the tool did its job. Only a complete run
+// is recorded; --no-ledger leaves it out (for a partial or experimental run).
+if (!process.argv.includes('--no-ledger')) {
+  const per = new Map();
+  for (const r of results) {
+    if (!r.op) continue;
+    const name = SET[r.op]?.tool ?? r.op;
+    if (!per.has(name)) per.set(name, []);
+    per.get(name).push(r);
+  }
+  const rows = [...per].map(([name, rs]) => {
+    const kinds = (o) => rs.filter((r) => r.outcome === o).map((r) => r.kind);
+    const crashed = kinds('CRASHED'), ok = kinds('ok'), refused = rs.filter((r) => r.outcome === 'refused');
+    if (crashed.length) return { name, outcome: 'fail', detail: `crashed Premiere on: ${crashed.join(', ')}` };
+    if (ok.length) return { name, outcome: 'pass', detail: `ok on ${ok.join(', ')}${refused.length ? `; refused on ${refused.map((r) => r.kind).join(', ')}` : ''}` };
+    if (refused.length) return { name, outcome: 'fail', detail: `refused on every kind tried: ${refused[0].detail || 'no reason given'}` };
+    return { name, outcome: 'skipped_args', detail: 'no fixture or setup failed on every kind' };
+  });
+  const environment = await collectEnvironment({ tools, harness: 'crash-matrix', mode: 'mutate' });
+  console.log(`ledger entry: ${recordSweep({ environment, tools: rows })}`);
+}
 console.log(`\n${results.filter((x) => x.outcome === 'CRASHED').length} crash(es); results: ${file}`);
 process.exit(0);

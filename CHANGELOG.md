@@ -35,12 +35,33 @@ All notable changes are documented here. Releases use semantic versioning.
 - **`reorder_effects`** cannot reorder (Premiere's scripting has no call that moves an effect),
   so it now reads the stack, returns `success: false, changed: false` with the current order and
   any requested names not on the clip, and counts as read-only inside a transaction.
+- **Tools reached through `call_tool` run their own steps.** A tool outside the default
+  profile, called through `call_tool`, ran its internal steps against the advertised list, so a
+  step the profile hid was refused mid-call: `version_up_shots` (`replace_clip_media`),
+  `remove_silence` (`detect_silence`, `close_gap_at`), `title_card`, `lower_third_preset` and
+  `batch_mogrt_from_data` (`add_text_overlay`). Every internal step now runs past the profile, and
+  a test forbids the old pattern.
+- **Failures say why.** `update_marker` and `delete_marker` on a missing id, `title_card`, and
+  `set_app_property` / `set_project_property` on a key that does not exist used to fail with no
+  reason (shown as "unknown") or with Premiere's bare "Invalid parameter".
+- `set_project_property` now shares `set_app_property`'s checked write. Despite its name it has
+  always written application preferences (`app.properties`), and it reported `verified: true`
+  without comparing the read-back.
+- `get_clip_links` returns the clips linked to the clip (its own audio or video) in `linked`; it
+  used to return only the clip's info.
+- `set_source_in_out` says when nothing is open in the Source Monitor, and reads both marks back.
+- `look_at_cut` refuses an `outputPath` that is not `.jpg`/`.png` before capturing anything.
+- `batch_apply_effect` counts clips of the other kind (audio clips for a video effect) as not
+  applicable rather than failed. Applicability now comes from Premiere's effect lists, because
+  `getAudioEffectByName` returns an effect object even for a video effect's name.
 - `set_clip_pan` refuses nested clips with the reason, and says the pan may have changed if
   the write went through but the read-back failed. `normalize_clip_peaks` refuses nested clips.
 - New `scripts/crash-matrix.mjs`: runs each risky tool on its own fresh sequence against seven
-  kinds of clip, re-checks before every case that only the scratch project is open, records a
+  kinds of clip (it generates the audio-only, dual-mono and 29.97 media it needs), re-checks
+  before every case that only the scratch project is open, records a
   crash with its report's top frames, relaunches Premiere and carries on, and saves as it goes.
-- New live workflow W10 covers the above against a running Premiere.
+- New live workflow W10 covers the above against a running Premiere. `live-smoke-sweep --skip a,b`
+  leaves tools out of one run (reported as untested).
 - Internals: the 20-level chain of tool classes is now one class per domain on a shared base,
   with cross-domain calls typed. Flattening it would have broken four untyped
   `(this as any).executeTool` calls; the live workflow tests caught them before commit, and a
