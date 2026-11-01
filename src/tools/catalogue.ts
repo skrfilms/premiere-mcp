@@ -5933,7 +5933,7 @@ export function buildToolCatalogue(): MCPTool[] {
     {
       name: 'set_project_property',
       description:
-        'Sets an application-level property via app.properties.setProperty(key, value). Confirmed working. Returns readback.',
+        'Sets an APPLICATION-level property (app.properties, despite the name; same as set_app_property) and reads it back: fails if the value does not read back as requested. For project-wide settings use the project/sequence settings tools.',
       inputSchema: z.object({
         key: z.string().describe('Property key'),
         value: z.string().describe('Property value'),
@@ -5983,7 +5983,9 @@ export function buildToolCatalogue(): MCPTool[] {
         outputPath: z
           .string()
           .optional()
-          .describe('Where to write the contact sheet (.jpg); default a temp file'),
+          .describe(
+            'Where to write the contact sheet: a path ending in .jpg, .jpeg or .png; default a temp file',
+          ),
       }),
     },
     {

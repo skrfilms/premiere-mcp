@@ -415,6 +415,7 @@ function outputExtension(key, toolName) {
   if (/loudness|normalize/.test(t)) return '.mp4';
   if (/^snapshot_state$/.test(t)) return '.json';
   if (/thumbnail|still|frame|scope|palette|snapshot|false_color/.test(t)) return '.png';
+  if (/^look_at_cut$|contact|sheet/.test(t)) return '.jpg';
   if (/export|render|encode|reel|spot/.test(t)) return '.mp4';
   return '.txt';
 }

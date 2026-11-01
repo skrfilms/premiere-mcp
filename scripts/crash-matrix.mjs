@@ -93,15 +93,45 @@ const q = JSON.stringify;
 const itemId = async (name) => (await bridge.executeScript(`(function(){var hit=null;function w(it){for(var i=0;i<it.children.numItems&&!hit;i++){var c=it.children[i];if(String(c.name)===${q(name)})hit=c;else if(c.type===2)w(c);}}w(app.project.rootItem);return JSON.stringify({id:hit?String(hit.nodeId):null});})();`)).id;
 const seqItemId = async (name) => (await bridge.executeScript(`(function(){for(var i=0;i<app.project.sequences.numSequences;i++){var s=app.project.sequences[i];if(String(s.name)===${q(name)})return JSON.stringify({id:String(s.projectItem.nodeId)});}return JSON.stringify({id:null});})();`)).id;
 
+// The kinds the reset project does not hold are generated here (ffmpeg) and imported into a
+// crash_fixtures bin, so every case has material instead of being skipped as no_fixture.
+const CRASH_MEDIA = join(ROOT, '.scratch', 'media', 'crash');
+const SIDE = {
+  'crash_audio_only.m4a': ['-f', 'lavfi', '-i', 'sine=frequency=440:duration=6', '-c:a', 'aac'],
+  'crash_dualmono.mp4': ['-f', 'lavfi', '-i', 'testsrc2=s=640x360:r=24:d=6', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=6', '-f', 'lavfi', '-i', 'sine=frequency=660:duration=6', '-map', '0:v', '-map', '1:a', '-map', '2:a', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac'],
+  'crash_2997_long.mp4': ['-f', 'lavfi', '-i', 'testsrc2=s=640x360:r=30000/1001:d=60', '-f', 'lavfi', '-i', 'sine=frequency=330:duration=60', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest'],
+};
+mkdirSync(CRASH_MEDIA, { recursive: true });
+for (const [name, args] of Object.entries(SIDE)) {
+  const out = join(CRASH_MEDIA, name);
+  if (!existsSync(out)) execFileSync(process.env.PREMIERE_MCP_FFMPEG_CMD || 'ffmpeg', ['-v', 'error', '-y', ...args, out]);
+}
+// Also re-run after every relaunch: a crashed Premiere reopens the last SAVED scratch project,
+// which may not hold the imports made in this run.
+async function importCrashFixtures() {
+  const r = await bridge.executeScript(`(function(){
+    function has(it, n){ for (var i=0;i<it.children.numItems;i++){ var c=it.children[i]; if (String(c.name)===n) return true; if (c.type===2 && has(c,n)) return true; } return false; }
+    var want = ${JSON.stringify(Object.keys(SIDE).map((n) => join(CRASH_MEDIA, n)))}, missing = [];
+    for (var i=0;i<want.length;i++){ var n = want[i].split('/').pop(); if (!has(app.project.rootItem, n)) missing.push(want[i]); }
+    if (!missing.length) return JSON.stringify({ imported: 0 });
+    var bin = null; for (var b=0;b<app.project.rootItem.children.numItems;b++){ var c=app.project.rootItem.children[b]; if (c.type===2 && String(c.name)==='crash_fixtures') bin=c; }
+    if (!bin) bin = app.project.rootItem.createBin('crash_fixtures');
+    app.project.importFiles(missing, true, bin, false);
+    return JSON.stringify({ imported: missing.length });
+  })();`);
+  console.log(`crash fixtures: ${r?.imported ?? '?'} imported`);
+}
+await importCrashFixtures();
+
 /** Kinds of material: how to get a project item whose clip lands on V1/A1 of a new sequence. */
 const KINDS = {
   'plain video+audio': () => itemId('fixture_a.mp4'),
-  'audio only': () => itemId('dialogue.m4a'),
+  'audio only': () => itemId('crash_audio_only.m4a'),
   'nested sequence': () => seqItemId('fixture_seq_a'),
   'multicam source': () => seqItemId('fixture_multicam[1]-fixture_multicam'),
   'still image': () => itemId('fixture_still.png'),
-  'dual mono': () => itemId('bits_dualmono.mp4'),
-  '29.97 long': () => itemId('bits_2997_long.mp4'),
+  'dual mono': () => itemId('crash_dualmono.mp4'),
+  '29.97 long': () => itemId('crash_2997_long.mp4'),
 };
 
 /** Risky operations, each against V1/A1 clip 0 of the case's own sequence. */
@@ -191,6 +221,7 @@ async function recover(when) {
   if (!(await relaunch())) stop(4, `${when}: Premiere did not come back after a relaunch`);
   await connect();
   await ensureScratch(`after relaunch (${when})`);
+  await importCrashFixtures();
 }
 /** Alive, slow or gone: a stale heartbeat with the process still running is a long render, not a crash. */
 async function settle() {

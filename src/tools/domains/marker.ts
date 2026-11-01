@@ -186,7 +186,9 @@ ${this.peers.sequenceTrack.buildSequenceResolver(sequenceId)}
           success: deleted && !stillPresent,
           sequenceId: sequence.sequenceID,
           sequenceName: sequence.name,
-          message: deleted && !stillPresent ? "Marker deleted successfully" : (deleted ? "Premiere reported marker deletion but marker is still present" : "Marker not found")
+          message: deleted && !stillPresent ? "Marker deleted successfully" : (deleted ? "Premiere reported marker deletion but marker is still present" : "Marker not found"),
+          // A failure always says why: without an error field callers showed "unknown".
+          error: deleted && !stillPresent ? undefined : (deleted ? "Premiere reported the marker deleted but it is still there." : "No marker with id " + ${JSON.stringify(markerId)} + " on " + sequence.name + " (" + sequence.markers.numMarkers + " markers). Get ids from list_markers. Nothing was changed.")
         });
       } catch (e) {
         return JSON.stringify({
@@ -233,7 +235,8 @@ ${this.peers.sequenceTrack.buildSequenceResolver(sequenceId)}
           verified: found,
           sequenceId: sequence.sequenceID,
           sequenceName: sequence.name,
-          message: found ? "Marker updated and verified" : "Marker not found"
+          message: found ? "Marker updated and verified" : "Marker not found",
+          error: found ? undefined : "No marker with id " + ${JSON.stringify(markerId)} + " on " + sequence.name + " (" + sequence.markers.numMarkers + " markers). Get ids from list_markers. Nothing was changed."
         });
       } catch (e) {
         return JSON.stringify({

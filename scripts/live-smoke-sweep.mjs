@@ -54,6 +54,11 @@ const ALLOW_MUTATE = process.argv.includes('--mutate');
  * driving the same bridge.
  */
 const ALLOW_RECOVER = process.argv.includes('--recover');
+// --skip a,b: leave these out of this run only (reported as untested, like every skip). For a
+// tool that just hung the host, so the rest of the catalogue can still be measured.
+const RUN_SKIP = new Set(
+  process.argv.includes('--skip') ? String(process.argv[process.argv.indexOf('--skip') + 1] || '').split(',').filter(Boolean) : [],
+);
 
 /** How long one tool gets before the harness gives up on it and records a failure. */
 const TOOL_TIMEOUT_MS = 25_000;
@@ -317,6 +322,7 @@ async function main() {
     const name = tool.name;
 
     if (SKIP[name]) { results.skipped.push({ name, reason: SKIP[name] }); continue; }
+    if (RUN_SKIP.has(name)) { results.skipped.push({ name, reason: 'skipped for this run (--skip)' }); continue; }
 
     const readOnly = isReadOnly(name);
     if (!readOnly && !ALLOW_MUTATE) { results.mutateDeferred.push(name); continue; }
