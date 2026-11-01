@@ -20,7 +20,8 @@ import { spawnSync } from 'node:child_process';
 const noBridge = { executeScript: async () => ({ success: true }) } as never;
 
 function priv(): any {
-  return new PremiereProTools(noBridge) as unknown as any;
+  // The footage index lives in the project-media domain.
+  return (new PremiereProTools(noBridge) as unknown as any).projectMedia;
 }
 
 const entry = (path: string, summary: Record<string, unknown>) => ({ path, summary });

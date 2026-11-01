@@ -1,23 +1,23 @@
 /**
  * GraphicsTools -- the Titles, Graphics & MOGRTs tool domain.
  *
- * One link in the chain that composes PremiereProTools. Split out of tools/index.ts, which
- * had grown to 19k lines; the method bodies are unchanged.
+ * A plain class on ToolsBase. PremiereProTools holds one instance and dispatches tool calls
+ * to it by name; other domains it relies on are reached through `this.peers`.
  */
-import { SpeedTimeTools } from './speed-time.js';
+import { ToolsBase } from './base.js';
 import { createMotionDemoAssets } from '../../utils/demoAssets.js';
 import { evaluateTextInjectionResult } from './shared.js';
 import { bridgeDir } from '../../utils/scratch-paths.js';
 
-export class GraphicsTools extends SpeedTimeTools {
-  protected async buildMotionGraphicsDemo(sequenceName = 'Apple Like Motion Demo'): Promise<any> {
+export class GraphicsTools extends ToolsBase {
+  async buildMotionGraphicsDemo(sequenceName = 'Apple Like Motion Demo'): Promise<any> {
     const assetBase = bridgeDir();
     const assetDir = `${assetBase.replace(/\/$/, '')}/motion-demo-${Date.now()}`;
     const assets = await createMotionDemoAssets(assetDir);
 
     const imported = [];
     for (const asset of assets) {
-      const result = await this.importMedia(asset.path);
+      const result = await this.peers.projectMedia.importMedia(asset.path);
       imported.push(result);
       if (!result.success || !result.id) {
         return {
@@ -30,7 +30,7 @@ export class GraphicsTools extends SpeedTimeTools {
       }
     }
 
-    const createdSequence = await this.createSequenceFromProjectItems(
+    const createdSequence = await this.peers.sequenceTrack.createSequenceFromProjectItems(
       sequenceName,
       imported.map((item: any) => item.id),
     );
@@ -46,7 +46,7 @@ export class GraphicsTools extends SpeedTimeTools {
 
     const placements = [];
     for (let index = 0; index < imported.length; index++) {
-      const placement = await this.addToTimeline(
+      const placement = await this.peers.assembly.addToTimeline(
         createdSequence.id,
         imported[index].id,
         0,
@@ -69,10 +69,14 @@ export class GraphicsTools extends SpeedTimeTools {
     const clips = placements.map((placement: any) => placement.id).filter(Boolean);
     const transitions = [];
     if (clips[0]) {
-      transitions.push(await this.addTransitionToClip(clips[0], 'Cross Dissolve', 'end', 0.75));
+      transitions.push(
+        await this.peers.effects.addTransitionToClip(clips[0], 'Cross Dissolve', 'end', 0.75),
+      );
     }
     if (clips[1]) {
-      transitions.push(await this.addTransitionToClip(clips[1], 'Cross Dissolve', 'end', 0.75));
+      transitions.push(
+        await this.peers.effects.addTransitionToClip(clips[1], 'Cross Dissolve', 'end', 0.75),
+      );
     }
 
     const animations = [];
@@ -87,12 +91,20 @@ export class GraphicsTools extends SpeedTimeTools {
         continue;
       }
       animations.push(
-        await this.addKeyframe(clips[index], 'Motion', 'Scale', frame.start, frame.from),
+        await this.peers.keyframe.addKeyframe(
+          clips[index],
+          'Motion',
+          'Scale',
+          frame.start,
+          frame.from,
+        ),
       );
-      animations.push(await this.addKeyframe(clips[index], 'Motion', 'Scale', frame.end, frame.to));
+      animations.push(
+        await this.peers.keyframe.addKeyframe(clips[index], 'Motion', 'Scale', frame.end, frame.to),
+      );
     }
 
-    const tracks = await this.listSequenceTracks(createdSequence.id);
+    const tracks = await this.peers.sequenceTrack.listSequenceTracks(createdSequence.id);
 
     return {
       success: true,
@@ -108,7 +120,7 @@ export class GraphicsTools extends SpeedTimeTools {
     };
   }
 
-  protected async setMogrtText(
+  async setMogrtText(
     sequenceId: string | undefined,
     ti: number,
     ci: number,
@@ -138,7 +150,7 @@ export class GraphicsTools extends SpeedTimeTools {
     `);
   }
 
-  protected async setMogrtParam(
+  async setMogrtParam(
     sequenceId: string | undefined,
     ti: number,
     ci: number,
@@ -166,11 +178,7 @@ export class GraphicsTools extends SpeedTimeTools {
     `);
   }
 
-  protected async mogrtParamsReport(
-    sequenceId: string | undefined,
-    ti: number,
-    ci: number,
-  ): Promise<any> {
+  async mogrtParamsReport(sequenceId: string | undefined, ti: number, ci: number): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(sequenceId)};
@@ -190,11 +198,7 @@ export class GraphicsTools extends SpeedTimeTools {
     `);
   }
 
-  protected async timecodeBurnIn(
-    sequenceId: string | undefined,
-    ti: number,
-    ci: number,
-  ): Promise<any> {
+  async timecodeBurnIn(sequenceId: string | undefined, ti: number, ci: number): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -218,7 +222,7 @@ export class GraphicsTools extends SpeedTimeTools {
   }
 
   // Text and Graphics Implementation
-  protected async addTextOverlay(args: any): Promise<any> {
+  async addTextOverlay(args: any): Promise<any> {
     if (!args.mogrtPath && process.env.PREMIERE_MCP_DEFAULT_MOGRT) {
       args = { ...args, mogrtPath: process.env.PREMIERE_MCP_DEFAULT_MOGRT };
     }
@@ -616,7 +620,7 @@ export class GraphicsTools extends SpeedTimeTools {
   }
 
   // Import MOGRT Implementation
-  protected async importMogrt(
+  async importMogrt(
     sequenceId: string,
     mogrtPath: string,
     time: number,
@@ -646,7 +650,7 @@ export class GraphicsTools extends SpeedTimeTools {
   }
 
   // Import MOGRT From Library Implementation
-  protected async importMogrtFromLibrary(
+  async importMogrtFromLibrary(
     sequenceId: string,
     libraryName: string,
     mogrtName: string,
@@ -676,7 +680,7 @@ export class GraphicsTools extends SpeedTimeTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async watermarkApply(
+  async watermarkApply(
     logoPath: string,
     opacity: number,
     corner: string,
@@ -706,7 +710,7 @@ export class GraphicsTools extends SpeedTimeTools {
     `);
   }
 
-  protected async getMogrtTextAll(seqId?: string): Promise<any> {
+  async getMogrtTextAll(seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(seqId)};
@@ -734,7 +738,7 @@ export class GraphicsTools extends SpeedTimeTools {
     `);
   }
 
-  protected async removeMogrtClip(
+  async removeMogrtClip(
     seqId: string | undefined,
     trackIndex: number,
     clipIndex: number,
@@ -769,7 +773,7 @@ export class GraphicsTools extends SpeedTimeTools {
     `);
   }
 
-  protected async createAdjustmentLayerAt(
+  async createAdjustmentLayerAt(
     startTimeSecs: number,
     durationSecs: number,
     trackIndex?: number,

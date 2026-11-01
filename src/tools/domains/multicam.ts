@@ -1,15 +1,15 @@
 /**
  * MulticamTools -- the Multicam tool domain.
  *
- * One link in the chain that composes PremiereProTools. Split out of tools/index.ts, which
- * had grown to 19k lines; the method bodies are unchanged.
+ * A plain class on ToolsBase. PremiereProTools holds one instance and dispatches tool calls
+ * to it by name; other domains it relies on are reached through `this.peers`.
  */
-import { MotionLayoutTools } from './motion-layout.js';
+import { ToolsBase } from './base.js';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-export class MulticamTools extends MotionLayoutTools {
+export class MulticamTools extends ToolsBase {
   /**
    * Build a cut multicam edit: a new sequence whose V1 is a run of multicam clips, each showing
    * the requested angle — i.e. a finished multicam cut that stays switchable in Premiere.
@@ -20,7 +20,7 @@ export class MulticamTools extends MotionLayoutTools {
    * <activevideoangle> is the one shown. Measured on 2026-10-27 with three solid-colour angles:
    * each cut rendered its own angle. Angles are synced at their media start (all in points 0).
    */
-  protected async createMulticamCut(
+  async createMulticamCut(
     angleItemIds: string[],
     cuts: Array<{ startSecs: number; endSecs: number; angle: number }>,
     sequenceName: string,
@@ -141,7 +141,7 @@ export class MulticamTools extends MotionLayoutTools {
     `);
   }
 
-  protected async enableMulticam(
+  async enableMulticam(
     seqId: string | undefined,
     trackIndex: number,
     clipIndex: number,
@@ -179,7 +179,7 @@ export class MulticamTools extends MotionLayoutTools {
     `);
   }
 
-  protected async getMulticamAngleCount(seqId?: string): Promise<any> {
+  async getMulticamAngleCount(seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(seqId)};
@@ -190,7 +190,7 @@ export class MulticamTools extends MotionLayoutTools {
     `);
   }
 
-  protected async flattenMulticam(
+  async flattenMulticam(
     seqId: string | undefined,
     trackIndex: number,
     clipIndex: number,
@@ -207,7 +207,7 @@ export class MulticamTools extends MotionLayoutTools {
     `);
   }
 
-  protected async multicamInfo(
+  async multicamInfo(
     seqId: string | undefined,
     trackIndex: number,
     clipIndex: number,
@@ -224,7 +224,7 @@ export class MulticamTools extends MotionLayoutTools {
     `);
   }
 
-  protected async setMulticamAngle(
+  async setMulticamAngle(
     seqId: string | undefined,
     trackIndex: number,
     clipIndex: number,
@@ -254,7 +254,7 @@ export class MulticamTools extends MotionLayoutTools {
    * and then report "Bin is empty". Uses the shared __resolveBin prelude helper. Sub-bins are
    * also skipped when collecting angles -- they were previously pushed in as camera angles.
    */
-  protected async createMulticamSourceSequence(
+  async createMulticamSourceSequence(
     binName: string,
     newSeqName: string,
     presetPath?: string,
@@ -278,7 +278,7 @@ export class MulticamTools extends MotionLayoutTools {
     `);
   }
 
-  protected async createMulticamFromClips(
+  async createMulticamFromClips(
     projectItemIds: string[],
     seqName: string,
     presetPath?: string,

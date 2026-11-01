@@ -1,14 +1,14 @@
 /**
  * TrimmingTools -- the Trimming tool domain.
  *
- * One link in the chain that composes PremiereProTools. Split out of tools/index.ts, which
- * had grown to 19k lines; the method bodies are unchanged.
+ * A plain class on ToolsBase. PremiereProTools holds one instance and dispatches tool calls
+ * to it by name; other domains it relies on are reached through `this.peers`.
  */
-import { GraphicsTools } from './graphics.js';
+import { ToolsBase } from './base.js';
 import { TRIM_LIB } from '../trim-lib.js';
 
-export class TrimmingTools extends GraphicsTools {
-  protected async rippleTrimIn(
+export class TrimmingTools extends ToolsBase {
+  async rippleTrimIn(
     sequenceId: string | undefined,
     trackIndex: number,
     clipIndex: number,
@@ -35,7 +35,7 @@ export class TrimmingTools extends GraphicsTools {
     `);
   }
 
-  protected async rippleTrimOut(
+  async rippleTrimOut(
     sequenceId: string | undefined,
     trackIndex: number,
     clipIndex: number,
@@ -60,7 +60,7 @@ export class TrimmingTools extends GraphicsTools {
     `);
   }
 
-  protected async extendEdit(
+  async extendEdit(
     sequenceId: string | undefined,
     trackIndex: number,
     clipIndex: number,
@@ -93,7 +93,7 @@ export class TrimmingTools extends GraphicsTools {
     `);
   }
 
-  protected async nudgeClip(
+  async nudgeClip(
     sequenceId: string | undefined,
     trackIndex: number,
     clipIndex: number,
@@ -183,7 +183,7 @@ export class TrimmingTools extends GraphicsTools {
     `;
   }
 
-  protected async closeGapAt(timecode: string, sequenceId?: string): Promise<any> {
+  async closeGapAt(timecode: string, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(
       this.gapCloserScript(
         sequenceId,
@@ -205,7 +205,7 @@ export class TrimmingTools extends GraphicsTools {
     );
   }
 
-  protected async closeAllGaps(
+  async closeAllGaps(
     sequenceId?: string,
     trackIndex?: number,
     includeLeadingGap = false,
@@ -243,7 +243,7 @@ export class TrimmingTools extends GraphicsTools {
     );
   }
 
-  protected async trimClip(
+  async trimClip(
     clipId: string,
     inPoint?: number,
     outPoint?: number,
@@ -315,7 +315,7 @@ export class TrimmingTools extends GraphicsTools {
     `);
   }
 
-  protected async getSequenceGaps(seqId?: string, trackIndex?: number): Promise<any> {
+  async getSequenceGaps(seqId?: string, trackIndex?: number): Promise<any> {
     // Computed from clip ranges: getTimelineGaps() does not exist on this host, and the old
     // typeof-guarded call reported gapCount:0 on every sequence, gaps or not.
     return await this.bridge.executeScript(`

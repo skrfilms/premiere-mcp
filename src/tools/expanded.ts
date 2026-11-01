@@ -3117,7 +3117,9 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
               // precedes the target.
               var qeBatchClip = __findQeClipByDomClip(qeBatchTrack, batchClips[bai].clip);
               var batchEffect = batchClips[bai].trackType === "video" ? qe.project.getVideoEffectByName(String(args.effectName || args.name)) : qe.project.getAudioEffectByName(String(args.effectName || args.name));
-              if (!batchEffect || !qeBatchClip) batchResults.push({ clipId: batchClips[bai].clip.nodeId, ok: false, error: "QE clip/effect unavailable" });
+              var batchRefuse = batchClips[bai].trackType === "video" ? "" : __crashProneAudioFx(batchClips[bai].clip, String(args.effectName || args.name));
+              if (batchRefuse) batchResults.push({ clipId: batchClips[bai].clip.nodeId, ok: false, skipped: true, error: batchRefuse });
+              else if (!batchEffect || !qeBatchClip) batchResults.push({ clipId: batchClips[bai].clip.nodeId, ok: false, error: "QE clip/effect unavailable" });
               else { qeBatchClip.addVideoEffect ? (batchClips[bai].trackType === "video" ? qeBatchClip.addVideoEffect(batchEffect) : qeBatchClip.addAudioEffect(batchEffect)) : qeBatchClip.addAudioEffect(batchEffect); batchResults.push({ clipId: batchClips[bai].clip.nodeId, ok: true }); }
             } catch (batchError) {
               batchResults.push({ clipId: batchClips[bai].clip.nodeId, ok: false, error: batchError.toString() });
@@ -3261,9 +3263,19 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
             var panRaw = typeof args.pan !== "undefined" ? args.pan : args.value;
             var panWanted = Number(typeof panRaw === "undefined" ? 0 : panRaw);
             if (isNaN(panWanted) || panWanted < -100 || panWanted > 100) return fail("pan must be a number from -100 (full left) to 100 (full right).");
-            var panBefore = Number(panComp.getParamValue("Pan"));
-            panComp.setParamValue("Pan", String(panWanted));
-            var panAfter = Number(panComp.getParamValue("Pan"));
+            var panBefore, panAfter;
+            try {
+              panBefore = Number(panComp.getParamValue("Pan"));
+              panComp.setParamValue("Pan", String(panWanted));
+              panAfter = Number(panComp.getParamValue("Pan"));
+            } catch (ePan) {
+              // Measured 2026-10-29: a nested-sequence clip's pan component throws "Unknown error
+              // exception" on read. Its audio is mixed inside the nested sequence.
+              var panNested = false; try { panNested = !!(transformClip.clip.projectItem && transformClip.clip.projectItem.isSequence()); } catch (eN) {}
+              return fail(panNested
+                ? "This clip is a nested sequence; Premiere will not read or set its pan from script. Set pan on the clips inside that sequence. Nothing was changed."
+                : "Premiere refused the pan change (" + ePan + "). Nothing was changed.");
+            }
             if (Math.abs(panAfter - panWanted) > 0.01) return fail("Pan reads back " + panAfter + " after being set to " + panWanted + ".", { before: panBefore, after: panAfter });
             return ok({ component: "QE clip pan", property: "Pan", before: panBefore, after: panAfter, verified: true, verifiedBy: "QE getParamValue readback" });
           }

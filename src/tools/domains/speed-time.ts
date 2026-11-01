@@ -1,18 +1,18 @@
 /**
  * SpeedTimeTools -- the Speed & Time tool domain.
  *
- * One link in the chain that composes PremiereProTools. Split out of tools/index.ts, which
- * had grown to 19k lines; the method bodies are unchanged.
+ * A plain class on ToolsBase. PremiereProTools holds one instance and dispatches tool calls
+ * to it by name; other domains it relies on are reached through `this.peers`.
  */
-import { SourceMonitorTools } from './source-monitor.js';
+import { ToolsBase } from './base.js';
 import { spawn } from 'child_process';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import { basename, dirname, extname, join } from 'node:path';
 import { TRIM_LIB } from '../trim-lib.js';
 import { runFf } from '../ff-exec.js';
 
-export class SpeedTimeTools extends SourceMonitorTools {
-  protected async setClipReverse(
+export class SpeedTimeTools extends ToolsBase {
+  async setClipReverse(
     trackIndex: number,
     clipIndex: number,
     reverse: boolean,
@@ -45,7 +45,7 @@ export class SpeedTimeTools extends SourceMonitorTools {
    * absent, and verify-after-write (the output must exist and be non-empty)
    * before claiming success.
    */
-  protected async bakeSpeedChange(
+  async bakeSpeedChange(
     mediaPath?: string,
     projectItemId?: string,
     speed?: number,
@@ -75,7 +75,7 @@ export class SpeedTimeTools extends SourceMonitorTools {
       return { success: false, error: `Media file not found or unreadable: ${resolvedPath}` };
     }
 
-    const ffmpeg = this.ffmpegCmd();
+    const ffmpeg = this.peers.exportRender.ffmpegCmd();
     const available = await this.checkCommandAvailable(ffmpeg, ['-version']);
     if (!available) {
       return {
@@ -129,7 +129,7 @@ export class SpeedTimeTools extends SourceMonitorTools {
     const argv: string[] = ['-y', '-i', resolvedPath as string, '-vf', vf];
     if (includeAudio) {
       const audioFilter = preservePitch
-        ? this.buildAtempoChain(speed)
+        ? this.peers.audio.buildAtempoChain(speed)
         : // Pitch shifts with speed: run the sample clock faster, then resample back to the source rate.
           `asetrate=${srcRate}*${speed},aresample=${srcRate}`;
       argv.push('-af', audioFilter);
@@ -188,7 +188,7 @@ export class SpeedTimeTools extends SourceMonitorTools {
     });
   }
 
-  protected async speedChange(clipId: string, speed: number, maintainAudio = true): Promise<any> {
+  async speedChange(clipId: string, speed: number, maintainAudio = true): Promise<any> {
     // QE setSpeed is miscalibrated on 26.5.2. Measured frame-exact on a clip with no tail handle:
     // a requested rate r plays at 2r/(r+1) (2x -> 1.33x, 3x -> 1.5x) while the duration is cut to
     // 1/r, so the clip silently loses the tail of its source range; on a clip with a neighbour it
@@ -237,7 +237,7 @@ export class SpeedTimeTools extends SourceMonitorTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async reverseClip(clipId: string, maintainAudioPitch?: boolean): Promise<any> {
+  async reverseClip(clipId: string, maintainAudioPitch?: boolean): Promise<any> {
     return await this.bridge.executeScript(`
       ${TRIM_LIB}
       try {
@@ -259,7 +259,7 @@ export class SpeedTimeTools extends SourceMonitorTools {
     `);
   }
 
-  protected async rateStretchToFill(
+  async rateStretchToFill(
     trackIndex: number,
     clipIndex: number,
     targetDurationSecs?: number,
@@ -312,7 +312,7 @@ export class SpeedTimeTools extends SourceMonitorTools {
     `);
   }
 
-  protected async fitClipDuration(
+  async fitClipDuration(
     trackIndex: number,
     clipIndex: number,
     targetSeconds: number,
@@ -332,7 +332,7 @@ export class SpeedTimeTools extends SourceMonitorTools {
     `);
   }
 
-  protected async verifySpeedDuration(
+  async verifySpeedDuration(
     trackIndex: number,
     clipIndex: number,
     expectedSpeedPercent?: number,
@@ -350,11 +350,7 @@ export class SpeedTimeTools extends SourceMonitorTools {
     `);
   }
 
-  protected async getClipSpeedInfo(
-    trackIndex: number,
-    clipIndex: number,
-    seqId?: string,
-  ): Promise<any> {
+  async getClipSpeedInfo(trackIndex: number, clipIndex: number, seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -365,11 +361,7 @@ export class SpeedTimeTools extends SourceMonitorTools {
     `);
   }
 
-  protected async removeTimeRemap(
-    trackIndex: number,
-    clipIndex: number,
-    seqId?: string,
-  ): Promise<any> {
+  async removeTimeRemap(trackIndex: number, clipIndex: number, seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -398,7 +390,7 @@ export class SpeedTimeTools extends SourceMonitorTools {
     `);
   }
 
-  protected slowmoQualityReport(sourceFps: number, targetSpeedPercent: number): any {
+  slowmoQualityReport(sourceFps: number, targetSpeedPercent: number): any {
     const effectiveFps = sourceFps * (targetSpeedPercent / 100);
     const willJudder = effectiveFps < 24;
     return {
@@ -414,7 +406,7 @@ export class SpeedTimeTools extends SourceMonitorTools {
     };
   }
 
-  protected async speedRampBake(
+  async speedRampBake(
     trackIndex: number,
     clipIndex: number,
     speedPercent: number,

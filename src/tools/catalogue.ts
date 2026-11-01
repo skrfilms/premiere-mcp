@@ -1460,7 +1460,7 @@ export function buildToolCatalogue(): MCPTool[] {
     {
       name: 'reorder_effects',
       description:
-        'Reorders the effect stack on a clip by specifying the new component order as a list of display names. Serializes params, removes, re-adds in new order.',
+        "Reports a clip's effect stack order next to the order you want. Premiere's scripting cannot move an effect within the stack, so this changes nothing and returns success:false with how to do it by hand (Effect Controls panel, or remove and re-apply, which loses that effect's keyframes).",
       inputSchema: z.object({
         trackIndex: z.number(),
         clipIndex: z.number(),

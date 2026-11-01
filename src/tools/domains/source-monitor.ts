@@ -1,18 +1,18 @@
 /**
  * SourceMonitorTools -- the Source Monitor & Logging tool domain.
  *
- * One link in the chain that composes PremiereProTools. Split out of tools/index.ts, which
- * had grown to 19k lines; the method bodies are unchanged.
+ * A plain class on ToolsBase. PremiereProTools holds one instance and dispatches tool calls
+ * to it by name; other domains it relies on are reached through `this.peers`.
  */
-import { ReviewDeliveryTools } from './review-delivery.js';
 // Synchronous fs/path/os bindings for the Node-side (non-ExtendScript) tools.
 // The async API is the separate `promises as fs` import.
+import { ToolsBase } from './base.js';
 import * as fsSync from 'node:fs';
 import * as pathSync from 'node:path';
 import { runFf } from '../ff-exec.js';
 
-export class SourceMonitorTools extends ReviewDeliveryTools {
-  protected async openProjectItemInSource(projectItemId: string, timecode?: string): Promise<any> {
+export class SourceMonitorTools extends ToolsBase {
+  async openProjectItemInSource(projectItemId: string, timecode?: string): Promise<any> {
     const script = `
       try {
         var item = null;
@@ -39,7 +39,7 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async logClip(
+  async logClip(
     projectItemId: string,
     inPoint?: string,
     outPoint?: string,
@@ -48,7 +48,7 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
   ): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var item=${this.findItemById(projectItemId)};
+        var item=${this.peers.projectMedia.findItemById(projectItemId)};
         if(!item)return JSON.stringify({success:false,error:'Item not found'});
         app.sourceMonitor.openProjectItem(item);
         ${inPoint ? `try{app.enableQE();qe.source.clip.setInPoint(${JSON.stringify(inPoint)});}catch(ei){}` : ''}
@@ -60,10 +60,10 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
     `);
   }
 
-  protected async createSubclipsFromMarkers(projectItemId: string): Promise<any> {
+  async createSubclipsFromMarkers(projectItemId: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var item=${this.findItemById(projectItemId)};
+        var item=${this.peers.projectMedia.findItemById(projectItemId)};
         if(!item)return JSON.stringify({success:false,error:'Item not found'});
         var markers=item.getMarkers();
         if(!markers||markers.numMarkers===0)return JSON.stringify({success:true,created:0,note:'No markers on item'});
@@ -83,7 +83,7 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
     `);
   }
 
-  protected hoverScrubFrames(mediaPath: string, count: number, outputDir: string): any {
+  hoverScrubFrames(mediaPath: string, count: number, outputDir: string): any {
     const fs = fsSync,
       path = pathSync;
     try {
@@ -138,7 +138,7 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
    * The frame at 50% of each take, side by side on disk. This was a stub that told the caller to
    * resolve the media paths itself; it now does that and extracts both frames with ffmpeg.
    */
-  protected async compareTakes(itemId1: string, itemId2: string, outputDir: string): Promise<any> {
+  async compareTakes(itemId1: string, itemId2: string, outputDir: string): Promise<any> {
     const info: any = await this.bridge.executeScript(`
       try {
         var ids = [${JSON.stringify(String(itemId1))}, ${JSON.stringify(String(itemId2))}], out = [];
@@ -190,7 +190,7 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
     return { success: true, verified: true, verifiedBy: 'both frame files written', frames };
   }
 
-  protected async getSourceClipInfo(): Promise<any> {
+  async getSourceClipInfo(): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var loaded=app.sourceMonitor.getProjectItem();
@@ -201,7 +201,7 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
     `);
   }
 
-  protected async batchLogFromCsv(csvPath: string): Promise<any> {
+  async batchLogFromCsv(csvPath: string): Promise<any> {
     const fs = fsSync;
     try {
       const lines = fs
@@ -246,7 +246,7 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
    * wrong bin onto the timeline and reported success. The shared __resolveBin prelude helper
    * refuses an ambiguous bare name instead of guessing, and also accepts a path or an id.
    */
-  protected async storyboardBinToSequence(
+  async storyboardBinToSequence(
     binName: string,
     seqId?: string,
     startAtSecs = 0,
@@ -274,7 +274,7 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
     `);
   }
 
-  protected async findClipsBySource(projectItemId: string): Promise<any> {
+  async findClipsBySource(projectItemId: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var results=[];
@@ -295,7 +295,7 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
     `);
   }
 
-  protected async openItemInSourceQe(trackIndex: number, clipIndex: number): Promise<any> {
+  async openItemInSourceQe(trackIndex: number, clipIndex: number): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -328,7 +328,7 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
   }
 
   // Subclip Implementation
-  protected async createSubclip(
+  async createSubclip(
     projectItemId: string,
     name: string,
     startTime: number,
@@ -368,14 +368,14 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async stopSourceMonitor(): Promise<any> {
+  async stopSourceMonitor(): Promise<any> {
     return await this.bridge.executeScript(`
       try { app.enableQE(); qe.source.player.stop(); return JSON.stringify({success:true}); }
       catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
 
-  protected async stepSourceMonitor(frames: number): Promise<any> {
+  async stepSourceMonitor(frames: number): Promise<any> {
     const tc =
       frames >= 0
         ? `00:00:00:${Math.abs(frames).toString().padStart(2, '0')}`
@@ -389,7 +389,7 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
     `);
   }
 
-  protected async scrubSourceTo(timecode: string): Promise<any> {
+  async scrubSourceTo(timecode: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -399,7 +399,7 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
     `);
   }
 
-  protected async getSourcePosition(): Promise<any> {
+  async getSourcePosition(): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -409,7 +409,7 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
     `);
   }
 
-  protected async openFileInSource(filePath: string): Promise<any> {
+  async openFileInSource(filePath: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -419,10 +419,7 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
     `);
   }
 
-  protected async setSourceInOutQe(
-    inPoint?: string | null,
-    outPoint?: string | null,
-  ): Promise<any> {
+  async setSourceInOutQe(inPoint?: string | null, outPoint?: string | null): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -433,7 +430,7 @@ export class SourceMonitorTools extends ReviewDeliveryTools {
     `);
   }
 
-  protected async getSourceClipInfoQe(): Promise<any> {
+  async getSourceClipInfoQe(): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
