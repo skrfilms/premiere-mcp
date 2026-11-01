@@ -14,6 +14,7 @@ import { createSecureTempDir, validateFilePath } from '../utils/security.js';
 import { currentEnv, sharedBridgeDir } from '../setup/setup.js';
 import type { PremiereProTransport } from './types.js';
 import { EXTENDSCRIPT_HELPERS } from './extendscript-helpers.js';
+import { uxpAvailable } from './uxp-channel.js';
 import {
   BridgeSocketTransport,
   BRIDGE_PROTOCOL_VERSION,
@@ -175,6 +176,9 @@ export class PremiereProBridge implements PremiereProTransport {
       await this.setupTempDirectory();
       await this.detectPremiereProInstallation();
       await this.initializeCommunication();
+      // Make the UXP channel's folder now, so the UXP helper (which polls it from load but cannot
+      // create it) is answering by the time the first UXP tool runs.
+      uxpAvailable();
       this.isInitialized = true;
       this.logger.info('Adobe Premiere Pro bridge initialized successfully');
     } catch (error) {

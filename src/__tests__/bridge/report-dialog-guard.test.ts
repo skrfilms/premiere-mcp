@@ -5,6 +5,8 @@
 import {
   REPORT_DIALOGS,
   dialogGuardEnabled,
+  resetScreenLockCache,
+  screenLocked,
   withReportDialogGuard,
 } from '../../bridge/report-dialog-guard.js';
 
@@ -50,5 +52,45 @@ describe('report dialog guard', () => {
     await expect(b).resolves.toMatchObject({ result: 'b' });
     releaseA();
     await expect(a).resolves.toMatchObject({ result: 'a' });
+  });
+});
+
+describe('screenLocked', () => {
+  const LOCKED = '<dict><key>CGSSessionScreenIsLocked</key>\n\t\t\t<true/></dict>';
+  const UNLOCKED = '<dict><key>kCGSSessionOnConsoleKey</key><true/></dict>';
+  const saved = process.env.PREMIERE_MCP_LOCK_CHECK;
+  beforeEach(() => {
+    delete process.env.PREMIERE_MCP_LOCK_CHECK;
+    resetScreenLockCache();
+  });
+  afterAll(() => {
+    process.env.PREMIERE_MCP_LOCK_CHECK = saved;
+    resetScreenLockCache();
+  });
+  const onMac = process.platform === 'darwin' ? it : it.skip;
+
+  onMac('reads the lock flag from ioreg', () => {
+    expect(screenLocked(1, () => LOCKED)).toBe(true);
+    resetScreenLockCache();
+    expect(screenLocked(1, () => UNLOCKED)).toBe(false);
+  });
+
+  onMac('treats an unreadable ioreg as unlocked rather than refusing everything', () => {
+    expect(
+      screenLocked(1, () => {
+        throw new Error('ioreg missing');
+      }),
+    ).toBe(false);
+  });
+
+  onMac('caches for five seconds', () => {
+    expect(screenLocked(1000, () => LOCKED)).toBe(true);
+    expect(screenLocked(4000, () => UNLOCKED)).toBe(true);
+    expect(screenLocked(7000, () => UNLOCKED)).toBe(false);
+  });
+
+  it('is off with PREMIERE_MCP_LOCK_CHECK=0', () => {
+    process.env.PREMIERE_MCP_LOCK_CHECK = '0';
+    expect(screenLocked(1, () => LOCKED)).toBe(false);
   });
 });

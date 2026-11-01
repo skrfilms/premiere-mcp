@@ -35,6 +35,17 @@ All notable changes are documented here. Releases use semantic versioning.
 - **`reorder_effects`** cannot reorder (Premiere's scripting has no call that moves an effect),
   so it now reads the stack, returns `success: false, changed: false` with the current order and
   any requested names not on the clip, and counts as read-only inside a transaction.
+- **The UXP helper starts again after a reboot.** It polls `/tmp/premiere-mcp-uxp` from load (no
+  panel needed) but cannot create the folder, and the server created it only when sending a
+  command, after checking for the helper's heartbeat. Once `/tmp` was cleared, neither side
+  started and every UXP tool (`set_work_area`, the transition fallback, keyframe ease readback)
+  reported the helper not running. The server now creates the folder at startup.
+- **No more frozen Premiere from an export dialog on a locked screen.** `exportAAF()` opens an
+  "AAF Export Log" dialog whenever the sequence has a Lumetri grade, and it blocks Premiere's
+  scripting engine until OK is clicked. The dialog guard clicks it away through macOS
+  accessibility, which cannot reach the screen while it is locked, so an unattended export froze
+  Premiere for good. The AAF/OMF and other report-dialog tools now refuse up front with
+  `SCREEN_LOCKED` while the screen is locked (`PREMIERE_MCP_LOCK_CHECK=0` turns this off).
 - **Tools reached through `call_tool` run their own steps.** A tool outside the default
   profile, called through `call_tool`, ran its internal steps against the advertised list, so a
   step the profile hid was refused mid-call: `version_up_shots` (`replace_clip_media`),

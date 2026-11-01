@@ -77,6 +77,8 @@ import { runFf } from './ff-exec.js';
 import {
   REPORT_DIALOG_TOOLS,
   REPORT_LINGER_MS,
+  dialogGuardEnabled,
+  screenLocked,
   withReportDialogGuard,
 } from '../bridge/report-dialog-guard.js';
 import { generatedAssetsDir } from '../utils/scratch-paths.js';
@@ -3411,6 +3413,16 @@ export class PremiereProTools extends ToolsBase {
     // Calls can raise an informational export-report dialog that blocks the engine until OK is
     // clicked (see report-dialog-guard.ts). The guard polls once for every call in flight, so
     // nested and concurrent calls are both covered.
+    // A report dialog cannot be dismissed while the screen is locked, and it blocks the engine
+    // until OK is clicked, so these tools are refused up front instead of freezing Premiere.
+    if (REPORT_DIALOG_TOOLS.test(name) && dialogGuardEnabled() && screenLocked()) {
+      return {
+        success: false,
+        notRun: true,
+        code: 'SCREEN_LOCKED',
+        error: `${name} can open a report dialog in Premiere (for example "AAF Export Log" when the sequence has a Lumetri grade) that blocks its scripting engine until OK is clicked. The screen is locked, so the dialog could not be dismissed and Premiere would stop responding. Nothing was run. Unlock the screen and retry, or set PREMIERE_MCP_DIALOG_GUARD=0 to run it anyway.`,
+      };
+    }
     const { result, guard } = await withReportDialogGuard(
       () => this.executeToolUnguarded(name, args, options),
       { lingerMs: REPORT_DIALOG_TOOLS.test(name) ? REPORT_LINGER_MS : 0 },

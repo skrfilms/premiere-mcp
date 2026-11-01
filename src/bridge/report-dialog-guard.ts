@@ -16,7 +16,7 @@
  * process to have Accessibility permission; without it the guard reports itself unavailable.
  */
 
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 
 export const REPORT_DIALOGS = ['AAF Export Log', 'Translation Report'];
 const START_AFTER_MS = 2500;
@@ -176,6 +176,35 @@ export async function withReportDialogGuard<T>(
       stopPollingIfIdle();
     }
   }
+}
+
+/**
+ * macOS: whether the console session's screen is locked. While it is, System Events cannot reach
+ * Premiere's windows, so a report dialog cannot be dismissed, and an AAF export on a graded
+ * sequence froze Premiere for good (measured 2026-11-01: ENGINE_DEAD after 376 s, the screen
+ * locked). Read from ioreg's CGSSessionScreenIsLocked, cached for 5 s; false when unreadable.
+ * PREMIERE_MCP_LOCK_CHECK=0 turns the check off.
+ */
+let lockCache: { at: number; locked: boolean } | undefined;
+export function screenLocked(
+  now: number = Date.now(),
+  probe: () => string = () =>
+    execFileSync('ioreg', ['-n', 'Root', '-d1', '-a'], { encoding: 'utf8', timeout: 3000 }),
+): boolean {
+  if (process.platform !== 'darwin' || process.env.PREMIERE_MCP_LOCK_CHECK === '0') return false;
+  if (lockCache && now - lockCache.at < 5000) return lockCache.locked;
+  let locked = false;
+  try {
+    locked = /<key>CGSSessionScreenIsLocked<\/key>\s*<true\/>/.test(probe());
+  } catch {
+    locked = false;
+  }
+  lockCache = { at: now, locked };
+  return locked;
+}
+/** Test hook: forget the cached lock state. */
+export function resetScreenLockCache(): void {
+  lockCache = undefined;
 }
 
 /** Tools whose Premiere call can raise a report dialog shortly after it returns. */
