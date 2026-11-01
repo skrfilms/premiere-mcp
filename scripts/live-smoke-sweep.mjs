@@ -223,7 +223,12 @@ async function main() {
   // replaced could not name a bin, a marker guid, an installed transition, or a file on disk, so
   // 93 tools bounced off our own validator and were filed as `skipped_args` — counted as "not
   // looked at", which was honest but was also two thirds of the breadth we could defend.
-  const ctx = await buildContext(bridge);
+  let ctx = await buildContext(bridge);
+  // Rebuilt after every mutating tool: the ids in it (clips, markers, items) are the fixture's
+  // CURRENT ones. Built once, an id an earlier tool deleted or replaced was handed to later tools,
+  // which then failed with "Clip not found" / "No marker with id" and were blamed for the sweep's
+  // stale state (update_marker, get_clip_links on 11-01).
+  let ctxStale = false;
   line(`context: seq=${ctx.sequenceId} tracks=${ctx.videoTracks} clips=${ctx.clips.length} items=${ctx.itemIds.length} markers=${ctx.markers.length}`);
   line(`side fixtures: ${ctx.files.outDir}`);
   if (ctx.raw?.error) line(`context WARNING: ${ctx.raw.error}`);
@@ -331,6 +336,10 @@ async function main() {
     // trip. A candidate our validator would reject never reaches Premiere, so recording it as a
     // failure would blame the tool for the harness's gap; it is filed as skipped_args naming the
     // keys we could not build.
+    if (ctxStale) {
+      try { ctx = await buildContext(bridge); } catch { /* keep the last good context */ }
+      ctxStale = false;
+    }
     const synth = synthesizeArgs(tool, ctx);
     if (!synth.ok) {
       results.noArgs.push({ name, error: String(synth.error ?? 'unsynthesisable').slice(0, 140) });
@@ -363,6 +372,7 @@ async function main() {
 
     try {
       let timer;
+      if (!readOnly) ctxStale = true;
       const r = await Promise.race([
         tools.executeTool(name, args),
         new Promise((_, rej) => { timer = setTimeout(() => rej(new Error(`harness timeout ${TOOL_TIMEOUT_MS / 1000}s`)), TOOL_TIMEOUT_MS); }),

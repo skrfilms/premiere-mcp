@@ -488,6 +488,9 @@ function resolveLeaf({ key, def, toolName, ctx, path }) {
   if (type === 'string' && /audio_effect/.test(tool) && k === 'effectname') return 'Amplify';
   // Transform setters read x/y; a "value" alongside them overrides both.
   if (/^set_clip_(position|anchor_point|scale|rotation)$|^set_(uniform_scale|scale_width_height)$/.test(tool) && k === 'value') return undefined;
+  // A QE parameter takes a number as a string; prose comes back as "nan" and is refused, which
+  // measured the harness, not the tool.
+  if (tool === 'set_qe_component_param' && k === 'value') return '50';
   if (k === 'channeltype') return undefined;
   // SRT cues are numbered from 1, as read_srt shows them.
   if ((type === 'number' || type === 'int') && /_srt_cue$/.test(tool) && k === 'index') return 1;
