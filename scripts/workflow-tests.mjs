@@ -486,6 +486,89 @@ if (run('W9')) try {
   check('and get_project_info hands it to the next session', String(info?.projectNotes ?? '').includes(note), info?.projectNotesPath);
 } catch (e) { stopped(e); }
 
+// ------------------------------------------------------------------- W10: honest edges
+// Last on purpose: if the DeNoise guard ever regresses, this is the workflow that takes Premiere
+// down, and nothing should run after it on a crashed host.
+if (run('W10')) try {
+  workflow('W10 the edges stay honest: default-profile swap, DeNoise near a nested clip, freeze on an image sequence, reorder');
+  const alive = async () => { try { return (await host('(function(){ return JSON.stringify({ ok: true }); })();'))?.ok === true; } catch { return false; } };
+
+  // 1. replace_clip under the default profile, which does not advertise the effect copier it uses.
+  for (const f of ['SH010_comp_v001.mp4', 'SH010_comp_v002.mp4']) must(`import ${f}`, imported(await tool('import_media', { filePath: join(MEDIA, f), binName: 'wf_renders' })));
+  const v1Item = await itemByName('SH010_comp_v001.mp4');
+  const v2Item = await itemByName('SH010_comp_v002.mp4');
+  const sr = await tool('create_sequence_from_clips', { projectItemIds: [v1Item], name: 'wf_w10_swap' });
+  const swapSeq = sr?.sequenceId || await seqByName('wf_w10_swap');
+  must('build a one-shot edit', !!swapSeq, sr?.error);
+  await tool('set_active_sequence', { sequenceId: swapSeq });
+  const shot = (await v1(swapSeq)).clips[0];
+  must('grade it (exposure +0.5)', (await tool('color_correct', { clipId: shot.id, exposure: 0.5 }))?.success !== false);
+  const profileWas = process.env.PREMIERE_MCP_PROFILE;
+  process.env.PREMIERE_MCP_PROFILE = 'core';
+  let sw;
+  try { sw = await tool('replace_clip', { clipId: shot.id, newProjectItemId: v2Item }); } finally { process.env.PREMIERE_MCP_PROFILE = profileWas; }
+  check('replace_clip under the default profile copies the effect values', sw?.success === true && sw?.effectValuesCopied != null, sw);
+  const swapped = (await v1(swapSeq)).clips[0];
+  check('the grade survived the swap', swapped?.comps?.find((c) => c.name === 'Lumetri Color')?.Exposure === 0.5, swapped?.comps);
+
+  // 2. DeNoise on a sequence that holds a nested clip next to a file clip.
+  must('import dialogue', imported(await tool('import_media', { filePath: join(MEDIA, 'dialogue.m4a'), binName: 'wf_w10' })));
+  const dia = await itemByName('dialogue.m4a');
+  const inner = await tool('create_sequence_from_clips', { projectItemIds: [dia], name: 'wf_w10_inner' });
+  const innerId = inner?.sequenceId || await seqByName('wf_w10_inner');
+  const innerItem = (await host(`(function(){ var s=__findSequence(${q(innerId)}); return JSON.stringify({ id: s ? String(s.projectItem.nodeId) : null }); })();`)).id;
+  const outer = await tool('create_sequence_from_clips', { projectItemIds: [innerItem, dia], name: 'wf_w10_outer' });
+  const outerId = outer?.sequenceId || await seqByName('wf_w10_outer');
+  must('build a sequence with a nested clip and a file clip', !!outerId && !!innerItem, outer?.error);
+  await tool('set_active_sequence', { sequenceId: outerId });
+  const all = await tool('apply_audio_effect_to_all_clips', { sequenceId: outerId, effectName: 'DeNoise' });
+  check('apply to all: partial, with the nested clip skipped and the file clip done', all?.success === false && all?.partial === true && all?.skippedCount >= 1 && all?.appliedCount >= 1, { success: all?.success, partial: all?.partial, applied: all?.appliedCount, skipped: all?.skippedCount, error: all?.error });
+  check('Premiere is still up after DeNoise near a nested clip', await alive());
+  const batch = await tool('batch_apply_effect', { sequenceId: outerId, effectName: 'DeNoise' });
+  const bd = batch?.details ?? batch;
+  check('batch_apply_effect: reported as partial, not success', batch?.success === false && bd?.skippedCount >= 1, { success: batch?.success, error: batch?.error, applied: bd?.appliedCount, skipped: bd?.skippedCount });
+  const nestedA = (await host(`(function(){ var s=__findSequence(${q(outerId)}); var t=s.audioTracks[0]; for (var i=0;i<t.clips.numItems;i++){ var c=t.clips[i]; try { if (c.projectItem.isSequence()) return JSON.stringify({ id: String(c.nodeId) }); } catch (e) {} } return JSON.stringify({ id: null }); })();`)).id;
+  must('find the nested clip on A1', !!nestedA);
+  const lower = await tool('apply_effect', { clipId: nestedA, effectName: 'denoise' });
+  check('a lowercase "denoise" on the nested clip does not get through', lower?.success === false, lower?.error);
+  check('Premiere is still up after all three', await alive());
+
+  // 3. freeze_frame on a numbered image sequence holds the frame Premiere shows, not frame 1.
+  const seqDir = join(MEDIA, 'imgseq_w10');
+  if (!existsSync(join(seqDir, 'w10_1001.png'))) {
+    mkdirSync(seqDir, { recursive: true });
+    // Each frame a different flat grey (frame N has luma 16 + 4N), so a frame is identified by its level.
+    spawnSync(FF, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'nullsrc=s=320x180:r=24:d=2', '-vf', "geq=lum='16+4*N':cb=128:cr=128,format=rgb24", '-start_number', '1001', join(seqDir, 'w10_%04d.png')]);
+  }
+  must('the image sequence is on disk', existsSync(join(seqDir, 'w10_1048.png')));
+  const imp = await tool('import_media_qe', { filePath: join(seqDir, 'w10_1001.png'), numberedStills: true });
+  check('import it as numbered stills', imp?.success !== false, imp?.error);
+  const seqItem = await itemByName('w10_1001.png') || await itemByName('w10_1001') || await itemByName('w10_[1001-1048].png');
+  must('the image sequence is in the project', !!seqItem);
+  const fr = await tool('create_sequence_from_clips', { projectItemIds: [seqItem], name: 'wf_w10_freeze' });
+  const frSeq = fr?.sequenceId || await seqByName('wf_w10_freeze');
+  must('build an edit from it', !!frSeq, fr?.error);
+  await tool('set_active_sequence', { sequenceId: frSeq });
+  const level = (png) => { const r = spawnSync(FF, ['-v', 'error', '-i', png, '-vf', 'scale=1:1,format=gray', '-f', 'rawvideo', '-'], { encoding: 'buffer' }); return r.stdout?.length ? r.stdout[0] : null; };
+  const atT = 1.0;
+  const shown = await frameAt(frSeq, atT, 'w10_shown');
+  const shownLevel = shown ? level(shown) : null;
+  const fclip = (await v1(frSeq)).clips[0];
+  const fz = await tool('freeze_frame', { clipId: fclip.id, time: atT, durationSecs: 0.5, sequenceId: frSeq });
+  check('freeze_frame on an image sequence succeeds and names the frame file', fz?.success !== false && /w10_1\d{3}\.png$/.test(String(fz?.heldFromFile ?? '')), fz);
+  const heldLevel = fz?.png && existsSync(fz.png) ? level(fz.png) : null;
+  // Within one frame (4 levels a frame, plus colour-pipeline drift): capture_program_output rounds
+  // the time to the nearest frame, freeze_frame takes the frame that contains it, as for video.
+  check('the held still is the frame Premiere shows at that time (within a frame), not the first frame', shownLevel != null && heldLevel != null && Math.abs(heldLevel - shownLevel) <= 6 && heldLevel > 40, { shownLevel, heldLevel, file: fz?.heldFromFile });
+
+  // 4. reorder_effects says it cannot, and changes nothing.
+  await tool('set_active_sequence', { sequenceId: swapSeq });
+  const orderBefore = (await v1(swapSeq)).clips[0].comps.map((c) => c.name);
+  const ro = await tool('reorder_effects', { trackIndex: 0, clipIndex: 0, newOrder: [...orderBefore].reverse().concat(['Not An Effect']), sequenceId: swapSeq });
+  check('reorder_effects returns success:false, changed:false, and names what is not on the clip', ro?.success === false && ro?.changed === false && (ro?.notOnClip ?? []).includes('Not An Effect'), ro);
+  check('the effect stack is untouched', JSON.stringify((await v1(swapSeq)).clips[0].comps.map((c) => c.name)) === JSON.stringify(orderBefore));
+} catch (e) { stopped(e); }
+
 // ------------------------------------------------------------------- summary
 console.log('\n================ WORKFLOWS ================');
 for (const w of results) console.log(`${w.ok ? 'PASS' : 'FAIL'}  ${w.name}  (${w.steps.filter((s) => s.ok).length}/${w.steps.length} steps)`);

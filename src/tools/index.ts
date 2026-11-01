@@ -4170,8 +4170,18 @@ export class PremiereProTools extends ToolsBase {
       comp.setParamValue(${JSON.stringify(paramName)}, ${JSON.stringify(value)});
       var after = String(comp.getParamValue(${JSON.stringify(paramName)}));
       // QE takes any string and turns what it cannot use into "nan"; check what actually landed.
+      // Checkboxes and menus can read back in another form ("true" for 1, a label for an index),
+      // so only a value that went to nan/empty, or did not move at all, is treated as refused;
+      // a change we cannot match is kept and reported as unverified rather than undone.
       var asked = ${JSON.stringify(value)};
-      var landed = after === asked || (!isNaN(parseFloat(asked)) && Math.abs(parseFloat(after) - parseFloat(asked)) < 0.01);
+      function __boolOf(v) { var l = String(v).toLowerCase(); if (l === '1' || l === 'true' || l === 'on' || l === 'yes') return 1; if (l === '0' || l === 'false' || l === 'off' || l === 'no') return 0; return -1; }
+      var landed = after === asked || (!isNaN(parseFloat(asked)) && Math.abs(parseFloat(after) - parseFloat(asked)) < 0.01) ||
+        (__boolOf(asked) >= 0 && __boolOf(asked) === __boolOf(after));
+      var refused = String(after).toLowerCase() === 'nan' || after === '' || (after === before && asked !== before);
+      if (!landed && !refused) {
+        return JSON.stringify({success:true,verified:false,paramName:${JSON.stringify(paramName)},requested:asked,before:before,after:after,changed:true,
+          note:'The parameter changed, but it reads back as "' + after + '" rather than "' + asked + '", so it cannot be confirmed that it holds the requested value. Check it in Effect Controls.'});
+      }
       if (!landed) {
         try { comp.setParamValue(${JSON.stringify(paramName)}, before); } catch (eR) {}
         var restored = String(comp.getParamValue(${JSON.stringify(paramName)}));
