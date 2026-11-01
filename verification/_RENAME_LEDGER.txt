@@ -33,3 +33,8 @@
    live-smoke-sweep.mjs now pre-flights the engine, classifies this rejection as `skipped_wedged`
    instead of `fail`, and uses the shared ensureHealthy() guard after every call so a wedge is
    attributed to the tool that caused it and cleared before the next one runs.
+
+2026-10-29  NOT KEPT  verification/sweeps/20261029T184543Z-live-smoke-sweep.json (never committed)
+   Reason: ran on fixtures damaged by an earlier sweep that crashed Premiere mid-run (denoise_clip),
+   so 27 tools failed on 0.23 s clips, a missing MOGRT and missing Chapter markers rather than on
+   their code. After `node scripts/reset-scratch.mjs` the same build passed 527 (20261029T185130Z).
