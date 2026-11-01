@@ -567,6 +567,20 @@ if (run('W10')) try {
   const ro = await tool('reorder_effects', { trackIndex: 0, clipIndex: 0, newOrder: [...orderBefore].reverse().concat(['Not An Effect']), sequenceId: swapSeq });
   check('reorder_effects returns success:false, changed:false, and names what is not on the clip', ro?.success === false && ro?.changed === false && (ro?.notOnClip ?? []).includes('Not An Effect'), ro);
   check('the effect stack is untouched', JSON.stringify((await v1(swapSeq)).clips[0].comps.map((c) => c.name)) === JSON.stringify(orderBefore));
+
+  // 5. Failures say why, and a video effect on a mixed sequence skips the audio clips cleanly.
+  const blur = await tool('batch_apply_effect', { sequenceId: swapSeq, effectName: 'Gaussian Blur' });
+  check('batch_apply_effect: a video effect counts audio clips as not applicable, not failed', blur?.success !== false && blur?.notApplicableCount >= 1 && blur?.appliedCount >= 1, blur?.error || blur);
+  const links = await tool('get_clip_links', { clipId: (await v1(swapSeq)).clips[0].id, sequenceId: swapSeq });
+  check('get_clip_links names the linked audio clip', Array.isArray(links?.linked) && links.linked.some((l) => l.trackType === 'audio'), links?.linked ?? links?.error);
+  const badMarker = await tool('update_marker', { sequenceId: swapSeq, markerId: 'no-such-marker', name: 'x' });
+  check('update_marker on a missing id says so', badMarker?.success === false && /No marker with id/.test(badMarker?.error ?? ''), badMarker?.error);
+  const badKey = await tool('set_app_property', { key: 'MCP.W10.NoSuchKey', value: 'x' });
+  check('set_app_property on a missing key says so and changes nothing', badKey?.success === false && badKey?.changed === false && /no application property/.test(badKey?.error ?? ''), badKey?.error);
+  const badSheet = await tool('look_at_cut', { sequenceId: swapSeq, outputPath: join(OUT, 'w10_sheet.txt') });
+  check('look_at_cut refuses a non-image path before capturing anything', badSheet?.success === false && /must end in/.test(badSheet?.error ?? ''), badSheet?.error);
+  const tc = await tool('call_tool', { name: 'title_card', args: { text: 'w10', startTimeSecs: 0.5, durationSecs: 1, sequenceId: swapSeq } });
+  check('title_card reached through call_tool runs its step and reports a real reason', tc?.success === true || (typeof tc?.error === 'string' && tc.error.length > 10 && tc.error !== 'unknown'), tc?.error);
 } catch (e) { stopped(e); }
 
 // ------------------------------------------------------------------- summary

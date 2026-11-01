@@ -59,3 +59,29 @@ describe('the catalogue and the handlers agree', () => {
     expect([...handled].filter((n) => !all.has(n))).toEqual([]);
   });
 });
+
+describe('internal tool steps', () => {
+  // A tool that runs another tool as a step has already passed the router's gate. A step that
+  // resolves against the advertised list instead was refused whenever the active profile hid it
+  // (version_up_shots -> replace_clip_media under `core`), and the outer tool failed or reported
+  // success without it. Steps go through executeStep, or pass { allowUnexposed: true }.
+  it('never call a named tool through the advertised list', () => {
+    const srcDir = join(__dirname, '..', '..', 'tools');
+    const files = [join(srcDir, 'index.ts'), ...readdirSync(DIR).map((f) => join(DIR, f))];
+    const offenders: string[] = [];
+    for (const f of files) {
+      const lines = readFileSync(f, 'utf8').split('\n');
+      lines.forEach((l, i) => {
+        if (
+          !/(this|this\.peers)\.executeTool\(\s*'[a-z_]+'/.test(l) &&
+          !/(this|this\.peers)\.executeTool\(\s*$/.test(l)
+        )
+          return;
+        const window = lines.slice(i, i + 14).join('\n');
+        if (!/allowUnexposed:\s*true/.test(window))
+          offenders.push(`${f.split('/src/')[1]}:${i + 1}`);
+      });
+    }
+    expect(offenders).toEqual([]);
+  });
+});

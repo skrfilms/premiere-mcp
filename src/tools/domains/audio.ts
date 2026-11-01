@@ -1282,8 +1282,11 @@ export class AudioTools extends ToolsBase {
         app.project.activeSequence = seq;
         var qeSeq = __qeSequenceOpening(seq);
         if (!qeSeq) return JSON.stringify({ success: false, error: "Could not address sequence '" + seq.name + "' through the QE API." });
-        var effect = qe.project.getAudioEffectByName(${JSON.stringify(effectName)});
-        if (!effect) return JSON.stringify({ success: false, error: "Audio effect not found: " + ${JSON.stringify(effectName)} });
+        // Checked against the list: getAudioEffectByName returns an object for any name, even a
+        // video effect's (measured 2026-11-01), so a null check never caught a wrong name.
+        var __inList = ("," + String(qe.project.getAudioEffectList()) + ",").indexOf("," + ${JSON.stringify(effectName)} + ",") >= 0;
+        var effect = __inList ? qe.project.getAudioEffectByName(${JSON.stringify(effectName)}) : null;
+        if (!effect) return JSON.stringify({ success: false, changed: false, error: "No audio effect named " + ${JSON.stringify(effectName)} + " on this build (names are exact; list_available_audio_effects shows them). Nothing was changed." });
 
         var requestedParams = ${paramJson};
         function normalize(s) { return String(s).toLowerCase().replace(/[\\s_-]+/g, ''); }

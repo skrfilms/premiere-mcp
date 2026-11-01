@@ -803,7 +803,7 @@ export class PremiereProTools extends ToolsBase {
         };
       const applied: any[] = [];
       for (const p of plan.relink) {
-        const r: any = await this.executeTool('replace_clip_media', {
+        const r: any = await this.executeStep('replace_clip_media', {
           projectItemId: p.id,
           newFilePath: p.to,
         });
@@ -3364,10 +3364,12 @@ export class PremiereProTools extends ToolsBase {
         'try { return JSON.stringify({success:true,count:app.projects.numProjects}); } catch(e){return JSON.stringify({success:false,error:e.toString()});}',
       );
     },
+    // Despite the name this has always written app.properties (application preferences), and it
+    // reported verified:true without comparing the read-back. It now shares set_app_property's
+    // checked write, so the two cannot disagree.
     set_project_property: async (args) => {
-      return await this.bridge.executeScript(
-        `try { app.properties.setProperty(${JSON.stringify(args.key)}, ${JSON.stringify(args.value)}); var v=app.properties.getProperty(${JSON.stringify(args.key)}); return JSON.stringify({success:true,key:${JSON.stringify(args.key)},value:String(v),verified:true}); } catch(e){return JSON.stringify({success:false,error:e.toString()});}`,
-      );
+      const r: any = await this.setAppProperty(args.key, args.value);
+      return r && typeof r === 'object' ? { ...r, scope: 'application (app.properties)' } : r;
     },
     get_project_property: async (args) => {
       return await this.bridge.executeScript(
@@ -3390,6 +3392,16 @@ export class PremiereProTools extends ToolsBase {
       );
     },
   };
+
+  /**
+   * Runs another tool as one step of the tool being executed. The outer tool already passed the
+   * router's gate, so the step resolves against the full registry: otherwise a step the active
+   * profile does not advertise (replace_clip_media inside version_up_shots under `core`) was
+   * refused and the outer tool failed or, worse, reported success without it.
+   */
+  private executeStep(name: string, args: Record<string, any>): Promise<any> {
+    return this.executeTool(name, args, { allowUnexposed: true });
+  }
 
   async executeTool(
     name: string,
@@ -4238,6 +4250,14 @@ export class PremiereProTools extends ToolsBase {
    */
   private async lookAtCut(args: any): Promise<any> {
     const max = Math.max(1, Math.min(Number(args.maxFrames) || 8, 16));
+    // ffmpeg picks the sheet's format from its extension; anything else used to fail after every
+    // frame had been captured, with ffmpeg's own error. Checked first, so nothing runs.
+    if (args.outputPath && !/\.(jpe?g|png)$/i.test(String(args.outputPath))) {
+      return {
+        success: false,
+        error: `outputPath must end in .jpg, .jpeg or .png (got "${String(args.outputPath).split(/[\\/]/).pop()}"). Nothing was captured.`,
+      };
+    }
     const shots: any = await this.bridge.executeScript(`
       try {
         var seq = __findSequence(${JSON.stringify(args.sequenceId ?? null)});
@@ -4273,7 +4293,7 @@ export class PremiereProTools extends ToolsBase {
     const frames: string[] = [];
     for (const [i, p] of picks.entries()) {
       const out = pathSync.join(work, `f${String(i).padStart(2, '0')}.png`);
-      const r: any = await this.executeTool('capture_program_output', {
+      const r: any = await this.executeStep('capture_program_output', {
         sequenceId: shots.sequenceId,
         time: p.t,
         format: 'png',
@@ -4863,7 +4883,7 @@ export class PremiereProTools extends ToolsBase {
         error:
           'The clip is reversed, so its source silences cannot be mapped onto the timeline. Nothing was changed.',
       };
-    const det: any = await this.executeTool('detect_silence', {
+    const det: any = await this.executeStep('detect_silence', {
       mediaPath: info.path,
       noiseThresholdDb: args.noiseThresholdDb ?? -35,
       minDurationSeconds: args.minSilenceSeconds ?? 0.5,
@@ -4898,7 +4918,7 @@ export class PremiereProTools extends ToolsBase {
         error: `Plan only: ${cuts.length} pause(s), ${total}s. Nothing was cut; call again with confirm:true to apply.`,
       };
     }
-    const cp: any = await this.executeTool('create_recovery_checkpoint', {
+    const cp: any = await this.executeStep('create_recovery_checkpoint', {
       sequenceId: info.seq,
       label: 'before remove_silence',
     });
@@ -4928,7 +4948,7 @@ export class PremiereProTools extends ToolsBase {
         done.push({ ...c, ok: false, error: lifted?.error });
         break;
       }
-      const closed: any = await this.executeTool('close_gap_at', {
+      const closed: any = await this.executeStep('close_gap_at', {
         timecode: String((c.start + c.end) / 2),
         sequenceId: info.seq,
       });
@@ -5842,6 +5862,11 @@ export class PremiereProTools extends ToolsBase {
   private async setAppProperty(key: string, value: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
+        // Measured 2026-11-01: setProperty on a key that does not exist throws "Invalid parameter",
+        // so say that instead of passing the bare host error through.
+        var exists=null; try{ exists=!!app.properties.doesPropertyExist(${JSON.stringify(key)}); }catch(eX){}
+        if(exists===false) return JSON.stringify({success:false,verified:true,changed:false,key:${JSON.stringify(key)},
+          error:'There is no application property named "' + ${JSON.stringify(key)} + '" (keys are case-sensitive, e.g. BE.Prefs.Audio.AutoPeakGeneration). Nothing was changed; this tool does not create new keys.'});
         var before=null; try{ before=String(app.properties.getProperty(${JSON.stringify(key)})); }catch(eB){}
         var setError=null;
         try{ app.properties.setProperty(${JSON.stringify(key)},${JSON.stringify(value)}); }catch(eS){ setError=eS.toString(); }
@@ -6727,7 +6752,7 @@ export class PremiereProTools extends ToolsBase {
     const tools = ['ping', 'get_version_info', 'get_premiere_state', 'list_sequences'];
     for (const tool of tools) {
       try {
-        const r = await this.executeTool(tool, {});
+        const r = await this.executeStep(tool, {});
         results[tool] = r?.success !== false ? 'PASS' : `FAIL: ${r?.error || 'success:false'}`;
       } catch (e: any) {
         results[tool] = `ERROR: ${e.message?.slice(0, 80)}`;
@@ -6779,7 +6804,7 @@ export class PremiereProTools extends ToolsBase {
     // which add_text_overlay fills from text2. Stacking two graphics on adjacent tracks drew the
     // template's own placeholder subtitle under each line.
     const results = [];
-    const r1: any = await this.executeTool('add_text_overlay', {
+    const r1: any = await this.executeStep('add_text_overlay', {
       text: name,
       text2: title,
       startTime: startTimeSecs,
@@ -6806,16 +6831,30 @@ export class PremiereProTools extends ToolsBase {
     seqId?: string,
     mogrtPath?: string,
   ): Promise<any> {
-    const r: any = await this.executeTool('add_text_overlay', {
+    // A step inside title_card (the authority gate), so it runs past the profile.
+    const r: any = await this.executeTool(
+      'add_text_overlay',
+      {
+        text,
+        startTime: startTimeSecs,
+        duration: durationSecs,
+        position: 'center',
+        trackIndex,
+        sequenceId: seqId,
+        mogrtPath,
+      },
+      { allowUnexposed: true },
+    );
+    const failed = r?.success === false;
+    return {
+      success: !failed,
       text,
-      startTime: startTimeSecs,
-      duration: durationSecs,
-      position: 'center',
-      trackIndex,
-      sequenceId: seqId,
-      mogrtPath,
-    });
-    return { success: r?.success !== false, text, startTimeSecs, durationSecs, result: r };
+      startTimeSecs,
+      durationSecs,
+      // Surfaced at the top: callers read `error`, and without it they showed "unknown".
+      ...(failed ? { error: r?.error ?? 'add_text_overlay failed without saying why.' } : {}),
+      result: r,
+    };
   }
 
   private async batchMogrtFromData(
@@ -6859,7 +6898,7 @@ export class PremiereProTools extends ToolsBase {
     const results = [];
     for (let i = count; i >= 1; i--) {
       const t = startTimeSecs + (count - i);
-      const r: any = await this.executeTool('add_text_overlay', {
+      const r: any = await this.executeStep('add_text_overlay', {
         text: String(i),
         startTime: t,
         duration: 1,
