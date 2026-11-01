@@ -1,8 +1,8 @@
 /**
  * AssemblyTools -- the Assembly Editing tool domain.
  *
- * One link in the chain that composes PremiereProTools. Split out of tools/index.ts, which
- * had grown to 19k lines; the method bodies are unchanged.
+ * A plain class on ToolsBase. PremiereProTools holds one instance and dispatches tool calls
+ * to it by name; other domains it relies on are reached through `this.peers`.
  */
 import { ToolsBase } from './base.js';
 import { TRIM_LIB } from '../trim-lib.js';
@@ -25,7 +25,7 @@ export class AssemblyTools extends ToolsBase {
    * original clip (Lumetri, Motion) are not carried onto it; reversed or time-remapped clips are
    * refused because their source time cannot be computed from in point and speed.
    */
-  protected async freezeFrame(args: any): Promise<any> {
+  async freezeFrame(args: any): Promise<any> {
     const clipId = String(args.clipId ?? args.node_id ?? args.nodeId ?? '');
     if (!clipId) return { success: false, error: 'freeze_frame requires clipId.' };
     const at = Number(args.time ?? args.seconds ?? NaN);
@@ -83,8 +83,10 @@ export class AssemblyTools extends ToolsBase {
           '-v',
           'error',
           '-y',
-          '-ss',
-          String(sourceSecs),
+          // A still image has one frame; seeking into it yields nothing.
+          ...(/\.(png|jpe?g|tiff?|psd|bmp|gif|exr|dpx|tga)$/i.test(info.mediaPath)
+            ? []
+            : ['-ss', String(sourceSecs)]),
           '-i',
           info.mediaPath,
           '-frames:v',
@@ -134,7 +136,7 @@ export class AssemblyTools extends ToolsBase {
     `);
   }
 
-  protected async threePointEdit(
+  async threePointEdit(
     projectItemId: string,
     sourceIn?: string,
     sourceOut?: string,
@@ -209,7 +211,7 @@ export class AssemblyTools extends ToolsBase {
   }
 
   // Timeline Operations Implementation
-  protected async addToTimelineBatch(
+  async addToTimelineBatch(
     sequenceId: string,
     clips: Array<{
       projectItemId: string;
@@ -248,7 +250,7 @@ export class AssemblyTools extends ToolsBase {
     }
   }
 
-  protected async addToTimeline(
+  async addToTimeline(
     sequenceId: string,
     projectItemId: string,
     trackIndex: number,
@@ -310,7 +312,7 @@ export class AssemblyTools extends ToolsBase {
     }
   }
 
-  protected async removeFromTimeline(
+  async removeFromTimeline(
     clipId: string,
     sequenceId?: string,
     deleteMode = 'ripple',
@@ -353,7 +355,7 @@ export class AssemblyTools extends ToolsBase {
     return await this.bridge.executeScript(script);
   }
 
-  protected async splitClip(clipId: string, splitTime: number): Promise<any> {
+  async splitClip(clipId: string, splitTime: number): Promise<any> {
     const script = `
       try {
         app.enableQE();
@@ -421,7 +423,7 @@ export class AssemblyTools extends ToolsBase {
     return await this.bridge.executeScript(script);
   }
 
-  protected async razorTimelineAtTime(
+  async razorTimelineAtTime(
     sequenceId?: string,
     time?: number,
     videoTrackIndices?: number[],
@@ -550,18 +552,8 @@ export class AssemblyTools extends ToolsBase {
     return await this.bridge.executeScript(script);
   }
 
-  // Nested Sequences
-  protected async createNestedSequence(_clipIds: string[], _name: string): Promise<any> {
-    return {
-      success: false,
-      error:
-        'create_nested_sequence: This feature requires selection and nesting APIs. Implementation pending.',
-      note: 'You can manually nest clips via right-click > Nest',
-    };
-  }
-
   // Additional Clip Operations
-  protected async duplicateClip(clipId: string, offset?: number): Promise<any> {
+  async duplicateClip(clipId: string, offset?: number): Promise<any> {
     // overwriteClip() places a project item's MARKED range, so the old version dropped the whole
     // source media (a 5s clip came back 10s long, from source 0) and overwrote whatever was at the
     // destination, while reporting success. The clip's own source range is now marked on the item
@@ -637,7 +629,7 @@ export class AssemblyTools extends ToolsBase {
    * To relink every use of a project item at once instead (the usual VFX version-up), use
    * replace_clip_media, which keeps the timeline clips themselves untouched.
    */
-  protected async replaceClip(
+  async replaceClip(
     clipId: string,
     newProjectItemId: string,
     preserveEffects?: boolean,
@@ -687,6 +679,7 @@ export class AssemblyTools extends ToolsBase {
           var lacking = need[name] - (have[name] || 0);
           for (var n = 0; n < lacking; n++) {
             var fx = o.video ? qe.project.getVideoEffectByName(name) : qe.project.getAudioEffectByName(name);
+            if (!o.video && __crashProneAudioFx(staged, name)) { missing.push(name); continue; }
             try { if (qc && fx) { if (o.video) qc.addVideoEffect(fx); else qc.addAudioEffect(fx); added.push(name); } else missing.push(name); } catch (eA) { missing.push(name); }
           }
         }
@@ -716,7 +709,7 @@ export class AssemblyTools extends ToolsBase {
     }
 
     // Effects: old clip -> temporary copy (it holds them while the old clip goes away).
-    await (this as any).executeTool('copy_effects_between_clips', {
+    await this.peers.executeTool('copy_effects_between_clips', {
       sourceClipId: clipId,
       targetClipId: prep.staged,
       sourceSequenceId: prep.seq,
@@ -756,6 +749,7 @@ export class AssemblyTools extends ToolsBase {
           var lacking = need[name] - (have[name] || 0);
           for (var n = 0; n < lacking; n++) {
             var fx = ${prep.video ? 'qe.project.getVideoEffectByName(name)' : 'qe.project.getAudioEffectByName(name)'};
+            if (!${prep.video} && __crashProneAudioFx(fin, name)) continue;
             try { if (qc && fx) { ${prep.video ? 'qc.addVideoEffect(fx)' : 'qc.addAudioEffect(fx)'}; } } catch (eA) {}
           }
         }
@@ -765,7 +759,7 @@ export class AssemblyTools extends ToolsBase {
     if (!placed?.success) return placed;
 
     // Effects: temporary copy -> the clip now in the old slot.
-    const copied: any = await (this as any).executeTool('copy_effects_between_clips', {
+    const copied: any = await this.peers.executeTool('copy_effects_between_clips', {
       sourceClipId: prep.staged,
       targetClipId: placed.finalId,
       sourceSequenceId: prep.seq,
@@ -801,7 +795,7 @@ export class AssemblyTools extends ToolsBase {
     `);
   }
 
-  protected async nestAllV1Clips(newSeqName: string, seqId?: string): Promise<any> {
+  async nestAllV1Clips(newSeqName: string, seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(seqId)};
@@ -816,11 +810,7 @@ export class AssemblyTools extends ToolsBase {
     `);
   }
 
-  protected async batchReplaceClips(
-    oldItemId: string,
-    newItemId: string,
-    seqId?: string,
-  ): Promise<any> {
+  async batchReplaceClips(oldItemId: string, newItemId: string, seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var newItem = __findProjectItem(${JSON.stringify(newItemId)});

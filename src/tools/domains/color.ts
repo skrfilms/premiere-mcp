@@ -1,10 +1,10 @@
 /**
  * ColorTools -- the Color tool domain.
  *
- * One link in the chain that composes PremiereProTools. Split out of tools/index.ts, which
- * had grown to 19k lines; the method bodies are unchanged.
+ * A plain class on ToolsBase. PremiereProTools holds one instance and dispatches tool calls
+ * to it by name; other domains it relies on are reached through `this.peers`.
  */
-import { ProjectMediaTools } from './project-media.js';
+import { ToolsBase } from './base.js';
 import { spawn } from 'child_process';
 // Synchronous fs/path/os bindings for the Node-side (non-ExtendScript) tools.
 // The async API is the separate `promises as fs` import.
@@ -17,8 +17,8 @@ import type { ClipPlanColor } from './shared.js';
 import { runFf } from '../ff-exec.js';
 import { generatedAssetsDir } from '../../utils/scratch-paths.js';
 
-export class ColorTools extends ProjectMediaTools {
-  protected hasColorAdjustments(color?: ClipPlanColor): boolean {
+export class ColorTools extends ToolsBase {
+  hasColorAdjustments(color?: ClipPlanColor): boolean {
     if (!color) {
       return false;
     }
@@ -110,7 +110,7 @@ export class ColorTools extends ProjectMediaTools {
     `;
   }
 
-  protected async lumetriBasicSet(args: any): Promise<any> {
+  async lumetriBasicSet(args: any): Promise<any> {
     const ti = args.trackIndex ?? 0;
     const ci = args.clipIndex ?? 0;
     const targets: Array<{ index: number; name: string; value: number }> = [];
@@ -139,7 +139,7 @@ export class ColorTools extends ProjectMediaTools {
     );
   }
 
-  protected async lumetriCreativeSet(args: any): Promise<any> {
+  async lumetriCreativeSet(args: any): Promise<any> {
     const ti = args.trackIndex ?? 0;
     const ci = args.clipIndex ?? 0;
     const targets: Array<{ index: number; name: string; value: number }> = [];
@@ -162,7 +162,7 @@ export class ColorTools extends ProjectMediaTools {
     );
   }
 
-  protected async lumetriVignetteSet(args: any): Promise<any> {
+  async lumetriVignetteSet(args: any): Promise<any> {
     const ti = args.trackIndex ?? 0;
     const ci = args.clipIndex ?? 0;
     const targets: Array<{ index: number; name: string; value: number }> = [];
@@ -185,11 +185,7 @@ export class ColorTools extends ProjectMediaTools {
     );
   }
 
-  protected async lumetriReport(
-    sequenceId: string | undefined,
-    ti: number,
-    ci: number,
-  ): Promise<any> {
+  async lumetriReport(sequenceId: string | undefined, ti: number, ci: number): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(sequenceId)};
@@ -210,13 +206,13 @@ export class ColorTools extends ProjectMediaTools {
     `);
   }
 
-  protected async copyGrade(sequenceId: string | undefined, ti: number, ci: number): Promise<any> {
+  async copyGrade(sequenceId: string | undefined, ti: number, ci: number): Promise<any> {
     const report = await this.lumetriReport(sequenceId, ti, ci);
     if (!report.success) return report;
     return { success: true, gradeJson: JSON.stringify(report.grade), clipName: report.clipName };
   }
 
-  protected async pasteGradeToClips(
+  async pasteGradeToClips(
     gradeJson: string,
     targets: Array<{ trackIndex: number; clipIndex: number }>,
     sequenceId?: string,
@@ -412,11 +408,7 @@ export class ColorTools extends ProjectMediaTools {
     };
   }
 
-  protected async autoWhiteBalance(
-    sequenceId: string | undefined,
-    ti: number,
-    ci: number,
-  ): Promise<any> {
+  async autoWhiteBalance(sequenceId: string | undefined, ti: number, ci: number): Promise<any> {
     const newData = JSON.stringify({
       mAutoTonePressed: true,
       mBlacks: 0,
@@ -468,7 +460,7 @@ export class ColorTools extends ProjectMediaTools {
     `);
   }
 
-  protected async setLutInterpolation(method: number): Promise<any> {
+  async setLutInterpolation(method: number): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var before = null;
@@ -490,7 +482,7 @@ export class ColorTools extends ProjectMediaTools {
     `);
   }
 
-  protected async getLumetriPresetList(folder?: string): Promise<any> {
+  async getLumetriPresetList(folder?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var all;
@@ -505,7 +497,7 @@ export class ColorTools extends ProjectMediaTools {
     `);
   }
 
-  protected async setClipBorderColor(
+  async setClipBorderColor(
     trackIndex: number,
     clipIndex: number,
     _r: number,
@@ -526,7 +518,7 @@ export class ColorTools extends ProjectMediaTools {
   }
 
   // Batch G: Clip property utilities
-  protected async getClipColorSpace(projectItemId: string): Promise<any> {
+  async getClipColorSpace(projectItemId: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var root = app.project.rootItem;
@@ -541,13 +533,13 @@ export class ColorTools extends ProjectMediaTools {
     `);
   }
 
-  protected async setClipColorSpace(projectItemId: string, colorSpaceName: string): Promise<any> {
+  async setClipColorSpace(projectItemId: string, colorSpaceName: string): Promise<any> {
     // Same operation as set_color_space_override. This used to pass the name string straight to
     // setOverrideColorSpace(), which takes a ColorSpace object and threw "Illegal Parameter type".
     return await this.setColorSpaceOverride(projectItemId, colorSpaceName);
   }
 
-  protected async applyLutToClip(
+  async applyLutToClip(
     trackIndex: number,
     clipIndex: number,
     lutPath: string,
@@ -575,7 +567,7 @@ export class ColorTools extends ProjectMediaTools {
    * into the user LUT folder Premiere scans at launch, and the caller is told a restart is needed.
    * Upper-track clips covering the probe frame are disabled while probing and restored after.
    */
-  protected async applyLutByRenderMatch(
+  async applyLutByRenderMatch(
     target: {
       clipId?: string | undefined;
       trackIndex?: number | undefined;
@@ -658,7 +650,7 @@ export class ColorTools extends ProjectMediaTools {
     const work = fsSync.mkdtempSync(pathSync.join(osSync.tmpdir(), 'premiere-mcp-lut-'));
     const capture = async (name: string) => {
       const out = pathSync.join(work, `${name}.png`);
-      const r: any = await (this as any).executeTool('capture_program_output', {
+      const r: any = await this.peers.executeTool('capture_program_output', {
         sequenceId: prep.sequenceId,
         time: prep.at,
         format: 'png',
@@ -801,7 +793,7 @@ export class ColorTools extends ProjectMediaTools {
    * (the PNG must exist) before claiming success -- so an out-of-range timestamp
    * or unreadable file returns a clear error, not a fake success.
    */
-  protected async generateScope(
+  async generateScope(
     mediaPath?: string,
     projectItemId?: string,
     scope = 'waveform',
@@ -823,7 +815,7 @@ export class ColorTools extends ProjectMediaTools {
       return { success: false, error: `Media file not found or unreadable: ${resolvedPath}` };
     }
 
-    const ffmpeg = this.ffmpegCmd();
+    const ffmpeg = this.peers.exportRender.ffmpegCmd();
     const available = await this.checkCommandAvailable(ffmpeg, ['-version']);
     if (!available) {
       return {
@@ -1036,7 +1028,7 @@ export class ColorTools extends ProjectMediaTools {
    * 101, Contrast at 20 and 103, Saturation at 16, 43 and 105). Matching by name takes the first,
    * which is the Basic Correction instance — the one a caller means.
    */
-  protected async colorCorrect(clipId: string, adjustments: any): Promise<any> {
+  async colorCorrect(clipId: string, adjustments: any): Promise<any> {
     const requested: Record<string, number> = {};
     // brightness and exposure are the same Lumetri parameter; an explicit exposure wins.
     if (adjustments.brightness !== undefined) requested['Exposure'] = adjustments.brightness;
@@ -1086,7 +1078,7 @@ export class ColorTools extends ProjectMediaTools {
     };
   }
 
-  protected async applyLut(
+  async applyLut(
     clipId: string,
     lutPath: string,
     _intensity = 100,
@@ -1095,7 +1087,7 @@ export class ColorTools extends ProjectMediaTools {
     return await this.applyLutByRenderMatch({ clipId }, lutPath, installIfMissing === true);
   }
 
-  protected async lumetriHslSecondarySet(
+  async lumetriHslSecondarySet(
     trackIndex: number,
     clipIndex: number,
     params: any,
@@ -1126,7 +1118,7 @@ export class ColorTools extends ProjectMediaTools {
     `);
   }
 
-  protected broadcastSafeCheck(mediaPath: string): any {
+  broadcastSafeCheck(mediaPath: string): any {
     try {
       // signalstats per frame, printed by the metadata filter to stdout. The old movie= source put
       // the path inside a filtergraph unescaped and through a shell.
@@ -1176,12 +1168,7 @@ export class ColorTools extends ProjectMediaTools {
     }
   }
 
-  protected extractPalette(
-    mediaPath: string,
-    startSecs = 0,
-    durationSecs = 10,
-    colorCount = 8,
-  ): any {
+  extractPalette(mediaPath: string, startSecs = 0, durationSecs = 10, colorCount = 8): any {
     const os = osSync,
       path = pathSync;
     const palettePath = path.join(os.tmpdir(), 'mcp_palette.png');
@@ -1220,13 +1207,10 @@ export class ColorTools extends ProjectMediaTools {
     }
   }
 
-  protected async setColorSpaceOverride(
-    projectItemId: string,
-    colorSpaceName: string,
-  ): Promise<any> {
+  async setColorSpaceOverride(projectItemId: string, colorSpaceName: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var item=${this.findItemById(projectItemId)};
+        var item=${this.peers.projectMedia.findItemById(projectItemId)};
         if(!item)return JSON.stringify({success:false,error:'Item not found'});
         var cs=__findColorSpace(${JSON.stringify(colorSpaceName)}, item);
         if(!cs)return JSON.stringify({success:false,error:'No colour space named '+${JSON.stringify(JSON.stringify(colorSpaceName))}+' is available. Pass one of availableColorSpaces.',availableColorSpaces:__colorSpaceNames(item)});
@@ -1251,7 +1235,7 @@ export class ColorTools extends ProjectMediaTools {
     `);
   }
 
-  protected async matchShotColor(
+  async matchShotColor(
     srcTrack: number,
     srcClip: number,
     tgtTrack: number,
@@ -1296,7 +1280,7 @@ export class ColorTools extends ProjectMediaTools {
     `);
   }
 
-  protected async gradeSnapshot(
+  async gradeSnapshot(
     trackIndex: number,
     clipIndex: number,
     outputPath: string,
@@ -1335,7 +1319,7 @@ export class ColorTools extends ProjectMediaTools {
     return result;
   }
 
-  protected falseColorFrame(mediaPath: string, timeSecs: number, outputPath: string): any {
+  falseColorFrame(mediaPath: string, timeSecs: number, outputPath: string): any {
     try {
       // Exposure false colour on luma. lutrgb names the pixel value `val`; the old expression used
       // `r`, which lutrgb does not define, so ffmpeg rejected it on every call. After format=gray the
@@ -1387,7 +1371,7 @@ export class ColorTools extends ProjectMediaTools {
     }
   }
 
-  protected async getColorManagementOptions(): Promise<any> {
+  async getColorManagementOptions(): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var o = { success: true };
@@ -1401,7 +1385,7 @@ export class ColorTools extends ProjectMediaTools {
     `);
   }
 
-  protected async setLogColorManagementTool(enabled: boolean): Promise<any> {
+  async setLogColorManagementTool(enabled: boolean): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.project.setLogColorManagement(${enabled});
@@ -1411,10 +1395,10 @@ export class ColorTools extends ProjectMediaTools {
     `);
   }
 
-  protected async getItemColorManagement(projectItemId: string): Promise<any> {
+  async getItemColorManagement(projectItemId: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
-        var item = ${this.findItemById(projectItemId)};
+        var item = ${this.peers.projectMedia.findItemById(projectItemId)};
         if (!item) return JSON.stringify({ success: false, error: 'Project item not found: ' + ${JSON.stringify(projectItemId)} });
         var o = { success: true, name: String(item.name) };
         try { o.isColorManagedMedia = item.isColorManagedMedia(); } catch(e1) {}
@@ -1432,7 +1416,7 @@ export class ColorTools extends ProjectMediaTools {
   }
 
   // Set Color Label Implementation
-  protected async setColorLabel(projectItemId: string, colorIndex: number): Promise<any> {
+  async setColorLabel(projectItemId: string, colorIndex: number): Promise<any> {
     const script = `
       try {
         var item = __findProjectItem(${JSON.stringify(projectItemId)});
@@ -1466,7 +1450,7 @@ export class ColorTools extends ProjectMediaTools {
   }
 
   // Get Color Label Implementation
-  protected async getColorLabel(projectItemId: string): Promise<any> {
+  async getColorLabel(projectItemId: string): Promise<any> {
     const script = `
       try {
         var item = __findProjectItem(${JSON.stringify(projectItemId)});
@@ -1484,7 +1468,7 @@ export class ColorTools extends ProjectMediaTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async verifyColorGrade(
+  async verifyColorGrade(
     seqId: string | undefined,
     trackIndex: number,
     clipIndex: number,
@@ -1614,7 +1598,7 @@ export class ColorTools extends ProjectMediaTools {
     }
   }
 
-  protected async setMogrtColor(
+  async setMogrtColor(
     seqId: string | undefined,
     trackIndex: number,
     clipIndex: number,

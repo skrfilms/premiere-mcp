@@ -4,6 +4,21 @@ All notable changes are documented here. Releases use semantic versioning.
 
 ## [Unreleased]
 
+- DeNoise and DeReverb on a nested sequence or multicam clip crash Premiere 26.5.2. Every tool
+  that adds them (`denoise_clip`, `dereverb_clip`, `apply_audio_effect_qe`, `apply_effect`,
+  `apply_audio_effect_to_all_clips`, and the effect carry-over in `replace_clip`) now refuses on
+  those clips and says why, instead of
+  taking Premiere down. Found with the new crash matrix (`scripts/crash-matrix.mjs`), which runs
+  each risky tool on its own fresh sequence against seven kinds of clip and relaunches Premiere
+  if it dies.
+- `reorder_effects` no longer claims a reorder: Premiere's scripting cannot move an effect within
+  the stack, so it changes nothing, returns `success: false` and says how to do it by hand.
+- Internals: the 20-level chain of tool classes is now one class per domain on a shared base,
+  with cross-domain calls typed (four untyped calls had broken silently and only the live
+  workflow tests caught them; a test now forbids them). The tool catalogue is built once per
+  process instead of two to three times per call. The ExtendScript helper library has its own
+  file (`src/bridge/extendscript-helpers.ts`).
+
 ## [1.5.0] - 2026-10-29
 
 Premiere MCP that teammates can install with one double-click, that works with no panel open,

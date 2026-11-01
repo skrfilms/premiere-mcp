@@ -239,7 +239,7 @@ describe('srt — file tools (E2E on real temp files)', () => {
   });
 
   it('read_srt returns parsed cues with timecodes + validation', async () => {
-    const res = await tools.readSrtFile(srtPath);
+    const res = await tools.caption.readSrtFile(srtPath);
     expect(res.success).toBe(true);
     expect(res.cueCount).toBe(2);
     expect(res.cues[0]).toMatchObject({
@@ -253,15 +253,15 @@ describe('srt — file tools (E2E on real temp files)', () => {
   });
 
   it('read_srt rejects a relative path and a missing file', async () => {
-    expect((await tools.readSrtFile('captions.srt')).error).toMatch(/absolute path/);
-    const miss = await tools.readSrtFile(join(dir, 'nope.srt'));
+    expect((await tools.caption.readSrtFile('captions.srt')).error).toMatch(/absolute path/);
+    const miss = await tools.caption.readSrtFile(join(dir, 'nope.srt'));
     expect(miss.success).toBe(false);
     expect(miss.error).toMatch(/No file at/);
   });
 
   it('write_srt creates a verified file from cues (numbers + timecodes)', async () => {
     const out = join(dir, 'new.srt');
-    const res = await tools.writeSrtFile(out, [
+    const res = await tools.caption.writeSrtFile(out, [
       { start: 0, end: 1.5, text: 'first' },
       { start: '00:00:02,000', end: '00:00:03,000', text: 'second' },
     ]);
@@ -274,17 +274,23 @@ describe('srt — file tools (E2E on real temp files)', () => {
 
   it('write_srt refuses structurally-invalid cues unless allowInvalid', async () => {
     const out = join(dir, 'bad.srt');
-    const refused = await tools.writeSrtFile(out, [{ start: 5, end: 5, text: 'zero-length' }]);
+    const refused = await tools.caption.writeSrtFile(out, [
+      { start: 5, end: 5, text: 'zero-length' },
+    ]);
     expect(refused.success).toBe(false);
     expect(refused.error).toMatch(/structural error/);
     await expect(fs.readFile(out, 'utf8')).rejects.toBeTruthy(); // nothing written
-    const forced = await tools.writeSrtFile(out, [{ start: 5, end: 5, text: 'zero-length' }], true);
+    const forced = await tools.caption.writeSrtFile(
+      out,
+      [{ start: 5, end: 5, text: 'zero-length' }],
+      true,
+    );
     expect(forced.success).toBe(true);
     expect(forced.validation.errorCount).toBe(1);
   });
 
   it('write_srt reports NaN timing rather than writing garbage', async () => {
-    const res = await tools.writeSrtFile(join(dir, 'x.srt'), [
+    const res = await tools.caption.writeSrtFile(join(dir, 'x.srt'), [
       { start: 'banana', end: 2, text: 'x' },
     ]);
     expect(res.success).toBe(false);
@@ -293,13 +299,15 @@ describe('srt — file tools (E2E on real temp files)', () => {
 
   it('write_srt refuses a cue whose text has an interior blank line (unrepresentable)', async () => {
     const out = join(dir, 'blank.srt');
-    const res = await tools.writeSrtFile(out, [{ start: 0, end: 1, text: 'line1\n\nline2' }]);
+    const res = await tools.caption.writeSrtFile(out, [
+      { start: 0, end: 1, text: 'line1\n\nline2' },
+    ]);
     expect(res.success).toBe(false);
     expect(res.error).toMatch(/round-trip|blank line/i);
   });
 
   it('update_srt_cue edits one cue and reports before/after', async () => {
-    const res = await tools.updateSrtCue(srtPath, 1, { end: '00:00:02,000', text: 'Hi.' });
+    const res = await tools.caption.updateSrtCue(srtPath, 1, { end: '00:00:02,000', text: 'Hi.' });
     expect(res.success).toBe(true);
     expect(res.before.text).toBe('Hello there.');
     expect(res.after).toMatchObject({ index: 1, end: 2, text: 'Hi.' });
@@ -308,12 +316,14 @@ describe('srt — file tools (E2E on real temp files)', () => {
   });
 
   it('update_srt_cue requires at least one field and validates the index', async () => {
-    expect((await tools.updateSrtCue(srtPath, 1, {})).error).toMatch(/at least one/);
-    expect((await tools.updateSrtCue(srtPath, 99, { text: 'x' })).error).toMatch(/out of range/);
+    expect((await tools.caption.updateSrtCue(srtPath, 1, {})).error).toMatch(/at least one/);
+    expect((await tools.caption.updateSrtCue(srtPath, 99, { text: 'x' })).error).toMatch(
+      /out of range/,
+    );
   });
 
   it('insert_srt_cue places a cue chronologically and renumbers on disk', async () => {
-    const res = await tools.insertSrtCue(srtPath, '00:00:02,600', '00:00:02,900', 'Wait.');
+    const res = await tools.caption.insertSrtCue(srtPath, '00:00:02,600', '00:00:02,900', 'Wait.');
     expect(res.success).toBe(true);
     expect(res.insertedIndex).toBe(2);
     const back = parseSrt(await fs.readFile(srtPath, 'utf8')).cues;
@@ -325,7 +335,7 @@ describe('srt — file tools (E2E on real temp files)', () => {
   });
 
   it('remove_srt_cue deletes the addressed cue and renumbers', async () => {
-    const res = await tools.removeSrtCue(srtPath, 1);
+    const res = await tools.caption.removeSrtCue(srtPath, 1);
     expect(res.success).toBe(true);
     expect(res.removed.text).toBe('Hello there.');
     const back = parseSrt(await fs.readFile(srtPath, 'utf8')).cues;
@@ -334,7 +344,7 @@ describe('srt — file tools (E2E on real temp files)', () => {
   });
 
   it('shift_srt_timing offsets all cues and writes back verified', async () => {
-    const res = await tools.shiftSrtTiming(srtPath, 1.5);
+    const res = await tools.caption.shiftSrtTiming(srtPath, 1.5);
     expect(res.success).toBe(true);
     const back = parseSrt(await fs.readFile(srtPath, 'utf8')).cues;
     expect(back[0]).toEqual(cue(2.5, 4, 'Hello there.'));
@@ -342,14 +352,14 @@ describe('srt — file tools (E2E on real temp files)', () => {
   });
 
   it('shift_srt_timing applies a scale factor before the offset', async () => {
-    const res = await tools.shiftSrtTiming(srtPath, 0, 2);
+    const res = await tools.caption.shiftSrtTiming(srtPath, 0, 2);
     expect(res.success).toBe(true);
     const back = parseSrt(await fs.readFile(srtPath, 'utf8')).cues;
     expect(back[0]).toEqual(cue(2, 5, 'Hello there.')); // 1..2.5 scaled x2
   });
 
   it('shift_srt_timing applies a collapsing negative shift but reports the errors (no misleading refusal)', async () => {
-    const res = await tools.shiftSrtTiming(srtPath, -100);
+    const res = await tools.caption.shiftSrtTiming(srtPath, -100);
     expect(res.success).toBe(true); // the transform applied
     expect(res.validation.errorCount).toBeGreaterThan(0); // ...and is honestly flagged
     expect(res.note).toMatch(/structural error/);
@@ -360,7 +370,7 @@ describe('srt — file tools (E2E on real temp files)', () => {
   it('shift_srt_timing on an empty file is a no-op success', async () => {
     const empty = join(dir, 'empty.srt');
     await fs.writeFile(empty, '', 'utf8');
-    const res = await tools.shiftSrtTiming(empty, 5);
+    const res = await tools.caption.shiftSrtTiming(empty, 5);
     expect(res.success).toBe(true);
     expect(res.cueCount).toBe(0);
   });
@@ -368,7 +378,7 @@ describe('srt — file tools (E2E on real temp files)', () => {
   it('validate_srt reports errors on a bad file without modifying it', async () => {
     const bad = join(dir, 'bad.srt');
     await fs.writeFile(bad, '1\n00:00:05,000 --> 00:00:04,000\nbackwards\n', 'utf8');
-    const res = await tools.validateSrtFile(bad);
+    const res = await tools.caption.validateSrtFile(bad);
     expect(res.success).toBe(true);
     expect(res.valid).toBe(false);
     expect(res.errorCount).toBeGreaterThan(0);

@@ -1,8 +1,8 @@
 /**
  * ToolsBase -- the shared base for every tool domain tool domain.
  *
- * One link in the chain that composes PremiereProTools. Split out of tools/index.ts, which
- * had grown to 19k lines; the method bodies are unchanged.
+ * A plain class on ToolsBase. PremiereProTools holds one instance and dispatches tool calls
+ * to it by name; other domains it relies on are reached through `this.peers`.
  */
 import { spawn } from 'child_process';
 // Synchronous fs/path/os bindings for the Node-side (non-ExtendScript) tools.
@@ -10,59 +10,74 @@ import { spawn } from 'child_process';
 import * as fsSync from 'node:fs';
 import type { PremiereProTransport } from '../../bridge/types.js';
 import { Logger } from '../../utils/logger.js';
-import type { MCPTool } from '../tool-types.js';
 import type { CaptureTapReport } from './shared.js';
+import type { AssemblyTools } from './assembly.js';
+import type { AudioTools } from './audio.js';
+import type { CaptionTools } from './caption.js';
+import type { ColorTools } from './color.js';
+import type { EffectsTools } from './effects.js';
+import type { ExportRenderTools } from './export-render.js';
+import type { GraphicsTools } from './graphics.js';
+import type { InterchangeTools } from './interchange.js';
+import type { KeyframeTools } from './keyframe.js';
+import type { MarkerTools } from './marker.js';
+import type { MotionLayoutTools } from './motion-layout.js';
+import type { MulticamTools } from './multicam.js';
+import type { PlaybackTools } from './playback.js';
+import type { ProjectMediaTools } from './project-media.js';
+import type { ReviewDeliveryTools } from './review-delivery.js';
+import type { SequenceTrackTools } from './sequence-track.js';
+import type { SourceMonitorTools } from './source-monitor.js';
+import type { SpeedTimeTools } from './speed-time.js';
+import type { TrimmingTools } from './trimming.js';
+
+/**
+ * The tool domains a domain can call into. Each domain is one plain class on ToolsBase; the
+ * few that use another domain's helper (ffmpeg paths, item lookup, keyframe checks) reach it
+ * here, so the dependency is visible at the call site instead of hidden in a class chain.
+ */
+export interface DomainPeers {
+  /** Run another tool through the full path (validation, checkpoints, verification). */
+  executeTool(
+    name: string,
+    args: Record<string, any>,
+    options?: { allowUnexposed?: boolean },
+  ): Promise<any>;
+  assembly: AssemblyTools;
+  audio: AudioTools;
+  caption: CaptionTools;
+  color: ColorTools;
+  effects: EffectsTools;
+  exportRender: ExportRenderTools;
+  graphics: GraphicsTools;
+  interchange: InterchangeTools;
+  keyframe: KeyframeTools;
+  marker: MarkerTools;
+  motionLayout: MotionLayoutTools;
+  multicam: MulticamTools;
+  playback: PlaybackTools;
+  projectMedia: ProjectMediaTools;
+  reviewDelivery: ReviewDeliveryTools;
+  sequenceTrack: SequenceTrackTools;
+  sourceMonitor: SourceMonitorTools;
+  speedTime: SpeedTimeTools;
+  trimming: TrimmingTools;
+}
 
 export class ToolsBase {
   protected bridge: PremiereProTransport;
   protected logger: Logger;
   /** TTL cache for the capture-tap capability probe (speed mandate: don't re-probe every call). */
   protected captureTapsCache?: { at: number; taps: CaptureTapReport[] };
-  /**
-   * Tools promoted into the advertised list at runtime by `activate_tools`.
-   *
-   * Session state, deliberately not persisted: an operator who restarts the server
-   * should get exactly the profile they configured, not a surface some earlier agent
-   * grew. Everything in here passed the same authority gate `call_tool` uses.
-   */
-  protected activatedTools = new Set<string>();
-  /** Notified when the advertised tool list changes, so the server can emit tools/list_changed. */
-  protected exposureListeners: Array<() => void> = [];
 
-  constructor(bridge: PremiereProTransport) {
+  /** Other domains, for the handful of cross-domain helpers. Unset on PremiereProTools itself. */
+  protected readonly peers: DomainPeers;
+
+  constructor(bridge: PremiereProTransport, peers?: DomainPeers) {
     this.bridge = bridge;
     this.logger = new Logger('PremiereProTools');
+    this.peers = peers as DomainPeers;
   }
-
-  /**
-   * The locally-implemented tool catalogue, built ONCE per process.
-   *
-   * The literal below constructs several hundred Zod schemas, and it was re-evaluated on
-   * every call. executeTool() calls it two to three times for a SINGLE tool call (the
-   * getAvailableTools lookup, then the local-vs-expanded check), so the cost landed on
-   * every real edit as well as on the sweeps: the injection-guard suite, which calls
-   * executeTool once per tool x position x payload, spent the overwhelming majority of its
-   * 25 minutes rebuilding this array and timed out on the Windows runner because of it.
-   *
-   * Caching is safe because the builder is pure: it reads no environment variable and no
-   * instance state (`this` appears nowhere inside it), so the catalogue is byte-identical
-   * for every instance in the process. Profile curation is deliberately NOT cached —
-   * applyProfile() reads process.env on every call, so getAvailableTools() still reflects a
-   * profile or exclusion set changed after startup, which several suites depend on.
-   *
-   * A fresh array is returned per call, not the cached one, so a caller that sorts or
-   * splices its copy cannot corrupt the catalogue for everyone else. Copying ~640 object
-   * references is free next to rebuilding ~640 schemas.
-   */
-  protected static localToolsCache: MCPTool[] | null = null;
-
-  /**
-   * Every tool this build implements, before the active profile filters anything.
-   *
-   * Cached for the same reason getLocalTools is, and on the same terms: pure inputs, a fresh
-   * array handed to each caller. This is the one the hot paths actually call.
-   */
-  protected static registeredToolsCache: MCPTool[] | null = null;
 
   // ── New Wave-1 tools ───────────────────────────────────────────────────
 
