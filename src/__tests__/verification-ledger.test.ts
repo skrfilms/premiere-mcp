@@ -116,6 +116,45 @@ describe('verification ledger files', () => {
     expect(standings.get('ping')?.ranAt).toBe('2026-08-20T00:00:00Z');
   });
 
+  it("a skip from one harness does not erase another harness's live run", () => {
+    const env = (ranAt: string, harness: string) => ({
+      ranAt,
+      harness,
+      mode: 'mutate' as const,
+      gitSha: 'abc',
+      gitDirty: false,
+      premiereVersion: null,
+      platform: 'darwin',
+      catalogueSize: 1,
+    });
+    const standings = currentStandings([
+      {
+        environment: env('2026-11-01T10:00:00Z', 'crash-matrix'),
+        tools: [
+          { name: 'delete_track', outcome: 'pass' },
+          { name: 'nest_clips', outcome: 'fail', detail: 'x' },
+        ],
+      },
+      {
+        environment: env('2026-11-01T12:00:00Z', 'live-smoke-sweep'),
+        tools: [
+          { name: 'delete_track', outcome: 'skipped_unsafe', detail: 'destructive' },
+          { name: 'nest_clips', outcome: 'pass' },
+        ],
+      },
+    ]);
+    // The sweep skipped delete_track by design; the crash matrix ran it. A newer EXECUTION
+    // from any harness still wins (nest_clips).
+    expect(standings.get('delete_track')).toMatchObject({
+      outcome: 'pass',
+      harness: 'crash-matrix',
+    });
+    expect(standings.get('nest_clips')).toMatchObject({
+      outcome: 'pass',
+      harness: 'live-smoke-sweep',
+    });
+  });
+
   it('names every sweep tool that is not in the catalogue rather than dropping it', () => {
     const names = new Set(catalogueNames());
     const orphans = new Set<string>();

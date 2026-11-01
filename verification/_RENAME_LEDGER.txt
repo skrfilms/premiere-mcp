@@ -38,3 +38,10 @@
    Reason: ran on fixtures damaged by an earlier sweep that crashed Premiere mid-run (denoise_clip),
    so 27 tools failed on 0.23 s clips, a missing MOGRT and missing Chapter markers rather than on
    their code. After `node scripts/reset-scratch.mjs` the same build passed 527 (20261029T185130Z).
+
+2026-11-01  NOT KEPT  verification/sweeps/20261101T210533Z-live-smoke-sweep.json (never committed)
+   Reason: stopped after 450 of 663 tools. export_aaf_with_settings and export_social_preset ran
+   past the harness timeout, the script engine never came back (ENGINE_DEAD after 376 s, the
+   screen was locked, so a report dialog could not be dismissed), and the sweep refused to go on
+   because it could no longer confirm the target project. Premiere was restarted and the sweep
+   re-run with those two tools skipped for the run (--skip).
