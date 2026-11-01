@@ -12,3 +12,7 @@
  * applyProfile, so they are unaffected by this.
  */
 process.env.PREMIERE_MCP_PROFILE = 'all';
+
+// The locked-screen refusal (report-dialog-guard.ts) reads the real machine's lock state, so a
+// suite run on a locked Mac would refuse the AAF/OMF tools. Off here; its own test turns it on.
+process.env.PREMIERE_MCP_LOCK_CHECK = '0';

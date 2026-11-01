@@ -40,7 +40,8 @@ mkdirSync(OUT, { recursive: true });
     const p = join(dir, e.name);
     return Math.max(m, e.isDirectory() ? newest(p) : statSync(p).mtimeMs);
   }, 0);
-  const built = existsSync(join(ROOT, 'dist', 'tools', 'index.js')) ? statSync(join(ROOT, 'dist', 'tools', 'index.js')).mtimeMs : 0;
+  // Newest against newest: tsc builds incrementally and only rewrites the files that changed.
+  const built = existsSync(join(ROOT, 'dist')) ? newest(join(ROOT, 'dist')) : 0;
   if (built < newest(join(ROOT, 'src'))) { console.error('crash-matrix: dist/ is older than src/. Run npm run build first.'); process.exit(2); }
 }
 
