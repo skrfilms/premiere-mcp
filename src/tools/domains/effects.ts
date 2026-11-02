@@ -1,20 +1,20 @@
 /**
  * EffectsTools -- the Effects & Keying tool domain.
  *
- * One link in the chain that composes PremiereProTools. Split out of tools/index.ts, which
- * had grown to 19k lines; the method bodies are unchanged.
+ * A plain class on ToolsBase. PremiereProTools holds one instance and dispatches tool calls
+ * to it by name; other domains it relies on are reached through `this.peers`.
  */
-import { AssemblyTools } from './assembly.js';
 // Synchronous fs/path/os bindings for the Node-side (non-ExtendScript) tools.
 // The async API is the separate `promises as fs` import.
+import { ToolsBase } from './base.js';
 import * as fsSync from 'node:fs';
 import * as pathSync from 'node:path';
 import { runFf } from '../ff-exec.js';
 import { generatedAssetsDir } from '../../utils/scratch-paths.js';
 import { runUxp, uxpAvailable } from '../../bridge/uxp-channel.js';
 
-export class EffectsTools extends AssemblyTools {
-  protected async removeEffectAtIndex(
+export class EffectsTools extends ToolsBase {
+  async removeEffectAtIndex(
     trackIndex: number,
     clipIndex: number,
     componentIndex: number,
@@ -43,7 +43,7 @@ export class EffectsTools extends AssemblyTools {
     `);
   }
 
-  protected async reorderEffects(
+  async reorderEffects(
     trackIndex: number,
     clipIndex: number,
     newOrder: string[],
@@ -52,30 +52,29 @@ export class EffectsTools extends AssemblyTools {
     const orderJson = JSON.stringify(newOrder);
     return await this.bridge.executeScript(`
       try {
-        app.enableQE();
-        var seq = ${this.buildQSeqResolver(sequenceId)};
-        var qeClip = __qeClipByIndex(seq, 'video', ${trackIndex}, ${clipIndex});
         var domSeq = ${this.buildSeqRes(sequenceId)};
         var domClip = domSeq.videoTracks[${trackIndex}].clips[${clipIndex}];
+        if (!domClip) return JSON.stringify({success:false,changed:false,error:'Clip not found'});
         var newOrder = ${orderJson};
-        // Serialize all component params
-        var comps = [];
-        for (var i = 0; i < domClip.components.numItems; i++) {
-          var domComp = domClip.components[i];
-          var qeComp = qeClip.getComponentAt(i);
-          var entry = { name: String(domComp.displayName), matchName: String(domComp.matchName), params: {} };
-          if (qeComp) { try { var pl=qeComp.getParamList(); var pns=String(pl).split(',').map(function(s){return s.replace(/^\\s+|\\s+$/g,'');}).filter(function(s){return s;}); for(var j=0;j<pns.length;j++){try{entry.params[pns[j]]=String(qeComp.getParamValue(pns[j]));}catch(ep){}} } catch(e){} }
-          comps.push(entry);
+        // Read only: Premiere's scripting has no call that moves an effect in the stack, and
+        // removing and re-adding would lose keyframes. So this reports the current and requested
+        // order and changes nothing, rather than claiming a reorder that did not happen.
+        var current = [];
+        for (var i = 0; i < domClip.components.numItems; i++) current.push(String(domClip.components[i].displayName));
+        var notOnClip = [];
+        for (var oi = 0; oi < newOrder.length; oi++) {
+          var hit = false;
+          for (var ci = 0; ci < current.length; ci++) if (current[ci] === String(newOrder[oi])) { hit = true; break; }
+          if (!hit) notOnClip.push(String(newOrder[oi]));
         }
-        // Build order map
-        var ordered = [];
-        for (var oi=0;oi<newOrder.length;oi++) { for (var ci=0;ci<comps.length;ci++) { if (comps[ci].name===newOrder[oi]){ordered.push(comps[ci]);break;} } }
-        return JSON.stringify({success:true,note:'Reorder serialized. Full effect removal and re-add requires keyframe data preservation which is complex. Use remove_effect_at_index + apply_video_effect to manually reorder.',serialized:ordered.map(function(c){return c.name;})});
+        return JSON.stringify({success:false,verified:true,changed:false,
+          error:'Effects cannot be reordered by script in this Premiere version, so nothing was changed. Drag them in the Effect Controls panel, or remove_effect_at_index and apply_effect again (keyframes on a removed effect are lost).',
+          currentOrder:current,requestedOrder:newOrder,notOnClip:notOnClip});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
 
-  protected async findClipsWithEffect(effectName: string): Promise<any> {
+  async findClipsWithEffect(effectName: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var pat = ${JSON.stringify(effectName.toLowerCase())};
@@ -100,7 +99,7 @@ export class EffectsTools extends AssemblyTools {
     `);
   }
 
-  protected async effectStackReport(
+  async effectStackReport(
     trackIndex: number,
     clipIndex: number,
     sequenceId?: string,
@@ -127,7 +126,7 @@ export class EffectsTools extends AssemblyTools {
     `);
   }
 
-  protected async enableDisableEffect(
+  async enableDisableEffect(
     trackIndex: number,
     clipIndex: number,
     effectName: string,
@@ -187,7 +186,7 @@ export class EffectsTools extends AssemblyTools {
   }
 
   // Batch H: Effects shortcuts
-  protected async blurClip(
+  async blurClip(
     trackIndex: number,
     clipIndex: number,
     amount: number,
@@ -233,7 +232,7 @@ export class EffectsTools extends AssemblyTools {
     `);
   }
 
-  protected async sharpenClip(
+  async sharpenClip(
     trackIndex: number,
     clipIndex: number,
     amount: number,
@@ -263,7 +262,7 @@ export class EffectsTools extends AssemblyTools {
     `);
   }
 
-  protected async enableDisableAllEffects(
+  async enableDisableAllEffects(
     trackIndex: number,
     clipIndex: number,
     enabled: boolean,
@@ -316,7 +315,7 @@ export class EffectsTools extends AssemblyTools {
     `);
   }
 
-  protected async removeAllEffectsQe(
+  async removeAllEffectsQe(
     trackIndex: number,
     clipIndex: number,
     sequenceId?: string,
@@ -345,7 +344,7 @@ export class EffectsTools extends AssemblyTools {
     `);
   }
 
-  protected async listEffectsOnClipQe(
+  async listEffectsOnClipQe(
     trackIndex: number,
     clipIndex: number,
     sequenceId?: string,
@@ -370,7 +369,7 @@ export class EffectsTools extends AssemblyTools {
     `);
   }
 
-  protected transitionVerificationScript(): string {
+  transitionVerificationScript(): string {
     return `
         function __readQeTransitionState(qeClip) {
           var state = { available: false, count: null, names: [] };
@@ -486,7 +485,7 @@ export class EffectsTools extends AssemblyTools {
   //   4. For each entry in `parameters`, attempts to set the matching property by displayName
   //      (exact match first, then case-insensitive whitespace-stripped match)
   //   5. Returns dump + per-param result so debugging is one round-trip
-  protected async applyEffect(
+  async applyEffect(
     clipId: string,
     effectName: string,
     parameters?: Record<string, any>,
@@ -590,6 +589,10 @@ export class EffectsTools extends AssemblyTools {
         }
         var qeClip = findQeClipByTime();
         if (!qeClip) return JSON.stringify({ success: false, error: "Could not locate matching QE clip for effect application" });
+        if (info.trackType !== 'video') {
+          var __refuse = __crashProneAudioFx(info.clip, ${JSON.stringify(effectName)});
+          if (__refuse) return JSON.stringify({ success: false, verified: true, refusedToAvoidCrash: true, error: __refuse });
+        }
         if (info.trackType === 'video') { qeClip.addVideoEffect(effect); } else { qeClip.addAudioEffect(effect); }
 
         // Re-resolve after the QE mutation, then locate the unique inserted component by
@@ -817,7 +820,7 @@ export class EffectsTools extends AssemblyTools {
    * Premiere sometimes accepts without placing anything. UXP's own executeTransaction can report
    * true and place nothing too (seen once on 2026-10-27), so its word is never taken alone.
    */
-  protected async uxpTransitionAtCut(
+  async uxpTransitionAtCut(
     sequenceId: string | null,
     trackIndex: number,
     cutSecs: number,
@@ -840,6 +843,7 @@ export class EffectsTools extends AssemblyTools {
     const u = await runUxp(
       `
       const p = await ppro.Project.getActiveProject();
+      if (!p) return { error: 'no project is open in Premiere' };
       const s = (await p.getSequences()).find((q) => String(q.guid) === ${JSON.stringify(String(before.guid))});
       if (!s) return { error: 'sequence not found in UXP' };
       const names = await ppro.TransitionFactory.getVideoTransitionMatchNames();
@@ -896,7 +900,7 @@ export class EffectsTools extends AssemblyTools {
         };
   }
 
-  protected async addTransition(
+  async addTransition(
     clipId1: string,
     clipId2: string,
     transitionName: string,
@@ -974,7 +978,7 @@ export class EffectsTools extends AssemblyTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async addTransitionToClip(
+  async addTransitionToClip(
     clipId: string,
     transitionName: string,
     position: 'start' | 'end',
@@ -1085,7 +1089,7 @@ export class EffectsTools extends AssemblyTools {
   }
 
   // Advanced Features Implementation
-  protected async stabilizeClip(clipId: string, _method = 'warp', smoothness = 50): Promise<any> {
+  async stabilizeClip(clipId: string, _method = 'warp', smoothness = 50): Promise<any> {
     const script = `
       try {
         app.enableQE();
@@ -1133,7 +1137,7 @@ export class EffectsTools extends AssemblyTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async applyMorphCut(
+  async applyMorphCut(
     trackIndex: number,
     clipIndex: number,
     seqId?: string,
@@ -1211,7 +1215,7 @@ export class EffectsTools extends AssemblyTools {
   }
 
   // Effect & Transition Discovery Implementation
-  protected async listAvailableEffects(): Promise<any> {
+  async listAvailableEffects(): Promise<any> {
     const script = `
       try {
         app.enableQE();
@@ -1228,7 +1232,7 @@ export class EffectsTools extends AssemblyTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async listAvailableTransitions(): Promise<any> {
+  async listAvailableTransitions(): Promise<any> {
     const script = `
       try {
         app.enableQE();
@@ -1246,7 +1250,7 @@ export class EffectsTools extends AssemblyTools {
   }
 
   // Batch Operations Implementation
-  protected async batchAddTransitions(
+  async batchAddTransitions(
     sequenceId: string,
     trackIndex: number,
     transitionName: string,
@@ -1326,7 +1330,7 @@ export class EffectsTools extends AssemblyTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async verifyEffectRendered(
+  async verifyEffectRendered(
     seqId: string | undefined,
     trackIndex: number,
     clipIndex: number,
@@ -1474,7 +1478,7 @@ export class EffectsTools extends AssemblyTools {
     }
   }
 
-  protected async getAllClipEffects(seqId?: string): Promise<any> {
+  async getAllClipEffects(seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(seqId)};

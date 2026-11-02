@@ -43,6 +43,17 @@ export interface UxpResult {
 
 /** True when the UXP probe panel is running in Premiere and answering. */
 export function uxpAvailable(): boolean {
+  // The panel only writes its heartbeat into a folder that exists; it does not create it. The
+  // server used to create it only when sending, after this check, so once /tmp was cleared (a
+  // reboot) neither side ever started and every UXP tool reported the panel not running, though
+  // it was (measured 2026-11-01: heartbeat 2 s after the folder appeared). Create it here.
+  if (!existsSync(dir())) {
+    try {
+      ensureDir();
+    } catch {
+      /* reported as unavailable below */
+    }
+  }
   try {
     const hb = JSON.parse(readFileSync(`${dir()}/uxp-heartbeat.json`, 'utf8'));
     return Date.now() - Number(hb.ts) < STALE_MS;

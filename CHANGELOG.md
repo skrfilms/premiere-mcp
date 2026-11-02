@@ -4,6 +4,94 @@ All notable changes are documented here. Releases use semantic versioning.
 
 ## [Unreleased]
 
+- **DeNoise and DeReverb no longer crash Premiere on nested or multicam clips.** On 26.5.2,
+  adding either to a clip whose source is a sequence crashes Premiere. The 10-29 live sweep hit
+  it with `denoise_clip` on a nested clip, and it reproduced there; multicam clips are sequences
+  too and are refused the same way as a precaution. Every tool that adds them now checks first
+  and leaves those clips alone with the reason: `denoise_clip`, `dereverb_clip`,
+  `apply_audio_effect_qe` (on either track kind), `apply_effect`, `apply_audio_effect`,
+  `apply_audio_effect_to_all_clips` and `batch_apply_effect`. `replace_clip` refuses before it
+  touches anything when the old clip carries one of them and the new media is a sequence. The
+  check matches the name in any case and the obsolete "Adaptive Noise Reduction", and refuses
+  when it cannot read the clip's source. It is not tied to a version: it stays on until a build is
+  measured safe.
+- **Batch tools report what they skipped.** `apply_audio_effect_to_all_clips` reported
+  `allOk: true` whatever happened (it used `Array.every`, which this ExtendScript engine lacks),
+  and `batch_apply_effect` returned plain success. Both now return `success: false` with
+  `partial`, `appliedCount`, `skippedCount` and `failedCount` when any clip was left out, and
+  check that each effect was actually added.
+- **`replace_clip` and `stem_export` work under the default profile.** Their internal steps
+  (`copy_effects_between_clips`, `export_audio_only`) are not in `core`, so they were refused:
+  `replace_clip` reported success with effect values at their defaults, and every stem failed.
+  Internal steps now run past the profile, as transaction steps do. `replace_clip` stops before
+  touching the old clip if any of its effects could not be added to the new media or the values
+  could not be copied, removes its temporary copy (with all its linked audio), and fails if the
+  final copy did not land.
+- **`freeze_frame` on an image sequence** (EXR/DPX/PNG plates) holds the frame at the requested
+  time, picked from the sequence's own files, instead of always the first frame. Whether media is
+  a sequence comes from Premiere's own media type ("Video" for numbered stills, "Still Image" for
+  a single still), not from numbered files beside it, so one photo from a folder of numbered
+  photos still holds itself. Animated GIFs seek as video does.
+- **`set_qe_component_param`** reads the value back. A value that went to `nan`, or that
+  Premiere clamped (asked 500, reads 100; multi-part values such as "0.5,2" are compared part by
+  part), is put back if the previous value is a plain one, and reported as refused; one that did not
+  move is reported as refused with nothing written back; a change that reads back in another form
+  (a checkbox as `true`, a menu as a label) is kept and reported `verified: false` instead of
+  being undone.
+- **`reorder_effects`** cannot reorder (Premiere's scripting has no call that moves an effect),
+  so it now reads the stack, returns `success: false, changed: false` with the current order and
+  any requested names not on the clip, and counts as read-only inside a transaction.
+- **The UXP helper starts again after a reboot.** It polls `/tmp/premiere-mcp-uxp` from load (no
+  panel needed) but cannot create the folder, and the server created it only when sending a
+  command, after checking for the helper's heartbeat. Once `/tmp` was cleared, neither side
+  started and every UXP tool (`set_work_area`, the transition fallback, keyframe ease readback)
+  reported the helper not running. The server now creates the folder at startup.
+- **An AAF/OMF export can no longer freeze Premiere on a locked screen.** `exportAAF()` opens an
+  "AAF Export Log" dialog whenever the sequence has a Lumetri grade, and it blocks Premiere's
+  scripting engine until OK is clicked. The dialog guard clicks it away through macOS
+  accessibility, which cannot reach the screen while it is locked, so an unattended export froze
+  Premiere for good. While the screen is locked, the tools that can raise a report dialog
+  (AAF/OMF export, multicam XML import) now refuse up front with `SCREEN_LOCKED`, and so do the
+  FCP XML export tools, to be safe, though they pass `suppressUI` and have not been seen to raise
+  one (`PREMIERE_MCP_LOCK_CHECK=0` turns this off). Tools that export FCP XML only internally
+  (`add_transition`'s check, `export_edl`, `diff_sequences`) are not refused.
+- **Tools reached through `call_tool` run their own steps.** A tool outside the default
+  profile, called through `call_tool`, ran its internal steps against the advertised list, so a
+  step the profile hid was refused mid-call: `version_up_shots` (`replace_clip_media`),
+  `remove_silence` (`detect_silence`, `close_gap_at`), `title_card`, `lower_third_preset` and
+  `batch_mogrt_from_data` (`add_text_overlay`). Every internal step now runs past the profile, and
+  a test forbids the old pattern.
+- **Failures say why.** `update_marker` and `delete_marker` on a missing id, `title_card`, and
+  `set_app_property` / `set_project_property` on a key that does not exist used to fail with no
+  reason (shown as "unknown") or with Premiere's bare "Invalid parameter".
+- `set_project_property` now shares `set_app_property`'s checked write. Despite its name it has
+  always written application preferences (`app.properties`), and it reported `verified: true`
+  without comparing the read-back.
+- `get_clip_links` returns the clips linked to the clip (its own audio or video) in `linked`; it
+  used to return only the clip's info.
+- `set_source_in_out` says when nothing is open in the Source Monitor, and reads both marks back.
+- `look_at_cut` refuses an `outputPath` that is not `.jpg`/`.png` before capturing anything.
+- `batch_apply_effect` counts clips of the other kind (audio clips for a video effect) as not
+  applicable rather than failed, and says so when a sequence is empty or holds no clip of the
+  effect's kind; `apply_audio_effect_to_all_clips` fails on a sequence with no audio clips. Applicability now comes from Premiere's effect lists, because
+  `getAudioEffectByName` returns an effect object even for a video effect's name.
+- `open_item_in_source_qe` reported every open as "did not take": a QE project item has no
+  `nodeId`, and `String(undefined)` was compared with the loaded item's real id. It now takes the
+  id from the timeline clip's own project item.
+- `set_clip_pan` refuses nested clips with the reason, and says the pan may have changed if
+  the write went through but the read-back failed. `normalize_clip_peaks` refuses nested clips.
+- New `scripts/crash-matrix.mjs`: runs each risky tool on its own fresh sequence against seven
+  kinds of clip (it generates the audio-only, dual-mono and 29.97 media it needs), re-checks
+  before every case that only the scratch project is open, records a
+  crash with its report's top frames, relaunches Premiere and carries on, and saves as it goes.
+- New live workflow W10 covers the above against a running Premiere. `live-smoke-sweep --skip a,b`
+  leaves tools out of one run (reported as untested).
+- Internals: the 20-level chain of tool classes is now one class per domain on a shared base,
+  with cross-domain calls typed. Flattening it would have broken four untyped
+  `(this as any).executeTool` calls; the live workflow tests caught them before commit, and a
+  test now forbids the pattern. The ExtendScript helper library has its own file
+  (`src/bridge/extendscript-helpers.ts`).
+
 ## [1.5.0] - 2026-10-29
 
 Premiere MCP that teammates can install with one double-click, that works with no panel open,

@@ -1,10 +1,10 @@
 /**
  * CaptionTools -- the Captions tool domain.
  *
- * One link in the chain that composes PremiereProTools. Split out of tools/index.ts, which
- * had grown to 19k lines; the method bodies are unchanged.
+ * A plain class on ToolsBase. PremiereProTools holds one instance and dispatches tool calls
+ * to it by name; other domains it relies on are reached through `this.peers`.
  */
-import { AudioTools } from './audio.js';
+import { ToolsBase } from './base.js';
 import { spawn } from 'child_process';
 // Synchronous fs/path/os bindings for the Node-side (non-ExtendScript) tools.
 // The async API is the separate `promises as fs` import.
@@ -27,9 +27,9 @@ import {
   scaleCues,
 } from '../srt.js';
 
-export class CaptionTools extends AudioTools {
+export class CaptionTools extends ToolsBase {
   // Batch D: Captions
-  protected async exportCaptionsToSrt(outputPath: string, sequenceId?: string): Promise<any> {
+  async exportCaptionsToSrt(outputPath: string, sequenceId?: string): Promise<any> {
     const result: any = await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(sequenceId)};
@@ -67,7 +67,7 @@ export class CaptionTools extends AudioTools {
     };
   }
 
-  protected captionQcReport(srtPath: string, maxCps: number, maxLineLength: number): any {
+  captionQcReport(srtPath: string, maxCps: number, maxLineLength: number): any {
     const fs = fsSync;
     try {
       const content = fs.readFileSync(srtPath, 'utf8');
@@ -114,7 +114,7 @@ export class CaptionTools extends AudioTools {
     }
   }
 
-  protected captionQcFix(
+  captionQcFix(
     srtPath: string,
     outputPath: string | undefined,
     _maxCps: number,
@@ -157,7 +157,7 @@ export class CaptionTools extends AudioTools {
     }
   }
 
-  protected captionsFromTranscriptJson(
+  captionsFromTranscriptJson(
     jsonPath: string,
     outputPath: string,
     maxCps: number,
@@ -213,7 +213,7 @@ export class CaptionTools extends AudioTools {
     }
   }
 
-  protected srtDiff(srtPathA: string, srtPathB: string): any {
+  srtDiff(srtPathA: string, srtPathB: string): any {
     const fs = fsSync;
     try {
       const parse = (p: string) =>
@@ -260,7 +260,7 @@ export class CaptionTools extends AudioTools {
     }
   }
 
-  protected async captionsToMarkers(
+  async captionsToMarkers(
     srtPath: string,
     sequenceId: string | undefined,
     markerType: string,
@@ -301,7 +301,7 @@ export class CaptionTools extends AudioTools {
     }
   }
 
-  protected async readSequenceCaptions(sequenceId?: string): Promise<any> {
+  async readSequenceCaptions(sequenceId?: string): Promise<any> {
     const seqArg = sequenceId ? JSON.stringify(sequenceId) : 'null';
     const script = `
       try {
@@ -523,7 +523,7 @@ export class CaptionTools extends AudioTools {
     return { ok: true };
   }
 
-  protected async readSrtFile(srtPath: string): Promise<any> {
+  async readSrtFile(srtPath: string): Promise<any> {
     const loaded = await this.loadSrt(srtPath);
     if (!loaded.ok) return { success: false, error: loaded.error };
     return {
@@ -541,7 +541,7 @@ export class CaptionTools extends AudioTools {
     };
   }
 
-  protected async validateSrtFile(srtPath: string): Promise<any> {
+  async validateSrtFile(srtPath: string): Promise<any> {
     const loaded = await this.loadSrt(srtPath);
     if (!loaded.ok) return { success: false, error: loaded.error };
     const report = this.srtValidationReport(loaded.cues);
@@ -558,7 +558,7 @@ export class CaptionTools extends AudioTools {
     };
   }
 
-  protected async writeSrtFile(
+  async writeSrtFile(
     srtPath: string,
     cuesIn: Array<{ start: number | string; end: number | string; text: string }>,
     allowInvalid?: boolean,
@@ -607,7 +607,7 @@ export class CaptionTools extends AudioTools {
     };
   }
 
-  protected async updateSrtCue(
+  async updateSrtCue(
     srtPath: string,
     index: number,
     patch: { start?: number | string; end?: number | string; text?: string },
@@ -673,7 +673,7 @@ export class CaptionTools extends AudioTools {
     };
   }
 
-  protected async insertSrtCue(
+  async insertSrtCue(
     srtPath: string,
     start: number | string,
     end: number | string,
@@ -717,7 +717,7 @@ export class CaptionTools extends AudioTools {
     };
   }
 
-  protected async removeSrtCue(srtPath: string, index: number): Promise<any> {
+  async removeSrtCue(srtPath: string, index: number): Promise<any> {
     const loaded = await this.loadSrt(srtPath);
     if (!loaded.ok) return { success: false, error: loaded.error };
     const cues = loaded.cues;
@@ -748,7 +748,7 @@ export class CaptionTools extends AudioTools {
     };
   }
 
-  protected async shiftSrtTiming(
+  async shiftSrtTiming(
     srtPath: string,
     offsetSeconds?: number,
     scaleFactor?: number,
@@ -818,7 +818,7 @@ export class CaptionTools extends AudioTools {
    * success). Whisper is configurable via PREMIERE_MCP_WHISPER_CMD for installs
    * that expose a differently-named binary.
    */
-  protected async transcribeToSrt(
+  async transcribeToSrt(
     mediaPath?: string,
     projectItemId?: string,
     outputDir?: string,
@@ -948,7 +948,7 @@ export class CaptionTools extends AudioTools {
   }
 
   // Caption Track Implementation
-  protected async createCaptionTrack(
+  async createCaptionTrack(
     sequenceId: string,
     projectItemId: string,
     startTime?: number,

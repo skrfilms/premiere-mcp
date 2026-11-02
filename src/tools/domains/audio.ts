@@ -1,18 +1,18 @@
 /**
  * AudioTools -- the Audio tool domain.
  *
- * One link in the chain that composes PremiereProTools. Split out of tools/index.ts, which
- * had grown to 19k lines; the method bodies are unchanged.
+ * A plain class on ToolsBase. PremiereProTools holds one instance and dispatches tool calls
+ * to it by name; other domains it relies on are reached through `this.peers`.
  */
-import { ExportRenderTools } from './export-render.js';
+import { ToolsBase } from './base.js';
 import { spawn } from 'child_process';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import { basename, dirname, extname, join } from 'node:path';
 import { runFf } from '../ff-exec.js';
 import { TRIM_LIB } from '../trim-lib.js';
 
-export class AudioTools extends ExportRenderTools {
-  protected async setEssentialSoundCategory(projectItemId: string, category: string): Promise<any> {
+export class AudioTools extends ToolsBase {
+  async setEssentialSoundCategory(projectItemId: string, category: string): Promise<any> {
     const clipMixTypeMap: Record<string, number> = { dialog: 1, music: 2, sfx: 3, ambience: 4 };
     const clipMixType = clipMixTypeMap[category] ?? 1;
     const script = `
@@ -32,7 +32,7 @@ export class AudioTools extends ExportRenderTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async jCut(
+  async jCut(
     sequenceId: string | undefined,
     videoTrackIndex: number,
     clipIndex: number,
@@ -43,7 +43,7 @@ export class AudioTools extends ExportRenderTools {
     return await this.audioRoll(sequenceId, videoTrackIndex, clipIndex, frames, 'head', 'j_cut');
   }
 
-  protected async lCut(
+  async lCut(
     sequenceId: string | undefined,
     videoTrackIndex: number,
     clipIndex: number,
@@ -85,7 +85,7 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected async fadeAudio(
+  async fadeAudio(
     sequenceId: string | undefined,
     ati: number,
     ci: number,
@@ -143,7 +143,7 @@ export class AudioTools extends ExportRenderTools {
    * wrote raw dB into it — which, once an Amplify was present, would have written e.g. 6 into a
    * 0..1 field.
    */
-  protected async setClipGain(
+  async setClipGain(
     sequenceId: string | undefined,
     ati: number,
     ci: number,
@@ -191,7 +191,7 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected async audioCrossfadeAtCut(
+  async audioCrossfadeAtCut(
     sequenceId: string | undefined,
     ati: number,
     clipIndex: number,
@@ -225,7 +225,7 @@ export class AudioTools extends ExportRenderTools {
         var domClip = domTrack ? domTrack.clips[${clipIndex}] : null;
         var transition = qe.project.getAudioTransitionByName('Constant Power');
         if (!transition) return JSON.stringify({success:false,error:'The Constant Power audio transition is not present on this build. Use list_available_audio_transitions to see what is.'});
-        ${this.transitionVerificationScript()}
+        ${this.peers.effects.transitionVerificationScript()}
         // The second argument puts the transition at the clip's START when true (measured on
         // 26.5.2), so this used to crossfade the head of the clip -- usually not a cut at all --
         // and the XML count never noticed. false = the clip's end = the cut with the next clip.
@@ -265,7 +265,7 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected async muteClipAudio(
+  async muteClipAudio(
     sequenceId: string | undefined,
     ti: number,
     ci: number,
@@ -307,7 +307,7 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected loudnessReport(filePath: string): any {
+  loudnessReport(filePath: string): any {
     try {
       // ebur128 prints its summary at the end of stderr.
       const result = runFf(
@@ -345,7 +345,7 @@ export class AudioTools extends ExportRenderTools {
     }
   }
 
-  protected async normalizeClipPeaks(
+  async normalizeClipPeaks(
     sequenceId: string | undefined,
     ati: number,
     ci: number,
@@ -357,11 +357,23 @@ export class AudioTools extends ExportRenderTools {
         var seq = ${this.buildSeqRes(sequenceId)};
         var clip = seq.audioTracks[${ati}].clips[${ci}];
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
-        return JSON.stringify({success:true,path:clip.projectItem ? String(clip.projectItem.getMediaPath()) : null,name:String(clip.name)});
+        var nested = false; try { nested = !!(clip.projectItem && clip.projectItem.isSequence()); } catch (eN) {}
+        return JSON.stringify({success:true,nested:nested,path:clip.projectItem && !nested ? String(clip.projectItem.getMediaPath()) : null,name:String(clip.name)});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
+    if (pathResult.success && pathResult.nested)
+      return {
+        success: false,
+        error:
+          'This clip is a nested sequence, so there is no single media file to measure. Normalize the clips inside it, or render it first. Nothing was changed.',
+      };
     if (!pathResult.success || !pathResult.path)
-      return { success: false, error: 'Could not get media path' };
+      return {
+        success: false,
+        error:
+          pathResult.error ??
+          'This clip has no media file on disk to measure. Nothing was changed.',
+      };
     // Analyze peak
     try {
       const vol = runFf(
@@ -390,7 +402,7 @@ export class AudioTools extends ExportRenderTools {
     }
   }
 
-  protected async renderAudio(sequenceId?: string): Promise<any> {
+  async renderAudio(sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -401,7 +413,7 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected async applyAudioEffectQe(
+  async applyAudioEffectQe(
     trackIndex: number,
     clipIndex: number,
     effectName: string,
@@ -437,6 +449,11 @@ export class AudioTools extends ExportRenderTools {
         }
         if (!exact) return JSON.stringify({success:false,error:'Effect not found on this build: '+wanted});
 
+        // Guarded on both track kinds: addAudioEffect on a video-track clip still reaches the
+        // linked audio, and the guard only reads the clip's project item.
+        var __dom = null; try { var __ds = ${this.buildSeqRes(sequenceId)}; __dom = (${audioTrack} ? __ds.audioTracks : __ds.videoTracks)[${trackIndex}].clips[${clipIndex}]; } catch (eD) {}
+        var __refuse = __crashProneAudioFx(__dom, exact);
+        if (__refuse) return JSON.stringify({success:false,verified:true,refusedToAvoidCrash:true,changed:false,error:__refuse});
         var eff = qe.project.getAudioEffectByName(exact);
         if (!eff) return JSON.stringify({success:false,error:'getAudioEffectByName returned nothing for: '+exact});
         var domSeq = ${this.buildSeqRes(sequenceId)};
@@ -461,15 +478,11 @@ export class AudioTools extends ExportRenderTools {
     return result;
   }
 
-  protected async denoiseClip(
-    trackIndex: number,
-    clipIndex: number,
-    sequenceId?: string,
-  ): Promise<any> {
+  async denoiseClip(trackIndex: number, clipIndex: number, sequenceId?: string): Promise<any> {
     return await this.applyAudioEffectQe(trackIndex, clipIndex, 'DeNoise', true, sequenceId);
   }
 
-  protected async listAudioEffectsOnClip(
+  async listAudioEffectsOnClip(
     trackIndex: number,
     clipIndex: number,
     sequenceId?: string,
@@ -494,7 +507,7 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected audioPeaksReport(filePath: string): any {
+  audioPeaksReport(filePath: string): any {
     try {
       // Whole-file astats summary from stderr. The old amovie= source put the path inside a
       // filtergraph through a shell, and reset=1 reported only the first 20 audio frames.
@@ -537,7 +550,7 @@ export class AudioTools extends ExportRenderTools {
     }
   }
 
-  protected async setTrackVolumeKeyframes(
+  async setTrackVolumeKeyframes(
     trackIndex: number,
     keyframes: Array<{ timeSecs: number; level: number }>,
     sequenceId?: string,
@@ -566,10 +579,7 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected async batchAddAudioCrossfades(
-    durationSeconds: number,
-    sequenceId?: string,
-  ): Promise<any> {
+  async batchAddAudioCrossfades(durationSeconds: number, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -578,7 +588,7 @@ export class AudioTools extends ExportRenderTools {
         if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
         var transition = qe.project.getAudioTransitionByName('Constant Power');
         if (!transition) return JSON.stringify({success:false,error:'The Constant Power audio transition is not present on this build. Use list_available_audio_transitions to see what is.'});
-        ${this.transitionVerificationScript()}
+        ${this.peers.effects.transitionVerificationScript()}
         // Called addTransition with ONE argument (QE takes seven on 26.3.2) inside a bare
         // catch, then counted the ATTEMPTS as "crossfadesAdded" — so a run that added nothing
         // reported success with a non-zero count. Correct signature, and the count now comes
@@ -654,7 +664,7 @@ export class AudioTools extends ExportRenderTools {
     return intervals;
   }
 
-  protected async detectSilence(
+  async detectSilence(
     mediaPath?: string,
     projectItemId?: string,
     noiseThresholdDb = -30,
@@ -674,7 +684,7 @@ export class AudioTools extends ExportRenderTools {
       return { success: false, error: 'Provide either mediaPath or projectItemId' };
     }
 
-    const ffmpegAvailable = await this.checkFfmpegAvailable();
+    const ffmpegAvailable = await this.peers.exportRender.checkFfmpegAvailable();
     if (!ffmpegAvailable) {
       return {
         success: false,
@@ -734,7 +744,7 @@ export class AudioTools extends ExportRenderTools {
    * 0.25x -> atempo=0.5,atempo=0.5). Pitch is preserved. Returns a comma-joined
    * chain suitable for -af.
    */
-  protected buildAtempoChain(speed: number): string {
+  buildAtempoChain(speed: number): string {
     const steps: number[] = [];
     let remaining = speed;
     // Factor down while too fast (>2), and up while too slow (<0.5).
@@ -760,7 +770,7 @@ export class AudioTools extends ExportRenderTools {
    * install guidance if ffmpeg is absent, verify-after-write before success, and
    * the measured input loudness is returned so the change is auditable.
    */
-  protected async normalizeLoudness(
+  async normalizeLoudness(
     mediaPath?: string,
     projectItemId?: string,
     targetLufs = -14,
@@ -783,7 +793,7 @@ export class AudioTools extends ExportRenderTools {
       return { success: false, error: `Media file not found or unreadable: ${resolvedPath}` };
     }
 
-    const ffmpeg = this.ffmpegCmd();
+    const ffmpeg = this.peers.exportRender.ffmpegCmd();
     const available = await this.checkCommandAvailable(ffmpeg, ['-version']);
     if (!available) {
       return {
@@ -923,7 +933,7 @@ export class AudioTools extends ExportRenderTools {
    *
    * Replaces the manual Sprint 3 "8 keyframes per video" pattern.
    */
-  protected async setupDucking(
+  async setupDucking(
     clipId: string,
     baseDb: number,
     duckingWindows: Array<{ startTime: number; endTime: number; duckedDb: number }>,
@@ -981,7 +991,7 @@ export class AudioTools extends ExportRenderTools {
   //     linear scale (1.0 = 0 dB, 1.4454 = +3.2 dB). Conversion: linear = 10^(dB/20).
   //   - Now supports localized component names (Spanish "Volumen", English "Volume", others).
   //   - On not-found, returns a dump of clip components+properties for debugging.
-  protected async adjustAudioLevels(clipId: string, level: number): Promise<any> {
+  async adjustAudioLevels(clipId: string, level: number): Promise<any> {
     const script = `
       try {
         var info = __findClip(${JSON.stringify(clipId)});
@@ -1080,7 +1090,7 @@ export class AudioTools extends ExportRenderTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async addAudioKeyframes(
+  async addAudioKeyframes(
     clipId: string,
     keyframes: Array<{ time: number; level: number }>,
   ): Promise<any> {
@@ -1191,7 +1201,7 @@ export class AudioTools extends ExportRenderTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async muteTrack(sequenceId: string, trackIndex: number, muted: boolean): Promise<any> {
+  async muteTrack(sequenceId: string, trackIndex: number, muted: boolean): Promise<any> {
     const script = `
       try {
         var sequence = __findSequence(${JSON.stringify(sequenceId)});
@@ -1233,7 +1243,7 @@ export class AudioTools extends ExportRenderTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async linkAudioVideo(clipId: string, linked: boolean): Promise<any> {
+  async linkAudioVideo(clipId: string, linked: boolean): Promise<any> {
     const script = `
       try {
         var info = __findClip(${JSON.stringify(clipId)});
@@ -1249,18 +1259,14 @@ export class AudioTools extends ExportRenderTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async applyAudioEffect(
-    clipId: string,
-    effectName: string,
-    parameters?: any,
-  ): Promise<any> {
-    return await this.applyEffect(clipId, effectName, parameters);
+  async applyAudioEffect(clipId: string, effectName: string, parameters?: any): Promise<any> {
+    return await this.peers.effects.applyEffect(clipId, effectName, parameters);
   }
 
   // BULK helper: apply same audio effect + parameters to all audio clips of a sequence in ONE
   // ExtendScript round-trip. Activates the target sequence first (QE DOM operates on active).
   // Returns per-clip results with valueAfter readback for the SET parameters.
-  protected async applyAudioEffectToAllClips(
+  async applyAudioEffectToAllClips(
     sequenceId: string,
     effectName: string,
     parameters?: Record<string, any>,
@@ -1276,8 +1282,11 @@ export class AudioTools extends ExportRenderTools {
         app.project.activeSequence = seq;
         var qeSeq = __qeSequenceOpening(seq);
         if (!qeSeq) return JSON.stringify({ success: false, error: "Could not address sequence '" + seq.name + "' through the QE API." });
-        var effect = qe.project.getAudioEffectByName(${JSON.stringify(effectName)});
-        if (!effect) return JSON.stringify({ success: false, error: "Audio effect not found: " + ${JSON.stringify(effectName)} });
+        // Checked against the list: getAudioEffectByName returns an object for any name, even a
+        // video effect's (measured 2026-11-01), so a null check never caught a wrong name.
+        var __inList = ("," + String(qe.project.getAudioEffectList()) + ",").indexOf("," + ${JSON.stringify(effectName)} + ",") >= 0;
+        var effect = __inList ? qe.project.getAudioEffectByName(${JSON.stringify(effectName)}) : null;
+        if (!effect) return JSON.stringify({ success: false, changed: false, error: "No audio effect named " + ${JSON.stringify(effectName)} + " on this build (names are exact; list_available_audio_effects shows them). Nothing was changed." });
 
         var requestedParams = ${paramJson};
         function normalize(s) { return String(s).toLowerCase().replace(/[\\s_-]+/g, ''); }
@@ -1291,8 +1300,15 @@ export class AudioTools extends ExportRenderTools {
             // Same gap/transition mismatch: c is the DOM clip index, which is not the
             // QE item index once anything non-clip sits earlier on the track.
             var qeClip = __findQeClipByDomClip(qeTrack, clip);
+            var __refuse = __crashProneAudioFx(clip, ${JSON.stringify(effectName)});
+            if (__refuse) { perClip.push({ trackIndex: t, clipIndex: c, ok: false, skipped: true, error: __refuse }); continue; }
             try {
+              var __compsBefore = clip.components.numItems;
               qeClip.addAudioEffect(effect);
+              if (clip.components.numItems <= __compsBefore) {
+                perClip.push({ clipIndex: c, trackIndex: t, clipId: String(clip.nodeId), name: String(clip.name), ok: false, error: "addAudioEffect ran but the clip's effect count did not rise, so the effect was not added" });
+                continue;
+              }
               var newCompIdx = clip.components.numItems - 1;
               var newComp = clip.components[newCompIdx];
               var paramResults = [];
@@ -1333,13 +1349,26 @@ export class AudioTools extends ExportRenderTools {
           }
         }
 
+        // Counted by hand: Array.prototype.every does not exist in this ExtendScript engine,
+        // and the old fallback reported allOk:true whatever happened.
+        var __okCount = 0, __skipped = 0, __failed = 0;
+        for (var r = 0; r < perClip.length; r++) {
+          if (perClip[r].ok) __okCount++; else if (perClip[r].skipped) __skipped++; else __failed++;
+        }
+        if (perClip.length === 0) return JSON.stringify({ success: false, changed: false, sequenceId: ${JSON.stringify(sequenceId)}, effectName: ${JSON.stringify(effectName)}, totalClipsProcessed: 0, error: "The sequence has no audio clips, so nothing was added." });
+        var __allOk = __skipped === 0 && __failed === 0;
         return JSON.stringify({
-          success: true,
+          success: __allOk,
+          partial: !__allOk && __okCount > 0,
           sequenceId: ${JSON.stringify(sequenceId)},
           sequenceName: String(seq.name),
           effectName: ${JSON.stringify(effectName)},
           totalClipsProcessed: perClip.length,
-          allOk: perClip.every ? perClip.every(function(r){return r.ok;}) : true,
+          appliedCount: __okCount,
+          skippedCount: __skipped,
+          failedCount: __failed,
+          allOk: __allOk,
+          error: __allOk ? undefined : ('Added to ' + __okCount + ' of ' + perClip.length + ' clips' + (__skipped ? '; ' + __skipped + ' skipped to avoid a crash (nested or multicam)' : '') + (__failed ? '; ' + __failed + ' failed' : '') + '. See perClip.'),
           perClip: perClip
         });
       } catch (e) {
@@ -1358,7 +1387,7 @@ export class AudioTools extends ExportRenderTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async listAvailableAudioEffects(): Promise<any> {
+  async listAvailableAudioEffects(): Promise<any> {
     const script = `
       try {
         app.enableQE();
@@ -1375,7 +1404,7 @@ export class AudioTools extends ExportRenderTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async listAvailableAudioTransitions(): Promise<any> {
+  async listAvailableAudioTransitions(): Promise<any> {
     const script = `
       try {
         app.enableQE();
@@ -1392,7 +1421,7 @@ export class AudioTools extends ExportRenderTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async setParametricEq(
+  async setParametricEq(
     seqId: string | undefined,
     trackIndex: number,
     clipIndex: number,
@@ -1431,7 +1460,7 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected async setCompressor(
+  async setCompressor(
     seqId: string | undefined,
     trackIndex: number,
     clipIndex: number,
@@ -1465,7 +1494,7 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected async setLimiter(
+  async setLimiter(
     seqId: string | undefined,
     trackIndex: number,
     clipIndex: number,
@@ -1491,7 +1520,7 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected async dereverbClip(
+  async dereverbClip(
     seqId: string | undefined,
     trackIndex: number,
     clipIndex: number,
@@ -1507,6 +1536,8 @@ export class AudioTools extends ExportRenderTools {
         var eff = qe.project.getAudioEffectByName('DeReverb');
         if (!eff) return JSON.stringify({success:false,error:'DeReverb effect not found in effect list'});
         var domClip = ${this.buildSeqRes(seqId)}.audioTracks[${trackIndex}].clips[${clipIndex}];
+        var __refuse = __crashProneAudioFx(domClip, 'DeReverb');
+        if (__refuse) return JSON.stringify({success:false,verified:true,refusedToAvoidCrash:true,error:__refuse});
         var before = domClip.components.numItems;
         clip.addAudioEffect(eff);
         var after = domClip.components.numItems;
@@ -1520,7 +1551,7 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected async normalizeTrackPeaks(
+  async normalizeTrackPeaks(
     seqId: string | undefined,
     trackIndex: number,
     targetDbfs: number,
@@ -1552,7 +1583,7 @@ export class AudioTools extends ExportRenderTools {
    * without a word. Now: refuse unless the span is empty on that track, then lay audio-only
    * subclips cut to fit, looping the source when the gap is longer than the media.
    */
-  protected async fillRoomTone(
+  async fillRoomTone(
     seqId: string | undefined,
     trackIndex: number,
     gapStart: number,
@@ -1615,7 +1646,7 @@ export class AudioTools extends ExportRenderTools {
    * raised "Illegal Parameter type" anyway: AudioTrack.setMute takes 1/0, not a boolean
    * (measured on 26.5.2). The original mute state of every track is put back, even on failure.
    */
-  protected async stemExport(
+  async stemExport(
     seqId: string | undefined,
     trackIndices: number[],
     outputDir: string,
@@ -1652,11 +1683,13 @@ export class AudioTools extends ExportRenderTools {
         }
         await setMutes(state.muted.map((_: number, t: number) => (t === target ? 0 : 1)));
         const outputPath = join(outputDir, `stem_A${target + 1}.${ext}`);
-        const r: any = await (this as any).executeTool('export_audio_only', {
-          outputPath,
-          format: ext,
-          sequenceId: state.sequenceId,
-        });
+        // allowUnexposed: a step inside stem_export (the authority gate); the default profile
+        // does not advertise export_audio_only, so every stem used to be refused.
+        const r: any = await this.peers.executeTool(
+          'export_audio_only',
+          { outputPath, format: ext, sequenceId: state.sequenceId },
+          { allowUnexposed: true },
+        );
         let size = 0;
         try {
           size = (await fs.stat(outputPath)).size;
@@ -1687,7 +1720,7 @@ export class AudioTools extends ExportRenderTools {
     };
   }
 
-  protected async channelRemapReport(seqId?: string): Promise<any> {
+  async channelRemapReport(seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(seqId)};
@@ -1707,7 +1740,7 @@ export class AudioTools extends ExportRenderTools {
     `);
   }
 
-  protected audioSilenceScan(filePath: string, noiseDb: number, minDuration: number): any {
+  audioSilenceScan(filePath: string, noiseDb: number, minDuration: number): any {
     try {
       const out = runFf(
         'ffmpeg',

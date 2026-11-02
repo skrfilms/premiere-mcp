@@ -86,7 +86,7 @@ describe('bake_speed_change — atempo chain math', () => {
   // Reach the private helper through the instance; it is pure and deterministic.
   const chain = (speed: number): string =>
     (
-      new PremiereProTools(noBridge) as unknown as { buildAtempoChain(s: number): string }
+      new PremiereProTools(noBridge).audio as unknown as { buildAtempoChain(s: number): string }
     ).buildAtempoChain(speed);
 
   it('leaves in-range factors as a single atempo', () => {

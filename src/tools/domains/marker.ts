@@ -1,17 +1,17 @@
 /**
  * MarkerTools -- the Markers tool domain.
  *
- * One link in the chain that composes PremiereProTools. Split out of tools/index.ts, which
- * had grown to 19k lines; the method bodies are unchanged.
+ * A plain class on ToolsBase. PremiereProTools holds one instance and dispatches tool calls
+ * to it by name; other domains it relies on are reached through `this.peers`.
  */
-import { KeyframeTools } from './keyframe.js';
 // Synchronous fs/path/os bindings for the Node-side (non-ExtendScript) tools.
 // The async API is the separate `promises as fs` import.
+import { ToolsBase } from './base.js';
 import * as fsSync from 'node:fs';
 import { MARKER_COLOR_NAMES } from '../catalogue-schemas.js';
 
-export class MarkerTools extends KeyframeTools {
-  protected async createMarker(
+export class MarkerTools extends ToolsBase {
+  async createMarker(
     timeSecs: number,
     name?: string,
     comment?: string,
@@ -44,7 +44,7 @@ export class MarkerTools extends KeyframeTools {
     `);
   }
 
-  protected async markersToCsv(outputPath: string, sequenceId?: string): Promise<any> {
+  async markersToCsv(outputPath: string, sequenceId?: string): Promise<any> {
     const result = await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(sequenceId)};
@@ -77,7 +77,7 @@ export class MarkerTools extends KeyframeTools {
     };
   }
 
-  protected async markersFromCsv(csvPath: string, sequenceId?: string): Promise<any> {
+  async markersFromCsv(csvPath: string, sequenceId?: string): Promise<any> {
     const fs = fsSync;
     if (!fs.existsSync(csvPath)) return { success: false, error: 'CSV file not found: ' + csvPath };
     const lines = fs
@@ -126,7 +126,7 @@ export class MarkerTools extends KeyframeTools {
     return index === -1 ? null : index;
   }
 
-  protected async addMarker(
+  async addMarker(
     sequenceId: string,
     time: number,
     name: string,
@@ -137,7 +137,7 @@ export class MarkerTools extends KeyframeTools {
     const colorIndex = MarkerTools.resolveMarkerColor(color);
     const script = `
       try {
-${this.buildSequenceResolver(sequenceId)}
+${this.peers.sequenceTrack.buildSequenceResolver(sequenceId)}
         var marker = sequence.markers.createMarker(${time});
         marker.name = ${JSON.stringify(name)};
         ${comment ? `marker.comments = ${JSON.stringify(comment)};` : ''}
@@ -161,10 +161,10 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(script);
   }
 
-  protected async deleteMarker(sequenceId: string, markerId: string): Promise<any> {
+  async deleteMarker(sequenceId: string, markerId: string): Promise<any> {
     const script = `
       try {
-${this.buildSequenceResolver(sequenceId)}
+${this.peers.sequenceTrack.buildSequenceResolver(sequenceId)}
         var deleted = false;
         for (var i = 0; i < sequence.markers.numMarkers; i++) {
           var marker = sequence.markers[i];
@@ -186,7 +186,9 @@ ${this.buildSequenceResolver(sequenceId)}
           success: deleted && !stillPresent,
           sequenceId: sequence.sequenceID,
           sequenceName: sequence.name,
-          message: deleted && !stillPresent ? "Marker deleted successfully" : (deleted ? "Premiere reported marker deletion but marker is still present" : "Marker not found")
+          message: deleted && !stillPresent ? "Marker deleted successfully" : (deleted ? "Premiere reported marker deletion but marker is still present" : "Marker not found"),
+          // A failure always says why: without an error field callers showed "unknown".
+          error: deleted && !stillPresent ? undefined : (deleted ? "Premiere reported the marker deleted but it is still there." : "No marker with id " + ${JSON.stringify(markerId)} + " on " + sequence.name + " (" + sequence.markers.numMarkers + " markers). Get ids from list_markers. Nothing was changed.")
         });
       } catch (e) {
         return JSON.stringify({
@@ -198,11 +200,11 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(script);
   }
 
-  protected async updateMarker(sequenceId: string, markerId: string, updates: any): Promise<any> {
+  async updateMarker(sequenceId: string, markerId: string, updates: any): Promise<any> {
     const updateColorIndex = MarkerTools.resolveMarkerColor(updates.color);
     const script = `
       try {
-${this.buildSequenceResolver(sequenceId)}
+${this.peers.sequenceTrack.buildSequenceResolver(sequenceId)}
         var found = false;
         var mismatch = [];
         for (var i = 0; i < sequence.markers.numMarkers; i++) {
@@ -233,7 +235,8 @@ ${this.buildSequenceResolver(sequenceId)}
           verified: found,
           sequenceId: sequence.sequenceID,
           sequenceName: sequence.name,
-          message: found ? "Marker updated and verified" : "Marker not found"
+          message: found ? "Marker updated and verified" : "Marker not found",
+          error: found ? undefined : "No marker with id " + ${JSON.stringify(markerId)} + " on " + sequence.name + " (" + sequence.markers.numMarkers + " markers). Get ids from list_markers. Nothing was changed."
         });
       } catch (e) {
         return JSON.stringify({
@@ -245,10 +248,10 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(script);
   }
 
-  protected async listMarkers(sequenceId: string): Promise<any> {
+  async listMarkers(sequenceId: string): Promise<any> {
     const script = `
       try {
-${this.buildSequenceResolver(sequenceId)}
+${this.peers.sequenceTrack.buildSequenceResolver(sequenceId)}
         // getColorByIndex() is not bounded by the write domain: a marker can hold
         // -1, a persistent "no colour assigned" state that renders black. Guard
         // the lookup, or an undefined value silently drops colorName from the JSON.
@@ -287,7 +290,7 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(script);
   }
 
-  protected async durationMarkerAdd(
+  async durationMarkerAdd(
     startSecs: number,
     durationSecs: number,
     name?: string,
@@ -327,7 +330,7 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  protected async setMarkerType(
+  async setMarkerType(
     timeSecs: number,
     type: string,
     toleranceSecs: number,
@@ -356,7 +359,7 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  protected async todoMarkerReport(seqId?: string): Promise<any> {
+  async todoMarkerReport(seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq=${this.buildSeqRes(seqId)};
@@ -374,7 +377,7 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  protected async chapterMarkersToYoutube(seqId?: string): Promise<any> {
+  async chapterMarkersToYoutube(seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq=${this.buildSeqRes(seqId)};
@@ -394,7 +397,7 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  protected async copyMarkersBetweenSequences(srcSeqId: string, tgtSeqId: string): Promise<any> {
+  async copyMarkersBetweenSequences(srcSeqId: string, tgtSeqId: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seqs=app.project.sequences;
@@ -437,18 +440,14 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  protected async markerToSubclip(
-    markerName: string,
-    projectItemId: string,
-    seqId?: string,
-  ): Promise<any> {
+  async markerToSubclip(markerName: string, projectItemId: string, seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq=${this.buildSeqRes(seqId)};
         var m=seq.markers.getFirstMarker(),found=null;
         while(m){if(String(m.name)===${JSON.stringify(markerName)}){found=m;break;}m=seq.markers.getNextMarker(m);}
         if(!found)return JSON.stringify({success:false,error:'Marker not found: '+${JSON.stringify(markerName)}});
-        var item=${this.findItemById(projectItemId)};
+        var item=${this.peers.projectMedia.findItemById(projectItemId)};
         if(!item)return JSON.stringify({success:false,error:'Item not found'});
         var st=new Time();st.ticks=String(found.start.ticks);
         var et=new Time();et.ticks=String(found.end?found.end.ticks:found.start.ticks);
@@ -458,7 +457,7 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  protected async getAllMarkers(): Promise<any> {
+  async getAllMarkers(): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var all=[];
@@ -473,7 +472,7 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  protected async frameIoNotesToMarkers(
+  async frameIoNotesToMarkers(
     jsonPath: string,
     sequenceId?: string,
     markerColor = 1,
@@ -539,7 +538,7 @@ ${this.buildSequenceResolver(sequenceId)}
    * The in/out points are now captured up front and restored with setInPoint/setOutPoint,
    * and every output is stat'ed so `verified` reflects files that are actually on disk.
    */
-  protected async exportPerMarkerRange(
+  async exportPerMarkerRange(
     outputDir: string,
     presetPath?: string,
     markerPattern?: string,

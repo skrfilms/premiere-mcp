@@ -1,19 +1,19 @@
 /**
  * SequenceTrackTools -- the Sequence & Track Structure tool domain.
  *
- * One link in the chain that composes PremiereProTools. Split out of tools/index.ts, which
- * had grown to 19k lines; the method bodies are unchanged.
+ * A plain class on ToolsBase. PremiereProTools holds one instance and dispatches tool calls
+ * to it by name; other domains it relies on are reached through `this.peers`.
  */
-import { EffectsTools } from './effects.js';
 // Synchronous fs/path/os bindings for the Node-side (non-ExtendScript) tools.
 // The async API is the separate `promises as fs` import.
+import { ToolsBase } from './base.js';
 import * as fsSync from 'node:fs';
 import * as pathSync from 'node:path';
 import { runFf } from '../ff-exec.js';
 import { generatedAssetsDir } from '../../utils/scratch-paths.js';
 
-export class SequenceTrackTools extends EffectsTools {
-  protected async listSequences(): Promise<any> {
+export class SequenceTrackTools extends ToolsBase {
+  async listSequences(): Promise<any> {
     const script = `
       try {
         var sequences = [];
@@ -48,7 +48,7 @@ export class SequenceTrackTools extends EffectsTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async listSequenceTracks(sequenceId: string): Promise<any> {
+  async listSequenceTracks(sequenceId: string): Promise<any> {
     const script = `
       try {
 ${this.buildSequenceResolver(sequenceId)}
@@ -122,7 +122,7 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(script);
   }
 
-  protected async deleteEmptyTracks(
+  async deleteEmptyTracks(
     sequenceId: string | undefined,
     video: boolean,
     audio: boolean,
@@ -140,11 +140,7 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  protected async setSequenceInOutQe(
-    inPoint?: string,
-    outPoint?: string,
-    sequenceId?: string,
-  ): Promise<any> {
+  async setSequenceInOutQe(inPoint?: string, outPoint?: string, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -157,7 +153,7 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  protected async getQeSequenceProps(sequenceId?: string): Promise<any> {
+  async getQeSequenceProps(sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -180,7 +176,7 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  protected async getEditPointList(sequenceId?: string, videoOnly?: boolean): Promise<any> {
+  async getEditPointList(sequenceId?: string, videoOnly?: boolean): Promise<any> {
     return await this.bridge.executeScript(`
       var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No sequence'});
@@ -206,7 +202,7 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  protected async detectSettingsMismatch(sequenceId?: string): Promise<any> {
+  async detectSettingsMismatch(sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No sequence'});
@@ -230,7 +226,7 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  protected async countTracksUsed(sequenceId?: string): Promise<any> {
+  async countTracksUsed(sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No sequence'});
@@ -245,7 +241,7 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  protected sequenceThumbnailStrip(filePath: string, count: number, outputDir?: string): any {
+  sequenceThumbnailStrip(filePath: string, count: number, outputDir?: string): any {
     const path = pathSync;
     const fs = fsSync;
     const dir = outputDir ?? generatedAssetsDir();
@@ -295,7 +291,7 @@ ${this.buildSequenceResolver(sequenceId)}
     }
   }
 
-  protected async listSequencesByName(pattern: string): Promise<any> {
+  async listSequencesByName(pattern: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var pat = ${JSON.stringify(pattern.toLowerCase())};
@@ -313,7 +309,7 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   // Batch F: Sequence utilities
-  protected async setSequenceInOutFromClips(sequenceId?: string): Promise<any> {
+  async setSequenceInOutFromClips(sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -338,7 +334,7 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  protected async flushSequenceCache(sequenceId?: string): Promise<any> {
+  async flushSequenceCache(sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -350,11 +346,7 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   // Sequence Management Implementation
-  protected async createSequence(
-    name: string,
-    presetPath: string,
-    frameRate?: number,
-  ): Promise<any> {
+  async createSequence(name: string, presetPath: string, frameRate?: number): Promise<any> {
     try {
       const result: any = await this.bridge.createSequence(name, presetPath);
       if (result?.success === false) {
@@ -412,10 +404,7 @@ ${this.buildSequenceResolver(sequenceId)}
     }
   }
 
-  protected async createSequenceFromProjectItems(
-    name: string,
-    projectItemIds: string[],
-  ): Promise<any> {
+  async createSequenceFromProjectItems(name: string, projectItemIds: string[]): Promise<any> {
     if (!projectItemIds.length) {
       return {
         success: false,
@@ -456,7 +445,7 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(script);
   }
 
-  protected async duplicateSequence(
+  async duplicateSequence(
     sequenceId: string,
     newName: string,
     clearContents = false,
@@ -599,7 +588,7 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(script);
   }
 
-  protected async deleteSequence(sequenceId: string): Promise<any> {
+  async deleteSequence(sequenceId: string): Promise<any> {
     const script = `
       try {
         var sequence = __findSequence(${JSON.stringify(sequenceId)});
@@ -632,7 +621,7 @@ ${this.buildSequenceResolver(sequenceId)}
    * best-effort source frame rate, plus the sequence frame rate). Read-only.
    * Shared by lint_timeline and diff_sequences. Defaults to the active sequence.
    */
-  protected async walkSequence(sequenceId?: string): Promise<any> {
+  async walkSequence(sequenceId?: string): Promise<any> {
     const seqExpr = sequenceId
       ? `__findSequence(${JSON.stringify(sequenceId)})`
       : 'app.project.activeSequence';
@@ -696,7 +685,7 @@ ${this.buildSequenceResolver(sequenceId)}
    * Resolve the active sequence's id, so capture_program_output can default to
    * "whatever is open" the way the frame/scope tools elsewhere accept no id.
    */
-  protected async resolveActiveSequenceId(): Promise<{
+  async resolveActiveSequenceId(): Promise<{
     id?: string;
     name?: string;
     error?: string;
@@ -729,7 +718,7 @@ ${this.buildSequenceResolver(sequenceId)}
    * by `list_sequences` and `get_active_sequence`. It is deliberately not `sequence.id` or
    * `projectItem.nodeId`, which are different identifiers.
    */
-  protected buildSequenceResolver(sequenceId: string, varName: string = 'sequence'): string {
+  buildSequenceResolver(sequenceId: string, varName: string = 'sequence'): string {
     const literal = JSON.stringify(sequenceId);
     return `        var ${varName} = __findSequence(${literal});
         if (!${varName}) {
@@ -754,11 +743,7 @@ ${this.buildSequenceResolver(sequenceId)}
   //     existing tracks keep their indices)
   //   - "below" → insert at 0 (legacy behavior, pushes existing up — only useful in special
   //     cases since V1 in Premiere's UI is the bottom)
-  protected async addTrack(
-    sequenceId: string,
-    trackType: string,
-    position: string = 'above',
-  ): Promise<any> {
+  async addTrack(sequenceId: string, trackType: string, position: string = 'above'): Promise<any> {
     const isVideo = trackType === 'video';
     const numVideo = isVideo ? 1 : 0;
     const numAudio = isVideo ? 0 : 1;
@@ -829,11 +814,7 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(script);
   }
 
-  protected async deleteTrack(
-    sequenceId: string,
-    trackType: string,
-    trackIndex: number,
-  ): Promise<any> {
+  async deleteTrack(sequenceId: string, trackType: string, trackIndex: number): Promise<any> {
     if (trackType === 'caption') {
       return {
         success: false,
@@ -922,7 +903,7 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(script);
   }
 
-  protected async lockTrack(
+  async lockTrack(
     sequenceId: string,
     trackType: string,
     trackIndex: number,
@@ -976,7 +957,7 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(script);
   }
 
-  protected async toggleTrackVisibility(
+  async toggleTrackVisibility(
     sequenceId: string,
     trackIndex: number,
     visible: boolean,
@@ -1031,7 +1012,7 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(script);
   }
 
-  protected async unnestSequence(nestedSequenceClipId: string): Promise<any> {
+  async unnestSequence(nestedSequenceClipId: string): Promise<any> {
     const script = `
       try {
         var info = __findClip(${JSON.stringify(nestedSequenceClipId)});
@@ -1126,7 +1107,7 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   // Project Settings
-  protected async getSequenceSettings(sequenceId: string): Promise<any> {
+  async getSequenceSettings(sequenceId: string): Promise<any> {
     const script = `
       try {
         var sequence = __findSequence(${JSON.stringify(sequenceId)});
@@ -1160,7 +1141,7 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(script);
   }
 
-  protected async setSequenceSettings(sequenceId: string, settings: any): Promise<any> {
+  async setSequenceSettings(sequenceId: string, settings: any): Promise<any> {
     const script = `
       try {
         var sequence = __findSequence(${JSON.stringify(sequenceId)});
@@ -1278,7 +1259,7 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(script);
   }
 
-  protected async distributeClipsEvenly(
+  async distributeClipsEvenly(
     trackIndex: number,
     clipIndices: number[],
     startSecs: number,
@@ -1304,7 +1285,7 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  protected async snapClipsToGrid(seqId?: string): Promise<any> {
+  async snapClipsToGrid(seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq=${this.buildSeqRes(seqId)};
@@ -1326,7 +1307,7 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  protected async conformSequenceSettings(srcSeqId: string, tgtSeqId: string): Promise<any> {
+  async conformSequenceSettings(srcSeqId: string, tgtSeqId: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seqs=app.project.sequences;
@@ -1339,7 +1320,7 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  protected async getSequenceInfoExtended(seqId?: string): Promise<any> {
+  async getSequenceInfoExtended(seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq=${this.buildSeqRes(seqId)};
@@ -1351,13 +1332,13 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  protected async setSequenceZeroPoint(timecode: string, seqId?: string): Promise<any> {
+  async setSequenceZeroPoint(timecode: string, seqId?: string): Promise<any> {
     // Same operation as set_sequence_start_timecode; this one passed the timecode straight to
     // setZeroPoint (which takes ticks) and reported success with no readback.
     return await this.setSequenceStartTimecode(timecode, seqId);
   }
 
-  protected async sequenceFromMarkers(seqId?: string, markerType = 'Chapter'): Promise<any> {
+  async sequenceFromMarkers(seqId?: string, markerType = 'Chapter'): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq=${this.buildSeqRes(seqId)};
@@ -1414,7 +1395,7 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  protected async getQeSequenceSettings(): Promise<any> {
+  async getQeSequenceSettings(): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -1442,11 +1423,7 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  protected async setTrackLockQe(
-    trackIndex: number,
-    locked: boolean,
-    audio: boolean,
-  ): Promise<any> {
+  async setTrackLockQe(trackIndex: number, locked: boolean, audio: boolean): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -1468,11 +1445,7 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  protected async attachSequenceCustomProperty(
-    key: string,
-    value: string,
-    seqId?: string,
-  ): Promise<any> {
+  async attachSequenceCustomProperty(key: string, value: string, seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(seqId)};
@@ -1485,7 +1458,7 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  protected async qeSequenceInfo(seqId?: string): Promise<any> {
+  async qeSequenceInfo(seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -1497,7 +1470,7 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   // Active Sequence Management Implementation
-  protected async setActiveSequence(sequenceId: string): Promise<any> {
+  async setActiveSequence(sequenceId: string): Promise<any> {
     const script = `
       try {
         var seq = __findSequence(${JSON.stringify(sequenceId)});
@@ -1519,7 +1492,7 @@ ${this.buildSequenceResolver(sequenceId)}
     return await this.bridge.executeScript(script);
   }
 
-  protected async getActiveSequence(): Promise<any> {
+  async getActiveSequence(): Promise<any> {
     const script = `
       try {
         var seq = app.project.activeSequence;
@@ -1540,7 +1513,7 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   // Set Sequence In/Out Points Implementation
-  protected async setSequenceInOutPoints(
+  async setSequenceInOutPoints(
     sequenceId: string | undefined,
     inPoint?: number,
     outPoint?: number,
@@ -1584,7 +1557,7 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   // Get Sequence In/Out Points Implementation
-  protected async getSequenceInOutPoints(sequenceId: string): Promise<any> {
+  async getSequenceInOutPoints(sequenceId: string): Promise<any> {
     const script = `
       try {
         var seq = __findSequence(${JSON.stringify(sequenceId)});
@@ -1605,10 +1578,7 @@ ${this.buildSequenceResolver(sequenceId)}
   }
 
   // Create Subsequence Implementation
-  protected async createSubsequence(
-    sequenceId: string,
-    ignoreTrackTargeting?: boolean,
-  ): Promise<any> {
+  async createSubsequence(sequenceId: string, ignoreTrackTargeting?: boolean): Promise<any> {
     const ignoreTargeting = ignoreTrackTargeting ? 'true' : 'false';
     const script = `
       try {
@@ -1634,7 +1604,7 @@ ${this.buildSequenceResolver(sequenceId)}
    * could not be reached at all, and a CLIP sharing the name would win. Uses the shared
    * __resolveBin prelude helper (id, "/"-separated path, or deep name with an ambiguity refusal).
    */
-  protected async createSequenceFromBin(
+  async createSequenceFromBin(
     binName: string,
     seqName: string,
     presetPath?: string,
@@ -1660,7 +1630,7 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  protected async clearSequenceInOut(seqId?: string): Promise<any> {
+  async clearSequenceInOut(seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = __findSequence(${JSON.stringify(seqId ?? null)});
@@ -1692,7 +1662,7 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  protected async setSequenceStartTimecode(timecode: string, seqId?: string): Promise<any> {
+  async setSequenceStartTimecode(timecode: string, seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(seqId)};
@@ -1718,7 +1688,7 @@ ${this.buildSequenceResolver(sequenceId)}
     `);
   }
 
-  protected async getSequenceDuration(seqId?: string): Promise<any> {
+  async getSequenceDuration(seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(seqId)};
