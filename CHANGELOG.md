@@ -4,6 +4,24 @@ All notable changes are documented here. Releases use semantic versioning.
 
 ## [Unreleased]
 
+- **`replace_clip` carries every setting, or stops with nothing changed.** It used to copy
+  effect settings by name through `copy_effects_between_clips`, and Lumetri repeats names (four
+  "Saturation", two each of Temperature, Tint and Contrast), so one setting overwrote another
+  while the swap reported success; keyframes were not copied, and effects and levels on the
+  clip's linked audio or video were dropped. Now it reads every setting of the clip and its
+  linked clips by position (effect, then property index), with keyframes, and rehearses the swap
+  on a temporary copy of the new media: missing effects are added and checked, settings written
+  and compared. The old clip is touched only when the rehearsal matches exactly, the new media
+  is long enough for the old source range (checked against its real length: Premiere lays a clip
+  in past the end of short media and reads it back as asked), and laying it in would overwrite
+  nothing but the old clip's own group. After the swap the settings are compared again. Keyframe
+  interpolation has no scripting read, so it is not carried, and the result says so. New live
+  workflow W11 covers it.
+- **`batch_replace_clips` keeps each clip's trim and effects.** It removed every clip that used
+  the old item and laid the new one in at full length, losing trims, grades and levels and
+  running over the next shot, and reported the count as success. It now runs a verified
+  `replace_clip` per clip; a clip whose swap is refused is left exactly as it was and listed.
+
 - **DeNoise and DeReverb no longer crash Premiere on nested or multicam clips.** On 26.5.2,
   adding either to a clip whose source is a sequence crashes Premiere. The 10-29 live sweep hit
   it with `denoise_clip` on a nested clip, and it reproduced there; multicam clips are sequences

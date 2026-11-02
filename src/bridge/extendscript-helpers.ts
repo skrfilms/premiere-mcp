@@ -313,6 +313,136 @@ function __crashProneAudioFx(domClip, effectName) {
   return n + ' on a nested sequence or multicam clip crashes Premiere, so it was not added and nothing was changed. Apply it to the clips inside that sequence instead.';
 }
 
+// Clip state by POSITION, for carrying a clip's settings onto new media (replace_clip).
+// Settings are matched by effect matchName occurrence and property index, never by display
+// name: Lumetri repeats names (four "Saturation", two each of Temperature, Tint and Contrast),
+// so a by-name copy overwrote one with another. Keyframes are carried by time and value;
+// Premiere has no scripting read for a key's interpolation, so that is not carried.
+function __mcpValOut(v) {
+  if (v && typeof v === 'object' && v.length !== undefined) { var a = []; for (var i = 0; i < v.length; i++) a.push(v[i]); return a; }
+  return v;
+}
+function __mcpSame(a, b) {
+  if (a === b) return true;
+  if (typeof a === 'number' && typeof b === 'number') return Math.abs(a - b) <= 1e-4 * Math.max(1, Math.abs(a), Math.abs(b));
+  if (a && b && typeof a === 'object' && typeof b === 'object' && a.length !== undefined && a.length === b.length) {
+    for (var i = 0; i < a.length; i++) if (!__mcpSame(a[i], b[i])) return false;
+    return true;
+  }
+  return false;
+}
+function __mcpSnapClip(clip) {
+  var out = [];
+  for (var k = 0; k < clip.components.numItems; k++) {
+    var m = clip.components[k], props = [];
+    for (var p = 0; p < m.properties.numItems; p++) {
+      var pr = m.properties[p], e = { ok: true, tv: false };
+      try { e.tv = !!pr.isTimeVarying(); } catch (eT) { e.tv = false; }
+      if (e.tv) {
+        e.keys = [];
+        try { var ks = pr.getKeys(); for (var i = 0; ks && i < ks.length; i++) e.keys.push({ s: ks[i].seconds, v: __mcpValOut(pr.getValueAtKey(ks[i])) }); }
+        catch (eK) { e.ok = false; e.err = String(eK); }
+      } else {
+        try { e.v = __mcpValOut(pr.getValue()); } catch (eV) { e.ok = false; e.err = String(eV); }
+      }
+      props.push(e);
+    }
+    out.push({ match: String(m.matchName), name: String(m.displayName), props: props });
+  }
+  return out;
+}
+function __mcpCompIndex(clip, match, nth) {
+  var seen = 0;
+  for (var k = 0; k < clip.components.numItems; k++) {
+    if (String(clip.components[k].matchName) === match) { if (seen === nth) return k; seen++; }
+  }
+  return -1;
+}
+// Writes a snapshot onto a clip whose effects already match it. Returns the writes that threw.
+function __mcpApplySnap(clip, snap) {
+  var errors = [], counts = {};
+  for (var c = 0; c < snap.length; c++) {
+    var s = snap[c], nth = counts[s.match] || 0;
+    counts[s.match] = nth + 1;
+    var k = __mcpCompIndex(clip, s.match, nth);
+    if (k < 0) { errors.push({ comp: s.name, error: 'no matching effect on the new clip' }); continue; }
+    var m = clip.components[k];
+    for (var p = 0; p < s.props.length && p < m.properties.numItems; p++) {
+      var e = s.props[p], pr = m.properties[p];
+      if (!e.ok) continue;
+      try {
+        if (e.tv) {
+          pr.setTimeVarying(true);
+          for (var i = 0; i < e.keys.length; i++) { var t = new Time(); t.seconds = e.keys[i].s; pr.addKey(t); pr.setValueAtKey(t, e.keys[i].v, true); }
+        } else {
+          var cur = null;
+          try { cur = __mcpValOut(pr.getValue()); } catch (eC) {}
+          if (!__mcpSame(cur, e.v)) pr.setValue(e.v, true);
+        }
+      } catch (eS) { errors.push({ comp: s.name, prop: String(pr.displayName), index: p, error: String(eS) }); }
+    }
+  }
+  return errors;
+}
+// Where a clip differs from a snapshot (missing effects, values, keyframes). Empty when it matches.
+function __mcpDiffSnap(clip, snap) {
+  var now = __mcpSnapClip(clip), diffs = [], counts = {};
+  for (var c = 0; c < snap.length; c++) {
+    var s = snap[c], nth = counts[s.match] || 0;
+    counts[s.match] = nth + 1;
+    var k = __mcpCompIndex(clip, s.match, nth);
+    if (k < 0) { diffs.push({ comp: s.name, missing: true }); continue; }
+    var n = now[k];
+    for (var p = 0; p < s.props.length; p++) {
+      var e = s.props[p], f = n.props[p];
+      if (!e.ok) continue;
+      if (!f || !f.ok) { diffs.push({ comp: s.name, index: p, unreadable: true }); continue; }
+      if (e.tv !== f.tv) { diffs.push({ comp: s.name, index: p, keyframed: e.tv }); continue; }
+      if (e.tv) {
+        if (e.keys.length !== f.keys.length) { diffs.push({ comp: s.name, index: p, keyCount: [e.keys.length, f.keys.length] }); continue; }
+        for (var i = 0; i < e.keys.length; i++) {
+          if (Math.abs(e.keys[i].s - f.keys[i].s) > 0.0005 || !__mcpSame(e.keys[i].v, f.keys[i].v)) { diffs.push({ comp: s.name, index: p, key: i }); break; }
+        }
+      } else if (!__mcpSame(e.v, f.v)) diffs.push({ comp: s.name, index: p, want: e.v, got: f.v });
+    }
+  }
+  return diffs;
+}
+// A project item's real media length in seconds, from its MediaDuration timecode (HH:MM:SS:FF),
+// or null when Premiere does not report one (stills). getOutPoint() is the bin MARK, and a clip
+// placed past the end of its media still reads back at the requested length (measured
+// 2026-11-01: a 1 s render laid in as 6 s read back in 0 / out 6), so that cannot tell.
+function __mcpMediaSecs(item) {
+  try {
+    var m = /<premierePrivateProjectMetaData:Column\\.Intrinsic\\.MediaDuration>([^<]*)</.exec(String(item.getProjectMetadata()));
+    if (!m) return null;
+    var parts = m[1].split(/[:;]/);
+    if (parts.length !== 4) return null;
+    var fps = 0;
+    try { fps = Number(item.getFootageInterpretation().frameRate); } catch (eF) {}
+    var nominal = fps > 0 ? Math.round(fps) : 24;
+    return Number(parts[0]) * 3600 + Number(parts[1]) * 60 + Number(parts[2]) + Number(parts[3]) / nominal;
+  } catch (e) { return null; }
+}
+// A clip and the clips linked to it, video first, then by track: [{ clip, type, track, index }].
+function __mcpClipGroup(seq, clip) {
+  var all = [clip];
+  try { var li = clip.getLinkedItems(); for (var i = 0; li && i < li.numItems; i++) if (String(li[i].nodeId) !== String(clip.nodeId)) all.push(li[i]); } catch (eL) {}
+  var out = [];
+  for (var a = 0; a < all.length; a++) {
+    var id = String(all[a].nodeId), hit = null;
+    var kinds = [['video', seq.videoTracks], ['audio', seq.audioTracks]];
+    for (var kk = 0; kk < 2 && !hit; kk++) {
+      var tracks = kinds[kk][1];
+      for (var t = 0; t < tracks.numTracks && !hit; t++) {
+        for (var c = 0; c < tracks[t].clips.numItems; c++) if (String(tracks[t].clips[c].nodeId) === id) { hit = { clip: tracks[t].clips[c], type: kinds[kk][0], track: t, index: c }; break; }
+      }
+    }
+    if (hit) out.push(hit);
+  }
+  out.sort(function (x, y) { if (x.type !== y.type) return x.type === 'video' ? -1 : 1; return x.track - y.track; });
+  return out;
+}
 function __findSequence(id) {
   if (!app.project || !app.project.sequences) return null;
   // Fall back to the active sequence when no id is given. Most sequence tools in this catalogue
