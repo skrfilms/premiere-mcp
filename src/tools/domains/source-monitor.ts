@@ -306,12 +306,19 @@ export class SourceMonitorTools extends ToolsBase {
         var pi = clip.getProjectItem();
         if (!pi) return JSON.stringify({ success: false, error: 'getProjectItem() returned nothing' });
         var wantedName = String(pi.name);
-        var wantedId = null; try { wantedId = String(pi.nodeId); } catch(eI) {}
+        // Identity from the DOM clip's project item: a QE project item has no nodeId, and
+        // String(undefined) is "undefined", not null, so the old check compared "undefined" with
+        // the loaded item's real id and reported every open as not taken.
+        var wantedId = null;
+        try {
+          var domClip = app.project.activeSequence.videoTracks[${trackIndex}].clips[${clipIndex}];
+          if (domClip && domClip.projectItem && domClip.projectItem.nodeId) wantedId = String(domClip.projectItem.nodeId);
+        } catch(eI) {}
         pi.openInSource();
         // "loaded !== null" only proved the Source Monitor had SOMETHING in it — including the
         // clip that was already there when openInSource did nothing. Compare identity.
         var loaded = null, loadedId = null;
-        try { var li = app.sourceMonitor.getProjectItem(); if (li) { loaded = String(li.name); try { loadedId = String(li.nodeId); } catch(eL) {} } } catch(x) {}
+        try { var li = app.sourceMonitor.getProjectItem(); if (li) { loaded = String(li.name); try { if (li.nodeId) loadedId = String(li.nodeId); } catch(eL) {} } } catch(x) {}
         if (loaded === null) {
           return JSON.stringify({ success: false, verified: true, verifiedBy: 'app.sourceMonitor.getProjectItem() identity comparison', requested: wantedName,
             error: 'The Source Monitor reports no loaded item after openInSource(), so the clip was not opened.' });
