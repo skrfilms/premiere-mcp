@@ -62,9 +62,11 @@ function check(label, ok, detail) {
 /** Every tool call each workflow makes and whether it succeeded, for the verification ledger. */
 const used = (name, args, r) => {
   if (!current) return;
-  const ok = !!r && r.success !== false;
+  // A result object that does not say it failed; a bare string or a panel {error} is not one.
+  const ok = typeof r === 'object' && r !== null && r.success !== false && !(r.error && r.success === undefined);
   current.calls.push({ name, ok });
-  if (name === 'call_tool' && args?.name) current.calls.push({ name: String(args.name), ok });
+  // The routed tool only counts when it actually ran (a dryRun validates and runs nothing).
+  if (name === 'call_tool' && args?.name) current.calls.push({ name: String(args.name), ok: ok && r?.routed?.invoked === true });
 };
 async function tool(name, args) {
   // Recorded in finally: a call that throws is a failed call, not a missing one.
