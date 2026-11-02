@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.skrfilms/premiere-mcp",
   "title": "Premiere MCP",
-  "description": "Adobe Premiere Pro for AI agents: 660+ tools, each edit read back and verified, never faked.",
+  "description": "Adobe Premiere Pro for AI agents: 660+ tools; edits are read back, and unchecked ones say so.",
   "repository": {
     "url": "https://github.com/skrfilms/premiere-mcp",
     "source": "github"
