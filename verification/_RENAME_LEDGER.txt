@@ -45,3 +45,15 @@
    screen was locked, so a report dialog could not be dismissed), and the sweep refused to go on
    because it could no longer confirm the target project. Premiere was restarted and the sweep
    re-run with those two tools skipped for the run (--skip).
+
+2026-11-01  NOT KEPT  verification/sweeps/20261101T213309Z-workflow-tests.json and
+            20261102T031450Z-workflow-tests.json (never committed)
+   Reason: written by the first version of the workflow-tests ledger writer, which filed every
+   tool a passing workflow called as a pass, including tools only ever run on their refusal
+   paths (title_card, update_marker, set_app_property in W10). Replaced by a run of the fixed
+   writer, which records a pass only for a call that succeeded.
+
+2026-11-01  REBUILT  verification/sweeps/20261102T033033Z-crash-matrix.json
+   Rows rebuilt from that run's own raw results with the fixed aggregation: render_sequence_previews,
+   render_audio and export_with_burn_ins succeeded only with verified:false, which the first writer
+   dropped. Same run, same environment block.
