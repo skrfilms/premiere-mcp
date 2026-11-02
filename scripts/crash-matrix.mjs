@@ -299,7 +299,9 @@ if (!process.argv.includes('--no-ledger')) {
     const kinds = (o) => rs.filter((r) => r.outcome === o).map((r) => r.kind);
     const crashed = kinds('CRASHED'), ok = kinds('ok'), refused = rs.filter((r) => r.outcome === 'refused');
     if (crashed.length) return { name, outcome: 'fail', detail: `crashed Premiere on: ${crashed.join(', ')}` };
-    if (ok.length) return { name, outcome: 'pass', detail: `ok on ${ok.join(', ')}${refused.length ? `; refused on ${refused.map((r) => r.kind).join(', ')}` : ''}` };
+    // A success the tool itself could not check stays marked as such in the ledger.
+    const unverified = rs.some((r) => r.outcome === 'ok' && r.verified === false);
+    if (ok.length) return { name, outcome: 'pass', ...(unverified ? { verified: false } : {}), detail: `ok on ${ok.join(', ')}${refused.length ? `; refused on ${refused.map((r) => r.kind).join(', ')}` : ''}` };
     if (refused.length) return { name, outcome: 'fail', detail: `refused on every kind tried: ${refused[0].detail || 'no reason given'}` };
     return { name, outcome: 'skipped_args', detail: 'no fixture or setup failed on every kind' };
   });

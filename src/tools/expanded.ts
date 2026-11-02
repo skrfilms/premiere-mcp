@@ -3163,7 +3163,9 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           }
           var batchApplicable = batchResults.length - batchNa;
           var batchSummary = { effectName: String(args.effectName || args.name), appliedCount: batchOk, applicableCount: batchApplicable, notApplicableCount: batchNa, skippedCount: batchSkipped, failedCount: batchFailed, results: batchResults };
-          if (batchApplicable === 0) return fail("No video or audio effect named " + String(args.effectName || args.name) + " was found, so nothing was added.", batchSummary);
+          if (batchResults.length === 0) return fail("The sequence has no clips, so nothing was added.", batchSummary);
+          if (!batchInVideo && !batchInAudio) return fail("No video or audio effect named " + batchName + " was found, so nothing was added.", batchSummary);
+          if (batchApplicable === 0) return fail("No clip in the sequence takes a " + (batchInVideo ? "video" : "audio") + " effect like " + batchName + ", so nothing was added.", batchSummary);
           if (batchSkipped === 0 && batchFailed === 0) return ok(batchSummary);
           batchSummary.partial = batchOk > 0;
           return fail("Added to " + batchOk + " of " + batchApplicable + " clips it applies to" + (batchSkipped ? "; " + batchSkipped + " skipped to avoid a crash (nested or multicam)" : "") + (batchFailed ? "; " + batchFailed + " failed" : "") + ". See details.results.", batchSummary);

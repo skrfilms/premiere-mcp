@@ -76,10 +76,14 @@ export class AssemblyTools extends ToolsBase {
         try { path = String(c.projectItem.getMediaPath()); } catch (eP) {}
         var fps = 0;
         try { fps = Number(c.projectItem.getFootageInterpretation().frameRate); } catch (eF) {}
+        // "Still Image" for a single still, "Video" for numbered stills imported as a sequence
+        // (measured 2026-11-01; a still also reports 29.97 fps, so the rate cannot tell them apart).
+        var mediaType = null;
+        try { var __md = /<premierePrivateProjectMetaData:Column\\.Intrinsic\\.MediaType>([^<]*)</.exec(String(c.projectItem.getProjectMetadata())); mediaType = __md ? __md[1] : null; } catch (eT) {}
         var projDir = '';
         try { projDir = String(app.project.path).replace(/[\\/][^\\/]*$/, ''); } catch (eD) {}
         return JSON.stringify({success:true,start:c.start.seconds,end:c.end.seconds,inPoint:c.inPoint.seconds,speed:speed,reversed:reversed,
-          mediaPath:path,frameRate:fps,projectDir:projDir,trackIndex:f.trackIndex,sequenceId:String(f.sequenceId),name:String(c.name)});
+          mediaPath:path,frameRate:fps,mediaType:mediaType,projectDir:projDir,trackIndex:f.trackIndex,sequenceId:String(f.sequenceId),name:String(c.name)});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
     if (!info || info.success === false) return info;
@@ -118,9 +122,27 @@ export class AssemblyTools extends ToolsBase {
     let heldFile: string | undefined;
     if (/\.(png|jpe?g|tiff?|psd|bmp|exr|dpx|tga)$/i.test(info.mediaPath)) {
       seek = [];
-      const seqFrame = imageSequenceFrame(info.mediaPath, sourceSecs, Number(info.frameRate));
-      if (seqFrame && 'error' in seqFrame) return { success: false, error: seqFrame.error };
-      if (seqFrame) input = heldFile = seqFrame.file;
+      // Premiere says which it is. A numbered file beside it proves nothing: a single still from
+      // a folder of numbered photos would otherwise hold a different photo.
+      const still = info.mediaType === 'Still Image';
+      const sequence = info.mediaType != null && !still;
+      if (!still) {
+        const seqFrame = imageSequenceFrame(info.mediaPath, sourceSecs, Number(info.frameRate));
+        if (seqFrame && 'error' in seqFrame) return { success: false, error: seqFrame.error };
+        if (seqFrame && !sequence) {
+          return {
+            success: false,
+            error: `Could not tell whether "${basename(info.mediaPath)}" is a single still or the first frame of an image sequence (Premiere did not report its media type), so the frame at ${sourceSecs}s cannot be picked safely. Nothing was changed.`,
+          };
+        }
+        if (seqFrame) input = heldFile = seqFrame.file;
+        else if (sequence) {
+          return {
+            success: false,
+            error: `Premiere treats "${basename(info.mediaPath)}" as an image sequence, but its numbered files could not be found beside it, so the frame at ${sourceSecs}s cannot be located. Nothing was changed.`,
+          };
+        }
+      }
     }
     try {
       runFf('ffmpeg', ['-v', 'error', '-y', ...seek, '-i', input, '-frames:v', '1', png], {
@@ -686,9 +708,11 @@ export class AssemblyTools extends ToolsBase {
         // Refuse before anything is staged or removed: carrying DeNoise/DeReverb onto new media
         // that is a sequence (nested or multicam) crashes Premiere, and skipping the effect
         // would swap the clip and quietly lose it.
-        for (var ce = 0; ce < o.effects.length; ce++) {
+        // Audio clips only: a video effect that happens to share the name (a "Denoiser" plug-in)
+        // is not the audio filter that crashes.
+        for (var ce = 0; !o.video && ce < o.effects.length; ce++) {
           var crashWhy = __crashProneAudioFx({ projectItem: newItem }, o.effects[ce]);
-          if (crashWhy) return JSON.stringify({ success: false, verified: true, changed: false, refusedToAvoidCrash: true, error: 'The clip carries ' + o.effects[ce] + ' and the new media is a nested sequence or multicam clip: ' + crashWhy + ' Remove that effect first, or swap with preserveEffects:false.' });
+          if (crashWhy) return JSON.stringify({ success: false, verified: true, changed: false, refusedToAvoidCrash: true, error: 'The clip carries ' + o.effects[ce] + ', which would be carried onto the new media. ' + crashWhy + ' Remove that effect first, or swap with preserveEffects:false.' });
         }
         // Empty space past everything on every track, so the staging copy overlaps nothing.
         var far = 0;
@@ -760,6 +784,25 @@ export class AssemblyTools extends ToolsBase {
       },
       { allowUnexposed: true },
     );
+    // Nothing has been removed yet. If the effect values did not reach the temporary copy,
+    // stop here and take the copy away, rather than swap and leave the grade at its defaults.
+    if (!stagedCopy || stagedCopy.success === false) {
+      const cleaned: any = await this.bridge.executeScript(`
+        try {
+          var tmp = __findClip(${JSON.stringify(prep.staged)}, ${JSON.stringify(prep.seq)});
+          if (tmp) {
+            try { var li = tmp.clip.getLinkedItems(); for (var i = 0; li && i < li.numItems; i++) if (String(li[i].nodeId) !== String(tmp.clip.nodeId)) li[i].remove(false, false); } catch (eL) {}
+            tmp.clip.remove(false, false);
+          }
+          return JSON.stringify({ success: true, gone: !__findClip(${JSON.stringify(prep.staged)}, ${JSON.stringify(prep.seq)}) });
+        } catch (e) { return JSON.stringify({ success: false, error: e.toString() }); }
+      `);
+      return {
+        success: false,
+        changed: !cleaned?.gone,
+        error: `The effect values could not be copied off the clip (${stagedCopy?.error ?? 'no result'}), so the swap was stopped before the old clip was touched.${cleaned?.gone ? ' Nothing was changed.' : ` A temporary copy of the new media is still on the track at ${prep.stagedStart}s; delete it.`}`,
+      };
+    }
 
     // No TrackItem.move(): sliding the staged copy back across other clips left Premiere's
     // internal track order scrambled (QE listed SH020 6-12s before SH010 1-4s, then "Empty from
