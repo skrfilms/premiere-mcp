@@ -65,6 +65,9 @@ All notable changes are documented here. Releases use semantic versioning.
 - `batch_apply_effect` counts clips of the other kind (audio clips for a video effect) as not
   applicable rather than failed. Applicability now comes from Premiere's effect lists, because
   `getAudioEffectByName` returns an effect object even for a video effect's name.
+- `open_item_in_source_qe` reported every open as "did not take": a QE project item has no
+  `nodeId`, and `String(undefined)` was compared with the loaded item's real id. It now takes the
+  id from the timeline clip's own project item.
 - `set_clip_pan` refuses nested clips with the reason, and says the pan may have changed if
   the write went through but the read-back failed. `normalize_clip_peaks` refuses nested clips.
 - New `scripts/crash-matrix.mjs`: runs each risky tool on its own fresh sequence against seven
