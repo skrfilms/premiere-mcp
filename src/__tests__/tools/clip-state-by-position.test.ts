@@ -130,4 +130,22 @@ describe('clip state by position', () => {
       ),
     ).toEqual([true, false, true, false, false]);
   });
+
+  it('reads real media length from MediaDuration at the real frame rate, drop-frame included', () => {
+    const item = (tc: string | null, fps: number) => ({
+      getProjectMetadata: () =>
+        tc === null
+          ? '<x/>'
+          : `<premierePrivateProjectMetaData:Column.Intrinsic.MediaDuration>${tc}</premierePrivateProjectMetaData:Column.Intrinsic.MediaDuration>`,
+      getFootageInterpretation: () => ({ frameRate: fps }),
+    });
+    const secs = (tc: string | null, fps: number) =>
+      run('__mcpMediaSecs(it)', { it: item(tc, fps) });
+    expect(secs('00:00:06:00', 24)).toBeCloseTo(6, 6);
+    expect(secs('00:10:00;00', 30000 / 1001)).toBeCloseTo(599.9994, 3); // drop-frame: real ten minutes
+    expect(secs('00:00:05:59', 60000 / 1001)).toBeCloseTo(5.989, 3); // not 7.46 from a guessed 24
+    expect(secs('00:00:50:00', 24000 / 1001)).toBeCloseTo(50.05, 2); // non-drop counts at nominal 24
+    expect(secs(null, 24)).toBeNull(); // a still: no length
+    expect(secs('00:00:06:00', 0)).toBeNull(); // unknown rate: no guess
+  });
 });

@@ -4,23 +4,29 @@ All notable changes are documented here. Releases use semantic versioning.
 
 ## [Unreleased]
 
-- **`replace_clip` carries every setting, or stops with nothing changed.** It used to copy
-  effect settings by name through `copy_effects_between_clips`, and Lumetri repeats names (four
-  "Saturation", two each of Temperature, Tint and Contrast), so one setting overwrote another
-  while the swap reported success; keyframes were not copied, and effects and levels on the
-  clip's linked audio or video were dropped. Now it reads every setting of the clip and its
-  linked clips by position (effect, then property index), with keyframes, and rehearses the swap
-  on a temporary copy of the new media: missing effects are added and checked, settings written
-  and compared. The old clip is touched only when the rehearsal matches exactly, the new media
-  is long enough for the old source range (checked against its real length: Premiere lays a clip
-  in past the end of short media and reads it back as asked), and laying it in would overwrite
-  nothing but the old clip's own group. After the swap the settings are compared again. Keyframe
-  interpolation has no scripting read, so it is not carried, and the result says so. New live
-  workflow W11 covers it.
+- **`replace_clip` carries everything, or changes nothing.** It used to copy effect settings by
+  name through `copy_effects_between_clips`, and Lumetri repeats names (four "Saturation", two
+  each of Temperature, Tint and Contrast), so one setting overwrote another while the swap
+  reported success; keyframes were not copied; effects, levels and the layout of the clip's linked
+  audio or video were dropped, and so were the transitions on its edges. Now the clip and every
+  clip linked to it are read: track, start, end, source in point, on/off, effect order, every
+  setting by position (effect, then property index) with keyframes, and the transitions on their
+  edges. The whole layout is rebuilt first on a temporary copy past the end of the edit, so L- and
+  J-cuts and audio on another track than its video come back as they were, and compared with the
+  original. The old clip is touched only when that rehearsal matches exactly, the new media is long
+  enough (from its real length, read at its real frame rate with drop-frame counted: Premiere lays
+  a clip in past the end of short media and reads it back as asked), and every span the rebuild
+  writes is free apart from the old clip's own group. After the swap everything is compared again,
+  and edge transitions are re-added and read back; if anything differs the swap is undone back to
+  exactly the state before it. Not carried, and said so: keyframe interpolation (no scripting
+  read). Refused up front: a transition centred on a cut (QE places them only starting or ending at
+  the cut), settings that cannot be read on the old clip, and media whose length Premiere does not
+  report. New live workflow W11 covers it.
 - **`batch_replace_clips` keeps each clip's trim and effects.** It removed every clip that used
   the old item and laid the new one in at full length, losing trims, grades and levels and
   running over the next shot, and reported the count as success. It now runs a verified
-  `replace_clip` per clip; a clip whose swap is refused is left exactly as it was and listed.
+  `replace_clip` per use (video, or audio-only), and a clip whose swap is refused is left exactly
+  as it was and listed.
 
 - **DeNoise and DeReverb no longer crash Premiere on nested or multicam clips.** On 26.5.2,
   adding either to a clip whose source is a sequence crashes Premiere. The 10-29 live sweep hit

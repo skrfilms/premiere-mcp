@@ -567,7 +567,7 @@ if (run('W11')) try {
     const cur = (await v1(seq)).clips[0];
     const r2 = await tool('replace_clip', { clipId: cur.id, newProjectItemId: shortI });
     const st2 = await readState();
-    check('too-short media is refused before the old clip is touched', r2?.success === false && r2?.changed === false && /source range/.test(r2?.error ?? '') && st2.media === 'SH010_comp_v002.mp4' && st2.v1 === 1 && st2.temp === 20 && st2.keys === 2, { error: r2?.error, st2 });
+    check('too-short media is refused before the old clip is touched', r2?.success === false && r2?.changed === false && /does not cover/.test(r2?.error ?? '') && st2.media === 'SH010_comp_v002.mp4' && st2.v1 === 1 && st2.temp === 20 && st2.keys === 2, { error: r2?.error, st2 });
   }
 
   // Video-only old clip over music on A1: the new media's audio would overwrite the music.
@@ -581,6 +581,57 @@ if (run('W11')) try {
     const st3 = await readState();
     check('a swap that would overwrite the music bed on A1 is refused with nothing changed', r3?.success === false && r3?.changed === false && /overwrite/.test(r3?.error ?? '') && JSON.stringify(st3) === JSON.stringify(st3a), { error: r3?.error, before: st3a, after: st3 });
   } else check('set up a video-only clip over music', false, { lone, music: music?.error, hasMusic });
+
+  // Layout: an L-cut (A's audio runs 1 s past its video), a dissolve ending at the A/B cut, and a
+  // clip whose audio sits on A3 under its video on V1. All must come back exactly.
+  const lmk = await tool('create_sequence_from_clips', { projectItemIds: [v1i, v1i], name: 'wf_w11_layout' });
+  const lseq = lmk?.sequenceId || await seqByName('wf_w11_layout');
+  must('build a two-shot edit', !!lseq, lmk?.error);
+  await tool('set_active_sequence', { sequenceId: lseq });
+  for (let i = 0; i < 3; i++) await tool('add_track', { sequenceId: lseq, trackType: 'audio' });
+  const setup = await host(`(function(){
+    var s=__findSequence(${q(lseq)}); function T(x){ var t=new Time(); t.seconds=x; return t; }
+    var A=s.videoTracks[0].clips[0], B=s.videoTracks[0].clips[1];
+    function partner(c){ var li=c.getLinkedItems(); for (var i=0; li && i<li.numItems; i++) if (String(li[i].nodeId)!==String(c.nodeId)) return li[i]; return null; }
+    var Aa=partner(A), Ba=partner(B);
+    // B first (it moves left into 4-8), then A: video 0-4, audio 0-5 (the L-cut).
+    B.inPoint=T(1); B.start=T(4); B.end=T(8); Ba.inPoint=T(2); Ba.start=T(5); Ba.end=T(8);
+    A.end=T(4); Aa.end=T(5);
+    app.enableQE(); var qs=__qeSequenceOpening(s), qt=qs.getVideoTrackAt(0), qa=null;
+    for (var i=0;i<qt.numItems;i++){ var x=qt.getItemAt(i); if (x.type==='Clip' && Math.abs(Number(x.end.secs)-4)<0.05) qa=x; }
+    qa.addTransition(qe.project.getVideoTransitionByName('Cross Dissolve'), false, '12', '0', 1, true, true);
+    // C at 20 on V1, its audio on A3: lay in on V1 (V1+A1) and on A3 (V3+A3), keep V1 + A3, link.
+    var item=__findProjectItem(${q(v1i)});
+    s.videoTracks[0].overwriteClip(item, T(20)); s.audioTracks[2].overwriteClip(item, T(20));
+    function at(tracks, ti, t0){ var tk=tracks[ti]; for (var c=0;c<tk.clips.numItems;c++) if (Math.abs(tk.clips[c].start.seconds-t0)<0.05) return tk.clips[c]; return null; }
+    var cv=at(s.videoTracks,0,20), v3=at(s.videoTracks,2,20), a1=at(s.audioTracks,0,20), a3=at(s.audioTracks,2,20);
+    if (v3) v3.remove(false,false); if (a1) a1.remove(false,false);
+    cv.setSelected(true,false); a3.setSelected(true,false); s.linkSelection(); cv.setSelected(false,false); a3.setSelected(false,false);
+    var tr=s.videoTracks[0].transitions, trs=[]; for (var k=0; tr && k<tr.numItems; k++) trs.push([tr[k].start.seconds, tr[k].end.seconds, String(tr[k].name)]);
+    var lc=cv.getLinkedItems();
+    return JSON.stringify({ A:String(A.nodeId), C:String(cv.nodeId), trs:trs, cLinked: lc?lc.numItems:0, a3:!!a3 });
+  })();`);
+  must('set up the L-cut, the dissolve and the clip with its audio on A3', setup && setup.trs.length === 1 && setup.cLinked === 2 && setup.a3, setup);
+  const layout = async () => host(`(function(){
+    var s=__findSequence(${q(lseq)}), out={ v:[], a:[], trs:[] };
+    for (var t=0;t<s.videoTracks.numTracks;t++) for (var c=0;c<s.videoTracks[t].clips.numItems;c++){ var x=s.videoTracks[t].clips[c]; out.v.push(['V'+(t+1), String(x.projectItem.getMediaPath()).split('/').pop(), +x.start.seconds.toFixed(3), +x.end.seconds.toFixed(3), +x.inPoint.seconds.toFixed(3)]); }
+    for (var t2=0;t2<s.audioTracks.numTracks;t2++) for (var c2=0;c2<s.audioTracks[t2].clips.numItems;c2++){ var y=s.audioTracks[t2].clips[c2]; out.a.push(['A'+(t2+1), String(y.projectItem.getMediaPath()).split('/').pop(), +y.start.seconds.toFixed(3), +y.end.seconds.toFixed(3), +y.inPoint.seconds.toFixed(3)]); }
+    var tr=s.videoTracks[0].transitions; for (var k=0; tr && k<tr.numItems; k++) out.trs.push([+tr[k].start.seconds.toFixed(3), +tr[k].end.seconds.toFixed(3), String(tr[k].name)]);
+    return JSON.stringify(out);
+  })();`);
+  const L0 = await layout();
+  const swapA = await tool('replace_clip', { clipId: setup.A, newProjectItemId: v2i });
+  const L1 = await layout();
+  const media = (rows) => rows.map((r) => [r[0], r[2], r[3], r[4]]);
+  check('L-cut clip with a dissolve swaps, verified', swapA?.success === true && swapA?.transitionsCarried === 1, swapA?.error || swapA);
+  check('A comes back with its L-cut audio, B untouched, and the dissolve where it was', JSON.stringify(media(L1.v)) === JSON.stringify(media(L0.v)) && JSON.stringify(media(L1.a)) === JSON.stringify(media(L0.a)) && JSON.stringify(L1.trs) === JSON.stringify(L0.trs) && L1.v[0][1] === 'SH010_comp_v002.mp4' && L1.a[0][1] === 'SH010_comp_v002.mp4', { before: L0, after: L1 });
+  const swapC = await tool('replace_clip', { clipId: setup.C, newProjectItemId: v2i });
+  const L2 = await layout();
+  const cRows = (L) => ({ v: L.v.filter((r) => r[2] === 20), a: L.a.filter((r) => r[2] === 20) });
+  check('the clip with its audio on A3 swaps, verified', swapC?.success === true, swapC?.error || swapC);
+  check('its video stays on V1 and its audio on A3, nothing appears on V3 or A1', JSON.stringify(cRows(L2).v.map((r) => r[0])) === '["V1"]' && JSON.stringify(cRows(L2).a.map((r) => r[0])) === '["A3"]' && cRows(L2).v[0][1] === 'SH010_comp_v002.mp4', cRows(L2));
+  const cLinked = await host(`(function(){ var s=__findSequence(${q(lseq)}), v=null; for (var c=0;c<s.videoTracks[0].clips.numItems;c++) if (Math.abs(s.videoTracks[0].clips[c].start.seconds-20)<0.05) v=s.videoTracks[0].clips[c]; var li=v?v.getLinkedItems():null; return JSON.stringify({ n: li?li.numItems:0 }); })();`);
+  check('and the two are linked', cLinked.n === 2, cLinked);
 
   // batch_replace_clips: two trimmed, graded uses of the same shot, swapped in one call.
   const bmk = await tool('create_sequence_from_clips', { projectItemIds: [v1i, v1i], name: 'wf_w11_batch' });
