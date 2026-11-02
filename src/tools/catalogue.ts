@@ -5869,7 +5869,7 @@ export function buildToolCatalogue(): MCPTool[] {
     {
       name: 'batch_replace_clips',
       description:
-        'Replaces all timeline clips that reference oldItemId with newItemId across all sequences. Returns count of replaced clips.',
+        'Replaces every timeline clip (video, or audio-only) that uses oldProjectItemId with newProjectItemId (across all sequences, or one with sequenceId), one replace_clip per clip, so each keeps its trim, effects, keyframes and linked audio. A clip whose swap is refused (new media too short, something in the way) is left exactly as it was and listed in results.',
       inputSchema: z.object({
         oldProjectItemId: z.string().describe('NodeId of the project item to replace'),
         newProjectItemId: z.string().describe('NodeId of the replacement project item'),
