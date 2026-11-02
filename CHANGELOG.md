@@ -24,15 +24,17 @@ All notable changes are documented here. Releases use semantic versioning.
   (`copy_effects_between_clips`, `export_audio_only`) are not in `core`, so they were refused:
   `replace_clip` reported success with effect values at their defaults, and every stem failed.
   Internal steps now run past the profile, as transaction steps do. `replace_clip` stops before
-  removing the old clip if the effect values could not be copied, and fails if the final copy
-  did not land.
+  touching the old clip if any of its effects could not be added to the new media or the values
+  could not be copied, removes its temporary copy (with all its linked audio), and fails if the
+  final copy did not land.
 - **`freeze_frame` on an image sequence** (EXR/DPX/PNG plates) holds the frame at the requested
   time, picked from the sequence's own files, instead of always the first frame. Whether media is
   a sequence comes from Premiere's own media type ("Video" for numbered stills, "Still Image" for
   a single still), not from numbered files beside it, so one photo from a folder of numbered
   photos still holds itself. Animated GIFs seek as video does.
 - **`set_qe_component_param`** reads the value back. A value that went to `nan`, or that
-  Premiere clamped (asked 500, reads 100), is put back and reported as refused; one that did not
+  Premiere clamped (asked 500, reads 100; multi-part values such as "0.5,2" are compared part by
+  part), is put back if the previous value is a plain one, and reported as refused; one that did not
   move is reported as refused with nothing written back; a change that reads back in another form
   (a checkbox as `true`, a menu as a label) is kept and reported `verified: false` instead of
   being undone.
@@ -48,10 +50,11 @@ All notable changes are documented here. Releases use semantic versioning.
   "AAF Export Log" dialog whenever the sequence has a Lumetri grade, and it blocks Premiere's
   scripting engine until OK is clicked. The dialog guard clicks it away through macOS
   accessibility, which cannot reach the screen while it is locked, so an unattended export froze
-  Premiere for good. The tools that can raise a report dialog (AAF/OMF, multicam XML import,
-  project FCP XML with suppressUI off) now refuse up front with `SCREEN_LOCKED` while the screen
-  is locked (`PREMIERE_MCP_LOCK_CHECK=0` turns this off). FCP XML exports pass `suppressUI`, so
-  they never raise the Translation Report.
+  Premiere for good. While the screen is locked, the tools that can raise a report dialog
+  (AAF/OMF export, multicam XML import) now refuse up front with `SCREEN_LOCKED`, and so do the
+  FCP XML export tools, to be safe, though they pass `suppressUI` and have not been seen to raise
+  one (`PREMIERE_MCP_LOCK_CHECK=0` turns this off). Tools that export FCP XML only internally
+  (`add_transition`'s check, `export_edl`, `diff_sequences`) are not refused.
 - **Tools reached through `call_tool` run their own steps.** A tool outside the default
   profile, called through `call_tool`, ran its internal steps against the advertised list, so a
   step the profile hid was refused mid-call: `version_up_shots` (`replace_clip_media`),

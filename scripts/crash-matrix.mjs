@@ -276,7 +276,7 @@ for (const [op, spec] of ops) {
       continue;
     }
     const ok = r && r.success !== false;
-    record({ op, kind, outcome: ok ? 'ok' : 'refused', verified: r?.verified, detail: (r?.error ?? error ?? '').slice(0, 200) });
+    record({ op, kind, outcome: ok ? 'ok' : 'refused', verified: r?.verified ?? r?.data?.verified, detail: (r?.error ?? error ?? '').slice(0, 200) });
     console.log(`${ok ? 'ok   ' : 'no   '} ${label}${ok ? '' : `: ${(r?.error ?? error ?? '').slice(0, 120)}`}`);
   }
 }
