@@ -23,13 +23,17 @@ All notable changes are documented here. Releases use semantic versioning.
 - **`replace_clip` and `stem_export` work under the default profile.** Their internal steps
   (`copy_effects_between_clips`, `export_audio_only`) are not in `core`, so they were refused:
   `replace_clip` reported success with effect values at their defaults, and every stem failed.
-  Internal steps now run past the profile, as transaction steps do, and `replace_clip` fails if
-  the effect values were not copied.
+  Internal steps now run past the profile, as transaction steps do. `replace_clip` stops before
+  removing the old clip if the effect values could not be copied, and fails if the final copy
+  did not land.
 - **`freeze_frame` on an image sequence** (EXR/DPX/PNG plates) holds the frame at the requested
-  time, picked from the sequence's own files, instead of always the first frame. Single stills
-  are read without a seek; animated GIFs seek as video does.
-- **`set_qe_component_param`** reads the value back. A value that went to `nan`, or did not
-  move, is put back and reported as refused; a change that reads back in another form
+  time, picked from the sequence's own files, instead of always the first frame. Whether media is
+  a sequence comes from Premiere's own media type ("Video" for numbered stills, "Still Image" for
+  a single still), not from numbered files beside it, so one photo from a folder of numbered
+  photos still holds itself. Animated GIFs seek as video does.
+- **`set_qe_component_param`** reads the value back. A value that went to `nan`, or that
+  Premiere clamped (asked 500, reads 100), is put back and reported as refused; one that did not
+  move is reported as refused with nothing written back; a change that reads back in another form
   (a checkbox as `true`, a menu as a label) is kept and reported `verified: false` instead of
   being undone.
 - **`reorder_effects`** cannot reorder (Premiere's scripting has no call that moves an effect),
@@ -40,12 +44,14 @@ All notable changes are documented here. Releases use semantic versioning.
   command, after checking for the helper's heartbeat. Once `/tmp` was cleared, neither side
   started and every UXP tool (`set_work_area`, the transition fallback, keyframe ease readback)
   reported the helper not running. The server now creates the folder at startup.
-- **No more frozen Premiere from an export dialog on a locked screen.** `exportAAF()` opens an
+- **An AAF/OMF export can no longer freeze Premiere on a locked screen.** `exportAAF()` opens an
   "AAF Export Log" dialog whenever the sequence has a Lumetri grade, and it blocks Premiere's
   scripting engine until OK is clicked. The dialog guard clicks it away through macOS
   accessibility, which cannot reach the screen while it is locked, so an unattended export froze
-  Premiere for good. The AAF/OMF and other report-dialog tools now refuse up front with
-  `SCREEN_LOCKED` while the screen is locked (`PREMIERE_MCP_LOCK_CHECK=0` turns this off).
+  Premiere for good. The tools that can raise a report dialog (AAF/OMF, multicam XML import,
+  project FCP XML with suppressUI off) now refuse up front with `SCREEN_LOCKED` while the screen
+  is locked (`PREMIERE_MCP_LOCK_CHECK=0` turns this off). FCP XML exports pass `suppressUI`, so
+  they never raise the Translation Report.
 - **Tools reached through `call_tool` run their own steps.** A tool outside the default
   profile, called through `call_tool`, ran its internal steps against the advertised list, so a
   step the profile hid was refused mid-call: `version_up_shots` (`replace_clip_media`),
@@ -63,7 +69,8 @@ All notable changes are documented here. Releases use semantic versioning.
 - `set_source_in_out` says when nothing is open in the Source Monitor, and reads both marks back.
 - `look_at_cut` refuses an `outputPath` that is not `.jpg`/`.png` before capturing anything.
 - `batch_apply_effect` counts clips of the other kind (audio clips for a video effect) as not
-  applicable rather than failed. Applicability now comes from Premiere's effect lists, because
+  applicable rather than failed, and says so when a sequence is empty or holds no clip of the
+  effect's kind; `apply_audio_effect_to_all_clips` fails on a sequence with no audio clips. Applicability now comes from Premiere's effect lists, because
   `getAudioEffectByName` returns an effect object even for a video effect's name.
 - `open_item_in_source_qe` reported every open as "did not take": a QE project item has no
   `nodeId`, and `String(undefined)` was compared with the loaded item's real id. It now takes the

@@ -3420,7 +3420,7 @@ export class PremiereProTools extends ToolsBase {
         success: false,
         notRun: true,
         code: 'SCREEN_LOCKED',
-        error: `${name} can open a report dialog in Premiere (for example "AAF Export Log" when the sequence has a Lumetri grade) that blocks its scripting engine until OK is clicked. The screen is locked, so the dialog could not be dismissed and Premiere would stop responding. Nothing was run. Unlock the screen and retry, or set PREMIERE_MCP_DIALOG_GUARD=0 to run it anyway.`,
+        error: `${name} can open a report dialog in Premiere (for example "AAF Export Log" when the sequence has a Lumetri grade) that blocks its scripting engine until OK is clicked. The screen is locked, so the dialog could not be dismissed and Premiere would stop responding. Nothing was run. Unlock the screen and retry, or set PREMIERE_MCP_LOCK_CHECK=0 to run it anyway.`,
       };
     }
     const { result, guard } = await withReportDialogGuard(
@@ -4201,7 +4201,17 @@ export class PremiereProTools extends ToolsBase {
       function __boolOf(v) { var l = String(v).toLowerCase(); if (l === '1' || l === 'true' || l === 'on' || l === 'yes') return 1; if (l === '0' || l === 'false' || l === 'off' || l === 'no') return 0; return -1; }
       var landed = after === asked || (!isNaN(parseFloat(asked)) && Math.abs(parseFloat(after) - parseFloat(asked)) < 0.01) ||
         (__boolOf(asked) >= 0 && __boolOf(asked) === __boolOf(after));
-      var refused = String(after).toLowerCase() === 'nan' || after === '' || (after === before && asked !== before);
+      var unmoved = after === before && asked !== before;
+      // Both numbers but different: Premiere clamped or rounded it (asked 500, reads 100). That is
+      // a known wrong value, not an unconfirmable one.
+      var numericMismatch = !isNaN(parseFloat(asked)) && !isNaN(parseFloat(after)) && !landed;
+      var refused = String(after).toLowerCase() === 'nan' || after === '' || unmoved || numericMismatch;
+      if (!landed && unmoved) {
+        // Nothing moved, so there is nothing to put back (and writing the read-back form, such as
+        // a menu label, back into the parameter could itself corrupt it).
+        return JSON.stringify({success:false,verified:true,changed:false,paramName:${JSON.stringify(paramName)},requested:asked,readBack:after,before:before,
+          error:'The parameter still reads "' + after + '" after asking for "' + asked + '", so the value was not accepted. Nothing was changed.'});
+      }
       if (!landed && !refused) {
         return JSON.stringify({success:true,verified:false,paramName:${JSON.stringify(paramName)},requested:asked,before:before,after:after,changed:true,
           note:'The parameter changed, but it reads back as "' + after + '" rather than "' + asked + '", so it cannot be confirmed that it holds the requested value. Check it in Effect Controls.'});
@@ -4210,7 +4220,7 @@ export class PremiereProTools extends ToolsBase {
         try { comp.setParamValue(${JSON.stringify(paramName)}, before); } catch (eR) {}
         var restored = String(comp.getParamValue(${JSON.stringify(paramName)}));
         return JSON.stringify({success:false,verified:true,paramName:${JSON.stringify(paramName)},requested:asked,readBack:after,before:before,restored:restored===before,
-          error:'The parameter read back as "' + after + '", not the requested "' + asked + '", so the value was not accepted' + (restored===before ? ' and the previous value was put back.' : '; the previous value could not be restored (now "' + restored + '").')});
+          error:'The parameter read back as "' + after + '", not the requested "' + asked + '"' + (numericMismatch ? ' (Premiere clamped or rounded it)' : '') + ', so the value was not accepted' + (restored===before ? ' and the previous value was put back.' : '; the previous value could not be restored (now "' + restored + '").')});
       }
       return JSON.stringify({success:true,verified:true,verifiedBy:'getParamValue readback',paramName:${JSON.stringify(paramName)},before:before,after:after,changed:after!==before});
     `);

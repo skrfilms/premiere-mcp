@@ -1355,6 +1355,7 @@ export class AudioTools extends ToolsBase {
         for (var r = 0; r < perClip.length; r++) {
           if (perClip[r].ok) __okCount++; else if (perClip[r].skipped) __skipped++; else __failed++;
         }
+        if (perClip.length === 0) return JSON.stringify({ success: false, changed: false, sequenceId: ${JSON.stringify(sequenceId)}, effectName: ${JSON.stringify(effectName)}, totalClipsProcessed: 0, error: "The sequence has no audio clips, so nothing was added." });
         var __allOk = __skipped === 0 && __failed === 0;
         return JSON.stringify({
           success: __allOk,

@@ -337,6 +337,19 @@ async function main() {
     // failure would blame the tool for the harness's gap; it is filed as skipped_args naming the
     // keys we could not build.
     if (ctxStale) {
+      // Re-pinned first: rebuilt on another project, the context would hand THAT project's clip
+      // ids to the next tools, where a stale scratch id would only have failed.
+      const pinNow = await checkStillScratch(bridge, pinned);
+      if (!pinNow.ok) {
+        line('');
+        line(`!! ABORTED before ${name}: the scratch project is no longer the target.`);
+        line(`!! ${pinNow.reason}`);
+        line('!! Nothing further was run. Check Premiere by hand before saving anything.');
+        results.abortedAfter = name;
+        results.scratchDrift = pinNow.reason;
+        break;
+      }
+      callsSinceScratchCheck = 0;
       try { ctx = await buildContext(bridge); } catch { /* keep the last good context */ }
       ctxStale = false;
     }

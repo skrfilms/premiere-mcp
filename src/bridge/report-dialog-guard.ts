@@ -6,8 +6,10 @@
  * equivalents. Both are modal and OK-only, and both block the ExtendScript engine until someone
  * clicks OK, so every caller after that times out. Measured 2026-10-25: the file is already
  * written when the dialog appears; the dialog only reports what did not translate (the Translation
- * Report is also saved next to the XML). Tools that export FCP XML internally (add_transition's
- * verification, export_edl, diff_sequences) hit the same dialog.
+ * Report is also saved next to the XML). Every FCP XML export in this repo now passes
+ * suppressUI=true, which keeps the Translation Report from appearing (so add_transition's
+ * verification, export_edl and diff_sequences no longer raise it); exportAAF/exportOMF have no
+ * such switch, and export_project_as_fcp_xml lets the caller turn suppressUI off.
  *
  * The guard does not send keystrokes to whatever app is frontmost. It asks System Events for the
  * Premiere process's UI elements, and clicks the button described "OK" only inside a dialog whose

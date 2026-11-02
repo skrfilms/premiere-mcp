@@ -22,7 +22,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { requireScratchProject } from './lib/require-scratch-project.mjs';
+import { checkStillScratch, requireScratchProject } from './lib/require-scratch-project.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const MEDIA = join(ROOT, '.scratch', 'media', 'workflow');
@@ -33,12 +33,22 @@ mkdirSync(OUT, { recursive: true });
 const bridge = new PremiereProBridge();
 await bridge.initialize();
 const tools = new PremiereProTools(bridge);
-await requireScratchProject(bridge, 'workflow-tests');
+const pinned = await requireScratchProject(bridge, 'workflow-tests');
 
 // ---------------------------------------------------------------------------------- helpers
 const results = [];
 let current = null;
-function workflow(name) { current = { name, steps: [], ok: true }; results.push(current); console.log(`\n== ${name}`); }
+/** Starts a workflow, after re-checking that the scratch project is still the only one open. */
+async function workflow(name) {
+  const pin = await checkStillScratch(bridge, pinned);
+  if (!pin.ok) {
+    console.error(`workflow-tests stopped before ${name.split(/\s+/)[0]}: ${pin.reason}`);
+    process.exit(3);
+  }
+  current = { name, steps: [], ok: true, calls: [] };
+  results.push(current);
+  console.log(`\n== ${name}`);
+}
 class Abort extends Error {}
 function stopped(e) { if (!(e instanceof Abort)) check('no unexpected error in the workflow script', false, String(e && e.stack || e).slice(0, 300)); console.log('  (stopped here)'); }
 /** A failed link in the chain: record it and stop this workflow (later steps would act on the wrong thing). */
@@ -49,15 +59,16 @@ function check(label, ok, detail) {
   console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? '  — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 220) : ''}`);
   return !!ok;
 }
-/** Every tool each workflow calls, for the verification ledger. */
-const used = (name, args) => {
+/** Every tool call each workflow makes and whether it succeeded, for the verification ledger. */
+const used = (name, args, r) => {
   if (!current) return;
-  (current.tools ||= new Set()).add(name);
-  if (name === 'call_tool' && args?.name) current.tools.add(String(args.name));
+  const ok = !!r && r.success !== false;
+  current.calls.push({ name, ok });
+  if (name === 'call_tool' && args?.name) current.calls.push({ name: String(args.name), ok });
 };
 async function tool(name, args) {
-  used(name, args);
   const r = await tools.executeTool(name, args);
+  used(name, args, r);
   return r && r.data && r.success !== false && r.tool ? { success: true, ...r.data } : r;
 }
 async function host(body) { return bridge.executeScript(body); }
@@ -122,7 +133,7 @@ const run = (id) => wanted.size === 0 || wanted.has(id);
 
 // ------------------------------------------------------------------- W1: version up a shot
 if (run('W1')) try {
-  workflow('W1  v002 of SH010 landed: swap it in, keep the cut, the grade and the reframe');
+  await workflow('W1  v002 of SH010 landed: swap it in, keep the cut, the grade and the reframe');
   for (const f of ['SH010_comp_v001.mp4', 'SH020_comp_v001.mp4']) {
     const r = await tool('import_media', { filePath: join(MEDIA, f), binName: 'wf_renders' });
     must(`import ${f}`, imported(r), r?.error);
@@ -171,7 +182,7 @@ if (run('W1')) try {
 
 // ------------------------------------------------------------------- W1b: version up by relink
 if (run('W1b')) try {
-  workflow('W1b SH020 v002 landed: relink the project item, the timeline clip keeps everything');
+  await workflow('W1b SH020 v002 landed: relink the project item, the timeline clip keeps everything');
   const seq = await seqByName('wf_edit');
   must('the edit from W1 exists', !!seq);
   let st = await v1(seq);
@@ -204,7 +215,7 @@ if (run('W1b')) try {
 
 // ------------------------------------------------------------------- W2: review reel of latest
 if (run('W2')) try {
-  workflow('W2  review reel: every shot at its latest version, with burn-ins');
+  await workflow('W2  review reel: every shot at its latest version, with burn-ins');
   const seq = await seqByName('wf_edit');
   must('the edit from W1 exists', !!seq);
   // The assistant's job: for each shot on V1, find the newest version on disk and swap to it.
@@ -244,7 +255,7 @@ if (run('W2')) try {
 
 // ------------------------------------------------------------------- W3: captions
 if (run('W3')) try {
-  workflow('W3  captions: SRT in, on the timeline, rendering');
+  await workflow('W3  captions: SRT in, on the timeline, rendering');
   const seq = await seqByName('wf_edit');
   const srt = join(OUT, 'wf_captions.srt');
   writeFileSync(srt, '1\n00:00:00,500 --> 00:00:02,000\nTHIS IS THE FIRST LINE\n\n2\n00:00:02,500 --> 00:00:04,000\nAND THIS IS THE SECOND\n');
@@ -268,7 +279,7 @@ if (run('W3')) try {
 
 // ------------------------------------------------------------------- W4: audio pass
 if (run('W4')) try {
-  workflow('W4  audio pass: music under dialogue, loudness, stems');
+  await workflow('W4  audio pass: music under dialogue, loudness, stems');
   const seq = await seqByName('wf_edit');
   for (const f of ['music_bed.m4a', 'dialogue.m4a']) {
     const r = await tool('import_media', { filePath: join(MEDIA, f), binName: 'wf_renders' });
@@ -305,7 +316,7 @@ if (run('W4')) try {
 
 // ------------------------------------------------------------------- W5: version up everything
 if (run('W5')) try {
-  workflow('W5  new renders landed for every shot: one call brings the whole cut up to date');
+  await workflow('W5  new renders landed for every shot: one call brings the whole cut up to date');
   for (const f of ['SH010_comp_v001.mp4', 'SH020_comp_v001.mp4']) {
     const r = await tool('import_media', { filePath: join(MEDIA, f), binName: 'wf_w5' });
     must(`import ${f}`, imported(r), r?.error);
@@ -328,7 +339,7 @@ if (run('W5')) try {
 
 // ------------------------------------------------------------------- W6: remove silence
 if (run('W6')) try {
-  workflow('W6  cut the pauses out of a talking clip, with the music under it kept in sync');
+  await workflow('W6  cut the pauses out of a talking clip, with the music under it kept in sync');
   for (const f of ['talk_with_pauses.mp4', 'music_bed.m4a']) {
     const r = await tool('import_media', { filePath: join(MEDIA, f), binName: 'wf_w6' });
     must(`import ${f}`, imported(r), r?.error);
@@ -359,7 +370,7 @@ if (run('W6')) try {
 
 // ------------------------------------------------------------------- W7: sync by audio
 if (run('W7')) try {
-  workflow('W7  two cameras recorded the same moment: sync them by audio and build the synced sequence');
+  await workflow('W7  two cameras recorded the same moment: sync them by audio and build the synced sequence');
   for (const f of ['sync_camA.mp4', 'sync_camB.mp4']) {
     const r = await tool('import_media', { filePath: join(MEDIA, f), binName: 'wf_w7' });
     must(`import ${f}`, imported(r), r?.error);
@@ -379,7 +390,7 @@ if (run('W7')) try {
 
 // ------------------------------------------------------------------- W8: rough cut from transcript
 if (run('W8')) try {
-  workflow('W8  paper edit: pick lines from the transcript and get a stringout in that order');
+  await workflow('W8  paper edit: pick lines from the transcript and get a stringout in that order');
   const r0 = await tool('import_media', { filePath: join(MEDIA, 'talk_with_pauses.mp4'), binName: 'wf_w8' });
   must('the interview is in the project', imported(r0), r0?.error);
   const talk = await itemByName('talk_with_pauses.mp4');
@@ -422,11 +433,11 @@ async function mcpClient() {
     return JSON.parse(line ? line.slice(5) : text);
   };
   await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'workflow-tests', version: '1' } });
-  return async (name, args) => { used(name, args); const r = await rpc('tools/call', { name, arguments: args }); return r.result ? JSON.parse(r.result.content[0].text) : { success: false, error: r.error?.message }; };
+  return async (name, args) => { const r = await rpc('tools/call', { name, arguments: args }); const out = r.result ? JSON.parse(r.result.content[0].text) : { success: false, error: r.error?.message }; used(name, args, out); return out; };
 }
 
 if (run('W9')) try {
-  workflow('W9  the assistant keeps an accurate picture: undo a whole edit, notice hand edits, short replies, project notes');
+  await workflow('W9  the assistant keeps an accurate picture: undo a whole edit, notice hand edits, short replies, project notes');
   const mcp = await mcpClient();
   const r0 = await tool('import_media', { filePath: join(MEDIA, 'talk_with_pauses.mp4'), binName: 'wf_w9' });
   must('the interview is in the project', imported(r0), r0?.error);
@@ -497,7 +508,7 @@ if (run('W9')) try {
 // Last on purpose: if the DeNoise guard ever regresses, this is the workflow that takes Premiere
 // down, and nothing should run after it on a crashed host.
 if (run('W10')) try {
-  workflow('W10 the edges stay honest: default-profile swap, DeNoise near a nested clip, freeze on an image sequence, reorder');
+  await workflow('W10 the edges stay honest: default-profile swap, DeNoise near a nested clip, freeze on an image sequence, reorder');
   const alive = async () => { try { return (await host('(function(){ return JSON.stringify({ ok: true }); })();'))?.ok === true; } catch { return false; } };
 
   // 1. replace_clip under the default profile, which does not advertise the effect copier it uses.
@@ -568,6 +579,22 @@ if (run('W10')) try {
   // the time to the nearest frame, freeze_frame takes the frame that contains it, as for video.
   check('the held still is the frame Premiere shows at that time (within a frame), not the first frame', shownLevel != null && heldLevel != null && Math.abs(heldLevel - shownLevel) <= 6 && heldLevel > 40, { shownLevel, heldLevel, file: fz?.heldFromFile });
 
+  // 3b. A single numbered still from a folder of numbered photos is a still: it holds itself.
+  const stillDir = join(MEDIA, 'stills_w10');
+  mkdirSync(stillDir, { recursive: true });
+  for (const [n, c] of [['0001', 'red'], ['0002', 'blue'], ['0003', 'green']]) {
+    const f = join(stillDir, `IMG_${n}.png`);
+    if (!existsSync(f)) spawnSync(FF, ['-v', 'error', '-y', '-f', 'lavfi', '-i', `color=c=${c}:s=320x180`, '-frames:v', '1', f]);
+  }
+  must('import one numbered still on its own', imported(await tool('import_media', { filePath: join(stillDir, 'IMG_0001.png'), binName: 'wf_w10' })));
+  const stillItem = await itemByName('IMG_0001.png');
+  const ss = await tool('create_sequence_from_clips', { projectItemIds: [stillItem], name: 'wf_w10_still' });
+  const stillSeq = ss?.sequenceId || await seqByName('wf_w10_still');
+  await tool('set_active_sequence', { sequenceId: stillSeq });
+  const sclip = (await v1(stillSeq)).clips[0];
+  const sfz = await tool('freeze_frame', { clipId: sclip.id, time: 2, durationSecs: 0.5, sequenceId: stillSeq });
+  check('freeze_frame on a single numbered still holds that still, not a neighbouring photo', sfz?.success !== false && sfz?.heldFromFile == null && sfz?.png && hue(meanRgb(sfz.png)) === 'red', { success: sfz?.success, heldFromFile: sfz?.heldFromFile, hue: sfz?.png ? hue(meanRgb(sfz.png)) : null, error: sfz?.error });
+
   // 4. reorder_effects says it cannot, and changes nothing.
   await tool('set_active_sequence', { sequenceId: swapSeq });
   const orderBefore = (await v1(swapSeq)).clips[0].comps.map((c) => c.name);
@@ -593,21 +620,28 @@ if (run('W10')) try {
 // ------------------------------------------------------------------- summary
 console.log('\n================ WORKFLOWS ================');
 for (const w of results) console.log(`${w.ok ? 'PASS' : 'FAIL'}  ${w.name}  (${w.steps.filter((s) => s.ok).length}/${w.steps.length} steps)`);
-writeFileSync(join(OUT, 'workflow-results.json'), JSON.stringify(results, (k, v) => (v instanceof Set ? [...v] : v), 2));
+writeFileSync(join(OUT, 'workflow-results.json'), JSON.stringify(results, null, 2));
 
 // Into the verification ledger: a tool counts as passing when every workflow that called it
 // passed its independent checks (frames, levels, readbacks), and as failing, with the workflow
 // named, when one did not. Only a full run (no workflow ids given) is recorded.
 if (wanted.size === 0 && !process.argv.includes('--no-ledger')) {
   const { collectEnvironment, recordSweep } = await import('./lib/verification-ledger.mjs');
+  // A pass needs a call that succeeded: a tool only ever seen refusing (on purpose, as W10's
+  // edge checks do) proves its refusal, not that it works, and is left out rather than filed as
+  // passing. A tool in a workflow that failed is filed as failing either way.
   const per = new Map();
-  for (const w of results) for (const name of w.tools ?? []) {
-    if (!per.has(name)) per.set(name, { ok: [], bad: [] });
-    per.get(name)[w.ok ? 'ok' : 'bad'].push(w.name.split(/\s+/)[0]);
+  for (const w of results) for (const c of w.calls ?? []) {
+    if (!per.has(c.name)) per.set(c.name, { okCalls: 0, ok: new Set(), bad: new Set() });
+    const t = per.get(c.name);
+    if (c.ok) t.okCalls++;
+    t[w.ok ? 'ok' : 'bad'].add(w.name.split(/\s+/)[0]);
   }
-  const rows = [...per].map(([name, { ok, bad }]) => bad.length
-    ? { name, outcome: 'fail', detail: `in a failing workflow: ${bad.join(', ')}` }
-    : { name, outcome: 'pass', detail: `workflows ${ok.join(', ')}` });
+  const rows = [];
+  for (const [name, t] of per) {
+    if (t.bad.size) rows.push({ name, outcome: 'fail', detail: `in a failing workflow: ${[...t.bad].join(', ')}` });
+    else if (t.okCalls) rows.push({ name, outcome: 'pass', detail: `succeeded in workflows ${[...t.ok].join(', ')}` });
+  }
   const environment = await collectEnvironment({ tools, harness: 'workflow-tests', mode: 'mutate' });
   console.log(`ledger entry: ${recordSweep({ environment, tools: rows })}`);
 }
