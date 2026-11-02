@@ -161,17 +161,32 @@ export interface ToolStanding extends SweepToolRecord {
 /**
  * The current standing per tool: the newest sweep that has anything to say about it.
  *
- * Newest wins outright — a later sweep that skipped a tool supersedes an earlier pass,
- * because "we last looked on date X and did not run it" is the true statement. Ranking
+ * Newest wins — a later run of the SAME harness that skipped a tool supersedes its earlier
+ * pass, because "we last looked on date X and did not run it" is the true statement. Ranking
  * passes above skips would let an old success mask a tool nobody exercises any more.
+ *
+ * One exception: a skip from one harness says nothing about a tool another harness ran. The
+ * smoke sweep skips the destructive tools by design, and the crash matrix runs exactly those on
+ * their own sequences; letting every sweep erase that evidence would report as "never executed"
+ * tools that were executed. The kept standing still shows its own date and harness.
  */
 export function currentStandings(sweeps: Sweep[]): Map<string, ToolStanding> {
   const byNewest = [...sweeps].sort((a, b) =>
     a.environment.ranAt.localeCompare(b.environment.ranAt),
   );
   const out = new Map<string, ToolStanding>();
+  const executed = (o: ToolOutcome) => o === 'pass' || o === 'fail';
   for (const sweep of byNewest) {
     for (const record of sweep.tools) {
+      const prior = out.get(record.name);
+      if (
+        prior &&
+        executed(prior.outcome) &&
+        !executed(record.outcome) &&
+        prior.harness !== sweep.environment.harness
+      ) {
+        continue;
+      }
       out.set(record.name, {
         ...record,
         ranAt: sweep.environment.ranAt,

@@ -2122,11 +2122,29 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
 
         case "set_source_in_out":
         case "set_item_in_out":
-          var inOutItem = toolName === "set_source_in_out" ? app.sourceMonitor.getProjectItem() : findItem(args.item_id || args.itemId || args.projectItemId);
-          if (!inOutItem) return fail("Project item not found");
-          if (typeof args.in_seconds !== "undefined" || typeof args.inPoint !== "undefined") inOutItem.setInPoint(secondsToTicks(args.in_seconds || args.inPoint), 4);
-          if (typeof args.out_seconds !== "undefined" || typeof args.outPoint !== "undefined") inOutItem.setOutPoint(secondsToTicks(args.out_seconds || args.outPoint), 4);
-          return ok({ item: inOutItem.name, inSet: typeof args.in_seconds !== "undefined" || typeof args.inPoint !== "undefined", outSet: typeof args.out_seconds !== "undefined" || typeof args.outPoint !== "undefined" });
+          var inOutItem = null;
+          if (toolName === "set_source_in_out") {
+            try { inOutItem = app.sourceMonitor.getProjectItem(); } catch (eSm) {}
+            if (!inOutItem) return fail("Nothing is open in the Source Monitor. Open an item there first (open_in_source), or use set_item_in_out with a projectItemId. Nothing was changed.");
+          } else {
+            inOutItem = findItem(args.item_id || args.itemId || args.projectItemId);
+            if (!inOutItem) return fail("Project item not found");
+          }
+          // Read back what landed. Each value is checked against the request, so a host that
+          // ignores or rescales the write is reported rather than reported as set.
+          var wantIn = typeof args.in_seconds !== "undefined" ? Number(args.in_seconds) : (typeof args.inPoint !== "undefined" ? Number(args.inPoint) : null);
+          var wantOut = typeof args.out_seconds !== "undefined" ? Number(args.out_seconds) : (typeof args.outPoint !== "undefined" ? Number(args.outPoint) : null);
+          if (wantIn === null && wantOut === null) return fail("Give in_seconds and/or out_seconds. Nothing was changed.");
+          if (wantIn !== null) inOutItem.setInPoint(secondsToTicks(wantIn), 4);
+          if (wantOut !== null) inOutItem.setOutPoint(secondsToTicks(wantOut), 4);
+          var gotIn = null, gotOut = null;
+          try { gotIn = inOutItem.getInPoint().seconds; } catch (eGi) {}
+          try { gotOut = inOutItem.getOutPoint().seconds; } catch (eGo) {}
+          var inOk = wantIn === null || (gotIn !== null && Math.abs(gotIn - wantIn) < 0.05);
+          var outOk = wantOut === null || (gotOut !== null && Math.abs(gotOut - wantOut) < 0.05);
+          var inOutData = { item: inOutItem.name, verified: true, verifiedBy: "getInPoint/getOutPoint readback", requestedIn: wantIn, requestedOut: wantOut, inPoint: gotIn, outPoint: gotOut };
+          if (!inOk || !outOk) return fail("The marks read back as in " + gotIn + "s, out " + gotOut + "s, not the requested " + (wantIn === null ? "-" : wantIn) + "s / " + (wantOut === null ? "-" : wantOut) + "s.", inOutData);
+          return ok(inOutData);
 
         case "clear_item_in_out":
           var clearItem = findItem(args.item_id || args.itemId || args.projectItemId);
@@ -3109,6 +3127,11 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
           if (!qeBatchSeq) return fail("Could not address sequence '" + batchSeq.name + "' through the QE API.");
           var batchClips = allClips(batchSeq);
           var batchResults = [];
+          // Applicability from the effect lists, not from get*EffectByName: measured 2026-11-01,
+          // getAudioEffectByName("Gaussian Blur") returns a QEAudioEffect object for a video effect.
+          var batchName = String(args.effectName || args.name);
+          var batchInVideo = ("," + String(qe.project.getVideoEffectList()) + ",").indexOf("," + batchName + ",") >= 0;
+          var batchInAudio = ("," + String(qe.project.getAudioEffectList()) + ",").indexOf("," + batchName + ",") >= 0;
           for (var bai = 0; bai < batchClips.length; bai++) {
             try {
               var qeBatchTrack = batchClips[bai].trackType === "video" ? qeBatchSeq.getVideoTrackAt(batchClips[bai].trackIndex) : qeBatchSeq.getAudioTrackAt(batchClips[bai].trackIndex);
@@ -3116,14 +3139,36 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
               // transitions, so an index addresses a different item whenever anything
               // precedes the target.
               var qeBatchClip = __findQeClipByDomClip(qeBatchTrack, batchClips[bai].clip);
-              var batchEffect = batchClips[bai].trackType === "video" ? qe.project.getVideoEffectByName(String(args.effectName || args.name)) : qe.project.getAudioEffectByName(String(args.effectName || args.name));
-              if (!batchEffect || !qeBatchClip) batchResults.push({ clipId: batchClips[bai].clip.nodeId, ok: false, error: "QE clip/effect unavailable" });
-              else { qeBatchClip.addVideoEffect ? (batchClips[bai].trackType === "video" ? qeBatchClip.addVideoEffect(batchEffect) : qeBatchClip.addAudioEffect(batchEffect)) : qeBatchClip.addAudioEffect(batchEffect); batchResults.push({ clipId: batchClips[bai].clip.nodeId, ok: true }); }
+              var batchApplies = batchClips[bai].trackType === "video" ? batchInVideo : batchInAudio;
+              var batchEffect = !batchApplies ? null : (batchClips[bai].trackType === "video" ? qe.project.getVideoEffectByName(batchName) : qe.project.getAudioEffectByName(batchName));
+              var batchRefuse = batchClips[bai].trackType === "video" ? "" : __crashProneAudioFx(batchClips[bai].clip, String(args.effectName || args.name));
+              if (batchRefuse) batchResults.push({ clipId: batchClips[bai].clip.nodeId, ok: false, skipped: true, error: batchRefuse });
+              // A video effect has nothing to do on an audio clip (and the reverse): not applicable, not a failure.
+              else if (!batchEffect) batchResults.push({ clipId: batchClips[bai].clip.nodeId, ok: false, notApplicable: true, error: "not a " + batchClips[bai].trackType + " effect" });
+              else if (!qeBatchClip) batchResults.push({ clipId: batchClips[bai].clip.nodeId, ok: false, error: "QE could not address this clip" });
+              else {
+                var batchBefore = batchClips[bai].clip.components.numItems;
+                if (batchClips[bai].trackType === "video") qeBatchClip.addVideoEffect(batchEffect); else qeBatchClip.addAudioEffect(batchEffect);
+                if (batchClips[bai].clip.components.numItems > batchBefore) batchResults.push({ clipId: batchClips[bai].clip.nodeId, ok: true });
+                else batchResults.push({ clipId: batchClips[bai].clip.nodeId, ok: false, error: "the effect add ran but the clip effect count did not rise" });
+              }
             } catch (batchError) {
               batchResults.push({ clipId: batchClips[bai].clip.nodeId, ok: false, error: batchError.toString() });
             }
           }
-          return ok({ effectName: String(args.effectName || args.name), results: batchResults });
+          // A batch that left any clip out is reported as partial, never as a plain success.
+          var batchOk = 0, batchSkipped = 0, batchFailed = 0, batchNa = 0;
+          for (var bri = 0; bri < batchResults.length; bri++) {
+            if (batchResults[bri].ok) batchOk++; else if (batchResults[bri].notApplicable) batchNa++; else if (batchResults[bri].skipped) batchSkipped++; else batchFailed++;
+          }
+          var batchApplicable = batchResults.length - batchNa;
+          var batchSummary = { effectName: String(args.effectName || args.name), appliedCount: batchOk, applicableCount: batchApplicable, notApplicableCount: batchNa, skippedCount: batchSkipped, failedCount: batchFailed, results: batchResults };
+          if (batchResults.length === 0) return fail("The sequence has no clips, so nothing was added.", batchSummary);
+          if (!batchInVideo && !batchInAudio) return fail("No video or audio effect named " + batchName + " was found, so nothing was added.", batchSummary);
+          if (batchApplicable === 0) return fail("No clip in the sequence takes a " + (batchInVideo ? "video" : "audio") + " effect like " + batchName + ", so nothing was added.", batchSummary);
+          if (batchSkipped === 0 && batchFailed === 0) return ok(batchSummary);
+          batchSummary.partial = batchOk > 0;
+          return fail("Added to " + batchOk + " of " + batchApplicable + " clips it applies to" + (batchSkipped ? "; " + batchSkipped + " skipped to avoid a crash (nested or multicam)" : "") + (batchFailed ? "; " + batchFailed + " failed" : "") + ". See details.results.", batchSummary);
 
         case "set_blend_mode":
           if (!args.clipId && !args.node_id && !args.nodeId) return fail("set_blend_mode requires clipId.");
@@ -3261,9 +3306,23 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
             var panRaw = typeof args.pan !== "undefined" ? args.pan : args.value;
             var panWanted = Number(typeof panRaw === "undefined" ? 0 : panRaw);
             if (isNaN(panWanted) || panWanted < -100 || panWanted > 100) return fail("pan must be a number from -100 (full left) to 100 (full right).");
-            var panBefore = Number(panComp.getParamValue("Pan"));
-            panComp.setParamValue("Pan", String(panWanted));
-            var panAfter = Number(panComp.getParamValue("Pan"));
+            var panBefore, panAfter, panSetRan = false;
+            try {
+              panBefore = Number(panComp.getParamValue("Pan"));
+              panComp.setParamValue("Pan", String(panWanted));
+              panSetRan = true;
+              panAfter = Number(panComp.getParamValue("Pan"));
+            } catch (ePan) {
+              // The set went through but the read-back threw: the pan may have changed, so say so
+              // instead of claiming nothing did.
+              if (panSetRan) return fail("The pan was set to " + panWanted + " but could not be read back (" + ePan + "), so it may have changed and is unconfirmed. Check it in the Audio Clip Mixer.", { changed: null, requested: panWanted, before: panBefore });
+              // Measured 2026-10-29: a nested-sequence clip's pan component throws "Unknown error
+              // exception" on read. Its audio is mixed inside the nested sequence.
+              var panNested = false; try { panNested = !!(transformClip.clip.projectItem && transformClip.clip.projectItem.isSequence()); } catch (eN) {}
+              return fail(panNested
+                ? "This clip is a nested sequence; Premiere will not read or set its pan from script. Set pan on the clips inside that sequence. Nothing was changed."
+                : "Premiere refused the pan change (" + ePan + "). Nothing was changed.");
+            }
             if (Math.abs(panAfter - panWanted) > 0.01) return fail("Pan reads back " + panAfter + " after being set to " + panWanted + ".", { before: panBefore, after: panAfter });
             return ok({ component: "QE clip pan", property: "Pan", before: panBefore, after: panAfter, verified: true, verifiedBy: "QE getParamValue readback" });
           }
@@ -3859,6 +3918,21 @@ function buildExpandedToolScript(name: string, args: Record<string, any>): strin
               fullClip.components.push(compData);
             }
           } catch (e) {}
+          // The one thing the name promises: the clips linked to this one (its own audio or video).
+          if (toolName === "get_clip_links") {
+            fullClip.linked = [];
+            fullClip.linkedReadable = true;
+            try {
+              // Measured 2026-11-01: getLinkedItems() returns null, not an empty list, for a clip with no links.
+              var linkItems = foundClip.clip.getLinkedItems();
+              for (var li = 0; linkItems && li < linkItems.numItems; li++) {
+                var lc = linkItems[li];
+                if (String(lc.nodeId) === String(foundClip.clip.nodeId)) continue;
+                var lf = findClip(String(lc.nodeId));
+                fullClip.linked.push({ nodeId: String(lc.nodeId), name: String(lc.name), trackType: lf ? lf.trackType : null, trackIndex: lf ? lf.trackIndex : null, clipIndex: lf ? lf.clipIndex : null, start: lc.start.seconds, end: lc.end.seconds });
+              }
+            } catch (eLinks) { fullClip.linkedReadable = false; fullClip.linkedError = String(eLinks); }
+          }
           return ok(fullClip);
 
         case "rename_clip":

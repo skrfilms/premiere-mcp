@@ -3,6 +3,7 @@
  * a command through the file queue, and keep the queue private to this user.
  */
 import {
+  existsSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -24,6 +25,16 @@ describe('uxp channel', () => {
   const saved = process.env.PREMIERE_MCP_UXP_DIR;
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), 'uxp-test-'));
+    process.env.PREMIERE_MCP_UXP_DIR = dir;
+  });
+
+  it('creates the channel folder when it is missing, so the panel can start its heartbeat', () => {
+    const missing = join(dir, 'not-yet');
+    process.env.PREMIERE_MCP_UXP_DIR = missing;
+    expect(existsSync(missing)).toBe(false);
+    // No heartbeat yet, so not available, but the folder now exists for the panel to write into.
+    expect(uxpAvailable()).toBe(false);
+    expect(existsSync(missing)).toBe(true);
     process.env.PREMIERE_MCP_UXP_DIR = dir;
   });
   afterEach(() => {

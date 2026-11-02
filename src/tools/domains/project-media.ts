@@ -1,10 +1,10 @@
 /**
  * ProjectMediaTools -- the Project & Media Management tool domain.
  *
- * One link in the chain that composes PremiereProTools. Split out of tools/index.ts, which
- * had grown to 19k lines; the method bodies are unchanged.
+ * A plain class on ToolsBase. PremiereProTools holds one instance and dispatches tool calls
+ * to it by name; other domains it relies on are reached through `this.peers`.
  */
-import { CaptionTools } from './caption.js';
+import { ToolsBase } from './base.js';
 import { execSync } from 'child_process';
 // Synchronous fs/path/os bindings for the Node-side (non-ExtendScript) tools.
 // The async API is the separate `promises as fs` import.
@@ -32,14 +32,14 @@ import {
 } from '../prproj-surgery.js';
 import type { ProjectFileEditArgs, ProjectFileInspectArgs } from './shared.js';
 
-export class ProjectMediaTools extends CaptionTools {
+export class ProjectMediaTools extends ToolsBase {
   // Discovery Tools Implementation
   /**
    * A show project holds thousands of items, and the whole list in one reply would fill an
    * assistant's context. Filtered and paged here (the walk itself stays in ExtendScript): a page
    * of `limit` items from `offset`, optionally by name, type or bin, with nextOffset to go on.
    */
-  protected async listProjectItems(
+  async listProjectItems(
     includeBins = true,
     _includeMetadata = false,
     page: {
@@ -130,7 +130,7 @@ export class ProjectMediaTools extends CaptionTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async getProjectInfo(): Promise<any> {
+  async getProjectInfo(): Promise<any> {
     const script = `
       try {
         var project = app.project;
@@ -159,7 +159,7 @@ export class ProjectMediaTools extends CaptionTools {
   }
 
   // Project Management Implementation
-  protected async createProject(name: string, location: string): Promise<any> {
+  async createProject(name: string, location: string): Promise<any> {
     try {
       const result: any = await this.bridge.createProject(name, location);
       const projectPath = `${location.replace(/[\\/]+$/, '')}/${name.endsWith('.prproj') ? name : `${name}.prproj`}`;
@@ -184,7 +184,7 @@ export class ProjectMediaTools extends CaptionTools {
     }
   }
 
-  protected async openProject(path: string): Promise<any> {
+  async openProject(path: string): Promise<any> {
     try {
       const result: any = await this.bridge.openProject(path);
       if (result?.success === false) {
@@ -208,7 +208,7 @@ export class ProjectMediaTools extends CaptionTools {
     }
   }
 
-  protected async saveProject(): Promise<any> {
+  async saveProject(): Promise<any> {
     try {
       await this.bridge.saveProject();
       return {
@@ -224,7 +224,7 @@ export class ProjectMediaTools extends CaptionTools {
     }
   }
 
-  protected async saveProjectAs(name: string, location: string): Promise<any> {
+  async saveProjectAs(name: string, location: string): Promise<any> {
     const script = `
       try {
         var project = app.project;
@@ -250,7 +250,7 @@ export class ProjectMediaTools extends CaptionTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async closeProject(saveFirst: boolean, closeIfLast: boolean): Promise<any> {
+  async closeProject(saveFirst: boolean, closeIfLast: boolean): Promise<any> {
     const script = `
       try {
         var name = app.project.name;
@@ -261,7 +261,7 @@ export class ProjectMediaTools extends CaptionTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async listOpenProjects(): Promise<any> {
+  async listOpenProjects(): Promise<any> {
     const script = `
       try {
         var projs = app.projects;
@@ -276,7 +276,7 @@ export class ProjectMediaTools extends CaptionTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected listRecentProjects(limit: number, excludeAutosave: boolean): any {
+  listRecentProjects(limit: number, excludeAutosave: boolean): any {
     try {
       const raw = execSync('mdfind -name ".prproj"', { encoding: 'utf8', timeout: 5000 });
       const files = raw
@@ -302,7 +302,7 @@ export class ProjectMediaTools extends CaptionTools {
     }
   }
 
-  protected clipboardRead(): any {
+  clipboardRead(): any {
     try {
       const text = this.bridge.readClipboard();
       return { success: true, text, length: text.length };
@@ -311,7 +311,7 @@ export class ProjectMediaTools extends CaptionTools {
     }
   }
 
-  protected clipboardWrite(text: string): any {
+  clipboardWrite(text: string): any {
     try {
       this.bridge.writeClipboard(text);
       const readback = this.bridge.readClipboard();
@@ -327,11 +327,7 @@ export class ProjectMediaTools extends CaptionTools {
     }
   }
 
-  protected async addMetadataSchemaField(
-    columnId: string,
-    displayName: string,
-    type: number,
-  ): Promise<any> {
+  async addMetadataSchemaField(columnId: string, displayName: string, type: number): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.project.addPropertyToProjectMetadataSchema(${JSON.stringify(columnId)}, ${JSON.stringify(displayName)}, ${type});
@@ -340,7 +336,7 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async setItemMetadata(projectItemId: string, key: string, value: string): Promise<any> {
+  async setItemMetadata(projectItemId: string, key: string, value: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var item = null;
@@ -353,7 +349,7 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async getItemMetadataColumns(projectItemId: string): Promise<any> {
+  async getItemMetadataColumns(projectItemId: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         function findById(bin, id) { for(var i=0;i<bin.children.numItems;i++){var c=bin.children[i];if(c.nodeId===id)return c;if(c.type===2){var r=findById(c,id);if(r)return r;}}return null; }
@@ -365,7 +361,7 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async batchSetLabel(projectItemIds: string[], labelColor: string): Promise<any> {
+  async batchSetLabel(projectItemIds: string[], labelColor: string): Promise<any> {
     const colorMap: Record<string, number> = {
       violet: 0,
       iris: 1,
@@ -404,7 +400,7 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async batchRenameProjectItems(
+  async batchRenameProjectItems(
     renames: Array<{ projectItemId: string; newName: string }>,
   ): Promise<any> {
     const renamesJson = JSON.stringify(renames);
@@ -426,7 +422,7 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async getItemTreepath(projectItemId: string): Promise<any> {
+  async getItemTreepath(projectItemId: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         function findById(bin, id) { for(var i=0;i<bin.children.numItems;i++){var c=bin.children[i];if(c.nodeId===id)return c;if(c.type===2){var r=findById(c,id);if(r)return r;}}return null; }
@@ -437,7 +433,7 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async renameTimelineClip(
+  async renameTimelineClip(
     trackIndex: number,
     clipIndex: number,
     name: string,
@@ -465,7 +461,7 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async getProjectStats(): Promise<any> {
+  async getProjectStats(): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seqs = app.project.sequences;
@@ -486,7 +482,7 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async getBinTree(includeItems: boolean): Promise<any> {
+  async getBinTree(includeItems: boolean): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         function buildTree(bin) {
@@ -504,7 +500,7 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async getClipInfoExtended(projectItemId: string): Promise<any> {
+  async getClipInfoExtended(projectItemId: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var root = app.project.rootItem;
@@ -527,7 +523,7 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async batchRelinkByPattern(oldPrefix: string, newPrefix: string): Promise<any> {
+  async batchRelinkByPattern(oldPrefix: string, newPrefix: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var relinked = []; var failed = [];
@@ -553,7 +549,7 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async setItemPosterFrame(projectItemId: string, timeSecs: number): Promise<any> {
+  async setItemPosterFrame(projectItemId: string, timeSecs: number): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var root = app.project.rootItem;
@@ -568,7 +564,7 @@ export class ProjectMediaTools extends CaptionTools {
   }
 
   // Media Management Implementation
-  protected async importMedia(filePath: string, binName?: string, binId?: string): Promise<any> {
+  async importMedia(filePath: string, binName?: string, binId?: string): Promise<any> {
     try {
       const result: any = await this.bridge.importMedia(filePath, binName, binId);
       if (!result.success) {
@@ -603,7 +599,7 @@ export class ProjectMediaTools extends CaptionTools {
     }
   }
 
-  protected async importFolder(
+  async importFolder(
     folderPath: string,
     binName?: string,
     recursive = false,
@@ -683,11 +679,7 @@ export class ProjectMediaTools extends CaptionTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async createBin(
-    name: string,
-    parentBinName?: string,
-    parentBinId?: string,
-  ): Promise<any> {
+  async createBin(name: string, parentBinName?: string, parentBinId?: string): Promise<any> {
     const script = `
       try {
         var parentBinName = ${parentBinName !== undefined ? JSON.stringify(parentBinName) : 'null'};
@@ -773,7 +765,7 @@ export class ProjectMediaTools extends CaptionTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async renameProjectItem(projectItemId: string, newName: string): Promise<any> {
+  async renameProjectItem(projectItemId: string, newName: string): Promise<any> {
     const safeName = JSON.stringify(newName);
     const script = `
       try {
@@ -935,7 +927,7 @@ export class ProjectMediaTools extends CaptionTools {
    * guidance if absent) and reports exactly what it scanned, added, updated,
    * skipped, and could not read.
    */
-  protected async indexFootage(
+  async indexFootage(
     rootPath?: string,
     recursive = true,
     extensions?: string[],
@@ -1070,7 +1062,7 @@ export class ProjectMediaTools extends CaptionTools {
    * matches (path + distilled technical summary) so an agent can FIND the right
    * footage before importing it.
    */
-  protected async searchFootage(criteria: any = {}, indexPath?: string, limit = 100): Promise<any> {
+  async searchFootage(criteria: any = {}, indexPath?: string, limit = 100): Promise<any> {
     const resolvedIndexPath = this.footageIndexPath(indexPath);
     let doc: any;
     try {
@@ -1095,7 +1087,7 @@ export class ProjectMediaTools extends CaptionTools {
     };
   }
 
-  protected async enableDisableClip(clipId: string, enabled: boolean): Promise<any> {
+  async enableDisableClip(clipId: string, enabled: boolean): Promise<any> {
     const script = `
       try {
         var info = __findClip(${JSON.stringify(clipId)});
@@ -1115,7 +1107,7 @@ export class ProjectMediaTools extends CaptionTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async getClipProperties(clipId: string, sequenceId?: string): Promise<any> {
+  async getClipProperties(clipId: string, sequenceId?: string): Promise<any> {
     const script = `
       try {
         var info = __findClip(${JSON.stringify(clipId)}, ${sequenceId ? JSON.stringify(sequenceId) : 'null'});
@@ -1185,7 +1177,7 @@ export class ProjectMediaTools extends CaptionTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async setClipProperties(clipId: string, properties: any): Promise<any> {
+  async setClipProperties(clipId: string, properties: any): Promise<any> {
     // Position is the Motion "Position" property. Callers pass PIXEL coordinates matching the
     // Effect Controls panel (e.g. 960,756 in a 1920x1280 sequence); the API stores it as a
     // NORMALIZED [x,y] (0..1, 0.5,0.5 = frame center), so we divide by the sequence frame size
@@ -1257,11 +1249,11 @@ export class ProjectMediaTools extends CaptionTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected findItemById(id: string): string {
+  findItemById(id: string): string {
     return `(function(){function f(b,id){for(var i=0;i<b.children.numItems;i++){var c=b.children[i];if(c.nodeId===id)return c;if(c.type===2){var r=f(c,id);if(r)return r;}}return null;}return f(app.project.rootItem,${JSON.stringify(id)});})()`;
   }
 
-  protected async findUnusedSequences(): Promise<any> {
+  async findUnusedSequences(): Promise<any> {
     // ExtendScript is ES3: no Set/Map. Uses a plain object as a string-key lookup.
     return await this.bridge.executeScript(`
       try {
@@ -1287,7 +1279,7 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async batchEnableDisableClips(
+  async batchEnableDisableClips(
     trackIndex: number,
     enabled: boolean,
     startSecs?: number,
@@ -1309,7 +1301,7 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async getProjectItemInfoExtended(projectItemId: string): Promise<any> {
+  async getProjectItemInfoExtended(projectItemId: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var item=${this.findItemById(projectItemId)};
@@ -1328,7 +1320,7 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async verifyMediaOnline(projectItemId: string): Promise<any> {
+  async verifyMediaOnline(projectItemId: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var item=${this.findItemById(projectItemId)};
@@ -1348,7 +1340,7 @@ export class ProjectMediaTools extends CaptionTools {
    * makes it worse than an error. Routed through the shared __resolveBin prelude helper, which
    * accepts an id, a "/"-separated path or a deep-searched name and refuses rather than guessing.
    */
-  protected async getBinContentsRecursive(binName?: string, binId?: string): Promise<any> {
+  async getBinContentsRecursive(binName?: string, binId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var req=__resolveBin(${JSON.stringify(binId ?? null)},${JSON.stringify(binName ?? null)});
@@ -1364,7 +1356,7 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async batchRelinkByPrefix(oldPrefix: string, newPrefix: string): Promise<any> {
+  async batchRelinkByPrefix(oldPrefix: string, newPrefix: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var relinked=0,failed=0;
@@ -1386,10 +1378,7 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async setInterpretationFrameRate(
-    projectItemId: string,
-    frameRate: number,
-  ): Promise<any> {
+  async setInterpretationFrameRate(projectItemId: string, frameRate: number): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var item=${this.findItemById(projectItemId)};
@@ -1413,7 +1402,7 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async getItemXmpMetadata(projectItemId: string): Promise<any> {
+  async getItemXmpMetadata(projectItemId: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var item=${this.findItemById(projectItemId)};
@@ -1424,7 +1413,7 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async projectMediaReport(): Promise<any> {
+  async projectMediaReport(): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var codecs={},fpss={},ress={},offline=0,total=0,totalDur=0;
@@ -1441,7 +1430,7 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async getProjectPanelSelection(viewId?: string): Promise<any> {
+  async getProjectPanelSelection(viewId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var sel;
@@ -1462,10 +1451,7 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async setProjectPanelSelection(
-    projectItemIds: string[],
-    viewId?: string,
-  ): Promise<any> {
+  async setProjectPanelSelection(projectItemIds: string[], viewId?: string): Promise<any> {
     const ids = JSON.stringify(Array.isArray(projectItemIds) ? projectItemIds : []);
     return await this.bridge.executeScript(`
       try {
@@ -1514,7 +1500,7 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async getProjectPanelColumns(): Promise<any> {
+  async getProjectPanelColumns(): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var blob = app.project.getProjectPanelMetadata();
@@ -1525,7 +1511,7 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async setProjectPanelColumns(metadata: string): Promise<any> {
+  async setProjectPanelColumns(metadata: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var before = '';
@@ -1539,11 +1525,7 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async getClipFlags(
-    trackIndex: number,
-    clipIndex: number,
-    seqId?: string,
-  ): Promise<any> {
+  async getClipFlags(trackIndex: number, clipIndex: number, seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(seqId)};
@@ -1567,7 +1549,7 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async setItemPixelAspectRatio(
+  async setItemPixelAspectRatio(
     projectItemId: string,
     numerator: number,
     denominator: number,
@@ -1583,7 +1565,7 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async findItemsMatchingMediaPathTool(
+  async findItemsMatchingMediaPathTool(
     pathSubstring: string,
     ignoreSubclips: boolean,
   ): Promise<any> {
@@ -1603,7 +1585,7 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async getItemVideoComponents(projectItemId: string): Promise<any> {
+  async getItemVideoComponents(projectItemId: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var item = ${this.findItemById(projectItemId)};
@@ -1628,7 +1610,7 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async getQeProjectInfo(): Promise<any> {
+  async getQeProjectInfo(): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -1656,7 +1638,7 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async createBinQe(name: string, smart: boolean): Promise<any> {
+  async createBinQe(name: string, smart: boolean): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -1673,7 +1655,7 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async importMediaQe(filePath: string, numberedStills: boolean): Promise<any> {
+  async importMediaQe(filePath: string, numberedStills: boolean): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -1693,7 +1675,7 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async getMediaProcessingStatus(trackIndex: number, clipIndex: number): Promise<any> {
+  async getMediaProcessingStatus(trackIndex: number, clipIndex: number): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -1723,7 +1705,7 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async linkMediaQe(
+  async linkMediaQe(
     trackIndex: number,
     clipIndex: number,
     mediaPath: string,
@@ -1752,11 +1734,7 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async createProxyQe(
-    trackIndex: number,
-    clipIndex: number,
-    presetPath: string,
-  ): Promise<any> {
+  async createProxyQe(trackIndex: number, clipIndex: number, presetPath: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -1780,7 +1758,7 @@ export class ProjectMediaTools extends CaptionTools {
     `);
   }
 
-  protected async getProxyStatus(seqId?: string): Promise<any> {
+  async getProxyStatus(seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq=${this.buildSeqRes(seqId)};
@@ -1907,7 +1885,7 @@ export class ProjectMediaTools extends CaptionTools {
     };
   }
 
-  protected async projectFileInspect(args: ProjectFileInspectArgs): Promise<any> {
+  async projectFileInspect(args: ProjectFileInspectArgs): Promise<any> {
     try {
       const { file } = readProjectFile(args.projectPath);
       const census = censusOf(file.xml);
@@ -1962,7 +1940,7 @@ export class ProjectMediaTools extends CaptionTools {
     }
   }
 
-  protected async projectFileEdit(args: ProjectFileEditArgs): Promise<any> {
+  async projectFileEdit(args: ProjectFileEditArgs): Promise<any> {
     // Invariant 8, enforced HERE rather than only in the tool profile. A profile is a context-cost
     // decision that call_tool deliberately reaches past (see router.ts), so a gate that lived only in
     // the advertised list would be routable. This one is not.
@@ -2174,7 +2152,7 @@ export class ProjectMediaTools extends CaptionTools {
     }
   }
 
-  protected async importProjectItems(projectPath: string, includeSequences = true): Promise<any> {
+  async importProjectItems(projectPath: string, includeSequences = true): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -2189,9 +2167,7 @@ export class ProjectMediaTools extends CaptionTools {
   // Batch variant of setClipProperties: apply Motion values to many clips in ONE round-trip.
   // Same per-clip loop as the single version (opacity/scale/rotation/position), collapsing N
   // file round-trips into 1. Returns a per-clip result array.
-  protected async setClipPropertiesBatch(
-    items: Array<{ clipId: string; properties: any }>,
-  ): Promise<any> {
+  async setClipPropertiesBatch(items: Array<{ clipId: string; properties: any }>): Promise<any> {
     const specs = items.map((it) => ({
       clipId: it.clipId,
       opacity: it.properties?.opacity === undefined ? null : it.properties.opacity,
@@ -2271,7 +2247,7 @@ export class ProjectMediaTools extends CaptionTools {
   }
 
   // Project Item Discovery & Management Implementation
-  protected async findProjectItemByName(name: string, type?: string): Promise<any> {
+  async findProjectItemByName(name: string, type?: string): Promise<any> {
     const filterType = type || 'any';
     const script = `
       try {
@@ -2312,7 +2288,7 @@ export class ProjectMediaTools extends CaptionTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async moveItemToBin(projectItemId: string, targetBinId: string): Promise<any> {
+  async moveItemToBin(projectItemId: string, targetBinId: string): Promise<any> {
     const script = `
       try {
         var item = __findProjectItem(${JSON.stringify(projectItemId)});
@@ -2334,7 +2310,7 @@ export class ProjectMediaTools extends CaptionTools {
   }
 
   // Relink Media Implementation
-  protected async relinkMedia(projectItemId: string, newFilePath: string): Promise<any> {
+  async relinkMedia(projectItemId: string, newFilePath: string): Promise<any> {
     const script = `
       try {
         var item = __findProjectItem(${JSON.stringify(projectItemId)});
@@ -2384,7 +2360,7 @@ export class ProjectMediaTools extends CaptionTools {
   }
 
   // Get Metadata Implementation
-  protected async getMetadata(projectItemId: string): Promise<any> {
+  async getMetadata(projectItemId: string): Promise<any> {
     const script = `
       try {
         var item = __findProjectItem(${JSON.stringify(projectItemId)});
@@ -2405,7 +2381,7 @@ export class ProjectMediaTools extends CaptionTools {
   }
 
   // Set Metadata Implementation
-  protected async setMetadata(projectItemId: string, key: string, value: string): Promise<any> {
+  async setMetadata(projectItemId: string, key: string, value: string): Promise<any> {
     const script = `
       try {
         var item = __findProjectItem(${JSON.stringify(projectItemId)});
@@ -2435,7 +2411,7 @@ export class ProjectMediaTools extends CaptionTools {
   }
 
   // Get Footage Interpretation Implementation
-  protected async getFootageInterpretation(projectItemId: string): Promise<any> {
+  async getFootageInterpretation(projectItemId: string): Promise<any> {
     const script = `
       try {
         var item = __findProjectItem(${JSON.stringify(projectItemId)});
@@ -2458,7 +2434,7 @@ export class ProjectMediaTools extends CaptionTools {
   }
 
   // Set Footage Interpretation Implementation
-  protected async setFootageInterpretation(
+  async setFootageInterpretation(
     projectItemId: string,
     frameRate?: number,
     pixelAspectRatio?: number,
@@ -2495,7 +2471,7 @@ export class ProjectMediaTools extends CaptionTools {
   }
 
   // Check Offline Media Implementation
-  protected async checkOfflineMedia(): Promise<any> {
+  async checkOfflineMedia(): Promise<any> {
     const script = `
       try {
         var offlineItems = [];
@@ -2529,7 +2505,7 @@ export class ProjectMediaTools extends CaptionTools {
   }
 
   // Consolidate Duplicates Implementation
-  protected async consolidateDuplicates(): Promise<any> {
+  async consolidateDuplicates(): Promise<any> {
     const script = `
       try {
         app.project.consolidateDuplicates();
@@ -2545,7 +2521,7 @@ export class ProjectMediaTools extends CaptionTools {
   }
 
   // Refresh Media Implementation
-  protected async refreshMedia(projectItemId: string): Promise<any> {
+  async refreshMedia(projectItemId: string): Promise<any> {
     const script = `
       try {
         var item = __findProjectItem(${JSON.stringify(projectItemId)});

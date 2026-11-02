@@ -1,10 +1,10 @@
 /**
  * ExportRenderTools -- the Export & Render tool domain.
  *
- * One link in the chain that composes PremiereProTools. Split out of tools/index.ts, which
- * had grown to 19k lines; the method bodies are unchanged.
+ * A plain class on ToolsBase. PremiereProTools holds one instance and dispatches tool calls
+ * to it by name; other domains it relies on are reached through `this.peers`.
  */
-import { PlaybackTools } from './playback.js';
+import { ToolsBase } from './base.js';
 import { spawn } from 'child_process';
 // Synchronous fs/path/os bindings for the Node-side (non-ExtendScript) tools.
 // The async API is the separate `promises as fs` import.
@@ -25,8 +25,8 @@ import type {
 import { runFf } from '../ff-exec.js';
 import { generatedAssetsDir } from '../../utils/scratch-paths.js';
 
-export class ExportRenderTools extends PlaybackTools {
-  protected async validateProjectForExport(
+export class ExportRenderTools extends ToolsBase {
+  async validateProjectForExport(
     sequenceId?: string,
     outputPath?: string,
     presetPath?: string,
@@ -300,7 +300,7 @@ export class ExportRenderTools extends PlaybackTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async getSequenceRenderStatus(sequenceId?: string): Promise<any> {
+  async getSequenceRenderStatus(sequenceId?: string): Promise<any> {
     const script = `
       try {
         app.enableQE();
@@ -325,7 +325,7 @@ export class ExportRenderTools extends PlaybackTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async renderSequencePreviews(sequenceId?: string, renderAll?: boolean): Promise<any> {
+  async renderSequencePreviews(sequenceId?: string, renderAll?: boolean): Promise<any> {
     const script = `
       try {
         app.enableQE();
@@ -340,7 +340,7 @@ export class ExportRenderTools extends PlaybackTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async exportInOutRange(
+  async exportInOutRange(
     outputPath: string,
     presetPath: string,
     sequenceId?: string,
@@ -357,7 +357,7 @@ export class ExportRenderTools extends PlaybackTools {
     `);
   }
 
-  protected listAllEncoderPresets(format?: string): any {
+  listAllEncoderPresets(format?: string): any {
     try {
       // Use AME encoder list from our probed catalog
       const formats: Record<string, string[]> = {
@@ -414,7 +414,7 @@ export class ExportRenderTools extends PlaybackTools {
     }
   }
 
-  protected createCustomExportPreset(
+  createCustomExportPreset(
     _format: string,
     _basePresetName: string | undefined,
     _params: Record<string, string>,
@@ -427,11 +427,7 @@ export class ExportRenderTools extends PlaybackTools {
     };
   }
 
-  protected async exportSocialPreset(
-    outputPath: string,
-    preset: string,
-    sequenceId?: string,
-  ): Promise<any> {
+  async exportSocialPreset(outputPath: string, preset: string, sequenceId?: string): Promise<any> {
     const presetSettings: Record<string, Record<string, string>> = {
       youtube_1080p: {
         Width: '1920',
@@ -478,11 +474,7 @@ export class ExportRenderTools extends PlaybackTools {
     `);
   }
 
-  protected async exportAudioOnly(
-    outputPath: string,
-    format: string,
-    sequenceId?: string,
-  ): Promise<any> {
+  async exportAudioOnly(outputPath: string, format: string, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var exporters = app.encoder.getExporters();
@@ -498,7 +490,7 @@ export class ExportRenderTools extends PlaybackTools {
     `);
   }
 
-  protected verifyExport(
+  verifyExport(
     filePath: string,
     expectedDurationSecs?: number,
     expectedFps?: number,
@@ -557,7 +549,7 @@ export class ExportRenderTools extends PlaybackTools {
     }
   }
 
-  protected async exportSequenceAsProject(outputPath: string, sequenceId?: string): Promise<any> {
+  async exportSequenceAsProject(outputPath: string, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(sequenceId)};
@@ -569,7 +561,7 @@ export class ExportRenderTools extends PlaybackTools {
     `);
   }
 
-  protected async getRendererNames(): Promise<any> {
+  async getRendererNames(): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -581,7 +573,7 @@ export class ExportRenderTools extends PlaybackTools {
     `);
   }
 
-  protected async setRenderer(rendererName: string): Promise<any> {
+  async setRenderer(rendererName: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -591,7 +583,7 @@ export class ExportRenderTools extends PlaybackTools {
     `);
   }
 
-  protected async setRenderPreviewQuality(
+  async setRenderPreviewQuality(
     useMaxQuality?: boolean,
     presetPath?: string,
     width?: number,
@@ -610,7 +602,7 @@ export class ExportRenderTools extends PlaybackTools {
     `);
   }
 
-  protected checkFfmpegAvailable(): Promise<boolean> {
+  checkFfmpegAvailable(): Promise<boolean> {
     return new Promise((resolve) => {
       const proc = spawn('ffmpeg', ['-version']);
       proc.on('error', () => resolve(false));
@@ -619,11 +611,11 @@ export class ExportRenderTools extends PlaybackTools {
   }
 
   /** The ffmpeg binary, overridable for installs that expose a different name. */
-  protected ffmpegCmd(): string {
+  ffmpegCmd(): string {
     return (process.env.PREMIERE_MCP_FFMPEG_CMD || 'ffmpeg').trim() || 'ffmpeg';
   }
 
-  protected async probeMedia(mediaPath?: string, projectItemId?: string): Promise<any> {
+  async probeMedia(mediaPath?: string, projectItemId?: string): Promise<any> {
     let resolvedPath = mediaPath;
     if (!resolvedPath && projectItemId) {
       const resolved = await this.resolveProjectItemMediaPath(projectItemId);
@@ -713,7 +705,7 @@ export class ExportRenderTools extends PlaybackTools {
    * receiver (warm persistent receivers are a later optimisation, not something
    * to start here on a mere probe).
    */
-  protected probeCaptureTaps(): CaptureTapReport[] {
+  probeCaptureTaps(): CaptureTapReport[] {
     const CACHE_TTL_MS = 30_000;
     const cached = this.captureTapsCache;
     if (cached && Date.now() - cached.at < CACHE_TTL_MS) {
@@ -809,7 +801,7 @@ export class ExportRenderTools extends PlaybackTools {
    * frame landed on disk (delegated to exportFrame's verify-after-write) before
    * claiming success; never hang and never fake a frame.
    */
-  protected async captureProgramOutput(
+  async captureProgramOutput(
     sequenceId?: string,
     time?: number,
     format: 'png' | 'jpg' | 'tiff' = 'png',
@@ -857,7 +849,7 @@ export class ExportRenderTools extends PlaybackTools {
     let resolvedSequenceId = sequenceId;
     let resolvedSequenceName: string | undefined;
     if (!resolvedSequenceId) {
-      const active = await this.resolveActiveSequenceId();
+      const active = await this.peers.sequenceTrack.resolveActiveSequenceId();
       if (active.error || !active.id) {
         return {
           success: false,
@@ -872,7 +864,7 @@ export class ExportRenderTools extends PlaybackTools {
     // Resolve time: explicit, else the current playhead of that sequence.
     let resolvedTime: number;
     if (time === undefined || time === null) {
-      const playhead = await this.getPlayheadPosition(resolvedSequenceId);
+      const playhead = await this.peers.playback.getPlayheadPosition(resolvedSequenceId);
       resolvedTime =
         playhead && playhead.success && typeof playhead.position === 'number'
           ? playhead.position
@@ -971,7 +963,7 @@ export class ExportRenderTools extends PlaybackTools {
       : basename(directory);
   }
 
-  protected async getEncoderPresets(directories?: string[]): Promise<EncoderPresetDiscovery> {
+  async getEncoderPresets(directories?: string[]): Promise<EncoderPresetDiscovery> {
     const searchedDirectories =
       directories && directories.length > 0
         ? directories
@@ -1200,7 +1192,7 @@ export class ExportRenderTools extends PlaybackTools {
     return warnings;
   }
 
-  protected async exportSequence(args: ExportSequenceArgs): Promise<any> {
+  async exportSequence(args: ExportSequenceArgs): Promise<any> {
     const {
       sequenceId,
       outputPath,
@@ -1313,7 +1305,7 @@ export class ExportRenderTools extends PlaybackTools {
     }
   }
 
-  protected async exportFrame(
+  async exportFrame(
     sequenceId: string,
     time: number,
     outputPath: string,
@@ -1479,7 +1471,7 @@ export class ExportRenderTools extends PlaybackTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected exportGif(
+  exportGif(
     mediaPath: string,
     startSecs: number,
     durationSecs: number,
@@ -1535,7 +1527,7 @@ export class ExportRenderTools extends PlaybackTools {
     }
   }
 
-  protected exportStillsBatch(mediaPath: string, outputDir: string, _seqId?: string): any {
+  exportStillsBatch(mediaPath: string, outputDir: string, _seqId?: string): any {
     const path = pathSync,
       fs = fsSync;
     try {
@@ -1565,7 +1557,7 @@ export class ExportRenderTools extends PlaybackTools {
    * frame, without effects, transitions, or anything from tracks above. For a composited frame
    * use capture_program_output, which is verified working.
    */
-  protected async exportThumbnail(outputPath: string, seqId?: string): Promise<any> {
+  async exportThumbnail(outputPath: string, seqId?: string): Promise<any> {
     const qe: any = await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -1683,7 +1675,7 @@ export class ExportRenderTools extends PlaybackTools {
     return { ok: true };
   }
 
-  protected listExportPresets(filter?: string): any {
+  listExportPresets(filter?: string): any {
     const path = pathSync,
       fs = fsSync;
     const baseDirs = [
@@ -1707,7 +1699,7 @@ export class ExportRenderTools extends PlaybackTools {
     return { success: true, count: results.length, presets: results };
   }
 
-  protected async getExportProgress(seqId?: string): Promise<any> {
+  async getExportProgress(seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -1718,7 +1710,7 @@ export class ExportRenderTools extends PlaybackTools {
     `);
   }
 
-  protected async exportPerMarkerSegments(
+  async exportPerMarkerSegments(
     _presetPath: string,
     _outputDir: string,
     _filePrefix: string,
@@ -1735,7 +1727,7 @@ export class ExportRenderTools extends PlaybackTools {
     `);
   }
 
-  protected async exportProjectAsFcpXml(outputPath: string, suppressUI: boolean): Promise<any> {
+  async exportProjectAsFcpXml(outputPath: string, suppressUI: boolean): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var out = ${JSON.stringify(outputPath)};
@@ -1753,7 +1745,7 @@ export class ExportRenderTools extends PlaybackTools {
     `);
   }
 
-  protected async getEncoderState(): Promise<any> {
+  async getEncoderState(): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var o = { success: true };
@@ -1765,7 +1757,7 @@ export class ExportRenderTools extends PlaybackTools {
     `);
   }
 
-  protected async setEncoderXmpOptions(embedded?: boolean, sidecar?: boolean): Promise<any> {
+  async setEncoderXmpOptions(embedded?: boolean, sidecar?: boolean): Promise<any> {
     if (embedded === undefined && sidecar === undefined) {
       return { success: false, error: 'Pass at least one of embedded or sidecar.' };
     }
@@ -1780,7 +1772,7 @@ export class ExportRenderTools extends PlaybackTools {
     `);
   }
 
-  protected async getCloudQueueInfo(): Promise<any> {
+  async getCloudQueueInfo(): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -1798,7 +1790,7 @@ export class ExportRenderTools extends PlaybackTools {
     `);
   }
 
-  protected async setPreviewQuality(
+  async setPreviewQuality(
     maxRenderQuality?: boolean,
     maxBitDepth?: boolean,
     previewWidth?: number,
@@ -1831,7 +1823,7 @@ export class ExportRenderTools extends PlaybackTools {
     `);
   }
 
-  protected async renderNeedsPreview(seqId?: string): Promise<any> {
+  async renderNeedsPreview(seqId?: string): Promise<any> {
     const result = await this.getSequenceRenderStatus(seqId);
     if (!result || !result.success) return result;
     return {
@@ -1843,11 +1835,11 @@ export class ExportRenderTools extends PlaybackTools {
   }
 
   // Render Queue
-  protected async addToRenderQueue(args: AddToRenderQueueArgs): Promise<any> {
+  async addToRenderQueue(args: AddToRenderQueueArgs): Promise<any> {
     return await this.exportSequence(args);
   }
 
-  protected async getRenderQueueStatus(outputPath?: string): Promise<any> {
+  async getRenderQueueStatus(outputPath?: string): Promise<any> {
     // Adobe exposes no ExtendScript read of AME's live queue. Two honest signals
     // ARE available, so report those instead of a hardcoded "unavailable":
     //   1. Whether the encoder hand-off bridge (app.encoder) is reachable at all.
@@ -1906,7 +1898,7 @@ export class ExportRenderTools extends PlaybackTools {
     };
   }
 
-  protected async exportWithBurnIns(outputPath: string, presetPath?: string): Promise<any> {
+  async exportWithBurnIns(outputPath: string, presetPath?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = app.project.activeSequence;
@@ -1925,7 +1917,7 @@ export class ExportRenderTools extends PlaybackTools {
     `);
   }
 
-  protected async archiveMaster(outputDir: string, _includeProxy: boolean): Promise<any> {
+  async archiveMaster(outputDir: string, _includeProxy: boolean): Promise<any> {
     const fs = fsSync;
     const path = pathSync;
     // Get project media list via bridge
@@ -1970,7 +1962,7 @@ export class ExportRenderTools extends PlaybackTools {
     }
   }
 
-  protected async startEncodeAndMonitor(
+  async startEncodeAndMonitor(
     outputPath: string,
     presetPath?: string,
     workAreaType = 0,
@@ -1986,7 +1978,7 @@ export class ExportRenderTools extends PlaybackTools {
     `);
   }
 
-  protected async batchExportSequences(
+  async batchExportSequences(
     sequenceIds: string[],
     outputDir: string,
     presetPath?: string,
@@ -2014,7 +2006,7 @@ export class ExportRenderTools extends PlaybackTools {
     return { ...verdict, count: results.length, results };
   }
 
-  protected async exportOmfWithSettings(outputPath: string): Promise<any> {
+  async exportOmfWithSettings(outputPath: string): Promise<any> {
     // exportOMF(sequence, path, title, sampleRate, bitsPerSample, encapsulated, audioFileFormat,
     // trimAudioFiles, handleFrames, includePan). The old call passed strings and booleans where
     // numbers belong, Premiere rejected it, and a zero-argument fallback ran that cannot take a
@@ -2033,7 +2025,7 @@ export class ExportRenderTools extends PlaybackTools {
     );
   }
 
-  protected async exportAafWithSettings(outputPath: string): Promise<any> {
+  async exportAafWithSettings(outputPath: string): Promise<any> {
     // Same typed argument list export_aaf uses (seq, path, mixDownVideo, explodeToMono, sampleRate,
     // bitsPerSample, embedAudio, audioFileFormat, trimSources, handleFrames). The old string/boolean
     // list was rejected and fell back to a zero-argument call that cannot take a path.
@@ -2121,7 +2113,7 @@ export class ExportRenderTools extends PlaybackTools {
     };
   }
 
-  protected verifyExportFile(
+  verifyExportFile(
     filePath: string,
     expectedDuration?: number,
     expectedFps?: number,

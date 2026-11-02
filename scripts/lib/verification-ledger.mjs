@@ -49,7 +49,8 @@ export async function collectEnvironment({ tools, harness, mode }) {
     harness,
     mode,
     gitSha: git(['rev-parse', 'HEAD']) || 'unknown',
-    gitDirty: git(['status', '--porcelain']).length > 0,
+    // Ledger files written earlier in the same session are evidence, not code changes.
+    gitDirty: git(['status', '--porcelain', '--', '.', ':!verification/sweeps']).length > 0,
     premiereVersion,
     platform: `${os.platform()} ${os.release()} ${os.arch()}`,
     catalogueSize: tools.getRegisteredTools().length,

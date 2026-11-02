@@ -1,0 +1,169 @@
+{
+  "environment": {
+    "ranAt": "2026-11-01T21:53:23Z",
+    "harness": "crash-matrix",
+    "mode": "mutate",
+    "gitSha": "c5cb21a94a159e849d8bc252ae1ae989a50992f5",
+    "gitDirty": true,
+    "premiereVersion": "26.5.2 (build 5)",
+    "platform": "darwin 25.6.0 arm64",
+    "catalogueSize": 663
+  },
+  "tools": [
+    {
+      "name": "add_keyframe",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, nested sequence, multicam source, still image, dual mono, 29.97 long"
+    },
+    {
+      "name": "add_transition_to_clip",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, nested sequence, multicam source, still image, dual mono, 29.97 long"
+    },
+    {
+      "name": "apply_audio_effect_qe",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, audio only, dual mono, 29.97 long; refused on nested sequence, multicam source"
+    },
+    {
+      "name": "apply_dynamics",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, audio only, nested sequence, multicam source, dual mono, 29.97 long"
+    },
+    {
+      "name": "apply_effect",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, audio only, dual mono, 29.97 long, plain video+audio, nested sequence, multicam source, still image, dual mono, 29.97 long; refused on nested sequence, multicam source"
+    },
+    {
+      "name": "apply_lut",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, multicam source, still image, dual mono, 29.97 long; refused on nested sequence"
+    },
+    {
+      "name": "color_correct",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, nested sequence, multicam source, still image, dual mono, 29.97 long"
+    },
+    {
+      "name": "crop_clip",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, nested sequence, multicam source, still image, dual mono, 29.97 long"
+    },
+    {
+      "name": "denoise_clip",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, audio only, dual mono, 29.97 long; refused on nested sequence, multicam source"
+    },
+    {
+      "name": "dereverb_clip",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, audio only, dual mono, 29.97 long; refused on nested sequence, multicam source"
+    },
+    {
+      "name": "fade_in_audio",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, audio only, nested sequence, multicam source, dual mono, 29.97 long"
+    },
+    {
+      "name": "fade_in_video",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, nested sequence, multicam source, still image, dual mono, 29.97 long"
+    },
+    {
+      "name": "flip_horizontal",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, nested sequence, multicam source, still image, dual mono, 29.97 long"
+    },
+    {
+      "name": "freeze_frame",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, still image, dual mono, 29.97 long; refused on nested sequence, multicam source"
+    },
+    {
+      "name": "ken_burns",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, nested sequence, multicam source, still image, dual mono, 29.97 long"
+    },
+    {
+      "name": "letterbox",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, nested sequence, multicam source, still image, dual mono, 29.97 long"
+    },
+    {
+      "name": "lumetri_basic_set",
+      "outcome": "fail",
+      "detail": "refused on every kind tried: No Lumetri Color on clip — apply it first with apply_lumetri_preset"
+    },
+    {
+      "name": "normalize_clip_peaks",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, audio only, dual mono, 29.97 long; refused on nested sequence, multicam source"
+    },
+    {
+      "name": "reverse_clip",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, nested sequence, multicam source, still image, dual mono, 29.97 long"
+    },
+    {
+      "name": "set_clip_gain",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, audio only, multicam source, dual mono, 29.97 long; refused on nested sequence"
+    },
+    {
+      "name": "set_clip_pan",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, audio only, multicam source, dual mono, 29.97 long; refused on nested sequence"
+    },
+    {
+      "name": "set_clip_scale",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, nested sequence, multicam source, still image, dual mono, 29.97 long"
+    },
+    {
+      "name": "set_clip_speed_qe",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, nested sequence, multicam source, still image, dual mono, 29.97 long"
+    },
+    {
+      "name": "set_compressor",
+      "outcome": "fail",
+      "detail": "refused on every kind tried: No compressor parameter was accepted on this clip (is a compressor applied?). Nothing was changed."
+    },
+    {
+      "name": "set_frame_blend",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, nested sequence, multicam source, still image, dual mono, 29.97 long"
+    },
+    {
+      "name": "set_limiter",
+      "outcome": "fail",
+      "detail": "refused on every kind tried: No limiter component found. Add a Limiter or Dynamics Processing effect first."
+    },
+    {
+      "name": "set_parametric_eq",
+      "outcome": "fail",
+      "detail": "refused on every kind tried: No EQ parameter was accepted on this clip (is a Parametric EQ applied?). Nothing was changed."
+    },
+    {
+      "name": "set_time_interpolation",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, nested sequence, multicam source, still image, dual mono, 29.97 long"
+    },
+    {
+      "name": "speed_change",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, nested sequence, multicam source, still image, dual mono, 29.97 long"
+    },
+    {
+      "name": "stabilize_clip",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, nested sequence, multicam source, still image, dual mono, 29.97 long"
+    },
+    {
+      "name": "timecode_burn_in",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, nested sequence, multicam source, still image, dual mono, 29.97 long"
+    }
+  ]
+}

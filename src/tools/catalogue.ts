@@ -1460,7 +1460,7 @@ export function buildToolCatalogue(): MCPTool[] {
     {
       name: 'reorder_effects',
       description:
-        'Reorders the effect stack on a clip by specifying the new component order as a list of display names. Serializes params, removes, re-adds in new order.',
+        "Reports a clip's effect stack order next to the order you want. Premiere's scripting cannot move an effect within the stack, so this changes nothing and returns success:false with how to do it by hand (Effect Controls panel, or remove and re-apply, which loses that effect's keyframes).",
       inputSchema: z.object({
         trackIndex: z.number(),
         clipIndex: z.number(),
@@ -5933,7 +5933,7 @@ export function buildToolCatalogue(): MCPTool[] {
     {
       name: 'set_project_property',
       description:
-        'Sets an application-level property via app.properties.setProperty(key, value). Confirmed working. Returns readback.',
+        'Sets an APPLICATION-level property (app.properties, despite the name; same as set_app_property) and reads it back: fails if the value does not read back as requested. For project-wide settings use the project/sequence settings tools.',
       inputSchema: z.object({
         key: z.string().describe('Property key'),
         value: z.string().describe('Property value'),
@@ -5983,7 +5983,9 @@ export function buildToolCatalogue(): MCPTool[] {
         outputPath: z
           .string()
           .optional()
-          .describe('Where to write the contact sheet (.jpg); default a temp file'),
+          .describe(
+            'Where to write the contact sheet: a path ending in .jpg, .jpeg or .png; default a temp file',
+          ),
       }),
     },
     {

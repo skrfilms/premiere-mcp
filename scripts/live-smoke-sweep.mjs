@@ -54,6 +54,11 @@ const ALLOW_MUTATE = process.argv.includes('--mutate');
  * driving the same bridge.
  */
 const ALLOW_RECOVER = process.argv.includes('--recover');
+// --skip a,b: leave these out of this run only (reported as untested, like every skip). For a
+// tool that just hung the host, so the rest of the catalogue can still be measured.
+const RUN_SKIP = new Set(
+  process.argv.includes('--skip') ? String(process.argv[process.argv.indexOf('--skip') + 1] || '').split(',').filter(Boolean) : [],
+);
 
 /** How long one tool gets before the harness gives up on it and records a failure. */
 const TOOL_TIMEOUT_MS = 25_000;
@@ -218,7 +223,14 @@ async function main() {
   // replaced could not name a bin, a marker guid, an installed transition, or a file on disk, so
   // 93 tools bounced off our own validator and were filed as `skipped_args` — counted as "not
   // looked at", which was honest but was also two thirds of the breadth we could defend.
-  const ctx = await buildContext(bridge);
+  let ctx = await buildContext(bridge);
+  // Rebuilt after every mutating tool: the ids in it (clips, markers, items) are the fixture's
+  // CURRENT ones. Built once, an id an earlier tool deleted or replaced was handed to later tools,
+  // which then failed with "Clip not found" / "No marker with id" and were blamed for the sweep's
+  // stale state (update_marker, get_clip_links on 11-01).
+  let ctxStale = false;
+  /** The last tool that actually reached the host, for the abort report. */
+  let lastToolRun = null;
   line(`context: seq=${ctx.sequenceId} tracks=${ctx.videoTracks} clips=${ctx.clips.length} items=${ctx.itemIds.length} markers=${ctx.markers.length}`);
   line(`side fixtures: ${ctx.files.outDir}`);
   if (ctx.raw?.error) line(`context WARNING: ${ctx.raw.error}`);
@@ -317,6 +329,7 @@ async function main() {
     const name = tool.name;
 
     if (SKIP[name]) { results.skipped.push({ name, reason: SKIP[name] }); continue; }
+    if (RUN_SKIP.has(name)) { results.skipped.push({ name, reason: 'skipped for this run (--skip)' }); continue; }
 
     const readOnly = isReadOnly(name);
     if (!readOnly && !ALLOW_MUTATE) { results.mutateDeferred.push(name); continue; }
@@ -325,6 +338,33 @@ async function main() {
     // trip. A candidate our validator would reject never reaches Premiere, so recording it as a
     // failure would blame the tool for the harness's gap; it is filed as skipped_args naming the
     // keys we could not build.
+    if (ctxStale) {
+      // Re-pinned first: rebuilt on another project, the context would hand THAT project's clip
+      // ids to the next tools, where a stale scratch id would only have failed.
+      let pinNow = await checkStillScratch(bridge, pinned);
+      if (!pinNow.ok) {
+        // A panel still busy with the last call cannot answer the probe. Let it drain (45 s, as
+        // after a wedge) and ask once more before calling it drift.
+        for (let i = 0; i < 15; i++) {
+          await sleep(3000);
+          const now = heartbeat();
+          if (now && now.ageMs < 10_000 && !now.isProcessing) break;
+        }
+        pinNow = await checkStillScratch(bridge, pinned);
+      }
+      if (!pinNow.ok) {
+        line('');
+        line(`!! ABORTED before ${name}: could not confirm the scratch project is still the target.`);
+        line(`!! ${pinNow.reason}`);
+        line('!! Nothing further was run. Check Premiere by hand before saving anything.');
+        results.abortedAfter = lastToolRun ?? '(before any tool)';
+        results.scratchDrift = pinNow.reason;
+        break;
+      }
+      callsSinceScratchCheck = 0;
+      try { ctx = await buildContext(bridge); } catch { /* keep the last good context */ }
+      ctxStale = false;
+    }
     const synth = synthesizeArgs(tool, ctx);
     if (!synth.ok) {
       results.noArgs.push({ name, error: String(synth.error ?? 'unsynthesisable').slice(0, 140) });
@@ -357,6 +397,8 @@ async function main() {
 
     try {
       let timer;
+      if (!readOnly) ctxStale = true;
+      lastToolRun = name;
       const r = await Promise.race([
         tools.executeTool(name, args),
         new Promise((_, rej) => { timer = setTimeout(() => rej(new Error(`harness timeout ${TOOL_TIMEOUT_MS / 1000}s`)), TOOL_TIMEOUT_MS); }),

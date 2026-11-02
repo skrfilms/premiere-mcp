@@ -1,14 +1,46 @@
 /**
  * AssemblyTools -- the Assembly Editing tool domain.
  *
- * One link in the chain that composes PremiereProTools. Split out of tools/index.ts, which
- * had grown to 19k lines; the method bodies are unchanged.
+ * A plain class on ToolsBase. PremiereProTools holds one instance and dispatches tool calls
+ * to it by name; other domains it relies on are reached through `this.peers`.
  */
 import { ToolsBase } from './base.js';
 import { TRIM_LIB } from '../trim-lib.js';
 import { runFf } from '../ff-exec.js';
 import { mkdirSync, existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
+
+/**
+ * If `firstFile` is the first file of a numbered image sequence (name_0001.exr with a
+ * name_0002.exr beside it), the file that holds the frame at `sourceSecs`. Null for a single
+ * still. An error when it is a sequence but the frame cannot be located honestly.
+ */
+export function imageSequenceFrame(
+  firstFile: string,
+  sourceSecs: number,
+  fps: number,
+  exists: (p: string) => boolean = existsSync,
+): { file: string } | { error: string } | null {
+  const m = /^(.*?)(\d+)(\.[^.]+)$/.exec(basename(firstFile));
+  if (!m) return null;
+  const [, prefix = '', digits = '', ext = ''] = m;
+  const dir = dirname(firstFile);
+  const at = (n: number) => join(dir, `${prefix}${String(n).padStart(digits.length, '0')}${ext}`);
+  const first = parseInt(digits, 10);
+  if (!exists(at(first + 1))) return null;
+  if (!(fps > 0)) {
+    return {
+      error: `"${basename(firstFile)}" is an image sequence and its frame rate could not be read, so the frame at ${sourceSecs}s cannot be located. Nothing was changed.`,
+    };
+  }
+  const file = at(first + Math.floor(sourceSecs * fps + 1e-6));
+  if (!exists(file)) {
+    return {
+      error: `The image-sequence frame for ${sourceSecs}s (${basename(file)}) is not on disk. Nothing was changed.`,
+    };
+  }
+  return { file };
+}
 
 export class AssemblyTools extends ToolsBase {
   /**
@@ -25,7 +57,7 @@ export class AssemblyTools extends ToolsBase {
    * original clip (Lumetri, Motion) are not carried onto it; reversed or time-remapped clips are
    * refused because their source time cannot be computed from in point and speed.
    */
-  protected async freezeFrame(args: any): Promise<any> {
+  async freezeFrame(args: any): Promise<any> {
     const clipId = String(args.clipId ?? args.node_id ?? args.nodeId ?? '');
     if (!clipId) return { success: false, error: 'freeze_frame requires clipId.' };
     const at = Number(args.time ?? args.seconds ?? NaN);
@@ -42,10 +74,16 @@ export class AssemblyTools extends ToolsBase {
         try { reversed = !!c.isSpeedReversed(); } catch (eR) {}
         var path = '';
         try { path = String(c.projectItem.getMediaPath()); } catch (eP) {}
+        var fps = 0;
+        try { fps = Number(c.projectItem.getFootageInterpretation().frameRate); } catch (eF) {}
+        // "Still Image" for a single still, "Video" for numbered stills imported as a sequence
+        // (measured 2026-11-01; a still also reports 29.97 fps, so the rate cannot tell them apart).
+        var mediaType = null;
+        try { var __md = /<premierePrivateProjectMetaData:Column\\.Intrinsic\\.MediaType>([^<]*)</.exec(String(c.projectItem.getProjectMetadata())); mediaType = __md ? __md[1] : null; } catch (eT) {}
         var projDir = '';
         try { projDir = String(app.project.path).replace(/[\\/][^\\/]*$/, ''); } catch (eD) {}
         return JSON.stringify({success:true,start:c.start.seconds,end:c.end.seconds,inPoint:c.inPoint.seconds,speed:speed,reversed:reversed,
-          mediaPath:path,projectDir:projDir,trackIndex:f.trackIndex,sequenceId:String(f.sequenceId),name:String(c.name)});
+          mediaPath:path,frameRate:fps,mediaType:mediaType,projectDir:projDir,trackIndex:f.trackIndex,sequenceId:String(f.sequenceId),name:String(c.name)});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
     if (!info || info.success === false) return info;
@@ -76,23 +114,42 @@ export class AssemblyTools extends ToolsBase {
       .replace(/\.[^.]+$/, '')
       .replace(/[^A-Za-z0-9_-]+/g, '_');
     const png = join(outDir, `${base}_hold_${stamp}.png`);
+    // Image media: a numbered image sequence (Premiere reports its first file) is held by picking
+    // the frame's own file; a single still has one frame at every time, so it is read without a
+    // seek. Animated GIFs are left to ffmpeg's normal seek.
+    let input = info.mediaPath;
+    let seek: string[] = ['-ss', String(sourceSecs)];
+    let heldFile: string | undefined;
+    if (/\.(png|jpe?g|tiff?|psd|bmp|exr|dpx|tga)$/i.test(info.mediaPath)) {
+      seek = [];
+      // Premiere says which it is. A numbered file beside it proves nothing: a single still from
+      // a folder of numbered photos would otherwise hold a different photo.
+      // Only the two measured English values are trusted; anything else (a localized Premiere,
+      // an empty field) is treated as unknown, which refuses when a numbered neighbour exists.
+      const still = info.mediaType === 'Still Image';
+      const sequence = info.mediaType === 'Video';
+      if (!still) {
+        const seqFrame = imageSequenceFrame(info.mediaPath, sourceSecs, Number(info.frameRate));
+        if (seqFrame && !sequence) {
+          return {
+            success: false,
+            error: `Could not tell whether "${basename(info.mediaPath)}" is a single still or the first frame of an image sequence (Premiere reports its media type as ${info.mediaType == null ? 'nothing' : `"${info.mediaType}"`}), so the frame at ${sourceSecs}s cannot be picked safely. Nothing was changed.`,
+          };
+        }
+        if (seqFrame && 'error' in seqFrame) return { success: false, error: seqFrame.error };
+        if (seqFrame) input = heldFile = seqFrame.file;
+        else if (sequence) {
+          return {
+            success: false,
+            error: `Premiere treats "${basename(info.mediaPath)}" as an image sequence, but its numbered files could not be found beside it, so the frame at ${sourceSecs}s cannot be located. Nothing was changed.`,
+          };
+        }
+      }
+    }
     try {
-      runFf(
-        'ffmpeg',
-        [
-          '-v',
-          'error',
-          '-y',
-          '-ss',
-          String(sourceSecs),
-          '-i',
-          info.mediaPath,
-          '-frames:v',
-          '1',
-          png,
-        ],
-        { timeoutMs: 60000 },
-      );
+      runFf('ffmpeg', ['-v', 'error', '-y', ...seek, '-i', input, '-frames:v', '1', png], {
+        timeoutMs: 60000,
+      });
     } catch (e: any) {
       return { success: false, error: `ffmpeg could not extract the frame: ${e.message}` };
     }
@@ -127,14 +184,14 @@ export class AssemblyTools extends ToolsBase {
         if (!landed) return JSON.stringify({success:false,verified:true,error:'The still was imported but did not land at ${t}s on V${info.trackIndex + 1} (locked or untargeted track?).',png:png});
         var len = landed.end.seconds - landed.start.seconds;
         return JSON.stringify({success:Math.abs(len - ${hold}) < 0.05,verified:true,verifiedBy:'track item readback',method:'source frame extracted with ffmpeg, overwritten as a still',
-          heldFrameSourceSecs:${sourceSecs},startSecs:landed.start.seconds,endSecs:landed.end.seconds,holdSecs:len,png:png,stillItemId:String(still.nodeId),
+          heldFrameSourceSecs:${sourceSecs},heldFromFile:${JSON.stringify(heldFile ?? null)},startSecs:landed.start.seconds,endSecs:landed.end.seconds,holdSecs:len,png:png,stillItemId:String(still.nodeId),
           note:'Effects on the original clip are not carried onto the still.',
           error: Math.abs(len - ${hold}) < 0.05 ? undefined : 'The hold landed but is ' + len + 's long instead of ${hold}s.'});
       } catch(e) { return JSON.stringify({success:false,error:e.toString()}); }
     `);
   }
 
-  protected async threePointEdit(
+  async threePointEdit(
     projectItemId: string,
     sourceIn?: string,
     sourceOut?: string,
@@ -209,7 +266,7 @@ export class AssemblyTools extends ToolsBase {
   }
 
   // Timeline Operations Implementation
-  protected async addToTimelineBatch(
+  async addToTimelineBatch(
     sequenceId: string,
     clips: Array<{
       projectItemId: string;
@@ -248,7 +305,7 @@ export class AssemblyTools extends ToolsBase {
     }
   }
 
-  protected async addToTimeline(
+  async addToTimeline(
     sequenceId: string,
     projectItemId: string,
     trackIndex: number,
@@ -310,7 +367,7 @@ export class AssemblyTools extends ToolsBase {
     }
   }
 
-  protected async removeFromTimeline(
+  async removeFromTimeline(
     clipId: string,
     sequenceId?: string,
     deleteMode = 'ripple',
@@ -353,7 +410,7 @@ export class AssemblyTools extends ToolsBase {
     return await this.bridge.executeScript(script);
   }
 
-  protected async splitClip(clipId: string, splitTime: number): Promise<any> {
+  async splitClip(clipId: string, splitTime: number): Promise<any> {
     const script = `
       try {
         app.enableQE();
@@ -421,7 +478,7 @@ export class AssemblyTools extends ToolsBase {
     return await this.bridge.executeScript(script);
   }
 
-  protected async razorTimelineAtTime(
+  async razorTimelineAtTime(
     sequenceId?: string,
     time?: number,
     videoTrackIndices?: number[],
@@ -550,18 +607,8 @@ export class AssemblyTools extends ToolsBase {
     return await this.bridge.executeScript(script);
   }
 
-  // Nested Sequences
-  protected async createNestedSequence(_clipIds: string[], _name: string): Promise<any> {
-    return {
-      success: false,
-      error:
-        'create_nested_sequence: This feature requires selection and nesting APIs. Implementation pending.',
-      note: 'You can manually nest clips via right-click > Nest',
-    };
-  }
-
   // Additional Clip Operations
-  protected async duplicateClip(clipId: string, offset?: number): Promise<any> {
+  async duplicateClip(clipId: string, offset?: number): Promise<any> {
     // overwriteClip() places a project item's MARKED range, so the old version dropped the whole
     // source media (a 5s clip came back 10s long, from source 0) and overwrote whatever was at the
     // destination, while reporting success. The clip's own source range is now marked on the item
@@ -637,7 +684,7 @@ export class AssemblyTools extends ToolsBase {
    * To relink every use of a project item at once instead (the usual VFX version-up), use
    * replace_clip_media, which keeps the timeline clips themselves untouched.
    */
-  protected async replaceClip(
+  async replaceClip(
     clipId: string,
     newProjectItemId: string,
     preserveEffects?: boolean,
@@ -660,6 +707,15 @@ export class AssemblyTools extends ToolsBase {
         for (var k = 0; k < c.components.numItems; k++) o.effects.push(String(c.components[k].displayName));
         try { var li = c.getLinkedItems(); for (var l = 0; l < li.numItems; l++) if (String(li[l].nodeId) !== String(c.nodeId)) o.linked.push(String(li[l].nodeId)); } catch (eL) {}
         if (!${keep}) return JSON.stringify(o);
+        // Refuse before anything is staged or removed: carrying DeNoise/DeReverb onto new media
+        // that is a sequence (nested or multicam) crashes Premiere, and skipping the effect
+        // would swap the clip and quietly lose it.
+        // Audio clips only: a video effect that happens to share the name (a "Denoiser" plug-in)
+        // is not the audio filter that crashes.
+        for (var ce = 0; !o.video && ce < o.effects.length; ce++) {
+          var crashWhy = __crashProneAudioFx({ projectItem: newItem }, o.effects[ce]);
+          if (crashWhy) return JSON.stringify({ success: false, verified: true, changed: false, refusedToAvoidCrash: true, error: 'The clip carries ' + o.effects[ce] + ', which would be carried onto the new media. ' + crashWhy + ' Remove that effect first, or swap with preserveEffects:false.' });
+        }
         // Empty space past everything on every track, so the staging copy overlaps nothing.
         var far = 0;
         for (var vt = 0; vt < seq.videoTracks.numTracks; vt++) { var tv = seq.videoTracks[vt]; if (tv.clips.numItems) far = Math.max(far, tv.clips[tv.clips.numItems - 1].end.seconds); }
@@ -687,6 +743,7 @@ export class AssemblyTools extends ToolsBase {
           var lacking = need[name] - (have[name] || 0);
           for (var n = 0; n < lacking; n++) {
             var fx = o.video ? qe.project.getVideoEffectByName(name) : qe.project.getAudioEffectByName(name);
+            if (!o.video && __crashProneAudioFx(staged, name)) { missing.push(name); continue; }
             try { if (qc && fx) { if (o.video) qc.addVideoEffect(fx); else qc.addAudioEffect(fx); added.push(name); } else missing.push(name); } catch (eA) { missing.push(name); }
           }
         }
@@ -716,12 +773,54 @@ export class AssemblyTools extends ToolsBase {
     }
 
     // Effects: old clip -> temporary copy (it holds them while the old clip goes away).
-    await (this as any).executeTool('copy_effects_between_clips', {
-      sourceClipId: clipId,
-      targetClipId: prep.staged,
-      sourceSequenceId: prep.seq,
-      targetSequenceId: prep.seq,
-    });
+    // allowUnexposed: this is a step inside replace_clip, which is the authority gate (as in
+    // transactions). Without it the copy was refused under the default profile, which does not
+    // advertise copy_effects_between_clips, and the swap still reported success.
+    const stagedCopy: any = await this.peers.executeTool(
+      'copy_effects_between_clips',
+      {
+        sourceClipId: clipId,
+        targetClipId: prep.staged,
+        sourceSequenceId: prep.seq,
+        targetSequenceId: prep.seq,
+      },
+      { allowUnexposed: true },
+    );
+    // Nothing has been removed yet. If an effect could not be added to the temporary copy, or
+    // the values did not reach it, stop here and take the copy away, rather than swap and leave
+    // the grade short. (copy_effects_between_clips reports success when any property copied, and
+    // Motion/Opacity always do, so a missing effect is checked by name as well.)
+    const missing: string[] = Array.isArray(prep.missing) ? prep.missing : [];
+    const abortReason = missing.length
+      ? `these effects could not be added to the new media: ${missing.join(', ')}`
+      : !stagedCopy || stagedCopy.success === false
+        ? `the effect values could not be copied off the clip (${stagedCopy?.error ?? 'no result'})`
+        : '';
+    if (abortReason) {
+      const cleaned: any = await this.bridge.executeScript(`
+        try {
+          var tmp = __findClip(${JSON.stringify(prep.staged)}, ${JSON.stringify(prep.seq)});
+          var ids = [];
+          if (tmp) {
+            // Collected first: removing items while walking the live linked list skipped some.
+            var linked = [];
+            try { var li = tmp.clip.getLinkedItems(); for (var i = 0; li && i < li.numItems; i++) if (String(li[i].nodeId) !== String(tmp.clip.nodeId)) linked.push(li[i]); } catch (eL) {}
+            for (var k = 0; k < linked.length; k++) { ids.push(String(linked[k].nodeId)); try { linked[k].remove(false, false); } catch (eR) {} }
+            ids.push(String(tmp.clip.nodeId));
+            tmp.clip.remove(false, false);
+          }
+          var left = [];
+          for (var g = 0; g < ids.length; g++) if (__findClip(ids[g], ${JSON.stringify(prep.seq)})) left.push(ids[g]);
+          return JSON.stringify({ success: true, gone: left.length === 0, left: left });
+        } catch (e) { return JSON.stringify({ success: false, error: e.toString() }); }
+      `);
+      return {
+        success: false,
+        changed: !cleaned?.gone,
+        error: `The swap was stopped before the old clip was touched: ${abortReason}.${cleaned?.gone ? ' Nothing was changed.' : ` A temporary copy of the new media (${(cleaned?.left ?? []).length || 'some'} item(s)) is still on the track from ${prep.stagedStart}s; delete it.`}`,
+        ...(missing.length ? { missingEffects: missing } : {}),
+      };
+    }
 
     // No TrackItem.move(): sliding the staged copy back across other clips left Premiere's
     // internal track order scrambled (QE listed SH020 6-12s before SH010 1-4s, then "Empty from
@@ -756,6 +855,7 @@ export class AssemblyTools extends ToolsBase {
           var lacking = need[name] - (have[name] || 0);
           for (var n = 0; n < lacking; n++) {
             var fx = ${prep.video ? 'qe.project.getVideoEffectByName(name)' : 'qe.project.getAudioEffectByName(name)'};
+            if (!${prep.video} && __crashProneAudioFx(fin, name)) continue;
             try { if (qc && fx) { ${prep.video ? 'qc.addVideoEffect(fx)' : 'qc.addAudioEffect(fx)'}; } } catch (eA) {}
           }
         }
@@ -765,12 +865,25 @@ export class AssemblyTools extends ToolsBase {
     if (!placed?.success) return placed;
 
     // Effects: temporary copy -> the clip now in the old slot.
-    const copied: any = await (this as any).executeTool('copy_effects_between_clips', {
-      sourceClipId: prep.staged,
-      targetClipId: placed.finalId,
-      sourceSequenceId: prep.seq,
-      targetSequenceId: prep.seq,
-    });
+    const copied: any = await this.peers.executeTool(
+      'copy_effects_between_clips',
+      {
+        sourceClipId: prep.staged,
+        targetClipId: placed.finalId,
+        sourceSequenceId: prep.seq,
+        targetSequenceId: prep.seq,
+      },
+      { allowUnexposed: true },
+    );
+    const copyFailed = [stagedCopy, copied].some((r) => !r || r.success === false);
+    const copyError = copyFailed
+      ? `Effect values were not copied (${
+          [stagedCopy, copied]
+            .map((r) => r?.error)
+            .filter(Boolean)
+            .join('; ') || 'no result'
+        }), so carried effects may sit at their defaults.`
+      : '';
 
     return await this.bridge.executeScript(`
       try {
@@ -790,18 +903,18 @@ export class AssemblyTools extends ToolsBase {
         for (var w = 0; w < want.length; w++) { var found = false; for (var f = 0; f < effects.length; f++) if (effects[f] === want[w]) { found = true; effects.splice(f, 1); break; } if (!found) lost.push(want[w]); }
         var placedOk = c && Math.abs(c.start.seconds - ${prep.start}) < 0.02 && Math.abs(c.end.seconds - ${prep.end}) < 0.02 && Math.abs(c.inPoint.seconds - ${prep.inPoint}) < 0.02;
         return JSON.stringify({
-          success: !!placedOk && lost.length === 0 && !__findClip(${JSON.stringify(prep.staged)}, ${JSON.stringify(prep.seq)}), verified: true,
+          success: !!placedOk && lost.length === 0 && ${!copyFailed} && !__findClip(${JSON.stringify(prep.staged)}, ${JSON.stringify(prep.seq)}), verified: true,
           verifiedBy: 'timeline readback of start, end, in point and effect list; temporary copy removed',
           clipId: c ? String(c.nodeId) : null, start: c ? c.start.seconds : null, end: c ? c.end.seconds : null, inPoint: c ? c.inPoint.seconds : null,
           effectsAdded: ${JSON.stringify(prep.added)}, effectValuesCopied: ${JSON.stringify(copied?.data?.copied ?? copied?.copied ?? null)},
           note: 'The swapped clip has a new clip id; use clipId from this result.',
-          error: !placedOk ? 'The new clip did not land at the old clip\\'s exact position and source range.' : (lost.length ? 'These effects could not be carried over: ' + lost.join(', ') : undefined)
+          error: !placedOk ? 'The new clip did not land at the old clip\\'s exact position and source range.' : (lost.length ? 'These effects could not be carried over: ' + lost.join(', ') : (${JSON.stringify(copyError)} || undefined))
         });
       } catch (e) { return JSON.stringify({ success: false, error: e.toString() }); }
     `);
   }
 
-  protected async nestAllV1Clips(newSeqName: string, seqId?: string): Promise<any> {
+  async nestAllV1Clips(newSeqName: string, seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(seqId)};
@@ -816,11 +929,7 @@ export class AssemblyTools extends ToolsBase {
     `);
   }
 
-  protected async batchReplaceClips(
-    oldItemId: string,
-    newItemId: string,
-    seqId?: string,
-  ): Promise<any> {
+  async batchReplaceClips(oldItemId: string, newItemId: string, seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var newItem = __findProjectItem(${JSON.stringify(newItemId)});

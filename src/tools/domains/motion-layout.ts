@@ -1,14 +1,14 @@
 /**
  * MotionLayoutTools -- the Motion & Clip Layout tool domain.
  *
- * One link in the chain that composes PremiereProTools. Split out of tools/index.ts, which
- * had grown to 19k lines; the method bodies are unchanged.
+ * A plain class on ToolsBase. PremiereProTools holds one instance and dispatches tool calls
+ * to it by name; other domains it relies on are reached through `this.peers`.
  */
-import { MarkerTools } from './marker.js';
+import { ToolsBase } from './base.js';
 import type { MotionParamTarget, MotionStyle } from './shared.js';
 
-export class MotionLayoutTools extends MarkerTools {
-  protected getMotionRange(style: MotionStyle, index: number): { from: number; to: number } {
+export class MotionLayoutTools extends ToolsBase {
+  getMotionRange(style: MotionStyle, index: number): { from: number; to: number } {
     if (style === 'push_in') {
       return { from: 100, to: 108 };
     }
@@ -139,7 +139,7 @@ export class MotionLayoutTools extends MarkerTools {
     `;
   }
 
-  protected async flipClip(
+  async flipClip(
     sequenceId: string | undefined,
     ti: number,
     ci: number,
@@ -180,7 +180,7 @@ export class MotionLayoutTools extends MarkerTools {
     `);
   }
 
-  protected async fadeVideo(
+  async fadeVideo(
     sequenceId: string | undefined,
     ti: number,
     ci: number,
@@ -192,7 +192,7 @@ export class MotionLayoutTools extends MarkerTools {
         var seq = ${this.buildSeqRes(sequenceId)};
         var clip = seq.videoTracks[${ti}].clips[${ci}];
         if (!clip) return JSON.stringify({success:false,error:'Clip not found'});
-        ${this.keyframeVerifyFragment()}
+        ${this.peers.keyframe.keyframeVerifyFragment()}
         // Opacity was addressed as components[0].properties[0] with no name check. Confirm
         // the parameter really is Opacity before animating it, or the fade lands on whatever
         // parameter happens to sit at that slot.
@@ -237,11 +237,7 @@ export class MotionLayoutTools extends MarkerTools {
     `);
   }
 
-  protected async resetTransform(
-    sequenceId: string | undefined,
-    ti: number,
-    ci: number,
-  ): Promise<any> {
+  async resetTransform(sequenceId: string | undefined, ti: number, ci: number): Promise<any> {
     return await this.bridge.executeScript(
       this.motionParamScript(
         sequenceId,
@@ -258,7 +254,7 @@ export class MotionLayoutTools extends MarkerTools {
     );
   }
 
-  protected async matchTransform(
+  async matchTransform(
     sequenceId: string | undefined,
     srcTi: number,
     srcCi: number,
@@ -326,7 +322,7 @@ export class MotionLayoutTools extends MarkerTools {
     };
   }
 
-  protected async applyLetterbox(
+  async applyLetterbox(
     sequenceId: string | undefined,
     ti: number,
     ci: number,
@@ -372,7 +368,7 @@ export class MotionLayoutTools extends MarkerTools {
     };
   }
 
-  protected async kenBurns(args: any): Promise<any> {
+  async kenBurns(args: any): Promise<any> {
     const ti = args.trackIndex ?? 0;
     const ci = args.clipIndex ?? 0;
     const sScale = args.startScale ?? 100;
@@ -385,7 +381,7 @@ export class MotionLayoutTools extends MarkerTools {
       try {
         var seq = app.project.activeSequence;
         var clip = seq.videoTracks[${ti}].clips[${ci}];
-        ${this.keyframeVerifyFragment()}
+        ${this.peers.keyframe.keyframeVerifyFragment()}
         var mot = null;
         for (var i=0;i<clip.components.numItems;i++){if(String(clip.components[i].displayName)==='Motion'){mot=clip.components[i];break;}}
         if (!mot) return JSON.stringify({success:false,verified:false,error:'This clip has no Motion component, so a Ken Burns move cannot be keyframed on it.'});
@@ -429,7 +425,7 @@ export class MotionLayoutTools extends MarkerTools {
     `);
   }
 
-  protected async setClipScaleToFrameSize(
+  async setClipScaleToFrameSize(
     sequenceId: string | undefined,
     ti: number,
     ci: number,
@@ -475,7 +471,7 @@ export class MotionLayoutTools extends MarkerTools {
    * argument it throws "Error: Not Enough Parameters" rather than defaulting to
    * true, so `enabled` is always passed through.
    */
-  protected async setScaleToFrameSizeBatch(
+  async setScaleToFrameSizeBatch(
     enabled: boolean,
     sequenceId?: string,
     trackIndex?: number,
@@ -579,7 +575,7 @@ export class MotionLayoutTools extends MarkerTools {
     `);
   }
 
-  protected async setFrameBlendQe(
+  async setFrameBlendQe(
     trackIndex: number,
     clipIndex: number,
     enabled: boolean,
@@ -593,7 +589,7 @@ export class MotionLayoutTools extends MarkerTools {
     `);
   }
 
-  protected async setClipBorderWidth(
+  async setClipBorderWidth(
     trackIndex: number,
     clipIndex: number,
     _width: number,
@@ -611,7 +607,7 @@ export class MotionLayoutTools extends MarkerTools {
     `);
   }
 
-  protected async cropClip(
+  async cropClip(
     clipId: string,
     options: {
       left?: number;
@@ -808,7 +804,7 @@ export class MotionLayoutTools extends MarkerTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async pipLayout(
+  async pipLayout(
     trackIndex: number,
     clipIndex: number,
     corner: string,
@@ -840,7 +836,7 @@ export class MotionLayoutTools extends MarkerTools {
     return { ...r, corner, sizePercent: scale };
   }
 
-  protected async gridLayout(
+  async gridLayout(
     clips: Array<{ trackIndex: number; clipIndex: number }>,
     cols: number,
     seqId?: string,
@@ -872,7 +868,7 @@ export class MotionLayoutTools extends MarkerTools {
     return { ...r, cols, rows, scale, clipsRequested: clips.length };
   }
 
-  protected async splitScreenLayout(
+  async splitScreenLayout(
     clips: Array<{ trackIndex: number; clipIndex: number }>,
     orientation: string,
     seqId?: string,
@@ -919,11 +915,7 @@ export class MotionLayoutTools extends MarkerTools {
     };
   }
 
-  protected async resetMotionToDefaults(
-    trackIndex: number,
-    clipIndex: number,
-    seqId?: string,
-  ): Promise<any> {
+  async resetMotionToDefaults(trackIndex: number, clipIndex: number, seqId?: string): Promise<any> {
     // Eleven bare-index writes, no readback, unconditional verified: true. Indices 7..10 were
     // assumed to be crop; each target now carries the name it must be, and a parameter that is
     // not where it was expected is reported instead of written blind.
@@ -946,7 +938,7 @@ export class MotionLayoutTools extends MarkerTools {
     );
   }
 
-  protected async alignClipsSpatial(
+  async alignClipsSpatial(
     clips: Array<{ trackIndex: number; clipIndex: number }>,
     alignment: string,
     seqId?: string,
@@ -1039,7 +1031,7 @@ export class MotionLayoutTools extends MarkerTools {
     };
   }
 
-  protected async safeAreaCheck(seqId?: string): Promise<any> {
+  async safeAreaCheck(seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       var seq=${this.buildSeqRes(seqId)};
       var w=seq.frameSizeHorizontal,h=seq.frameSizeVertical;
@@ -1047,7 +1039,7 @@ export class MotionLayoutTools extends MarkerTools {
     `);
   }
 
-  protected async setClipCrop(
+  async setClipCrop(
     trackIndex: number,
     clipIndex: number,
     left: number,
@@ -1083,7 +1075,7 @@ export class MotionLayoutTools extends MarkerTools {
     };
   }
 
-  protected async toggleUniformScale(
+  async toggleUniformScale(
     trackIndex: number,
     clipIndex: number,
     uniformScale: boolean,
@@ -1106,7 +1098,7 @@ export class MotionLayoutTools extends MarkerTools {
   }
 
   // Auto Reframe Implementation
-  protected async autoReframeSequence(
+  async autoReframeSequence(
     sequenceId: string,
     numerator: number,
     denominator: number,

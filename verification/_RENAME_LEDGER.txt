@@ -33,3 +33,27 @@
    live-smoke-sweep.mjs now pre-flights the engine, classifies this rejection as `skipped_wedged`
    instead of `fail`, and uses the shared ensureHealthy() guard after every call so a wedge is
    attributed to the tool that caused it and cleared before the next one runs.
+
+2026-10-29  NOT KEPT  verification/sweeps/20261029T184543Z-live-smoke-sweep.json (never committed)
+   Reason: ran on fixtures damaged by an earlier sweep that crashed Premiere mid-run (denoise_clip),
+   so 27 tools failed on 0.23 s clips, a missing MOGRT and missing Chapter markers rather than on
+   their code. After `node scripts/reset-scratch.mjs` the same build passed 527 (20261029T185130Z).
+
+2026-11-01  NOT KEPT  verification/sweeps/20261101T210533Z-live-smoke-sweep.json (never committed)
+   Reason: stopped after 450 of 663 tools. export_aaf_with_settings and export_social_preset ran
+   past the harness timeout, the script engine never came back (ENGINE_DEAD after 376 s, the
+   screen was locked, so a report dialog could not be dismissed), and the sweep refused to go on
+   because it could no longer confirm the target project. Premiere was restarted and the sweep
+   re-run with those two tools skipped for the run (--skip).
+
+2026-11-01  NOT KEPT  verification/sweeps/20261101T213309Z-workflow-tests.json and
+            20261102T031450Z-workflow-tests.json (never committed)
+   Reason: written by the first version of the workflow-tests ledger writer, which filed every
+   tool a passing workflow called as a pass, including tools only ever run on their refusal
+   paths (title_card, update_marker, set_app_property in W10). Replaced by a run of the fixed
+   writer, which records a pass only for a call that succeeded.
+
+2026-11-01  REBUILT  verification/sweeps/20261102T033033Z-crash-matrix.json
+   Rows rebuilt from that run's own raw results with the fixed aggregation: render_sequence_previews,
+   render_audio and export_with_burn_ins succeeded only with verified:false, which the first writer
+   dropped. Same run, same environment block.

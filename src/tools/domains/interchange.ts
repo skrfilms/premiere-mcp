@@ -1,16 +1,16 @@
 /**
  * InterchangeTools -- the Interchange & Conform tool domain.
  *
- * One link in the chain that composes PremiereProTools. Split out of tools/index.ts, which
- * had grown to 19k lines; the method bodies are unchanged.
+ * A plain class on ToolsBase. PremiereProTools holds one instance and dispatches tool calls
+ * to it by name; other domains it relies on are reached through `this.peers`.
  */
-import { ColorTools } from './color.js';
 // Synchronous fs/path/os bindings for the Node-side (non-ExtendScript) tools.
 // The async API is the separate `promises as fs` import.
+import { ToolsBase } from './base.js';
 import * as fsSync from 'node:fs';
 
-export class InterchangeTools extends ColorTools {
-  protected async vfxPullList(
+export class InterchangeTools extends ToolsBase {
+  async vfxPullList(
     sequenceId: string | undefined,
     handles: number,
     trackIndex: number,
@@ -48,7 +48,7 @@ export class InterchangeTools extends ColorTools {
     `);
   }
 
-  protected async cutListCsv(
+  async cutListCsv(
     outputPath: string,
     sequenceId: string | undefined,
     trackIndex: number,
@@ -71,7 +71,7 @@ export class InterchangeTools extends ColorTools {
     };
   }
 
-  protected async changeListReport(sequenceIdA: string, sequenceIdB: string): Promise<any> {
+  async changeListReport(sequenceIdA: string, sequenceIdB: string): Promise<any> {
     // Reuse diff_sequences tool logic
     return await this.bridge.executeScript(`
       try {
@@ -105,7 +105,7 @@ export class InterchangeTools extends ColorTools {
     `);
   }
 
-  protected async syncLockTrack(
+  async syncLockTrack(
     sequenceId: string | undefined,
     trackType: 'video' | 'audio',
     trackIndex: number,
@@ -134,7 +134,7 @@ export class InterchangeTools extends ColorTools {
     `);
   }
 
-  protected async getProductionList(): Promise<any> {
+  async getProductionList(): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -149,7 +149,7 @@ export class InterchangeTools extends ColorTools {
   }
 
   // Batch E: Project lifecycle
-  protected async openFcpXml(filePath: string, sequenceName?: string): Promise<any> {
+  async openFcpXml(filePath: string, sequenceName?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.openFCPXML(${JSON.stringify(filePath)}, ${JSON.stringify(sequenceName ?? '')});
@@ -165,7 +165,7 @@ export class InterchangeTools extends ColorTools {
    * Premiere to suppress warning UI. Do not use app.openFCPXML here: it rejects
    * the documented-looking two-argument form in the supported host runtime.
    */
-  protected async importFcpXml(filePath: string): Promise<any> {
+  async importFcpXml(filePath: string): Promise<any> {
     try {
       // No hand-escaping here. JSON.stringify below already produces a correctly
       // quoted literal; escaping first and then serialising doubled every backslash,
@@ -212,7 +212,7 @@ export class InterchangeTools extends ColorTools {
    * The resulting sequence's timebase/video standard comes from the project defaults
    * or the interactive dialog — app.importEDL has no video-standard argument.
    */
-  protected async importEdl(filePath: string): Promise<any> {
+  async importEdl(filePath: string): Promise<any> {
     return {
       success: false,
       blockedBeforePremiere: true,
@@ -222,7 +222,7 @@ export class InterchangeTools extends ColorTools {
     };
   }
 
-  protected async exportEdl(outputPath: string, seqId?: string): Promise<any> {
+  async exportEdl(outputPath: string, seqId?: string): Promise<any> {
     const xmlPath = outputPath.replace(/\.edl$/i, '_tmp.xml');
     const result = await this.bridge.executeScript(`
       try {
@@ -275,7 +275,7 @@ export class InterchangeTools extends ColorTools {
     }
   }
 
-  protected async getProductionInfo(): Promise<any> {
+  async getProductionInfo(): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -308,7 +308,7 @@ export class InterchangeTools extends ColorTools {
     `);
   }
 
-  protected async openFcpXmlProject(xmlPath: string, sequenceName = ''): Promise<any> {
+  async openFcpXmlProject(xmlPath: string, sequenceName = ''): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.openFCPXML(${JSON.stringify(xmlPath)},${JSON.stringify(sequenceName)});
@@ -318,7 +318,7 @@ export class InterchangeTools extends ColorTools {
   }
 
   // Export as FCP XML Implementation
-  protected async exportAsFcpXml(sequenceId: string, outputPath: string): Promise<any> {
+  async exportAsFcpXml(sequenceId: string, outputPath: string): Promise<any> {
     const script = `
       try {
         var seq = __findSequence(${JSON.stringify(sequenceId)});
@@ -343,7 +343,7 @@ export class InterchangeTools extends ColorTools {
   }
 
   // Export AAF Implementation
-  protected async exportAaf(
+  async exportAaf(
     sequenceId: string,
     outputPath: string,
     mixDownVideo?: boolean,
@@ -381,10 +381,7 @@ export class InterchangeTools extends ColorTools {
   }
 
   // Import Sequences From Project Implementation
-  protected async importSequencesFromProject(
-    projectPath: string,
-    sequenceIds: string[],
-  ): Promise<any> {
+  async importSequencesFromProject(projectPath: string, sequenceIds: string[]): Promise<any> {
     const script = `
       try {
         var seqIds = ${JSON.stringify(sequenceIds)};
@@ -402,7 +399,7 @@ export class InterchangeTools extends ColorTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async sendToAfterEffects(outputPath: string, sequenceId?: string): Promise<any> {
+  async sendToAfterEffects(outputPath: string, sequenceId?: string): Promise<any> {
     // Export sequence as .prproj — AE can open Premiere projects and access sequences
     const script = `
       try {
@@ -416,10 +413,7 @@ export class InterchangeTools extends ColorTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async convertProjectToProduction(
-    productionPath: string,
-    description?: string,
-  ): Promise<any> {
+  async convertProjectToProduction(productionPath: string, description?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -432,7 +426,7 @@ export class InterchangeTools extends ColorTools {
     `);
   }
 
-  protected async shareProduction(): Promise<any> {
+  async shareProduction(): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -443,7 +437,7 @@ export class InterchangeTools extends ColorTools {
     `);
   }
 
-  protected async syncProduction(): Promise<any> {
+  async syncProduction(): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();
@@ -454,7 +448,7 @@ export class InterchangeTools extends ColorTools {
     `);
   }
 
-  protected async productionSyncStatus(): Promise<any> {
+  async productionSyncStatus(): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.enableQE();

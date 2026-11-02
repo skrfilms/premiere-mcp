@@ -1,14 +1,14 @@
 /**
  * PlaybackTools -- the Playback, Navigation & Monitors tool domain.
  *
- * One link in the chain that composes PremiereProTools. Split out of tools/index.ts, which
- * had grown to 19k lines; the method bodies are unchanged.
+ * A plain class on ToolsBase. PremiereProTools holds one instance and dispatches tool calls
+ * to it by name; other domains it relies on are reached through `this.peers`.
  */
-import { SequenceTrackTools } from './sequence-track.js';
+import { ToolsBase } from './base.js';
 import { runUxp, uxpAvailable } from '../../bridge/uxp-channel.js';
 
-export class PlaybackTools extends SequenceTrackTools {
-  protected async goToSequenceStart(sequenceId?: string): Promise<any> {
+export class PlaybackTools extends ToolsBase {
+  async goToSequenceStart(sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
@@ -17,7 +17,7 @@ export class PlaybackTools extends SequenceTrackTools {
     `);
   }
 
-  protected async goToSequenceEnd(sequenceId?: string): Promise<any> {
+  async goToSequenceEnd(sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
@@ -31,7 +31,7 @@ export class PlaybackTools extends SequenceTrackTools {
     `);
   }
 
-  protected async goToInPoint(sequenceId?: string): Promise<any> {
+  async goToInPoint(sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
@@ -43,7 +43,7 @@ export class PlaybackTools extends SequenceTrackTools {
     `);
   }
 
-  protected async goToOutPoint(sequenceId?: string): Promise<any> {
+  async goToOutPoint(sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
@@ -55,7 +55,7 @@ export class PlaybackTools extends SequenceTrackTools {
     `);
   }
 
-  protected async stepFrames(frames: number, sequenceId?: string): Promise<any> {
+  async stepFrames(frames: number, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
@@ -76,7 +76,7 @@ export class PlaybackTools extends SequenceTrackTools {
     `);
   }
 
-  protected async getPlaybackState(sequenceId?: string): Promise<any> {
+  async getPlaybackState(sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No active sequence'});
@@ -85,7 +85,7 @@ export class PlaybackTools extends SequenceTrackTools {
     `);
   }
 
-  protected async getSequenceSelection(sequenceId?: string): Promise<any> {
+  async getSequenceSelection(sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No sequence'});
@@ -98,7 +98,7 @@ export class PlaybackTools extends SequenceTrackTools {
     `);
   }
 
-  protected async setSequenceSelection(
+  async setSequenceSelection(
     clips: Array<{ trackIndex: number; clipIndex: number }>,
     sequenceId?: string,
   ): Promise<any> {
@@ -132,7 +132,7 @@ export class PlaybackTools extends SequenceTrackTools {
     `);
   }
 
-  protected async goToNextMarker(sequenceId?: string): Promise<any> {
+  async goToNextMarker(sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No sequence'});
@@ -146,7 +146,7 @@ export class PlaybackTools extends SequenceTrackTools {
     `);
   }
 
-  protected async goToPrevMarker(sequenceId?: string): Promise<any> {
+  async goToPrevMarker(sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No sequence'});
@@ -160,7 +160,7 @@ export class PlaybackTools extends SequenceTrackTools {
     `);
   }
 
-  protected async goToTimecode(timecode: string, sequenceId?: string): Promise<any> {
+  async goToTimecode(timecode: string, sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No sequence'});
@@ -177,7 +177,7 @@ export class PlaybackTools extends SequenceTrackTools {
     `);
   }
 
-  protected async playInToOut(sequenceId?: string): Promise<any> {
+  async playInToOut(sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       var seq = ${this.buildSeqRes(sequenceId)};
       if (!seq) return JSON.stringify({success:false,error:'No sequence'});
@@ -187,7 +187,7 @@ export class PlaybackTools extends SequenceTrackTools {
     `);
   }
 
-  protected async timecodeToFrames(timecode: string, frameRate?: number): Promise<any> {
+  async timecodeToFrames(timecode: string, frameRate?: number): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = app.project.activeSequence;
@@ -203,7 +203,7 @@ export class PlaybackTools extends SequenceTrackTools {
     `);
   }
 
-  protected async framesToTimecode(frames: number, frameRate?: number): Promise<any> {
+  async framesToTimecode(frames: number, frameRate?: number): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = app.project.activeSequence;
@@ -219,7 +219,7 @@ export class PlaybackTools extends SequenceTrackTools {
     `);
   }
 
-  protected async selectClipsInTimeRange(
+  async selectClipsInTimeRange(
     startSecs: number,
     endSecs: number,
     trackIndices?: number[],
@@ -244,7 +244,7 @@ export class PlaybackTools extends SequenceTrackTools {
     `);
   }
 
-  protected async clearWorkArea(seqId?: string): Promise<any> {
+  async clearWorkArea(seqId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq=${this.buildSeqRes(seqId)};
@@ -278,7 +278,7 @@ export class PlaybackTools extends SequenceTrackTools {
     `);
   }
 
-  protected async refreshUi(): Promise<any> {
+  async refreshUi(): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         app.refresh();
@@ -287,7 +287,7 @@ export class PlaybackTools extends SequenceTrackTools {
     `);
   }
 
-  protected async getPanelVisibility(panels?: string[]): Promise<any> {
+  async getPanelVisibility(panels?: string[]): Promise<any> {
     const checkPanels = panels ?? [
       'Timeline',
       'Source Monitor',
@@ -312,7 +312,7 @@ export class PlaybackTools extends SequenceTrackTools {
   }
 
   // Playhead & Work Area Implementation
-  protected async getPlayheadPosition(sequenceId: string): Promise<any> {
+  async getPlayheadPosition(sequenceId: string): Promise<any> {
     const script = `
       try {
         var sequence = __findSequence(${JSON.stringify(sequenceId)});
@@ -330,7 +330,7 @@ export class PlaybackTools extends SequenceTrackTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async setPlayheadPosition(sequenceId: string, time: number): Promise<any> {
+  async setPlayheadPosition(sequenceId: string, time: number): Promise<any> {
     const script = `
       try {
         var sequence = __findSequence(${JSON.stringify(sequenceId)});
@@ -365,7 +365,7 @@ export class PlaybackTools extends SequenceTrackTools {
   }
 
   // Work Area Implementation
-  protected async setWorkArea(sequenceId: string, inPoint: number, outPoint: number): Promise<any> {
+  async setWorkArea(sequenceId: string, inPoint: number, outPoint: number): Promise<any> {
     if (!(Number(outPoint) > Number(inPoint))) {
       return {
         success: false,
@@ -380,6 +380,7 @@ export class PlaybackTools extends SequenceTrackTools {
       const u = await runUxp(
         `
         const p = await ppro.Project.getActiveProject();
+        if (!p) return { found: false, reason: 'no project is open in Premiere' };
         const seqs = await p.getSequences();
         const want = ${JSON.stringify(String(sequenceId ?? ''))};
         const s = want ? seqs.find((q) => String(q.guid) === want) : await p.getActiveSequence();
@@ -462,7 +463,7 @@ export class PlaybackTools extends SequenceTrackTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async getWorkArea(sequenceId: string): Promise<any> {
+  async getWorkArea(sequenceId: string): Promise<any> {
     const script = `
       try {
         var sequence = __findSequence(${JSON.stringify(sequenceId)});
@@ -482,7 +483,7 @@ export class PlaybackTools extends SequenceTrackTools {
   }
 
   // Clip Lookup Implementation
-  protected async getClipAtPosition(
+  async getClipAtPosition(
     sequenceId: string,
     trackType: string,
     trackIndex: number,
@@ -528,7 +529,7 @@ export class PlaybackTools extends SequenceTrackTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async selectAllOnTrack(
+  async selectAllOnTrack(
     trackIndex: number,
     startSecs?: number,
     endSecs?: number,

@@ -48,14 +48,14 @@ function stripComments(src: string): string {
     .join('\n');
 }
 
-/** Every `protected async` method in the domain layer, with its body. */
+/** Every async method in the domain layer, with its body. */
 function domainMethods(): Method[] {
   const out: Method[] = [];
   for (const file of domainFiles) {
     const lines = stripComments(readFileSync(join(DOMAIN_DIR, file), 'utf8')).split('\n');
     const starts: Array<[number, string]> = [];
     lines.forEach((l, i) => {
-      const m = /^\s*protected async (\w+)/.exec(l);
+      const m = /^ {2}(?:public |protected |private )?async (\w+)\(/.exec(l);
       if (m) starts.push([i, m[1]!]);
     });
     starts.forEach(([i, name], idx) => {

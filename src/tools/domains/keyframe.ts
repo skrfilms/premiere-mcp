@@ -1,13 +1,13 @@
 /**
  * KeyframeTools -- the Keyframes & Animation tool domain.
  *
- * One link in the chain that composes PremiereProTools. Split out of tools/index.ts, which
- * had grown to 19k lines; the method bodies are unchanged.
+ * A plain class on ToolsBase. PremiereProTools holds one instance and dispatches tool calls
+ * to it by name; other domains it relies on are reached through `this.peers`.
  */
-import { InterchangeTools } from './interchange.js';
+import { ToolsBase } from './base.js';
 import { type EaseKeyframe, type EaseSampleOptions, sampleEaseKeyframes } from '../easing.js';
 
-export class KeyframeTools extends InterchangeTools {
+export class KeyframeTools extends ToolsBase {
   /**
    * The Motion component's counterpart to lumetriParamScript, and it exists for the same
    * reason. Seven tools (reset_transform, match_transform, letterbox, pip_layout,
@@ -40,7 +40,7 @@ export class KeyframeTools extends InterchangeTools {
    * across this API. The value is read with a Time object first and a seconds number second,
    * and an unreadable value is reported as unreadable rather than assumed correct.
    */
-  protected keyframeVerifyFragment(): string {
+  keyframeVerifyFragment(): string {
     return `
       function __kfMatch(a, b) {
         if (a === null || a === undefined) return false;
@@ -89,7 +89,7 @@ export class KeyframeTools extends InterchangeTools {
     `;
   }
 
-  protected async setTimeInterpolationType(
+  async setTimeInterpolationType(
     trackIndex: number,
     clipIndex: number,
     type: number,
@@ -103,7 +103,7 @@ export class KeyframeTools extends InterchangeTools {
     `);
   }
 
-  protected async keyframeZoom(
+  async keyframeZoom(
     trackIndex: number,
     clipIndex: number,
     startScale: number,
@@ -151,7 +151,7 @@ export class KeyframeTools extends InterchangeTools {
     `);
   }
 
-  protected async findKeyframeNearTime(
+  async findKeyframeNearTime(
     trackIndex: number,
     clipIndex: number,
     componentIndex: number,
@@ -187,7 +187,7 @@ export class KeyframeTools extends InterchangeTools {
   }
 
   // Keyframe Implementation
-  protected async addKeyframe(
+  async addKeyframe(
     clipId: string,
     componentName: string,
     paramName: string,
@@ -245,7 +245,7 @@ export class KeyframeTools extends InterchangeTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async removeKeyframe(
+  async removeKeyframe(
     clipId: string,
     componentName: string,
     paramName: string,
@@ -297,11 +297,7 @@ export class KeyframeTools extends InterchangeTools {
     return await this.bridge.executeScript(script);
   }
 
-  protected async getKeyframes(
-    clipId: string,
-    componentName: string,
-    paramName: string,
-  ): Promise<any> {
+  async getKeyframes(clipId: string, componentName: string, paramName: string): Promise<any> {
     const script = `
       try {
         var info = __findClip(${JSON.stringify(clipId)});
@@ -361,7 +357,7 @@ export class KeyframeTools extends InterchangeTools {
    * verified. Keyframe *values* CAN be read back, so a curve baked from an
    * easing function is both arbitrary in shape and provable after the fact.
    */
-  protected async bakeKeyframeEase(args: any): Promise<any> {
+  async bakeKeyframeEase(args: any): Promise<any> {
     const componentName = String(args.componentName ?? 'Opacity');
     const paramName = String(args.paramName ?? 'Opacity');
 

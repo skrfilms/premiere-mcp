@@ -3847,7 +3847,7 @@ export const EXPANDED_TOOL_SPECS: ExpandedToolSpec[] = [
   {
     name: 'get_clip_links',
     description:
-      "Returns a clip's full info including effect components and property values (shared full-clip-info handler).",
+      "Returns the clips linked to this one (its own audio or video: id, name, track, start and end) in `linked`, plus the clip's full info with effect components and property values.",
     args: [
       {
         name: 'clipId',

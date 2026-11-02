@@ -1,20 +1,16 @@
 /**
  * ReviewDeliveryTools -- the Review & Delivery tool domain.
  *
- * One link in the chain that composes PremiereProTools. Split out of tools/index.ts, which
- * had grown to 19k lines; the method bodies are unchanged.
+ * A plain class on ToolsBase. PremiereProTools holds one instance and dispatches tool calls
+ * to it by name; other domains it relies on are reached through `this.peers`.
  */
-import { MulticamTools } from './multicam.js';
 // Synchronous fs/path/os bindings for the Node-side (non-ExtendScript) tools.
 // The async API is the separate `promises as fs` import.
+import { ToolsBase } from './base.js';
 import * as fsSync from 'node:fs';
 
-export class ReviewDeliveryTools extends MulticamTools {
-  protected async assembleReviewReel(
-    sequenceIds: string[],
-    reelName: string,
-    handles: number,
-  ): Promise<any> {
+export class ReviewDeliveryTools extends ToolsBase {
+  async assembleReviewReel(sequenceIds: string[], reelName: string, handles: number): Promise<any> {
     const idsJson = JSON.stringify(sequenceIds);
     return await this.bridge.executeScript(`
       try {
@@ -76,7 +72,7 @@ export class ReviewDeliveryTools extends MulticamTools {
     `);
   }
 
-  protected async versionUpSequence(sequenceId?: string, setActive?: boolean): Promise<any> {
+  async versionUpSequence(sequenceId?: string, setActive?: boolean): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(sequenceId)};
@@ -130,7 +126,7 @@ export class ReviewDeliveryTools extends MulticamTools {
     `);
   }
 
-  protected async shotStatusReport(): Promise<any> {
+  async shotStatusReport(): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seqs = app.project.sequences;
@@ -155,7 +151,7 @@ export class ReviewDeliveryTools extends MulticamTools {
     `);
   }
 
-  protected async notesToMarkers(
+  async notesToMarkers(
     notesPath: string,
     sequenceId?: string,
     markerType = 'Comment',
@@ -185,7 +181,7 @@ export class ReviewDeliveryTools extends MulticamTools {
         secs = parseInt(P(0)) * 3600 + parseInt(P(1)) * 60 + parseFloat(P(2));
       else if (parts.length === 2) secs = parseInt(P(0)) * 60 + parseFloat(P(1));
       else secs = parseFloat(tcStr);
-      const r = await this.createMarker(
+      const r = await this.peers.marker.createMarker(
         secs,
         note,
         '',
@@ -199,11 +195,7 @@ export class ReviewDeliveryTools extends MulticamTools {
     return { success: true, created, total: lines.length };
   }
 
-  protected async markersToNotes(
-    outputPath: string,
-    sequenceId?: string,
-    format = 'text',
-  ): Promise<any> {
+  async markersToNotes(outputPath: string, sequenceId?: string, format = 'text'): Promise<any> {
     const result = await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(sequenceId)};
@@ -245,7 +237,7 @@ export class ReviewDeliveryTools extends MulticamTools {
     return { success: true, outputPath, markerCount: result.rows.length, format };
   }
 
-  protected async deliveryQc(sequenceId?: string): Promise<any> {
+  async deliveryQc(sequenceId?: string): Promise<any> {
     return await this.bridge.executeScript(`
       try {
         var seq = ${this.buildSeqRes(sequenceId)};
@@ -292,10 +284,7 @@ export class ReviewDeliveryTools extends MulticamTools {
     `);
   }
 
-  protected async shotgridStatusSync(
-    csvPath: string,
-    statusToColor?: Record<string, number>,
-  ): Promise<any> {
+  async shotgridStatusSync(csvPath: string, statusToColor?: Record<string, number>): Promise<any> {
     const fs = fsSync;
     const defaultMap: Record<string, number> = {
       wtg: 0,
