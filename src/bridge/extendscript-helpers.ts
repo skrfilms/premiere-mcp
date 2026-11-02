@@ -416,13 +416,73 @@ function __mcpMediaSecs(item) {
   try {
     var m = /<premierePrivateProjectMetaData:Column\\.Intrinsic\\.MediaDuration>([^<]*)</.exec(String(item.getProjectMetadata()));
     if (!m) return null;
-    var parts = m[1].split(/[:;]/);
+    var drop = m[1].indexOf(';') >= 0, parts = m[1].split(/[:;]/);
     if (parts.length !== 4) return null;
     var fps = 0;
     try { fps = Number(item.getFootageInterpretation().frameRate); } catch (eF) {}
-    var nominal = fps > 0 ? Math.round(fps) : 24;
-    return Number(parts[0]) * 3600 + Number(parts[1]) * 60 + Number(parts[2]) + Number(parts[3]) / nominal;
+    // Unknown rate: no length, rather than a guess (a guessed 24 read a 60 fps 5:59 as 7.46 s).
+    if (!(fps > 0)) return null;
+    // The timecode counts frames at the nominal rate (30 for 29.97); real seconds are frames
+    // over the real rate. Drop-frame timecode skips 2 (or 4 at 59.94) numbers every minute
+    // except every tenth, which is taken back out of the count.
+    var nominal = Math.round(fps);
+    var frames = ((Number(parts[0]) * 60 + Number(parts[1])) * 60 + Number(parts[2])) * nominal + Number(parts[3]);
+    if (drop) { var mins = Number(parts[0]) * 60 + Number(parts[1]); frames -= Math.round(fps / 15) * (mins - Math.floor(mins / 10)); }
+    return frames / fps;
   } catch (e) { return null; }
+}
+// Every clip id on every track, for telling which clips a placement just created.
+function __mcpAllClipIds(seq) {
+  var ids = {};
+  var kinds = [seq.videoTracks, seq.audioTracks];
+  for (var k = 0; k < 2; k++) for (var t = 0; t < kinds[k].numTracks; t++) for (var c = 0; c < kinds[k][t].clips.numItems; c++) ids[String(kinds[k][t].clips[c].nodeId)] = true;
+  return ids;
+}
+// The clips not in before, as [{ clip, type, track, index }].
+function __mcpNewClips(seq, before) {
+  var out = [], kinds = [['video', seq.videoTracks], ['audio', seq.audioTracks]];
+  for (var k = 0; k < 2; k++) {
+    var tracks = kinds[k][1];
+    for (var t = 0; t < tracks.numTracks; t++) for (var c = 0; c < tracks[t].clips.numItems; c++) {
+      var cl = tracks[t].clips[c];
+      if (!before[String(cl.nodeId)]) out.push({ clip: cl, type: kinds[k][0], track: t, index: c });
+    }
+  }
+  return out;
+}
+// Where a clip is now: { clip, type, track, index }, or null.
+function __mcpLocate(seq, id) {
+  var kinds = [['video', seq.videoTracks], ['audio', seq.audioTracks]];
+  for (var k = 0; k < 2; k++) {
+    var tracks = kinds[k][1];
+    for (var t = 0; t < tracks.numTracks; t++) for (var c = 0; c < tracks[t].clips.numItems; c++) {
+      if (String(tracks[t].clips[c].nodeId) === String(id)) return { clip: tracks[t].clips[c], type: kinds[k][0], track: t, index: c };
+    }
+  }
+  return null;
+}
+function __mcpComponentOrder(clip) {
+  var o = [];
+  for (var k = 0; k < clip.components.numItems; k++) o.push(String(clip.components[k].matchName));
+  return o;
+}
+// Transitions on a member's head or tail edge: [{ edge, name, matchName, start, end, align }].
+// align: 0 when it starts at the cut, 1 when it ends at the cut (QE addTransition's alignment,
+// measured on both edges, 2026-11-01); null when it straddles the cut, which QE cannot re-create.
+function __mcpEdgeTransitions(seq, type, track, start, end, frame) {
+  var out = [], tracks = type === 'video' ? seq.videoTracks : seq.audioTracks, tr = null;
+  try { tr = tracks[track].transitions; } catch (e) { tr = null; }
+  for (var i = 0; tr && i < tr.numItems; i++) {
+    var x = tr[i], ts = x.start.seconds, te = x.end.seconds;
+    var edges = [['head', start], ['tail', end]];
+    for (var e2 = 0; e2 < 2; e2++) {
+      var cut = edges[e2][1];
+      if (ts > cut + frame || te < cut - frame) continue;
+      var align = Math.abs(ts - cut) <= frame ? 0 : Math.abs(te - cut) <= frame ? 1 : null;
+      out.push({ edge: edges[e2][0], name: String(x.name), matchName: String(x.matchName), start: ts, end: te, align: align });
+    }
+  }
+  return out;
 }
 // A clip and the clips linked to it, video first, then by track: [{ clip, type, track, index }].
 function __mcpClipGroup(seq, clip) {
