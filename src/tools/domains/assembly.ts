@@ -124,17 +124,19 @@ export class AssemblyTools extends ToolsBase {
       seek = [];
       // Premiere says which it is. A numbered file beside it proves nothing: a single still from
       // a folder of numbered photos would otherwise hold a different photo.
+      // Only the two measured English values are trusted; anything else (a localized Premiere,
+      // an empty field) is treated as unknown, which refuses when a numbered neighbour exists.
       const still = info.mediaType === 'Still Image';
-      const sequence = info.mediaType != null && !still;
+      const sequence = info.mediaType === 'Video';
       if (!still) {
         const seqFrame = imageSequenceFrame(info.mediaPath, sourceSecs, Number(info.frameRate));
-        if (seqFrame && 'error' in seqFrame) return { success: false, error: seqFrame.error };
         if (seqFrame && !sequence) {
           return {
             success: false,
-            error: `Could not tell whether "${basename(info.mediaPath)}" is a single still or the first frame of an image sequence (Premiere did not report its media type), so the frame at ${sourceSecs}s cannot be picked safely. Nothing was changed.`,
+            error: `Could not tell whether "${basename(info.mediaPath)}" is a single still or the first frame of an image sequence (Premiere reports its media type as ${info.mediaType == null ? 'nothing' : `"${info.mediaType}"`}), so the frame at ${sourceSecs}s cannot be picked safely. Nothing was changed.`,
           };
         }
+        if (seqFrame && 'error' in seqFrame) return { success: false, error: seqFrame.error };
         if (seqFrame) input = heldFile = seqFrame.file;
         else if (sequence) {
           return {
@@ -784,23 +786,39 @@ export class AssemblyTools extends ToolsBase {
       },
       { allowUnexposed: true },
     );
-    // Nothing has been removed yet. If the effect values did not reach the temporary copy,
-    // stop here and take the copy away, rather than swap and leave the grade at its defaults.
-    if (!stagedCopy || stagedCopy.success === false) {
+    // Nothing has been removed yet. If an effect could not be added to the temporary copy, or
+    // the values did not reach it, stop here and take the copy away, rather than swap and leave
+    // the grade short. (copy_effects_between_clips reports success when any property copied, and
+    // Motion/Opacity always do, so a missing effect is checked by name as well.)
+    const missing: string[] = Array.isArray(prep.missing) ? prep.missing : [];
+    const abortReason = missing.length
+      ? `these effects could not be added to the new media: ${missing.join(', ')}`
+      : !stagedCopy || stagedCopy.success === false
+        ? `the effect values could not be copied off the clip (${stagedCopy?.error ?? 'no result'})`
+        : '';
+    if (abortReason) {
       const cleaned: any = await this.bridge.executeScript(`
         try {
           var tmp = __findClip(${JSON.stringify(prep.staged)}, ${JSON.stringify(prep.seq)});
+          var ids = [];
           if (tmp) {
-            try { var li = tmp.clip.getLinkedItems(); for (var i = 0; li && i < li.numItems; i++) if (String(li[i].nodeId) !== String(tmp.clip.nodeId)) li[i].remove(false, false); } catch (eL) {}
+            // Collected first: removing items while walking the live linked list skipped some.
+            var linked = [];
+            try { var li = tmp.clip.getLinkedItems(); for (var i = 0; li && i < li.numItems; i++) if (String(li[i].nodeId) !== String(tmp.clip.nodeId)) linked.push(li[i]); } catch (eL) {}
+            for (var k = 0; k < linked.length; k++) { ids.push(String(linked[k].nodeId)); try { linked[k].remove(false, false); } catch (eR) {} }
+            ids.push(String(tmp.clip.nodeId));
             tmp.clip.remove(false, false);
           }
-          return JSON.stringify({ success: true, gone: !__findClip(${JSON.stringify(prep.staged)}, ${JSON.stringify(prep.seq)}) });
+          var left = [];
+          for (var g = 0; g < ids.length; g++) if (__findClip(ids[g], ${JSON.stringify(prep.seq)})) left.push(ids[g]);
+          return JSON.stringify({ success: true, gone: left.length === 0, left: left });
         } catch (e) { return JSON.stringify({ success: false, error: e.toString() }); }
       `);
       return {
         success: false,
         changed: !cleaned?.gone,
-        error: `The effect values could not be copied off the clip (${stagedCopy?.error ?? 'no result'}), so the swap was stopped before the old clip was touched.${cleaned?.gone ? ' Nothing was changed.' : ` A temporary copy of the new media is still on the track at ${prep.stagedStart}s; delete it.`}`,
+        error: `The swap was stopped before the old clip was touched: ${abortReason}.${cleaned?.gone ? ' Nothing was changed.' : ` A temporary copy of the new media (${(cleaned?.left ?? []).length || 'some'} item(s)) is still on the track from ${prep.stagedStart}s; delete it.`}`,
+        ...(missing.length ? { missingEffects: missing } : {}),
       };
     }
 

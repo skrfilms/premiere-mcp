@@ -67,8 +67,9 @@ const used = (name, args, r) => {
   if (name === 'call_tool' && args?.name) current.calls.push({ name: String(args.name), ok });
 };
 async function tool(name, args) {
-  const r = await tools.executeTool(name, args);
-  used(name, args, r);
+  // Recorded in finally: a call that throws is a failed call, not a missing one.
+  let r;
+  try { r = await tools.executeTool(name, args); } finally { used(name, args, r); }
   return r && r.data && r.success !== false && r.tool ? { success: true, ...r.data } : r;
 }
 async function host(body) { return bridge.executeScript(body); }
@@ -433,7 +434,14 @@ async function mcpClient() {
     return JSON.parse(line ? line.slice(5) : text);
   };
   await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'workflow-tests', version: '1' } });
-  return async (name, args) => { const r = await rpc('tools/call', { name, arguments: args }); const out = r.result ? JSON.parse(r.result.content[0].text) : { success: false, error: r.error?.message }; used(name, args, out); return out; };
+  return async (name, args) => {
+    let out;
+    try {
+      const r = await rpc('tools/call', { name, arguments: args });
+      out = r.result ? JSON.parse(r.result.content[0].text) : { success: false, error: r.error?.message };
+    } finally { used(name, args, out); }
+    return out;
+  };
 }
 
 if (run('W9')) try {

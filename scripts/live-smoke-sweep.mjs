@@ -229,6 +229,8 @@ async function main() {
   // which then failed with "Clip not found" / "No marker with id" and were blamed for the sweep's
   // stale state (update_marker, get_clip_links on 11-01).
   let ctxStale = false;
+  /** The last tool that actually reached the host, for the abort report. */
+  let lastToolRun = null;
   line(`context: seq=${ctx.sequenceId} tracks=${ctx.videoTracks} clips=${ctx.clips.length} items=${ctx.itemIds.length} markers=${ctx.markers.length}`);
   line(`side fixtures: ${ctx.files.outDir}`);
   if (ctx.raw?.error) line(`context WARNING: ${ctx.raw.error}`);
@@ -339,13 +341,23 @@ async function main() {
     if (ctxStale) {
       // Re-pinned first: rebuilt on another project, the context would hand THAT project's clip
       // ids to the next tools, where a stale scratch id would only have failed.
-      const pinNow = await checkStillScratch(bridge, pinned);
+      let pinNow = await checkStillScratch(bridge, pinned);
+      if (!pinNow.ok) {
+        // A panel still busy with the last call cannot answer the probe. Let it drain (45 s, as
+        // after a wedge) and ask once more before calling it drift.
+        for (let i = 0; i < 15; i++) {
+          await sleep(3000);
+          const now = heartbeat();
+          if (now && now.ageMs < 10_000 && !now.isProcessing) break;
+        }
+        pinNow = await checkStillScratch(bridge, pinned);
+      }
       if (!pinNow.ok) {
         line('');
-        line(`!! ABORTED before ${name}: the scratch project is no longer the target.`);
+        line(`!! ABORTED before ${name}: could not confirm the scratch project is still the target.`);
         line(`!! ${pinNow.reason}`);
         line('!! Nothing further was run. Check Premiere by hand before saving anything.');
-        results.abortedAfter = name;
+        results.abortedAfter = lastToolRun ?? '(before any tool)';
         results.scratchDrift = pinNow.reason;
         break;
       }
@@ -386,6 +398,7 @@ async function main() {
     try {
       let timer;
       if (!readOnly) ctxStale = true;
+      lastToolRun = name;
       const r = await Promise.race([
         tools.executeTool(name, args),
         new Promise((_, rej) => { timer = setTimeout(() => rej(new Error(`harness timeout ${TOOL_TIMEOUT_MS / 1000}s`)), TOOL_TIMEOUT_MS); }),

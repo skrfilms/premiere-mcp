@@ -4199,12 +4199,25 @@ export class PremiereProTools extends ToolsBase {
       // a change we cannot match is kept and reported as unverified rather than undone.
       var asked = ${JSON.stringify(value)};
       function __boolOf(v) { var l = String(v).toLowerCase(); if (l === '1' || l === 'true' || l === 'on' || l === 'yes') return 1; if (l === '0' || l === 'false' || l === 'off' || l === 'no') return 0; return -1; }
-      var landed = after === asked || (!isNaN(parseFloat(asked)) && Math.abs(parseFloat(after) - parseFloat(asked)) < 0.01) ||
-        (__boolOf(asked) >= 0 && __boolOf(asked) === __boolOf(after));
+      // Whole values only: parseFloat("2x") is 2, and "0.5,2" vs "0.5,1" compared only the first
+      // number. A value is numeric when every comma-separated part is a plain number.
+      function __nums(v) {
+        var parts = String(v).split(','), out = [];
+        for (var pi = 0; pi < parts.length; pi++) {
+          var t = parts[pi].replace(/^\\s+|\\s+$/g, '');
+          if (!/^[-+]?(\\d+\\.?\\d*|\\.\\d+)(e[-+]?\\d+)?$/i.test(t)) return null;
+          out.push(Number(t));
+        }
+        return out;
+      }
+      var __na = __nums(asked), __nb = __nums(after);
+      var __numEqual = !!(__na && __nb && __na.length === __nb.length);
+      for (var ni = 0; __numEqual && ni < __na.length; ni++) if (Math.abs(__na[ni] - __nb[ni]) >= 0.01) __numEqual = false;
+      var landed = after === asked || __numEqual || (__boolOf(asked) >= 0 && __boolOf(asked) === __boolOf(after));
       var unmoved = after === before && asked !== before;
       // Both numbers but different: Premiere clamped or rounded it (asked 500, reads 100). That is
       // a known wrong value, not an unconfirmable one.
-      var numericMismatch = !isNaN(parseFloat(asked)) && !isNaN(parseFloat(after)) && !landed;
+      var numericMismatch = !!(__na && __nb) && !landed;
       var refused = String(after).toLowerCase() === 'nan' || after === '' || unmoved || numericMismatch;
       if (!landed && unmoved) {
         // Nothing moved, so there is nothing to put back (and writing the read-back form, such as
@@ -4217,6 +4230,12 @@ export class PremiereProTools extends ToolsBase {
           note:'The parameter changed, but it reads back as "' + after + '" rather than "' + asked + '", so it cannot be confirmed that it holds the requested value. Check it in Effect Controls.'});
       }
       if (!landed) {
+        // Only a plain value is written back: a read-back form such as a menu label could itself
+        // corrupt the parameter.
+        if (!__nums(before) && __boolOf(before) < 0) {
+          return JSON.stringify({success:false,verified:true,changed:true,paramName:${JSON.stringify(paramName)},requested:asked,readBack:after,before:before,restored:false,
+            error:'The parameter read back as "' + after + '", not the requested "' + asked + '", so the value was not accepted. Its previous value "' + before + '" is not a plain value, so it was not written back; reset it in Effect Controls.'});
+        }
         try { comp.setParamValue(${JSON.stringify(paramName)}, before); } catch (eR) {}
         var restored = String(comp.getParamValue(${JSON.stringify(paramName)}));
         return JSON.stringify({success:false,verified:true,paramName:${JSON.stringify(paramName)},requested:asked,readBack:after,before:before,restored:restored===before,
