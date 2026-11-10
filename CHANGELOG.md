@@ -4,6 +4,18 @@ All notable changes are documented here. Releases use semantic versioning.
 
 ## [Unreleased]
 
+- **Exports find Media Encoder where Creative Cloud installs it on macOS.** The install check only
+  looked for an .app directly in /Applications, and Creative Cloud puts it one folder down
+  (`/Applications/Adobe Media Encoder 2026/Adobe Media Encoder 2026.app`), so `export_sequence`
+  refused with MEDIA_ENCODER_NOT_INSTALLED on a standard install. It now looks inside each
+  `Adobe Media Encoder <year>` folder too (ported from upstream 5528abb; the presets half was
+  ported on 10-21).
+- **ffmpeg and ffprobe are found outside PATH.** An MCP client started from the Dock or Finder
+  (Claude Desktop, an IDE) gets launchd's minimal PATH, so a Homebrew ffmpeg was reported as not
+  installed. After `PREMIERE_MCP_FFMPEG_CMD` / `PREMIERE_MCP_FFPROBE_CMD` and PATH, the server now
+  tries /opt/homebrew/bin, /usr/local/bin and /opt/local/bin. `detect_silence` and the ffmpeg
+  check behind it ran a bare `ffmpeg` and ignored the override; they use the same lookup now.
+
 - **DeNoise and DeReverb no longer crash Premiere on nested or multicam clips.** On 26.5.2,
   adding either to a clip whose source is a sequence crashes Premiere. The 10-29 live sweep hit
   it with `denoise_clip` on a nested clip, and it reproduced there; multicam clips are sequences

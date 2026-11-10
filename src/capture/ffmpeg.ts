@@ -11,7 +11,8 @@
  */
 
 import { spawn } from 'node:child_process';
-import { promises as fs, constants as fsConstants } from 'node:fs';
+import { promises as fs, constants as fsConstants, statSync } from 'node:fs';
+import { delimiter, join } from 'node:path';
 import type { Known } from './types.js';
 import { UNKNOWN } from './types.js';
 
@@ -24,16 +25,54 @@ export interface RunResult {
   spawnError?: string;
 }
 
+/**
+ * Folders package managers put ffmpeg in, tried when it is not on PATH. An MCP client started from
+ * the Dock or Finder (Claude Desktop, an IDE) gets launchd's minimal PATH (/usr/bin:/bin:...), not
+ * the shell's, so a Homebrew ffmpeg was reported missing even though it was installed.
+ */
+const FALLBACK_BIN_DIRS =
+  process.platform === 'win32' ? [] : ['/opt/homebrew/bin', '/usr/local/bin', '/opt/local/bin'];
+
+/**
+ * The binary to run: the env override when set; else the bare name when it is on PATH; else the
+ * full path in a known install folder; else the bare name (so a spawn reports it missing).
+ */
+export function resolveBinary(
+  name: string,
+  envVar: string,
+  fallbackDirs: string[] = FALLBACK_BIN_DIRS,
+): string {
+  const override = (process.env[envVar] || '').trim();
+  if (override) return override;
+  const exe = process.platform === 'win32' ? [name + '.exe', name] : [name];
+  for (const dir of (process.env.PATH || '').split(delimiter)) {
+    if (dir && exe.some((n) => isFile(join(dir, n)))) return name;
+  }
+  for (const dir of fallbackDirs) {
+    const full = join(dir, name);
+    if (isFile(full)) return full;
+  }
+  return name;
+}
+
+function isFile(p: string): boolean {
+  try {
+    return statSync(p).isFile();
+  } catch {
+    return false;
+  }
+}
+
 export function ffmpegCmd(): string {
-  return (process.env.PREMIERE_MCP_FFMPEG_CMD || 'ffmpeg').trim() || 'ffmpeg';
+  return resolveBinary('ffmpeg', 'PREMIERE_MCP_FFMPEG_CMD');
 }
 
 export function ffprobeCmd(): string {
-  return (process.env.PREMIERE_MCP_FFPROBE_CMD || 'ffprobe').trim() || 'ffprobe';
+  return resolveBinary('ffprobe', 'PREMIERE_MCP_FFPROBE_CMD');
 }
 
 export const FFMPEG_INSTALL_GUIDANCE =
-  'Install ffmpeg and put it on PATH (macOS: `brew install ffmpeg`; Windows: `winget install Gyan.FFmpeg`), or set PREMIERE_MCP_FFMPEG_CMD to its full path.';
+  'Install ffmpeg (macOS: `brew install ffmpeg`; Windows: `winget install Gyan.FFmpeg`). It is looked for on PATH and in /opt/homebrew/bin, /usr/local/bin and /opt/local/bin; anywhere else, set PREMIERE_MCP_FFMPEG_CMD to its full path.';
 
 export const FFPROBE_INSTALL_GUIDANCE =
   'ffprobe ships with ffmpeg (macOS: `brew install ffmpeg`; Windows: `winget install Gyan.FFmpeg`), or set PREMIERE_MCP_FFPROBE_CMD to its full path.';

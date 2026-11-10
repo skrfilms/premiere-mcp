@@ -5,6 +5,7 @@
  * to it by name; other domains it relies on are reached through `this.peers`.
  */
 import { spawn } from 'child_process';
+import { ffprobeCmd as sharedFfprobeCmd } from '../../capture/ffmpeg.js';
 // Synchronous fs/path/os bindings for the Node-side (non-ExtendScript) tools.
 // The async API is the separate `promises as fs` import.
 import * as fsSync from 'node:fs';
@@ -295,7 +296,7 @@ export class ToolsBase {
 
   /** The ffprobe binary, overridable for installs that expose a different name. */
   protected ffprobeCmd(): string {
-    return (process.env.PREMIERE_MCP_FFPROBE_CMD || 'ffprobe').trim() || 'ffprobe';
+    return sharedFfprobeCmd();
   }
 
   /** Parse an ffprobe "num/den" (or plain) frame-rate string to fps. */
