@@ -249,6 +249,33 @@ describe('PremiereProBridge', () => {
     }
   });
 
+  it.each([
+    ['the Beta build', ['Adobe Media Encoder (Beta)'], ['Adobe Media Encoder (Beta).app']],
+    ['an install folder it cannot read', ['Adobe Media Encoder 2026'], null],
+  ])('does not refuse export for %s', async (_label, top, inner) => {
+    const bridge = new PremiereProBridge();
+    const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+    mockFs.mkdir.mockResolvedValue(undefined);
+    mockFs.access.mockRejectedValue(new Error('Not found'));
+    mockFs.writeFile.mockResolvedValue(undefined);
+    mockFs.readFile.mockResolvedValue(JSON.stringify({ success: true }));
+    mockFs.unlink.mockResolvedValue(undefined);
+    mockFs.readdir.mockImplementation((async (dir: string) => {
+      if (dir === '/Applications') return top;
+      if (inner === null) throw Object.assign(new Error('EACCES'), { code: 'EACCES' });
+      return inner;
+    }) as any);
+
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    try {
+      await bridge.initialize();
+      const result = await bridge.renderSequence('seq-1', '/tmp/out.mp4', '/tmp/preset.epr');
+      expect(result.code).not.toBe('MEDIA_ENCODER_NOT_INSTALLED');
+    } finally {
+      if (platformDescriptor) Object.defineProperty(process, 'platform', platformDescriptor);
+    }
+  });
+
   it('treats a versioned install folder without the app as not installed', async () => {
     const bridge = new PremiereProBridge();
     const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform');

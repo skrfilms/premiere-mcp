@@ -2098,7 +2098,8 @@ export class PremiereProBridge implements PremiereProTransport {
       const applications = '/Applications';
       try {
         const entries = await fs.readdir(applications);
-        const appPattern = /^Adobe Media Encoder(?: \d+)?\.app$/i;
+        // "Adobe Media Encoder 2026.app", and the Beta build's "Adobe Media Encoder (Beta).app".
+        const appPattern = /^Adobe Media Encoder(?: \d+)?(?: \(Beta\))?\.app$/i;
         if (entries.some((entry) => appPattern.test(entry))) {
           return { available: true, searchedPaths: [applications] };
         }
@@ -2106,8 +2107,9 @@ export class PremiereProBridge implements PremiereProTransport {
         // /Applications/Adobe Media Encoder 2026/Adobe Media Encoder 2026.app. Looking only at
         // the top level failed every export on a standard install with MEDIA_ENCODER_NOT_INSTALLED.
         const searchedPaths = [applications];
+        let unreadable = false;
         for (const folder of entries.filter((entry) =>
-          /^Adobe Media Encoder(?: \d+)?$/i.test(entry),
+          /^Adobe Media Encoder(?: \d+)?(?: \(Beta\))?$/i.test(entry),
         )) {
           const folderPath = join(applications, folder);
           searchedPaths.push(folderPath);
@@ -2116,10 +2118,11 @@ export class PremiereProBridge implements PremiereProTransport {
               return { available: true, searchedPaths };
             }
           } catch {
-            // Not a readable folder; keep looking.
+            // Unreadable is unknown, as for /Applications itself: not a reason to refuse export.
+            unreadable = true;
           }
         }
-        return { available: false, searchedPaths };
+        return { available: unreadable, searchedPaths };
       } catch {
         return { available: true, searchedPaths: [applications] };
       }

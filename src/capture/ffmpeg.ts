@@ -72,7 +72,9 @@ export function ffprobeCmd(): string {
 }
 
 export const FFMPEG_INSTALL_GUIDANCE =
-  'Install ffmpeg (macOS: `brew install ffmpeg`; Windows: `winget install Gyan.FFmpeg`). It is looked for on PATH and in /opt/homebrew/bin, /usr/local/bin and /opt/local/bin; anywhere else, set PREMIERE_MCP_FFMPEG_CMD to its full path.';
+  'Install ffmpeg (macOS: `brew install ffmpeg`; Windows: `winget install Gyan.FFmpeg`). It is looked for on PATH' +
+  (FALLBACK_BIN_DIRS.length ? ' and in ' + FALLBACK_BIN_DIRS.join(', ') : '') +
+  '; anywhere else, set PREMIERE_MCP_FFMPEG_CMD to its full path.';
 
 export const FFPROBE_INSTALL_GUIDANCE =
   'ffprobe ships with ffmpeg (macOS: `brew install ffmpeg`; Windows: `winget install Gyan.FFmpeg`), or set PREMIERE_MCP_FFPROBE_CMD to its full path.';

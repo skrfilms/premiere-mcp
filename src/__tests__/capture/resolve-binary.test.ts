@@ -27,13 +27,19 @@ describe('resolveBinary', () => {
     expect(resolveBinary('ffmpeg', 'TEST_FF_CMD', [dir])).toBe('/custom/ffmpeg');
   });
 
-  it('keeps the bare name when it is on PATH', () => {
+  it('keeps the bare name when it is on PATH, ahead of an install folder that also has it', () => {
     process.env.PATH = dir;
-    expect(resolveBinary('ffmpeg', 'TEST_FF_CMD', [])).toBe('ffmpeg');
+    const other = mkdtempSync(join(tmpdir(), 'pmcp-bin2-'));
+    writeFileSync(join(other, 'ffmpeg'), '');
+    try {
+      expect(resolveBinary('ffmpeg', 'TEST_FF_CMD', [other])).toBe('ffmpeg');
+    } finally {
+      rmSync(other, { recursive: true, force: true });
+    }
   });
 
   it('falls back to the full path in a known install folder when PATH lacks it', () => {
-    process.env.PATH = '/usr/bin:/bin';
+    process.env.PATH = '/nonexistent-pmcp-path';
     expect(resolveBinary('ffmpeg', 'TEST_FF_CMD', ['/nonexistent-dir', dir])).toBe(
       join(dir, 'ffmpeg'),
     );
