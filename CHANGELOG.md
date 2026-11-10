@@ -4,6 +4,19 @@ All notable changes are documented here. Releases use semantic versioning.
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-11-10
+
+Swapping a shot for a new version now carries the whole clip or changes nothing: trim, in point,
+every effect setting by position, keyframes, linked audio laid out as it was (L/J-cuts, other
+tracks), edge transitions, and sync sound kept and relinked under a picture-only render; anything
+that cannot be reproduced is refused or undone, never reported as done. Exports find Media
+Encoder on a standard Creative Cloud install, ffmpeg is found when the client was launched from
+the Dock, DeNoise/DeReverb can no longer crash Premiere on nested clips, and the package carries
+what the official MCP registry needs to list it.
+
+- **Ready for the official MCP registry.** `package.json` carries `mcpName` and `server.json`
+  describes the package for registry.modelcontextprotocol.io; a test keeps the two versions in
+  step.
 - **`replace_clip` carries everything, or changes nothing.** It used to copy effect settings by
   name through `copy_effects_between_clips`, and Lumetri repeats names (four "Saturation", two
   each of Temperature, Tint and Contrast), so one setting overwrote another while the swap
