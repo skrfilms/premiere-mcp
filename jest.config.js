@@ -6,7 +6,10 @@ export default {
   // PREMIERE_MCP_TOOL_COVERAGE=1, so an ordinary run pays nothing and cannot fail because of it.
   // Must be setupFilesAfterEnv rather than setupFiles: the probe reads expect.getState() to
   // attribute each invocation to a test file, and expect does not exist in setupFiles.
-  setupFilesAfterEnv: ['<rootDir>/src/__tests__/tool-coverage-probe.ts'],
+  setupFilesAfterEnv: [
+    '<rootDir>/src/__tests__/tool-coverage-probe.ts',
+    '<rootDir>/src/__tests__/setup-after-env.ts',
+  ],
   roots: ['<rootDir>/src'],
   testMatch: ['**/__tests__/**/*.test.ts', '**/?(*.)+(spec|test).ts'],
   transform: {
