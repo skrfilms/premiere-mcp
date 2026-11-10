@@ -3949,7 +3949,8 @@ export function buildToolCatalogue(): MCPTool[] {
     },
     {
       name: 'replace_clip',
-      description: 'Replaces a clip on the timeline with another media item.',
+      description:
+        'Replaces one timeline clip with another media item, keeping its trim, source in point, effects, settings, keyframes, on/off state, edge transitions and the layout of its linked clips (L/J-cuts, audio on other tracks). The rebuild is rehearsed first and compared, and the swap is undone if anything does not carry, so it either carries everything or changes nothing. Linked clips from other media (dual-system sound), or of a kind the new media lacks (sync sound under a picture-only render), stay as they are and are linked to the new clip. To relink every use of a project item at once, use replace_clip_media.',
       inputSchema: z.object({
         clipId: z.string().describe('The ID of the clip to replace'),
         newProjectItemId: z.string().describe('The ID of the new project item to use'),

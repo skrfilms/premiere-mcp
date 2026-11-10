@@ -33,8 +33,8 @@ export interface TimelineState {
 
 /**
  * ExtendScript (ES3) helpers defining __tlState(seq) -> { str, hash, ... }. The string is what the
- * hash covers: every clip's track, name, start, end and in point in ticks, marker count and
- * project counts. Ticks, not seconds, so float formatting cannot make equal states differ.
+ * hash covers: every clip's track, name, source project item, start, end and in point in ticks,
+ * marker count and project counts. Ticks, not seconds, so float formatting cannot make equal states differ.
  */
 export const STATE_HELPERS = `
   function __tlHash(s) { var h = 5381; for (var i = 0; i < s.length; i++) { h = ((h << 5) + h + s.charCodeAt(i)) | 0; } return (h >>> 0).toString(16); }
@@ -47,8 +47,11 @@ export const STATE_HELPERS = `
       for (var t = 0; t < trs.numTracks; t++) {
         var tr = trs[t];
         for (var i = 0; i < tr.clips.numItems; i++) {
-          var c = tr.clips[i], label = kinds[k][0] + (t + 1);
-          parts.push(label + ':' + c.name + '@' + c.start.ticks + '-' + c.end.ticks + '/' + c.inPoint.ticks);
+          var c = tr.clips[i], label = kinds[k][0] + (t + 1), src = '';
+          // The source item too: a clip swapped for other media of the same name and span
+          // otherwise hashes the same, and an undo back to "before" stopped at 0 steps.
+          try { src = c.projectItem ? String(c.projectItem.nodeId) : ''; } catch (eSrc) {}
+          parts.push(label + ':' + c.name + '<' + src + '>@' + c.start.ticks + '-' + c.end.ticks + '/' + c.inPoint.ticks);
           if (withClips) clips.push({ id: String(c.nodeId), track: label, name: String(c.name), start: c.start.seconds, end: c.end.seconds, inPoint: c.inPoint.seconds });
         }
       }

@@ -682,7 +682,14 @@ export class AssemblyTools extends ToolsBase {
    * track than the video, come back as they were), effects added in order, settings written,
    * and everything compared with the original. The old clip is touched only when that rehearsal
    * matches exactly, the new media is long enough, and every span the rebuild writes in the old
-   * slot is free apart from the old clip's own group.
+   * slot is free apart from the old clip's own group; all of that is checked again just before
+   * the swap, so an edit made in between stops it untouched.
+   *
+   * Linked clips that are not rebuilt stay exactly where they are and are linked to the new
+   * pieces: a clip from other media (dual-system sound synced to the picture), and a kind of clip
+   * the new media does not have (the sync sound under a picture-only VFX render). Audio channels
+   * are matched by the order Premiere lays them out in, so a layout it would not reproduce (dual
+   * mono moved to other tracks, or a different channel count) is refused rather than guessed.
    *
    * After the swap, settings, layout and edge transitions are compared again. Transitions cannot
    * be rehearsed (they need the neighbouring clip), so they are re-added after the swap and read
@@ -725,83 +732,152 @@ export class AssemblyTools extends ToolsBase {
     // Shared by the rehearsal and the swap.
     //  __layOut: lays the new media out as the old group was, shifted by `shift` seconds, using
     //            only overwriteClip on tracks (which puts video on Vn and audio on An) plus trims;
-    //            extra pieces a placement creates are removed; the result is linked.
+    //            spare pieces a placement creates are removed; the result is linked. A member
+    //            flagged keep (other media, or a kind the new media does not have) is not rebuilt:
+    //            the old clip stays where it is and is linked to the new pieces.
     //  __carry:  adds missing effects in order, writes settings by position, compares.
     const lib = `
+      var __TPS = 254016000000;
       function __T(x) { var t = new Time(); t.seconds = x; return t; }
+      function __tk(x) { return String(Math.round(x * __TPS)); }
       function __label(type, track) { return (type === 'video' ? 'V' : 'A') + (track + 1); }
+      function __labels(type, tracks) { var o = []; for (var i = 0; i < tracks.length; i++) o.push(__label(type, tracks[i])); return o.join('+'); }
+      // Bin marks as tick strings: a seconds number floors to the frame below (measured 11-08).
       function __place(seq, item, type, track, start, inP, dur, created, footprint) {
         var tracks = type === 'video' ? seq.videoTracks : seq.audioTracks;
         if (track >= tracks.numTracks) return { error: 'the sequence has no ' + __label(type, track) + ' to lay the new media onto' };
-        var before = __mcpAllClipIds(seq), pi = null, po = null;
-        try { pi = item.getInPoint().seconds; po = item.getOutPoint().seconds; } catch (eP) {}
-        item.setInPoint(inP, 4); item.setOutPoint(inP + dur, 4);
-        tracks[track].overwriteClip(item, __T(start));
-        try { if (pi !== null) { item.setInPoint(pi, 4); item.setOutPoint(po, 4); } } catch (eB) {}
-        var made = __mcpNewClips(seq, before);
-        for (var i = 0; i < made.length; i++) {
-          created.push(String(made[i].clip.nodeId));
-          footprint.push({ type: made[i].type, track: made[i].track, start: made[i].clip.start.seconds, end: made[i].clip.end.seconds });
+        var before = __mcpAllClipIds(seq), pi = null, po = null, made = [], marksOk = true;
+        try { pi = String(item.getInPoint().ticks); po = String(item.getOutPoint().ticks); } catch (eP) {}
+        try {
+          item.setInPoint(__tk(inP), 4); item.setOutPoint(__tk(inP + dur), 4);
+          tracks[track].overwriteClip(item, __T(start));
+        } finally {
+          // However this ends: the bin marks go back (and are read back), and whatever landed is
+          // recorded, so a throw part-way cannot leave pieces nothing knows to remove.
+          try {
+            if (pi !== null) {
+              item.setInPoint(pi, 4); item.setOutPoint(po, 4);
+              if (String(item.getInPoint().ticks) !== pi || String(item.getOutPoint().ticks) !== po) marksOk = false;
+            }
+          } catch (eB) { marksOk = false; }
+          made = __mcpNewClips(seq, before);
+          for (var i = 0; i < made.length; i++) {
+            created.push(String(made[i].clip.nodeId));
+            footprint.push({ type: made[i].type, track: made[i].track, start: made[i].clip.start.seconds, end: made[i].clip.end.seconds });
+          }
         }
-        return { made: made };
+        return { made: made, marksOk: marksOk };
       }
-      function __layOut(seq, item, members, shift) {
-        var created = [], footprint = [], problems = [], assigned = [], pool = [], mi = 0;
-        for (var a = 0; a < members.length; a++) if (members[a].isMain) mi = a;
-        var M = members[mi];
-        var r = __place(seq, item, M.type, M.track, M.start + shift, M.inPoint, M.end - M.start, created, footprint);
+      // created: the caller's list, filled as each piece lands (not on return), so a throw
+      // part-way still leaves the caller knowing every piece to remove. linkKept: link the kept
+      // old clips to the new pieces (the swap; the rehearsal's pieces are temporary).
+      function __layOut(seq, item, members, shift, frame, created, linkKept) {
+        var footprint = [], problems = [], assigned = [], pool = [], tol = frame / 2, mi = 0, ai = -1;
+        for (var a = 0; a < members.length; a++) { if (members[a].isMain) mi = a; if (ai < 0 && !members[a].keep && members[a].type === 'video') ai = a; }
+        // Laid in from the picture when there is one: from an audio member, the channels would
+        // start on that audio track rather than under the video.
+        if (ai < 0) ai = mi;
+        var A = members[ai];
+        var r = __place(seq, item, A.type, A.track, A.start + shift, A.inPoint, A.end - A.start, created, footprint);
         if (r.error) return { created: created, footprint: footprint, problems: [r.error] };
+        if (!r.marksOk) problems.push('the In/Out marks of the new item in the bin could not be put back as they were');
         pool = r.made.slice();
+        // A kind of clip the new media does not have (a picture-only render over a clip with sync
+        // sound) stays as it was and is linked to the new picture, unless it is the clip asked for.
+        var has = { video: false, audio: false };
+        for (var h = 0; h < r.made.length; h++) has[r.made[h].type] = true;
+        for (var k0 = 0; k0 < members.length; k0++) if (!members[k0].keep && !has[members[k0].type]) {
+          if (k0 === mi) problems.push('the new media has no ' + members[k0].type + ' to replace the ' + __label(members[k0].type, members[k0].track) + ' clip with');
+          else { members[k0].keep = true; members[k0].keepWhy = 'the new media has no ' + members[k0].type; }
+        }
+        // Multichannel audio (dual mono, or more mono channels) carries no channel number a script
+        // can read; only the order Premiere lays the channels out in (one per track, in order).
+        // So the old channels must sit on exactly the tracks a fresh placement uses; otherwise a
+        // channel could land on another channel's track and still pass every other check.
+        var oldAudio = [], rebuiltAudio = 0;
+        for (var oa = 0; oa < members.length; oa++) if (!members[oa].keep && members[oa].type === 'audio') { oldAudio.push(members[oa].track); rebuiltAudio++; }
+        if (oldAudio.length > 1) {
+          var newAudio = [];
+          for (var na = 0; na < r.made.length; na++) if (r.made[na].type === 'audio') newAudio.push(r.made[na].track);
+          oldAudio.sort(function (p, q) { return p - q; }); newAudio.sort(function (p, q) { return p - q; });
+          if (oldAudio.join(',') !== newAudio.join(','))
+            problems.push('the linked audio is ' + oldAudio.length + ' channel clips on ' + __labels('audio', oldAudio) + ', and the new media lays its channels on ' + (newAudio.length ? __labels('audio', newAudio) : 'no audio track') + ', so which channel would end up on which track cannot be checked');
+        }
         function take(type, track) { for (var i = 0; i < pool.length; i++) if (pool[i] && pool[i].type === type && pool[i].track === track) { var x = pool[i]; pool[i] = null; return x; } return null; }
-        for (var m = 0; m < members.length; m++) assigned[m] = take(members[m].type, members[m].track);
-        if (!assigned[mi]) problems.push('the new media did not land on ' + __label(M.type, M.track));
+        for (var m = 0; m < members.length; m++) assigned[m] = members[m].keep ? null : take(members[m].type, members[m].track);
+        if (!problems.length && !assigned[ai]) problems.push('the new media did not land on ' + __label(A.type, A.track));
         // A linked clip on another track than the first placement put it: lay the media in again
         // on that track (which also drops a piece of the other kind there) and keep only that one.
-        for (var m2 = 0; m2 < members.length && !problems.length; m2++) if (!assigned[m2]) {
+        for (var m2 = 0; m2 < members.length && !problems.length; m2++) if (!members[m2].keep && !assigned[m2]) {
           var mm = members[m2];
           var r2 = __place(seq, item, mm.type, mm.track, mm.start + shift, mm.inPoint, mm.end - mm.start, created, footprint);
           if (r2.error) { problems.push(r2.error); break; }
+          if (!r2.marksOk) problems.push('the In/Out marks of the new item in the bin could not be put back as they were');
           var got = null;
           for (var j = 0; j < r2.made.length; j++) { if (!got && r2.made[j].type === mm.type && r2.made[j].track === mm.track) got = r2.made[j]; else pool.push(r2.made[j]); }
           if (!got) problems.push('the new media has no ' + mm.type + ' for the linked ' + mm.type + ' clip on ' + __label(mm.type, mm.track));
           assigned[m2] = got;
         }
-        for (var x2 = 0; x2 < pool.length; x2++) if (pool[x2]) { try { pool[x2].clip.remove(false, false); } catch (eX) {} }
+        // Spare pieces go, and are checked gone: one left behind would sit in the edit unlinked.
+        // A spare AUDIO piece while audio is being rebuilt is a channel the old clip did not use in
+        // that place: dropping it would lose sound (stereo old, dual mono new) or keep the wrong mic.
+        var spareAudio = [];
+        for (var x2 = 0; x2 < pool.length; x2++) if (pool[x2]) {
+          var spareId = String(pool[x2].clip.nodeId), spare = __label(pool[x2].type, pool[x2].track);
+          if (pool[x2].type === 'audio') spareAudio.push(spare);
+          try { pool[x2].clip.remove(false, false); } catch (eX) {}
+          if (__mcpLocate(seq, spareId)) problems.push('a spare piece of the new media on ' + spare + ' could not be removed');
+        }
+        if (spareAudio.length && rebuiltAudio)
+          problems.push('the new media lays out more audio channel clips than the old clip used (also ' + spareAudio.join(', ') + '), so carrying it over would drop a channel');
         if (problems.length) return { created: created, footprint: footprint, problems: problems };
-        // Each piece to its own span: in point (slip), head, tail; then on/off.
+        // Each piece to its own span: in point (slip), head, tail; then on/off. Read back from the
+        // clip found afresh (the object written to can keep its old in point), to half a frame.
         for (var m3 = 0; m3 < members.length; m3++) {
-          var src = members[m3], dst = assigned[m3].clip;
+          if (members[m3].keep) continue;
+          var src = members[m3], dst = assigned[m3].clip, dstId = String(dst.nodeId);
           dst.inPoint = __T(src.inPoint); dst.start = __T(src.start + shift); dst.end = __T(src.end + shift);
           footprint.push({ type: src.type, track: src.track, start: src.start + shift, end: src.end + shift });
-          if (Math.abs(dst.start.seconds - (src.start + shift)) > 0.02 || Math.abs(dst.end.seconds - (src.end + shift)) > 0.02)
-            problems.push(__label(src.type, src.track) + ' could not be trimmed to its old span (reads ' + dst.start.seconds + 's-' + dst.end.seconds + 's)');
+          var fresh = __mcpLocate(seq, dstId), rd = fresh ? fresh.clip : dst;
+          if (Math.abs(rd.start.seconds - (src.start + shift)) > tol || Math.abs(rd.end.seconds - (src.end + shift)) > tol)
+            problems.push(__label(src.type, src.track) + ' could not be trimmed to its old span (reads ' + rd.start.seconds + 's-' + rd.end.seconds + 's)');
+          else if (Math.abs(rd.inPoint.seconds - src.inPoint) > tol)
+            problems.push(__label(src.type, src.track) + ' starts at ' + rd.inPoint.seconds + 's of the new media, not ' + src.inPoint + 's as the old clip did');
           try { dst.disabled = !!src.disabled; } catch (eD) {}
           var dis = null; try { dis = !!dst.disabled; } catch (eD2) {}
           if (dis !== !!src.disabled) problems.push(__label(src.type, src.track) + ' could not be switched ' + (src.disabled ? 'off' : 'on') + ' as the old clip was');
         }
-        // One link group, as before.
-        if (!problems.length && members.length > 1) {
-          var main = assigned[mi].clip, want = {}, n = 0;
-          for (var m4 = 0; m4 < members.length; m4++) { want[String(assigned[m4].clip.nodeId)] = true; n++; }
-          function linkedOk() { var li = null; try { li = main.getLinkedItems(); } catch (eL) {} if (!li || li.numItems !== n) return false; for (var k = 0; k < li.numItems; k++) if (!want[String(li[k].nodeId)]) return false; return true; }
+        // One link group, as before: the new pieces, plus the kept old clips in the swap.
+        var linkSet = [];
+        for (var m4 = 0; m4 < members.length; m4++) {
+          if (!members[m4].keep) linkSet.push(assigned[m4].clip);
+          else if (linkKept) { var kc = __mcpLocate(seq, members[m4].id); if (kc) linkSet.push(kc.clip); else problems.push('lost the kept ' + __label(members[m4].type, members[m4].track) + ' clip'); }
+        }
+        if (!problems.length && linkSet.length > 1) {
+          var head = assigned[ai].clip, want = {}, n = linkSet.length;
+          for (var w0 = 0; w0 < linkSet.length; w0++) want[String(linkSet[w0].nodeId)] = true;
+          function linkedOk() { var li = null; try { li = head.getLinkedItems(); } catch (eL) {} if (!li || li.numItems !== n) return false; for (var k = 0; k < li.numItems; k++) if (!want[String(li[k].nodeId)]) return false; return true; }
           if (!linkedOk()) {
             var prevSel = []; try { var ps = seq.getSelection(); for (var p0 = 0; ps && p0 < ps.length; p0++) prevSel.push(ps[p0]); } catch (eS) {}
-            try { for (var p1 = 0; p1 < prevSel.length; p1++) prevSel[p1].setSelected(false, false); } catch (eS1) {}
-            for (var m5 = 0; m5 < members.length; m5++) assigned[m5].clip.setSelected(true, false);
+            // One try per item: a single clip that refuses selection must not leave the rest of
+            // the user's selection dropped, or the new pieces selected.
+            for (var p1 = 0; p1 < prevSel.length; p1++) { try { prevSel[p1].setSelected(false, false); } catch (eS1) {} }
+            for (var m5 = 0; m5 < linkSet.length; m5++) { try { linkSet[m5].setSelected(true, false); } catch (eS3) {} }
             try { seq.linkSelection(); } catch (eLk) {}
-            for (var m6 = 0; m6 < members.length; m6++) assigned[m6].clip.setSelected(false, false);
-            try { for (var p2 = 0; p2 < prevSel.length; p2++) prevSel[p2].setSelected(true, false); } catch (eS2) {}
-            if (!linkedOk()) problems.push('the pieces of the new media could not be linked as the old clip and its linked clips were (often the audio channels differ, e.g. dual-mono on the old clip and stereo on the new media)');
+            for (var m6 = 0; m6 < linkSet.length; m6++) { try { linkSet[m6].setSelected(false, false); } catch (eS4) {} }
+            for (var p2 = 0; p2 < prevSel.length; p2++) { try { prevSel[p2].setSelected(true, false); } catch (eS2) {} }
+            if (!linkedOk()) problems.push('the pieces could not be linked as the old clip and its linked clips were (often the audio channels differ, e.g. dual-mono on the old clip and stereo on the new media)');
           }
         }
         var group = [];
-        for (var m7 = 0; m7 < members.length; m7++) group.push(__mcpLocate(seq, String(assigned[m7].clip.nodeId)));
+        for (var m7 = 0; m7 < members.length; m7++) group.push(members[m7].keep ? null : __mcpLocate(seq, String(assigned[m7].clip.nodeId)));
         return { created: created, footprint: footprint, problems: problems, group: group };
       }
       function __carry(seq, qs, from, to) {
         var out = { problems: [], keyed: false };
         for (var m = 0; m < from.length; m++) {
           var src = from[m], dst = to[m];
+          if (src.keep) continue;
           if (!dst) { out.problems.push('lost track of the new ' + __label(src.type, src.track)); continue; }
           // Effects the new clip lacks, added in the old clip's order (QE appends).
           var seen = {}, qc = null;
@@ -834,6 +910,22 @@ export class AssemblyTools extends ToolsBase {
         for (var j = 0; j < ids.length; j++) if (__mcpLocate(seq, ids[j])) left.push(ids[j]);
         return left;
       }
+      // Clips in the edit that the rebuild would overwrite: every span it writes (slot time),
+      // against every clip that is not one of the old pieces being replaced.
+      function __blockedBy(seq, footprint, replacing) {
+        var blocked = {}, out = [];
+        for (var f = 0; f < footprint.length; f++) {
+          var fp = footprint[f];
+          var tk = (fp.type === 'video' ? seq.videoTracks : seq.audioTracks)[fp.track];
+          for (var ci = 0; tk && ci < tk.clips.numItems; ci++) {
+            var xc = tk.clips[ci];
+            if (replacing[String(xc.nodeId)]) continue;
+            if (xc.start.seconds < fp.end - 0.001 && xc.end.seconds > fp.start + 0.001) blocked[__label(fp.type, fp.track) + ' "' + xc.name + '"'] = true;
+          }
+        }
+        for (var bk in blocked) out.push(bk);
+        return out;
+      }
     `;
 
     // 1. Read the old group, rehearse the whole layout past the end of the edit, check the slot.
@@ -846,69 +938,78 @@ export class AssemblyTools extends ToolsBase {
         var newItem = __findProjectItem(${q(newProjectItemId)});
         if (!newItem) return JSON.stringify({ success: false, changed: false, error: "New project item not found" });
         var c = info.clip, seq = info.sequence; seqRef = seq;
-        var speed = 1, rev = false;
-        try { speed = Number(c.getSpeed()); } catch (eS) {}
-        try { rev = !!c.isSpeedReversed(); } catch (eR) {}
-        if (Math.abs(speed - 1) > 0.0001 || rev) return JSON.stringify({ success: false, changed: false, error: "The clip is speed-changed or reversed, so its source range cannot be reproduced on the new media. Nothing was changed. Pass preserveEffects:false to drop in the new media at its own length." });
         var frame = 1 / 24; try { var fr = Number(seq.getSettings().videoFrameRate.seconds); if (fr > 0) frame = fr; } catch (eF) {}
         var o = { success: true, seq: String(seq.sequenceID), oldIds: [], members: [], transitions: [], frame: frame };
-        var og = __mcpClipGroup(seq, c), unreadable = [];
+        var og = __mcpClipGroup(seq, c), unreadable = [], mainItem = null, allTrans = [];
+        try { mainItem = String(c.projectItem.nodeId); } catch (eMI) {}
+        if (mainItem === null) return JSON.stringify({ success: false, changed: false, error: 'The clip has no readable source item, so what it would be replaced from cannot be told. Nothing was changed.' });
         for (var g = 0; g < og.length; g++) {
-          var oc = og[g].clip, snap = __mcpSnapClip(oc), dis = false;
+          var oc = og[g].clip, dis = false, ocItem = null, ocName = '';
+          try { ocItem = String(oc.projectItem.nodeId); ocName = String(oc.projectItem.name); } catch (eOI) {}
+          // A linked clip from OTHER media (dual-system sound synced to the picture) is not
+          // rebuilt from the new media: it stays where it is and is linked to the new pieces.
+          var foreign = ocItem !== mainItem;
+          if (!foreign) {
+            var speed = 1, rev = false;
+            // Every piece, not just the clicked one: a linked clip at another speed would be
+            // rebuilt at speed 1 and drift out of sync.
+            try { speed = Number(oc.getSpeed()); } catch (eS) {}
+            try { rev = !!oc.isSpeedReversed(); } catch (eR) {}
+            if (Math.abs(speed - 1) > 0.0001 || rev) return JSON.stringify({ success: false, changed: false, error: (og.length > 1 ? 'The ' + __label(og[g].type, og[g].track) + ' piece of the clip' : 'The clip') + ' is speed-changed or reversed, so its source range cannot be reproduced on the new media. Nothing was changed. Pass preserveEffects:false to drop in the new media at its own length.' });
+          }
+          var snap = foreign ? [] : __mcpSnapClip(oc);
           try { dis = !!oc.disabled; } catch (eD) {}
           for (var u = 0; u < snap.length; u++) for (var up = 0; up < snap[u].props.length; up++) if (!snap[u].props[up].ok) unreadable.push(__label(og[g].type, og[g].track) + ' ' + snap[u].name + ' setting ' + up);
           o.oldIds.push(String(oc.nodeId));
-          o.members.push({ type: og[g].type, track: og[g].track, start: oc.start.seconds, end: oc.end.seconds, inPoint: oc.inPoint.seconds, disabled: dis, isMain: String(oc.nodeId) === String(c.nodeId), snap: snap });
+          o.members.push({ id: String(oc.nodeId), type: og[g].type, track: og[g].track, start: oc.start.seconds, end: oc.end.seconds, inPoint: oc.inPoint.seconds, disabled: dis, isMain: String(oc.nodeId) === String(c.nodeId), snap: snap,
+            keep: foreign, keepWhy: foreign ? 'it comes from other media ("' + ocName + '")' : '' });
           var tr = __mcpEdgeTransitions(seq, og[g].type, og[g].track, oc.start.seconds, oc.end.seconds, frame / 2);
-          for (var ti = 0; ti < tr.length; ti++) { tr[ti].member = g; o.transitions.push(tr[ti]); }
+          for (var ti = 0; ti < tr.length; ti++) { tr[ti].member = g; allTrans.push(tr[ti]); }
         }
         if (unreadable.length) return JSON.stringify({ success: false, changed: false, error: 'These settings cannot be read on the old clip, so they could not be carried or checked: ' + unreadable.slice(0, 5).join('; ') + (unreadable.length > 5 ? '; and ' + (unreadable.length - 5) + ' more' : '') + '. Nothing was changed.' });
-        for (var tc = 0; tc < o.transitions.length; tc++) if (o.transitions[tc].align === null) {
-          var bad = o.transitions[tc];
-          return JSON.stringify({ success: false, changed: false, error: 'The ' + bad.name + ' on the ' + bad.edge + ' of ' + __label(o.members[bad.member].type, o.members[bad.member].track) + ' is centred on the cut, and Premiere\\'s scripting can only place a transition starting or ending at a cut, so it could not be put back. Nothing was changed. Swap by hand, or re-place that transition first.' });
-        }
         // DeNoise/DeReverb onto a sequence crashes Premiere: refuse before anything is placed.
         for (var gg = 0; gg < o.members.length; gg++) if (o.members[gg].type === 'audio') for (var ce = 0; ce < o.members[gg].snap.length; ce++) {
           var why0 = __crashProneAudioFx({ projectItem: newItem }, o.members[gg].snap[ce].name);
           if (why0) return JSON.stringify({ success: false, verified: true, changed: false, refusedToAvoidCrash: true, error: 'The clip carries ' + o.members[gg].snap[ce].name + ', which would be carried onto the new media. ' + why0 + ' Remove that effect first, or swap with preserveEffects:false.' });
         }
-        // Long enough, from its real length (a clip laid past the end of its media reads back as asked).
-        var needSecs = 0;
-        for (var ln = 0; ln < o.members.length; ln++) needSecs = Math.max(needSecs, o.members[ln].inPoint + (o.members[ln].end - o.members[ln].start));
-        var haveSecs = __mcpMediaSecs(newItem), isStill = false;
-        try { isStill = /Still Image/.test(String(newItem.getProjectMetadata())); } catch (eSt) {}
-        if (haveSecs === null && !isStill) return JSON.stringify({ success: false, changed: false, error: 'Premiere does not report how long the new media is, so it cannot be checked that it covers the old clip. Nothing was changed.' });
-        if (haveSecs !== null && needSecs > haveSecs + frame / 2) return JSON.stringify({ success: false, changed: false, error: 'The new media is ' + haveSecs + 's long, and the old clip and its linked clips use its source up to ' + needSecs + 's, so it does not cover them. Nothing was changed.' });
-        // Rehearse past everything on every track.
+        // Rehearse past everything on every track. The shift is whole frames, so pieces of the
+        // old group (on the frame grid) stay on it: a whole second is not a frame boundary at
+        // 23.976 or 29.97, and a piece snapped to a frame would fail the span check.
         var far = 0, first = Infinity;
         for (var vt = 0; vt < seq.videoTracks.numTracks; vt++) { var tv = seq.videoTracks[vt]; if (tv.clips.numItems) far = Math.max(far, tv.clips[tv.clips.numItems - 1].end.seconds); }
         for (var at = 0; at < seq.audioTracks.numTracks; at++) { var ta = seq.audioTracks[at]; if (ta.clips.numItems) far = Math.max(far, ta.clips[ta.clips.numItems - 1].end.seconds); }
         for (var fm = 0; fm < o.members.length; fm++) first = Math.min(first, o.members[fm].start);
-        var shift = Math.ceil(far) + 10 - first;
-        o.stagedAt = Math.ceil(far) + 10;
+        var shift = Math.ceil((far + 10 - first) / frame) * frame;
+        o.stagedAt = first + shift;
         app.enableQE();
         var qs = __qeSequenceOpening(seq);
-        var lay = __layOut(seq, newItem, o.members, shift);
-        createdIds = lay.created;
+        var lay = __layOut(seq, newItem, o.members, shift, frame, createdIds, false);
         var problems = lay.problems.slice();
         if (!problems.length) { var reh = __carry(seq, qs, o.members, lay.group); problems = reh.problems; o.keyed = reh.keyed; }
         var leftR = __removeIds(seq, createdIds);
         if (problems.length) return JSON.stringify({ success: false, changed: leftR.length > 0, problems: problems, error: 'Rebuilding the clip on the new media did not match (' + problems.slice(0, 3).join('; ') + (problems.length > 3 ? '; and ' + (problems.length - 3) + ' more' : '') + '), so the swap was stopped before the old clip was touched.' + (leftR.length ? ' ' + leftR.length + ' temporary piece(s) are still on the timeline from ' + o.stagedAt + 's; delete them.' : ' Nothing was changed.') });
         if (leftR.length) return JSON.stringify({ success: false, changed: true, error: 'The rehearsal matched, but ' + leftR.length + ' temporary piece(s) past the end of the edit (from ' + o.stagedAt + 's) could not be removed; delete them. The old clip was not touched.' });
-        // In the old slot, every span the rebuild writes must be free apart from the old group.
-        var oldSet = {}; for (var oi = 0; oi < o.oldIds.length; oi++) oldSet[o.oldIds[oi]] = true;
-        var blocked = {};
-        for (var f = 0; f < lay.footprint.length; f++) {
-          var fp = lay.footprint[f], s0 = fp.start - shift, e0 = fp.end - shift;
-          var tk = (fp.type === 'video' ? seq.videoTracks : seq.audioTracks)[fp.track];
-          for (var ci = 0; tk && ci < tk.clips.numItems; ci++) {
-            var xc = tk.clips[ci];
-            if (oldSet[String(xc.nodeId)]) continue;
-            if (xc.start.seconds < e0 - 0.001 && xc.end.seconds > s0 + 0.001) blocked[__label(fp.type, fp.track) + ' "' + xc.name + '"'] = true;
-          }
+        // What the rehearsal settled: which pieces are rebuilt, and only their transitions count
+        // (a kept clip keeps its own).
+        for (var tc = 0; tc < allTrans.length; tc++) if (!o.members[allTrans[tc].member].keep) o.transitions.push(allTrans[tc]);
+        for (var tc2 = 0; tc2 < o.transitions.length; tc2++) if (o.transitions[tc2].align === null) {
+          var bad = o.transitions[tc2];
+          return JSON.stringify({ success: false, changed: false, error: 'The ' + bad.name + ' on the ' + bad.edge + ' of ' + __label(o.members[bad.member].type, o.members[bad.member].track) + ' is centred on the cut, and Premiere\\'s scripting can only place a transition starting or ending at a cut, so it could not be put back. Nothing was changed. Swap by hand, or re-place that transition first.' });
         }
-        var bl = []; for (var bk in blocked) bl.push(bk);
-        if (bl.length) return JSON.stringify({ success: false, changed: false, error: 'Rebuilding the clip in its old slot would overwrite ' + bl.join(', ') + ', so the swap was stopped before the old clip was touched. Nothing was changed.' });
+        // Long enough, from its real length (a clip laid past the end of its media reads back as asked).
+        var needSecs = 0;
+        for (var ln = 0; ln < o.members.length; ln++) if (!o.members[ln].keep) needSecs = Math.max(needSecs, o.members[ln].inPoint + (o.members[ln].end - o.members[ln].start));
+        var haveSecs = __mcpMediaSecs(newItem), isStill = false;
+        try { isStill = /Still Image/.test(String(newItem.getProjectMetadata())); } catch (eSt) {}
+        if (haveSecs === null && !isStill) return JSON.stringify({ success: false, changed: false, error: 'Premiere does not report how long the new media is, so it cannot be checked that it covers the old clip. Nothing was changed.' });
+        if (haveSecs !== null && needSecs > haveSecs + frame / 2) return JSON.stringify({ success: false, changed: false, error: 'The new media is ' + haveSecs + 's long, and the old clip and its linked clips use its source up to ' + needSecs + 's, so it does not cover them. Nothing was changed.' });
+        // In the old slot, every span the rebuild writes must be free apart from the pieces it
+        // replaces (a kept clip is in the way like any other).
+        o.footprint = [];
+        for (var f = 0; f < lay.footprint.length; f++) o.footprint.push({ type: lay.footprint[f].type, track: lay.footprint[f].track, start: lay.footprint[f].start - shift, end: lay.footprint[f].end - shift });
+        var replacing = {}; for (var oi = 0; oi < o.members.length; oi++) if (!o.members[oi].keep) replacing[o.members[oi].id] = true;
+        var bl = __blockedBy(seq, o.footprint, replacing);
+        if (bl.length) return JSON.stringify({ success: false, changed: false, error: 'Rebuilding the clip in its old slot would overwrite ' + bl.join(', ') + ' (Premiere lays every track of the new media in at once), so the swap was stopped before the old clip was touched. Nothing was changed.' });
         return JSON.stringify(o);
       } catch (e) {
         var leftE = []; try { if (createdIds.length && seqRef) leftE = __removeIds(seqRef, createdIds); } catch (eX) {}
@@ -921,16 +1022,32 @@ export class AssemblyTools extends ToolsBase {
     const swap: any = await this.bridge.executeScript(`
       ${STATE_HELPERS}
       ${lib}
+      var touched = false;
       try {
         var seq = __findSequence(${q(prep.seq)});
         var newItem = __findProjectItem(${q(newProjectItemId)});
         if (!seq || !newItem || !__mcpLocate(seq, ${q(clipId)})) return JSON.stringify({ success: false, changed: false, error: "Lost the old clip or the new item before the swap. Nothing was changed." });
-        var beforeHash = __tlState(seq, false).hash;
-        var members = ${q(prep.members)}, oldIds = ${q(prep.oldIds)}, trans = ${q(prep.transitions)};
-        for (var r = 0; r < oldIds.length; r++) { var f = __mcpLocate(seq, oldIds[r]); if (f) f.clip.remove(false, false); }
+        var members = ${q(prep.members)}, trans = ${q(prep.transitions)}, frame = ${q(prep.frame)}, footprint = ${q(prep.footprint)};
+        // Everything the rehearsal checked must still hold: an edit made in between (by hand, or
+        // by another call) would otherwise be rebuilt from stale spans or settings, or overwritten.
+        var replacing = {};
+        for (var v = 0; v < members.length; v++) {
+          var now0 = __mcpLocate(seq, members[v].id), want0 = members[v];
+          if (!now0 || now0.type !== want0.type || now0.track !== want0.track || Math.abs(now0.clip.start.seconds - want0.start) > frame / 2 || Math.abs(now0.clip.end.seconds - want0.end) > frame / 2 || Math.abs(now0.clip.inPoint.seconds - want0.inPoint) > frame / 2)
+            return JSON.stringify({ success: false, changed: false, error: 'The ' + __label(want0.type, want0.track) + ' clip ' + (now0 ? 'moved or was trimmed' : 'is gone') + ' since it was checked, so the swap was stopped before anything was touched. Nothing was changed. Run replace_clip again.' });
+          if (!want0.keep) {
+            replacing[want0.id] = true;
+            if (__mcpDiffSnap(now0.clip, want0.snap).length) return JSON.stringify({ success: false, changed: false, error: 'The effects or settings on ' + __label(want0.type, want0.track) + ' changed since they were checked, so the swap was stopped before anything was touched. Nothing was changed. Run replace_clip again.' });
+          }
+        }
+        var bl = __blockedBy(seq, footprint, replacing);
+        if (bl.length) return JSON.stringify({ success: false, changed: false, error: 'Since it was checked, ' + bl.join(', ') + ' landed where the new media goes, so the swap was stopped before anything was touched. Nothing was changed.' });
+        var beforeHash = __tlState(seq, false).hash, created = [];
+        touched = true;
+        for (var r = 0; r < members.length; r++) if (!members[r].keep) { var f = __mcpLocate(seq, members[r].id); if (f) f.clip.remove(false, false); }
         app.enableQE();
         var qs = __qeSequenceOpening(seq);
-        var lay = __layOut(seq, newItem, members, 0);
+        var lay = __layOut(seq, newItem, members, 0, frame, created, true);
         var problems = lay.problems.slice(), keyed = false;
         if (!problems.length) { var res = __carry(seq, qs, members, lay.group); problems = res.problems; keyed = res.keyed; }
         // Edge transitions, re-added on the new pieces and read back.
@@ -939,33 +1056,49 @@ export class AssemblyTools extends ToolsBase {
           if (!piece) { problems.push('lost the piece for the ' + tr.name); continue; }
           var qc = qs ? __qeClipByIndex(qs, piece.type, piece.track, piece.index) : null;
           var tx = piece.type === 'video' ? qe.project.getVideoTransitionByName(tr.name) : qe.project.getAudioTransitionByName(tr.name);
-          var frames = String(Math.round((tr.end - tr.start) / ${prep.frame}));
+          var frames = String(Math.round((tr.end - tr.start) / frame));
           try { if (qc && tx) qc.addTransition(tx, tr.edge === 'head', frames, '0', tr.align, true, true); } catch (eT) {}
-          var back = __mcpEdgeTransitions(seq, piece.type, piece.track, members[tr.member].start, members[tr.member].end, ${prep.frame} / 2), hit = false;
-          for (var b = 0; b < back.length; b++) if (back[b].edge === tr.edge && back[b].matchName === tr.matchName && Math.abs(back[b].start - tr.start) <= ${prep.frame} && Math.abs(back[b].end - tr.end) <= ${prep.frame}) hit = true;
+          var back = __mcpEdgeTransitions(seq, piece.type, piece.track, members[tr.member].start, members[tr.member].end, frame / 2), hit = false;
+          for (var b = 0; b < back.length; b++) if (back[b].edge === tr.edge && back[b].matchName === tr.matchName && Math.abs(back[b].start - tr.start) <= frame && Math.abs(back[b].end - tr.end) <= frame) hit = true;
           if (!hit) problems.push('the ' + tr.name + ' on the ' + tr.edge + ' of ' + __label(piece.type, piece.track) + ' could not be put back as it was');
         }
         // Exactly the old edge transitions, no more: one that survived the removal and was added
         // again would otherwise pass the check above as a duplicate.
         if (!problems.length) for (var mb = 0; mb < members.length; mb++) {
+          if (members[mb].keep) continue;
           var pc = lay.group[mb], want = 0;
           for (var t2 = 0; t2 < trans.length; t2++) if (trans[t2].member === mb) want++;
-          var now = pc ? __mcpEdgeTransitions(seq, pc.type, pc.track, members[mb].start, members[mb].end, ${prep.frame} / 2) : [];
+          var now = pc ? __mcpEdgeTransitions(seq, pc.type, pc.track, members[mb].start, members[mb].end, frame / 2) : [];
           if (now.length !== want) problems.push(__label(members[mb].type, members[mb].track) + ' has ' + now.length + ' edge transition(s) after the swap, not ' + want);
         }
-        if (problems.length) return JSON.stringify({ success: false, revert: true, beforeHash: beforeHash, problems: problems });
-        var main = null; for (var m = 0; m < members.length; m++) if (members[m].isMain) main = lay.group[m];
+        if (problems.length) return JSON.stringify({ success: false, revert: true, touched: true, beforeHash: beforeHash, problems: problems });
+        var main = null, kept = [];
+        for (var m = 0; m < members.length; m++) {
+          if (members[m].keep) kept.push(__label(members[m].type, members[m].track) + ' (' + members[m].keepWhy + ')');
+          else if (!main || members[m].isMain) main = lay.group[m];
+        }
         return JSON.stringify({ success: true, verified: true,
-          verifiedBy: 'every setting and keyframe of the clip and its linked clips compared by position with the original, plus each piece\\'s track, start, end, in point and on/off, effect order and edge transitions',
+          verifiedBy: 'every setting and keyframe of the clip and its linked clips compared by position with the original, plus each piece\\'s track, start, end, in point and on/off, effect order, edge transitions and the link group',
           clipId: String(main.clip.nodeId), start: main.clip.start.seconds, end: main.clip.end.seconds, inPoint: main.clip.inPoint.seconds,
-          linkedCarried: members.length - 1, transitionsCarried: trans.length,
-          note: 'The swapped clip has a new clip id; use clipId from this result.' + (keyed ? ' Keyframes were carried by time and value; their interpolation (ease) cannot be read by script, so it is back to the default.' : '') });
-      } catch (e) { return JSON.stringify({ success: false, revert: true, beforeHash: typeof beforeHash === 'string' ? beforeHash : null, problems: [e.toString()] }); }
+          linkedCarried: members.length - 1 - kept.length, linkedKept: kept.length, transitionsCarried: trans.length,
+          note: 'The swapped clip has a new clip id; use clipId from this result.'
+            + (kept.length ? ' Kept as they were and linked to the new media: ' + kept.join(', ') + '.' : '')
+            + (keyed ? ' Keyframes were carried by time and value; their interpolation (ease) cannot be read by script, so it is back to the default.' : '')
+            + (trans.length ? ' Transitions were put back with their type, length and alignment; their own settings (for example Dip to Color\\'s colour or Push\\'s direction) cannot be read by script, so they are back to the defaults.' : '') });
+      } catch (e) { return JSON.stringify({ success: false, revert: true, touched: touched, beforeHash: typeof beforeHash === 'string' ? beforeHash : null, problems: [e.toString()] }); }
     `);
     if (!swap?.revert) return swap;
 
     // 3. Something did not carry: undo back to exactly the state before the swap.
     const problems: string[] = swap.problems ?? [];
+    if (swap.touched === false) {
+      return {
+        success: false,
+        changed: false,
+        problems,
+        error: `The swap stopped (${problems.slice(0, 3).join('; ')}) before the old clip was touched. Nothing was changed.`,
+      };
+    }
     if (!swap.beforeHash) {
       return {
         success: false,
@@ -975,6 +1108,17 @@ export class AssemblyTools extends ToolsBase {
       };
     }
     const back: any = await this.bridge.executeScript(revertScript(prep.seq, swap.beforeHash, 400));
+    // Zero undo steps after a swap that removed and placed clips means the state check could not
+    // see the change, not that nothing changed (it used to report changed:false with the new
+    // media still in the edit). The swap always takes at least one step to undo.
+    if (back?.success && Number(back.undoSteps) === 0) {
+      return {
+        success: false,
+        changed: true,
+        problems,
+        error: `The swap did not carry everything (${problems.slice(0, 3).join('; ')}), and the sequence already reads as it did before the swap, so whether it was undone cannot be told. Check the clip in Premiere; Undo there restores the old clip.`,
+      };
+    }
     if (back?.success) {
       return {
         success: false,
@@ -1041,7 +1185,8 @@ export class AssemblyTools extends ToolsBase {
           for (var t = 0; t < vt.numTracks; t++) for (var c = 0; c < vt[t].clips.numItems; c++) {
             var cl = vt[t].clips[c], same = false;
             try { same = String(cl.projectItem.nodeId) === String(oldItem.nodeId); } catch (eP) {}
-            if (!same) continue;
+            // A second video clip linked to one already listed is swapped with it, not again.
+            if (!same || taken[String(cl.nodeId)]) continue;
             targets.push({ clipId: String(cl.nodeId), sequenceName: String(seqs[s].name), track: 'V' + (t + 1), start: cl.start.seconds });
             try { var li = cl.getLinkedItems(); for (var l = 0; li && l < li.numItems; l++) taken[String(li[l].nodeId)] = true; } catch (eL) {}
           }
