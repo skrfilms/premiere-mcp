@@ -3949,7 +3949,8 @@ export function buildToolCatalogue(): MCPTool[] {
     },
     {
       name: 'replace_clip',
-      description: 'Replaces a clip on the timeline with another media item.',
+      description:
+        'Replaces one timeline clip with another media item, keeping its trim, source in point, effects, settings, keyframes, on/off state, edge transitions and the layout of its linked clips (L/J-cuts, audio on other tracks). The rebuild is rehearsed first and compared, and the swap is undone if anything does not carry, so it either carries everything or changes nothing. Linked clips from other media (dual-system sound), or of a kind the new media lacks (sync sound under a picture-only render), stay as they are and are linked to the new clip. To relink every use of a project item at once, use replace_clip_media.',
       inputSchema: z.object({
         clipId: z.string().describe('The ID of the clip to replace'),
         newProjectItemId: z.string().describe('The ID of the new project item to use'),
@@ -5869,7 +5870,7 @@ export function buildToolCatalogue(): MCPTool[] {
     {
       name: 'batch_replace_clips',
       description:
-        'Replaces all timeline clips that reference oldItemId with newItemId across all sequences. Returns count of replaced clips.',
+        'Replaces every timeline clip (video, or audio-only) that uses oldProjectItemId with newProjectItemId (across all sequences, or one with sequenceId), one replace_clip per clip, so each keeps its trim, effects, keyframes and linked audio. A clip whose swap is refused (new media too short, something in the way) is left exactly as it was and listed in results.',
       inputSchema: z.object({
         oldProjectItemId: z.string().describe('NodeId of the project item to replace'),
         newProjectItemId: z.string().describe('NodeId of the replacement project item'),

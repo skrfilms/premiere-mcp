@@ -1,0 +1,152 @@
+{
+  "environment": {
+    "ranAt": "2026-11-02T05:48:45Z",
+    "harness": "crash-matrix",
+    "mode": "mutate",
+    "gitSha": "34e3bacf2e4eb2f99a587cc331ebf894055cdcba",
+    "gitDirty": true,
+    "premiereVersion": "26.5.2 (build 5)",
+    "platform": "darwin 25.6.0 arm64",
+    "catalogueSize": 663
+  },
+  "tools": [
+    {
+      "name": "bake_speed_change",
+      "outcome": "fail",
+      "detail": "refused on every kind tried: ffmpeg exited with code 234 but no retimed file was written to <repo>/.scratch/synth/out/synth-bake_speed_change.txt. The source may be unreadable or "
+    },
+    {
+      "name": "batch_replace_clips",
+      "outcome": "fail",
+      "detail": "refused on every kind tried: oldProjectItemId and newProjectItemId are the same item, so there is nothing to replace."
+    },
+    {
+      "name": "delete_empty_tracks",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, nested sequence, multicam source, still image, dual mono, 29.97 long"
+    },
+    {
+      "name": "delete_preview_files",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, nested sequence, multicam source, still image, dual mono, 29.97 long"
+    },
+    {
+      "name": "delete_track",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, nested sequence, multicam source, still image, dual mono, 29.97 long"
+    },
+    {
+      "name": "export_with_burn_ins",
+      "outcome": "pass",
+      "verified": false,
+      "detail": "ok on plain video+audio, nested sequence, multicam source, still image, dual mono, 29.97 long"
+    },
+    {
+      "name": "extract_selection",
+      "outcome": "fail",
+      "detail": "refused on every kind tried: No selected clips"
+    },
+    {
+      "name": "lift_selection",
+      "outcome": "fail",
+      "detail": "refused on every kind tried: No selected clips"
+    },
+    {
+      "name": "nest_all_v1_clips",
+      "outcome": "fail",
+      "detail": "refused on every kind tried: ReferenceError: seq.nest is not a function"
+    },
+    {
+      "name": "nest_clips",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, nested sequence, multicam source, still image, dual mono, 29.97 long"
+    },
+    {
+      "name": "remove_all_effects",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, nested sequence, multicam source, still image, dual mono, 29.97 long"
+    },
+    {
+      "name": "remove_all_effects_qe",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, nested sequence, multicam source, still image, dual mono, 29.97 long"
+    },
+    {
+      "name": "remove_effect",
+      "outcome": "fail",
+      "detail": "refused on every kind tried: 'Opacity' is an intrinsic component (Motion/Opacity/Volume/Pan) and cannot be removed."
+    },
+    {
+      "name": "remove_effect_at_index",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, nested sequence, multicam source, still image, dual mono, 29.97 long"
+    },
+    {
+      "name": "remove_effect_by_name",
+      "outcome": "fail",
+      "detail": "refused on every kind tried: 'Opacity' is an intrinsic component (Motion/Opacity/Volume/Pan) and cannot be removed."
+    },
+    {
+      "name": "remove_from_timeline",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, nested sequence, multicam source, still image, dual mono, 29.97 long"
+    },
+    {
+      "name": "remove_keyframe",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, nested sequence, multicam source, still image, dual mono, 29.97 long"
+    },
+    {
+      "name": "remove_keyframe_range",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, nested sequence, multicam source, still image, dual mono, 29.97 long"
+    },
+    {
+      "name": "remove_selected_clips",
+      "outcome": "fail",
+      "detail": "refused on every kind tried: No selected clips"
+    },
+    {
+      "name": "remove_time_remap",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, nested sequence, multicam source, still image, dual mono, 29.97 long"
+    },
+    {
+      "name": "render_audio",
+      "outcome": "pass",
+      "verified": false,
+      "detail": "ok on plain video+audio, audio only, nested sequence, multicam source, dual mono, 29.97 long"
+    },
+    {
+      "name": "render_sequence_previews",
+      "outcome": "pass",
+      "verified": false,
+      "detail": "ok on plain video+audio, nested sequence, multicam source, still image, dual mono, 29.97 long"
+    },
+    {
+      "name": "replace_clip",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, multicam source; refused on nested sequence, still image, dual mono, 29.97 long"
+    },
+    {
+      "name": "ripple_delete",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, nested sequence, multicam source, still image, dual mono, 29.97 long"
+    },
+    {
+      "name": "speed_ramp_bake",
+      "outcome": "fail",
+      "detail": "refused on every kind tried: no reason given"
+    },
+    {
+      "name": "stabilize_clip",
+      "outcome": "pass",
+      "detail": "ok on plain video+audio, nested sequence, multicam source, still image, dual mono, 29.97 long"
+    },
+    {
+      "name": "unnest_sequence",
+      "outcome": "pass",
+      "detail": "ok on nested sequence; refused on plain video+audio, multicam source, still image, dual mono, 29.97 long"
+    }
+  ]
+}

@@ -514,6 +514,138 @@ if (run('W9')) try {
   check('and get_project_info hands it to the next session', String(info?.projectNotes ?? '').includes(note), info?.projectNotesPath);
 } catch (e) { stopped(e); }
 
+// ------------------------------------------------------------------- W11: replace_clip carries everything
+if (run('W11')) try {
+  await workflow('W11 replace_clip carries every setting by position, keyframes and linked audio, or stops with nothing changed');
+  for (const f of ['SH010_comp_v001.mp4', 'SH010_comp_v002.mp4']) must(`import ${f}`, imported(await tool('import_media', { filePath: join(MEDIA, f), binName: 'wf_renders' })));
+  must('import the music bed', imported(await tool('import_media', { filePath: join(MEDIA, 'music_bed.m4a'), binName: 'wf_w11' })));
+  const v1i = await itemByName('SH010_comp_v001.mp4'), v2i = await itemByName('SH010_comp_v002.mp4'), musicI = await itemByName('music_bed.m4a');
+  const mk = await tool('create_sequence_from_clips', { projectItemIds: [v1i], name: 'wf_w11' });
+  const seq = mk?.sequenceId || await seqByName('wf_w11');
+  must('build a one-shot edit', !!seq, mk?.error);
+  await tool('set_active_sequence', { sequenceId: seq });
+  const first = (await v1(seq)).clips[0];
+  must('grade it', (await tool('color_correct', { clipId: first.id, exposure: 0.5 }))?.success !== false);
+  // Settings that share a name with another, a keyframed Scale, and a level on the linked audio.
+  const graded = await host(`(function(){
+    var s=__findSequence(${q(seq)}), c=s.videoTracks[0].clips[0], lum=null, mot=null;
+    for (var k=0;k<c.components.numItems;k++){ var m=c.components[k]; if (String(m.matchName)==='AE.ADBE Lumetri') lum=m; if (String(m.matchName)==='AE.ADBE Motion') mot=m; }
+    var sats=[], temps=[];
+    for (var p=0;p<lum.properties.numItems;p++){ var n=String(lum.properties[p].displayName); if(n==='Saturation') sats.push(p); if(n==='Temperature') temps.push(p); }
+    lum.properties[temps[0]].setValue(20, true); lum.properties[sats[1]].setValue(150, true);
+    var sc=mot.properties[1]; sc.setTimeVarying(true);
+    var a=new Time(); a.seconds=c.inPoint.seconds+0.5; var b=new Time(); b.seconds=c.inPoint.seconds+1.5;
+    sc.addKey(a); sc.setValueAtKey(a,80,true); sc.addKey(b); sc.setValueAtKey(b,120,true);
+    var au=s.audioTracks[0].clips[0], lvl=null; for (var j=0;j<au.components.numItems;j++) if (String(au.components[j].displayName)==='Volume') lvl=au.components[j].properties[1];
+    var before=lvl.getValue(); lvl.setValue(before*0.5, true);
+    return JSON.stringify({ temp:temps[0], sat2:sats[1], level: lvl.getValue() });
+  })();`);
+  must('set two same-named Lumetri settings, Scale keyframes and the linked audio level', graded && graded.temp >= 0 && graded.sat2 > graded.temp, graded);
+  const readState = async () => host(`(function(){
+    var s=__findSequence(${q(seq)}), c=s.videoTracks[0].clips[0], lum=null, mot=null;
+    for (var k=0;k<c.components.numItems;k++){ var m=c.components[k]; if (String(m.matchName)==='AE.ADBE Lumetri') lum=m; if (String(m.matchName)==='AE.ADBE Motion') mot=m; }
+    var au=s.audioTracks[0].clips.numItems?s.audioTracks[0].clips[0]:null, lvl=null;
+    if (au) for (var j=0;j<au.components.numItems;j++) if (String(au.components[j].displayName)==='Volume') lvl=au.components[j].properties[1].getValue();
+    var ks=mot.properties[1].isTimeVarying()?mot.properties[1].getKeys():[];
+    return JSON.stringify({ media:String(c.projectItem.getMediaPath()).split('/').pop(), exposure: lum ? lum.properties[19].getValue() : null, temp: lum ? lum.properties[${graded.temp}].getValue() : null, sat2: lum ? lum.properties[${graded.sat2}].getValue() : null, keys: ks ? ks.length : 0, level: lvl, v1: s.videoTracks[0].clips.numItems, a1: s.audioTracks[0].clips.numItems });
+  })();`);
+  const before = await readState();
+  const sw = await tool('replace_clip', { clipId: first.id, newProjectItemId: v2i });
+  check('replace_clip reports success, verified by position', sw?.success === true && /by position/.test(sw?.verifiedBy ?? ''), sw?.error || sw);
+  const after = await readState();
+  check('every setting carried: exposure, both same-named settings, the keyframes, the linked audio level', after.media === 'SH010_comp_v002.mp4' && after.exposure === before.exposure && after.temp === 20 && after.sat2 === 150 && after.keys === 2 && Math.abs(after.level - before.level) < 1e-4, { before, after });
+  check('it says keyframe ease is not carried', /interpolation/.test(sw?.note ?? ''), sw?.note);
+  check('no temporary copy is left past the end of the edit', after.v1 === 1 && after.a1 === 1, after);
+
+  // New media too short for the source range (a 1 s render for a 6 s shot): stop, nothing changed.
+  // A real file, not a subclip: Premiere extends a soft subclip past its marks.
+  const shortFile = join(MEDIA, 'w11_short_1s.mp4');
+  if (!existsSync(shortFile)) spawnSync(FF, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'testsrc2=s=640x360:r=24:d=1', '-f', 'lavfi', '-i', 'sine=frequency=500:duration=1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest', shortFile]);
+  must('import a 1 s render', imported(await tool('import_media', { filePath: shortFile, binName: 'wf_w11' })));
+  const shortI = await itemByName('w11_short_1s.mp4');
+  {
+    const cur = (await v1(seq)).clips[0];
+    const r2 = await tool('replace_clip', { clipId: cur.id, newProjectItemId: shortI });
+    const st2 = await readState();
+    check('too-short media is refused before the old clip is touched', r2?.success === false && r2?.changed === false && /does not cover/.test(r2?.error ?? '') && st2.media === 'SH010_comp_v002.mp4' && st2.v1 === 1 && st2.temp === 20 && st2.keys === 2, { error: r2?.error, st2 });
+  }
+
+  // Video-only old clip over music on A1: the new media's audio would overwrite the music.
+  const lone = await host(`(function(){ var s=__findSequence(${q(seq)}); var a=s.audioTracks[0].clips[0]; if (a) a.remove(false,false); return JSON.stringify({ a1: s.audioTracks[0].clips.numItems }); })();`);
+  const music = musicI ? await tool('add_to_timeline', { projectItemId: musicI, sequenceId: seq, trackType: 'audio', trackIndex: 0, time: 0 }) : null;
+  const hasMusic = await host(`(function(){ var s=__findSequence(${q(seq)}); return JSON.stringify({ a1: s.audioTracks[0].clips.numItems }); })();`);
+  if (lone.a1 === 0 && hasMusic.a1 === 1) {
+    const cur = (await v1(seq)).clips[0];
+    const st3a = await readState();
+    const r3 = await tool('replace_clip', { clipId: cur.id, newProjectItemId: v1i });
+    const st3 = await readState();
+    check('a swap that would overwrite the music bed on A1 is refused with nothing changed', r3?.success === false && r3?.changed === false && /overwrite/.test(r3?.error ?? '') && JSON.stringify(st3) === JSON.stringify(st3a), { error: r3?.error, before: st3a, after: st3 });
+  } else check('set up a video-only clip over music', false, { lone, music: music?.error, hasMusic });
+
+  // Layout: an L-cut (A's audio runs 1 s past its video), a dissolve ending at the A/B cut, and a
+  // clip whose audio sits on A3 under its video on V1. All must come back exactly.
+  const lmk = await tool('create_sequence_from_clips', { projectItemIds: [v1i, v1i], name: 'wf_w11_layout' });
+  const lseq = lmk?.sequenceId || await seqByName('wf_w11_layout');
+  must('build a two-shot edit', !!lseq, lmk?.error);
+  await tool('set_active_sequence', { sequenceId: lseq });
+  for (let i = 0; i < 3; i++) await tool('add_track', { sequenceId: lseq, trackType: 'audio' });
+  const setup = await host(`(function(){
+    var s=__findSequence(${q(lseq)}); function T(x){ var t=new Time(); t.seconds=x; return t; }
+    var A=s.videoTracks[0].clips[0], B=s.videoTracks[0].clips[1];
+    function partner(c){ var li=c.getLinkedItems(); for (var i=0; li && i<li.numItems; i++) if (String(li[i].nodeId)!==String(c.nodeId)) return li[i]; return null; }
+    var Aa=partner(A), Ba=partner(B);
+    // B first (it moves left into 4-8), then A: video 0-4, audio 0-5 (the L-cut).
+    B.inPoint=T(1); B.start=T(4); B.end=T(8); Ba.inPoint=T(2); Ba.start=T(5); Ba.end=T(8);
+    A.end=T(4); Aa.end=T(5);
+    app.enableQE(); var qs=__qeSequenceOpening(s), qt=qs.getVideoTrackAt(0), qa=null;
+    for (var i=0;i<qt.numItems;i++){ var x=qt.getItemAt(i); if (x.type==='Clip' && Math.abs(Number(x.end.secs)-4)<0.05) qa=x; }
+    qa.addTransition(qe.project.getVideoTransitionByName('Cross Dissolve'), false, '12', '0', 1, true, true);
+    // C at 20 on V1, its audio on A3: lay in on V1 (V1+A1) and on A3 (V3+A3), keep V1 + A3, link.
+    var item=__findProjectItem(${q(v1i)});
+    s.videoTracks[0].overwriteClip(item, T(20)); s.audioTracks[2].overwriteClip(item, T(20));
+    function at(tracks, ti, t0){ var tk=tracks[ti]; for (var c=0;c<tk.clips.numItems;c++) if (Math.abs(tk.clips[c].start.seconds-t0)<0.05) return tk.clips[c]; return null; }
+    var cv=at(s.videoTracks,0,20), v3=at(s.videoTracks,2,20), a1=at(s.audioTracks,0,20), a3=at(s.audioTracks,2,20);
+    if (v3) v3.remove(false,false); if (a1) a1.remove(false,false);
+    cv.setSelected(true,false); a3.setSelected(true,false); s.linkSelection(); cv.setSelected(false,false); a3.setSelected(false,false);
+    var tr=s.videoTracks[0].transitions, trs=[]; for (var k=0; tr && k<tr.numItems; k++) trs.push([tr[k].start.seconds, tr[k].end.seconds, String(tr[k].name)]);
+    var lc=cv.getLinkedItems();
+    return JSON.stringify({ A:String(A.nodeId), C:String(cv.nodeId), trs:trs, cLinked: lc?lc.numItems:0, a3:!!a3 });
+  })();`);
+  must('set up the L-cut, the dissolve and the clip with its audio on A3', setup && setup.trs.length === 1 && setup.cLinked === 2 && setup.a3, setup);
+  const layout = async () => host(`(function(){
+    var s=__findSequence(${q(lseq)}), out={ v:[], a:[], trs:[] };
+    for (var t=0;t<s.videoTracks.numTracks;t++) for (var c=0;c<s.videoTracks[t].clips.numItems;c++){ var x=s.videoTracks[t].clips[c]; out.v.push(['V'+(t+1), String(x.projectItem.getMediaPath()).split('/').pop(), +x.start.seconds.toFixed(3), +x.end.seconds.toFixed(3), +x.inPoint.seconds.toFixed(3)]); }
+    for (var t2=0;t2<s.audioTracks.numTracks;t2++) for (var c2=0;c2<s.audioTracks[t2].clips.numItems;c2++){ var y=s.audioTracks[t2].clips[c2]; out.a.push(['A'+(t2+1), String(y.projectItem.getMediaPath()).split('/').pop(), +y.start.seconds.toFixed(3), +y.end.seconds.toFixed(3), +y.inPoint.seconds.toFixed(3)]); }
+    var tr=s.videoTracks[0].transitions; for (var k=0; tr && k<tr.numItems; k++) out.trs.push([+tr[k].start.seconds.toFixed(3), +tr[k].end.seconds.toFixed(3), String(tr[k].name)]);
+    return JSON.stringify(out);
+  })();`);
+  const L0 = await layout();
+  const swapA = await tool('replace_clip', { clipId: setup.A, newProjectItemId: v2i });
+  const L1 = await layout();
+  const media = (rows) => rows.map((r) => [r[0], r[2], r[3], r[4]]);
+  check('L-cut clip with a dissolve swaps, verified', swapA?.success === true && swapA?.transitionsCarried === 1, swapA?.error || swapA);
+  check('A comes back with its L-cut audio, B untouched, and the dissolve where it was', JSON.stringify(media(L1.v)) === JSON.stringify(media(L0.v)) && JSON.stringify(media(L1.a)) === JSON.stringify(media(L0.a)) && JSON.stringify(L1.trs) === JSON.stringify(L0.trs) && L1.v[0][1] === 'SH010_comp_v002.mp4' && L1.a[0][1] === 'SH010_comp_v002.mp4', { before: L0, after: L1 });
+  const swapC = await tool('replace_clip', { clipId: setup.C, newProjectItemId: v2i });
+  const L2 = await layout();
+  const cRows = (L) => ({ v: L.v.filter((r) => r[2] === 20), a: L.a.filter((r) => r[2] === 20) });
+  check('the clip with its audio on A3 swaps, verified', swapC?.success === true, swapC?.error || swapC);
+  check('its video stays on V1 and its audio on A3, nothing appears on V3 or A1', JSON.stringify(cRows(L2).v.map((r) => r[0])) === '["V1"]' && JSON.stringify(cRows(L2).a.map((r) => r[0])) === '["A3"]' && cRows(L2).v[0][1] === 'SH010_comp_v002.mp4', cRows(L2));
+  const cLinked = await host(`(function(){ var s=__findSequence(${q(lseq)}), v=null; for (var c=0;c<s.videoTracks[0].clips.numItems;c++) if (Math.abs(s.videoTracks[0].clips[c].start.seconds-20)<0.05) v=s.videoTracks[0].clips[c]; var li=v?v.getLinkedItems():null; return JSON.stringify({ n: li?li.numItems:0 }); })();`);
+  check('and the two are linked', cLinked.n === 2, cLinked);
+
+  // batch_replace_clips: two trimmed, graded uses of the same shot, swapped in one call.
+  const bmk = await tool('create_sequence_from_clips', { projectItemIds: [v1i, v1i], name: 'wf_w11_batch' });
+  const bseq = bmk?.sequenceId || await seqByName('wf_w11_batch');
+  must('build an edit that uses the shot twice', !!bseq, bmk?.error);
+  await tool('set_active_sequence', { sequenceId: bseq });
+  for (const c of (await v1(bseq)).clips) must('grade each use', (await tool('color_correct', { clipId: c.id, exposure: 0.7, sequenceId: bseq }))?.success !== false);
+  const bBefore = (await v1(bseq)).clips.map((c) => [c.start, c.end, c.inPoint]);
+  const br = await tool('batch_replace_clips', { oldProjectItemId: v1i, newProjectItemId: v2i, sequenceId: bseq });
+  const bAfter = await v1(bseq);
+  check('batch_replace_clips swaps both, verified', br?.success === true && br?.replaced === 2, br?.error || br);
+  check('each keeps its place, trim and grade', bAfter.clips.length === 2 && bAfter.clips.every((c, i) => c.media === 'SH010_comp_v002.mp4' && Math.abs(c.start - bBefore[i][0]) < 0.02 && Math.abs(c.end - bBefore[i][1]) < 0.02 && c.comps.find((x) => x.name === 'Lumetri Color')?.Exposure === 0.7), bAfter.clips.map((c) => [c.media, c.start, c.end, c.comps.find((x) => x.name === 'Lumetri Color')?.Exposure]));
+} catch (e) { stopped(e); }
+
 // ------------------------------------------------------------------- W10: honest edges
 // Last on purpose: if the DeNoise guard ever regresses, this is the workflow that takes Premiere
 // down, and nothing should run after it on a crashed host.
@@ -535,7 +667,7 @@ if (run('W10')) try {
   process.env.PREMIERE_MCP_PROFILE = 'core';
   let sw;
   try { sw = await tool('replace_clip', { clipId: shot.id, newProjectItemId: v2Item }); } finally { process.env.PREMIERE_MCP_PROFILE = profileWas; }
-  check('replace_clip under the default profile copies the effect values', sw?.success === true && sw?.effectValuesCopied != null, sw);
+  check('replace_clip under the default profile carries and verifies the settings', sw?.success === true && /by position/.test(sw?.verifiedBy ?? ''), sw?.error || sw);
   const swapped = (await v1(swapSeq)).clips[0];
   check('the grade survived the swap', swapped?.comps?.find((c) => c.name === 'Lumetri Color')?.Exposure === 0.5, swapped?.comps);
 
