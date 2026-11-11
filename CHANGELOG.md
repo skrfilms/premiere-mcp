@@ -4,6 +4,67 @@ All notable changes are documented here. Releases use semantic versioning.
 
 ## [Unreleased]
 
+- **`replace_clip` carries everything, or changes nothing.** It used to copy effect settings by
+  name through `copy_effects_between_clips`, and Lumetri repeats names (four "Saturation", two
+  each of Temperature, Tint and Contrast), so one setting overwrote another while the swap
+  reported success; keyframes were not copied; effects, levels and the layout of the clip's linked
+  audio or video were dropped, and so were the transitions on its edges. Now the clip and every
+  clip linked to it are read: track, start, end, source in point, on/off, effect order, every
+  setting by position (effect, then property index) with keyframes, and the transitions on their
+  edges. The whole layout is rebuilt first on a temporary copy past the end of the edit, so L- and
+  J-cuts and audio on another track than its video come back as they were, and compared with the
+  original. The old clip is touched only when that rehearsal matches exactly, the new media is long
+  enough (from its real length, read at its real frame rate with drop-frame counted: Premiere lays
+  a clip in past the end of short media and reads it back as asked), and every span the rebuild
+  writes is free apart from the old clip's own group. After the swap everything is compared again,
+  and edge transitions are re-added and read back; if anything differs the swap is undone back to
+  exactly the state before it. Not carried, and said so: keyframe interpolation (no scripting
+  read). Refused up front: a transition centred on a cut (QE places them only starting or ending at
+  the cut), settings that cannot be read on the old clip, and media whose length Premiere does not
+  report. New live workflow W11 covers it.
+- **`replace_clip` closes the gaps a review of the rebuild found.** Each of these could report the
+  wrong thing:
+  - A swap for other media with the same name and span (a re-render under the same file name)
+    that then had to be undone stopped at 0 undo steps and said nothing changed, with the new
+    media still in the edit. The timeline state behind `revert_last_call` and `what_changed` now
+    covers each clip's source item, and a revert that takes 0 steps after a swap is reported as
+    not undone.
+  - A linked clip from other media (dual-system sound synced to the picture) was rebuilt from the
+    new media. It now stays exactly where it is and is linked to the new picture. The same goes
+    for the sync sound under a picture-only VFX render, which used to be refused every time ("the
+    new media has no audio"); the result lists what was kept and why. New media whose own audio
+    would land on a kept clip is refused before anything is touched.
+  - New media with more audio channel clips than the old clip used (stereo old, dual mono new)
+    dropped the extra channel and reported verified success. It is now refused. Dual-mono audio is
+    laid in from the picture, so clicking one of its channels swaps like clicking the video.
+  - Between the rehearsal and the swap, only the old clip's spans were checked again. A clip
+    dropped into the slot in between could be overwritten while the swap reported success, and
+    changed settings were carried from the stale copy. The slot and the settings are now checked
+    again too.
+  - The source in point of each piece was never compared, and spans were held to 0.02 s, more
+    than a frame at 50p and 60p. Both are now compared to half a frame of the sequence.
+  - A throw part-way through the rehearsal left temporary pieces past the end of the edit while
+    reporting nothing changed, and could leave the new item's bin in/out marks moved. Pieces are
+    now recorded as they land and removed, and the marks are put back however a placement ends,
+    as tick strings (a seconds number floors to the frame below), and read back.
+  - Dual-mono (or more mono channels) audio that does not sit on the tracks Premiere lays its
+    channels on could come back with the channels swapped. It is now refused with the tracks
+    named; audio laid out as Premiere lays it still swaps.
+  - Also: every linked piece is checked for speed changes, not just the clicked one; the group is
+    checked again right before the swap, so a trim made in between stops it untouched; the
+    rehearsal is shifted by whole frames (a whole second is not a frame at 23.976 or 29.97); a
+    spare piece that cannot be removed is reported; one clip refusing selection no longer drops
+    the rest of the user's selection; and the result says that re-added transitions are back to
+    their default settings (Dip to Color's colour, Push's direction cannot be read by script).
+  - `batch_replace_clips` no longer lists a second video clip linked to one already listed.
+  - New unit suite `replace-clip-swap.test.ts` runs the generated ExtendScript against a fake of
+    the measured Premiere behaviour; each case fails on the previous code.
+- **`batch_replace_clips` keeps each clip's trim and effects.** It removed every clip that used
+  the old item and laid the new one in at full length, losing trims, grades and levels and
+  running over the next shot, and reported the count as success. It now runs a verified
+  `replace_clip` per use (video, or audio-only), and a clip whose swap is refused is left exactly
+  as it was and listed.
+
 - **DeNoise and DeReverb no longer crash Premiere on nested or multicam clips.** On 26.5.2,
   adding either to a clip whose source is a sequence crashes Premiere. The 10-29 live sweep hit
   it with `denoise_clip` on a nested clip, and it reproduced there; multicam clips are sequences

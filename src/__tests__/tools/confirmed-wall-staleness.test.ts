@@ -398,7 +398,7 @@ function sweepOutcomes(): { outcomes: Map<string, string>; sources: string[] } {
   const sources: string[] = [];
   const candidates = [
     join(REPO_ROOT, '.scratch', 'sweep', 'coverage-results.json'),
-    join(process.env.PREMIERE_TEMP_DIR || '/tmp/premiere-mcp-bridge', 'live-tool-sweep.json'),
+    join(process.env.PMCP_LIVE_BRIDGE_DIR || '/tmp/premiere-mcp-bridge', 'live-tool-sweep.json'),
   ];
   for (const path of candidates) {
     if (!existsSync(path)) continue;
