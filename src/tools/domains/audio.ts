@@ -6,6 +6,7 @@
  */
 import { ToolsBase } from './base.js';
 import { spawn } from 'child_process';
+import { ffmpegCmd } from '../../capture/ffmpeg.js';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import { basename, dirname, extname, join } from 'node:path';
 import { runFf } from '../ff-exec.js';
@@ -703,7 +704,7 @@ export class AudioTools extends ToolsBase {
         'null',
         '-',
       ];
-      const proc = spawn('ffmpeg', ffmpegArgs);
+      const proc = spawn(ffmpegCmd(), ffmpegArgs);
       let stderr = '';
 
       proc.stderr.on('data', (chunk) => {
