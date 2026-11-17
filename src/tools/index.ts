@@ -3605,7 +3605,8 @@ export class PremiereProTools extends ToolsBase {
             id: sequence.sequenceID,
             name: sequence.name
           } : null,
-          readOnly: true
+          readOnly: true,
+          readOnlyMeaning: 'this connection check changed nothing; it says nothing about whether the server or tool profile allows edits'
         });
       } catch (e) {
         return JSON.stringify({
@@ -3717,28 +3718,46 @@ export class PremiereProTools extends ToolsBase {
 
   private async getCapabilities(checkConnection = false, probeLocalTools = false): Promise<any> {
     const currentPlatform = platform();
-    const cepExtensionPath =
+    // 2026-11-16: the panel can be installed per-user OR system-wide (the ZXP/installer route puts it in
+    // /Library/Application Support/Adobe/CEP/extensions, folder "MCP Bridge (CEP)"). Checking only the per-user
+    // "MCPBridgeCEP" folder reported not_detected for a panel that was installed and connected.
+    const cepFolderNames = ['MCPBridgeCEP', 'MCP Bridge (CEP)'];
+    const cepRoots =
       currentPlatform === 'darwin'
-        ? join(
-            homedir(),
-            'Library',
-            'Application Support',
-            'Adobe',
-            'CEP',
-            'extensions',
-            'MCPBridgeCEP',
-          )
+        ? [
+            join(homedir(), 'Library', 'Application Support', 'Adobe', 'CEP', 'extensions'),
+            join('/Library', 'Application Support', 'Adobe', 'CEP', 'extensions'),
+          ]
         : currentPlatform === 'win32'
-          ? join(process.env.APPDATA || homedir(), 'Adobe', 'CEP', 'extensions', 'MCPBridgeCEP')
-          : null;
-
+          ? [
+              join(process.env.APPDATA || homedir(), 'Adobe', 'CEP', 'extensions'),
+              join(
+                process.env['CommonProgramFiles(x86)'] || 'C:\\Program Files (x86)\\Common Files',
+                'Adobe',
+                'CEP',
+                'extensions',
+              ),
+              join(
+                process.env.CommonProgramFiles || 'C:\\Program Files\\Common Files',
+                'Adobe',
+                'CEP',
+                'extensions',
+              ),
+            ]
+          : [];
+    const cepCandidates = cepRoots.flatMap((root) =>
+      cepFolderNames.map((name) => join(root, name)),
+    );
+    let cepExtensionPath: string | null = cepCandidates[0] ?? null;
     let cepInstalled = false;
-    if (cepExtensionPath) {
+    for (const candidate of cepCandidates) {
       try {
-        await fs.access(cepExtensionPath, fsConstants.R_OK);
+        await fs.access(candidate, fsConstants.R_OK);
         cepInstalled = true;
+        cepExtensionPath = candidate;
+        break;
       } catch {
-        cepInstalled = false;
+        // try the next location
       }
     }
 
@@ -3782,6 +3801,7 @@ export class PremiereProTools extends ToolsBase {
         cep: {
           status: cepInstalled ? 'installed' : 'not_detected',
           path: cepExtensionPath,
+          searched: cepInstalled ? undefined : cepCandidates,
           support: 'production bridge for Premiere Pro 2020+',
         },
         uxp: {
@@ -6547,13 +6567,24 @@ export class PremiereProTools extends ToolsBase {
     // concatenation happens here rather than through eval()/Function() in the host: the
     // ExtendScript engine is ES3 and its Function constructor is unreliable, and a runtime
     // eval would also defeat the syntax check the test suite runs over generated scripts.
+    // 2026-11-16: a snippet written as a bare expression -- typically "(function(){ ... return JSON.stringify(x); })()" --
+    // was wrapped as a function BODY with no return, so its value was silently dropped and the caller only saw
+    // success:true. A snippet that has no top-level return and is a single expression now gets one prepended, and
+    // every result says whether the snippet returned anything.
+    const asBody = (src: string): string => {
+      const s = String(src ?? '')
+        .trim()
+        .replace(/;+\s*$/, '');
+      const isIife = /^\(\s*function\s*\(/.test(s) && /\)\s*\(\s*\)$/.test(s);
+      return isIife ? `return ${s};` : String(src ?? '');
+    };
     const blocks = operations
       .map((op, i) => {
         const idLiteral = JSON.stringify(String(op.id ?? `op_${i}`));
         return `
         try {
-          var __res${i} = (function(){ ${op.script} })();
-          __results.push({ id: ${idLiteral}, success: true, result: __res${i} });
+          var __res${i} = (function(){ ${asBody(op.script)} })();
+          __results.push({ id: ${idLiteral}, success: true, returned: typeof __res${i} !== 'undefined', result: (typeof __res${i} === 'undefined' ? null : __res${i}) });
         } catch (__e${i}) {
           __results.push({ id: ${idLiteral}, success: false, error: __e${i}.toString() });
         }`;

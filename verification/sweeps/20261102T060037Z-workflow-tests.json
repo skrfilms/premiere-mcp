@@ -1,0 +1,234 @@
+{
+  "environment": {
+    "ranAt": "2026-11-02T06:00:37Z",
+    "harness": "workflow-tests",
+    "mode": "mutate",
+    "gitSha": "34e3bacf2e4eb2f99a587cc331ebf894055cdcba",
+    "gitDirty": true,
+    "premiereVersion": "26.5.2 (build 5)",
+    "platform": "darwin 25.6.0 arm64",
+    "catalogueSize": 663
+  },
+  "tools": [
+    {
+      "name": "add_marker",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W9"
+    },
+    {
+      "name": "add_project_note",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W9"
+    },
+    {
+      "name": "add_to_timeline",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W11"
+    },
+    {
+      "name": "assemble_review_reel",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W2"
+    },
+    {
+      "name": "batch_apply_effect",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W10"
+    },
+    {
+      "name": "batch_replace_clips",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W11"
+    },
+    {
+      "name": "capture_program_output",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W1, W1b, W2, W3, W7, W10"
+    },
+    {
+      "name": "color_correct",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W1, W1b, W11, W10"
+    },
+    {
+      "name": "create_caption_track",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W3"
+    },
+    {
+      "name": "create_sequence_from_clips",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W1, W5, W6, W9, W11, W10"
+    },
+    {
+      "name": "execute_extendscript",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W9"
+    },
+    {
+      "name": "find_tool",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W9"
+    },
+    {
+      "name": "freeze_frame",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W10"
+    },
+    {
+      "name": "get_active_sequence",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W9"
+    },
+    {
+      "name": "get_clip_links",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W10"
+    },
+    {
+      "name": "get_playhead_position",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W9"
+    },
+    {
+      "name": "get_project_info",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W9"
+    },
+    {
+      "name": "get_project_notes",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W9"
+    },
+    {
+      "name": "get_recent_calls",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W9"
+    },
+    {
+      "name": "get_selected_clips",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W9"
+    },
+    {
+      "name": "import_media",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W1, W2, W3, W4, W5, W6, W7, W8, W9, W11, W10"
+    },
+    {
+      "name": "import_media_qe",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W10"
+    },
+    {
+      "name": "list_project_items",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W9"
+    },
+    {
+      "name": "list_sequence_tracks",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W9"
+    },
+    {
+      "name": "list_sequences",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W9"
+    },
+    {
+      "name": "look_at_cut",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W8, W10"
+    },
+    {
+      "name": "normalize_loudness",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W4"
+    },
+    {
+      "name": "razor_timeline_at_time",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W9"
+    },
+    {
+      "name": "remove_silence",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W6, W9"
+    },
+    {
+      "name": "replace_clip",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W1, W11, W10"
+    },
+    {
+      "name": "replace_clip_media",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W1b"
+    },
+    {
+      "name": "revert_last_call",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W9"
+    },
+    {
+      "name": "set_active_sequence",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W3, W9, W11, W10"
+    },
+    {
+      "name": "set_clip_scale",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W1, W1b"
+    },
+    {
+      "name": "setup_ducking",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W4"
+    },
+    {
+      "name": "stem_export",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W4"
+    },
+    {
+      "name": "stringout_from_transcript",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W8"
+    },
+    {
+      "name": "sync_by_audio",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W7"
+    },
+    {
+      "name": "timecode_burn_in",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W2"
+    },
+    {
+      "name": "timeline_fingerprint",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W9"
+    },
+    {
+      "name": "trim_clip",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W1, W1b"
+    },
+    {
+      "name": "verify_premiere_connection",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W9"
+    },
+    {
+      "name": "version_up_shots",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W5"
+    },
+    {
+      "name": "what_changed",
+      "outcome": "pass",
+      "detail": "succeeded in workflows W9"
+    }
+  ]
+}

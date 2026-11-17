@@ -6,6 +6,7 @@
  */
 import { ToolsBase } from './base.js';
 import { spawn } from 'child_process';
+import { ffmpegCmd as sharedFfmpegCmd } from '../../capture/ffmpeg.js';
 // Synchronous fs/path/os bindings for the Node-side (non-ExtendScript) tools.
 // The async API is the separate `promises as fs` import.
 import * as fsSync from 'node:fs';
@@ -604,7 +605,7 @@ export class ExportRenderTools extends ToolsBase {
 
   checkFfmpegAvailable(): Promise<boolean> {
     return new Promise((resolve) => {
-      const proc = spawn('ffmpeg', ['-version']);
+      const proc = spawn(sharedFfmpegCmd(), ['-version']);
       proc.on('error', () => resolve(false));
       proc.on('close', (code) => resolve(code === 0));
     });
@@ -612,7 +613,7 @@ export class ExportRenderTools extends ToolsBase {
 
   /** The ffmpeg binary, overridable for installs that expose a different name. */
   ffmpegCmd(): string {
-    return (process.env.PREMIERE_MCP_FFMPEG_CMD || 'ffmpeg').trim() || 'ffmpeg';
+    return sharedFfmpegCmd();
   }
 
   async probeMedia(mediaPath?: string, projectItemId?: string): Promise<any> {

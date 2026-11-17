@@ -4,6 +4,92 @@ All notable changes are documented here. Releases use semantic versioning.
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-11-10
+
+Swapping a shot for a new version now carries the whole clip or changes nothing: trim, in point,
+every effect setting by position, keyframes, linked audio laid out as it was (L/J-cuts, other
+tracks), edge transitions, and sync sound kept and relinked under a picture-only render; anything
+that cannot be reproduced is refused or undone, never reported as done. Exports find Media
+Encoder on a standard Creative Cloud install, ffmpeg is found when the client was launched from
+the Dock, DeNoise/DeReverb can no longer crash Premiere on nested clips, and the package carries
+what the official MCP registry needs to list it.
+
+- **Ready for the official MCP registry.** `package.json` carries `mcpName` and `server.json`
+  describes the package for registry.modelcontextprotocol.io; a test keeps the two versions in
+  step.
+- **`replace_clip` carries everything, or changes nothing.** It used to copy effect settings by
+  name through `copy_effects_between_clips`, and Lumetri repeats names (four "Saturation", two
+  each of Temperature, Tint and Contrast), so one setting overwrote another while the swap
+  reported success; keyframes were not copied; effects, levels and the layout of the clip's linked
+  audio or video were dropped, and so were the transitions on its edges. Now the clip and every
+  clip linked to it are read: track, start, end, source in point, on/off, effect order, every
+  setting by position (effect, then property index) with keyframes, and the transitions on their
+  edges. The whole layout is rebuilt first on a temporary copy past the end of the edit, so L- and
+  J-cuts and audio on another track than its video come back as they were, and compared with the
+  original. The old clip is touched only when that rehearsal matches exactly, the new media is long
+  enough (from its real length, read at its real frame rate with drop-frame counted: Premiere lays
+  a clip in past the end of short media and reads it back as asked), and every span the rebuild
+  writes is free apart from the old clip's own group. After the swap everything is compared again,
+  and edge transitions are re-added and read back; if anything differs the swap is undone back to
+  exactly the state before it. Not carried, and said so: keyframe interpolation (no scripting
+  read). Refused up front: a transition centred on a cut (QE places them only starting or ending at
+  the cut), settings that cannot be read on the old clip, and media whose length Premiere does not
+  report. New live workflow W11 covers it.
+- **`replace_clip` closes the gaps a review of the rebuild found.** Each of these could report the
+  wrong thing:
+  - A swap for other media with the same name and span (a re-render under the same file name)
+    that then had to be undone stopped at 0 undo steps and said nothing changed, with the new
+    media still in the edit. The timeline state behind `revert_last_call` and `what_changed` now
+    covers each clip's source item, and a revert that takes 0 steps after a swap is reported as
+    not undone.
+  - A linked clip from other media (dual-system sound synced to the picture) was rebuilt from the
+    new media. It now stays exactly where it is and is linked to the new picture. The same goes
+    for the sync sound under a picture-only VFX render, which used to be refused every time ("the
+    new media has no audio"); the result lists what was kept and why. New media whose own audio
+    would land on a kept clip is refused before anything is touched.
+  - New media with more audio channel clips than the old clip used (stereo old, dual mono new)
+    dropped the extra channel and reported verified success. It is now refused. Dual-mono audio is
+    laid in from the picture, so clicking one of its channels swaps like clicking the video.
+  - Between the rehearsal and the swap, only the old clip's spans were checked again. A clip
+    dropped into the slot in between could be overwritten while the swap reported success, and
+    changed settings were carried from the stale copy. The slot and the settings are now checked
+    again too.
+  - The source in point of each piece was never compared, and spans were held to 0.02 s, more
+    than a frame at 50p and 60p. Both are now compared to half a frame of the sequence.
+  - A throw part-way through the rehearsal left temporary pieces past the end of the edit while
+    reporting nothing changed, and could leave the new item's bin in/out marks moved. Pieces are
+    now recorded as they land and removed, and the marks are put back however a placement ends,
+    as tick strings (a seconds number floors to the frame below), and read back.
+  - Dual-mono (or more mono channels) audio that does not sit on the tracks Premiere lays its
+    channels on could come back with the channels swapped. It is now refused with the tracks
+    named; audio laid out as Premiere lays it still swaps.
+  - Also: every linked piece is checked for speed changes, not just the clicked one; the group is
+    checked again right before the swap, so a trim made in between stops it untouched; the
+    rehearsal is shifted by whole frames (a whole second is not a frame at 23.976 or 29.97); a
+    spare piece that cannot be removed is reported; one clip refusing selection no longer drops
+    the rest of the user's selection; and the result says that re-added transitions are back to
+    their default settings (Dip to Color's colour, Push's direction cannot be read by script).
+  - `batch_replace_clips` no longer lists a second video clip linked to one already listed.
+  - New unit suite `replace-clip-swap.test.ts` runs the generated ExtendScript against a fake of
+    the measured Premiere behaviour; each case fails on the previous code.
+- **`batch_replace_clips` keeps each clip's trim and effects.** It removed every clip that used
+  the old item and laid the new one in at full length, losing trims, grades and levels and
+  running over the next shot, and reported the count as success. It now runs a verified
+  `replace_clip` per use (video, or audio-only), and a clip whose swap is refused is left exactly
+  as it was and listed.
+
+- **Exports find Media Encoder where Creative Cloud installs it on macOS.** The install check only
+  looked for an .app directly in /Applications, and Creative Cloud puts it one folder down
+  (`/Applications/Adobe Media Encoder 2026/Adobe Media Encoder 2026.app`), so `export_sequence`
+  refused with MEDIA_ENCODER_NOT_INSTALLED on a standard install. It now looks inside each
+  `Adobe Media Encoder <year>` folder too (ported from upstream 5528abb; the presets half was
+  ported on 10-21).
+- **ffmpeg and ffprobe are found outside PATH.** An MCP client started from the Dock or Finder
+  (Claude Desktop, an IDE) gets launchd's minimal PATH, so a Homebrew ffmpeg was reported as not
+  installed. After `PREMIERE_MCP_FFMPEG_CMD` / `PREMIERE_MCP_FFPROBE_CMD` and PATH, the server now
+  tries /opt/homebrew/bin, /usr/local/bin and /opt/local/bin. `detect_silence` and the ffmpeg
+  check behind it ran a bare `ffmpeg` and ignored the override; they use the same lookup now.
+
 - **DeNoise and DeReverb no longer crash Premiere on nested or multicam clips.** On 26.5.2,
   adding either to a clip whose source is a sequence crashes Premiere. The 10-29 live sweep hit
   it with `denoise_clip` on a nested clip, and it reproduced there; multicam clips are sequences
@@ -64,6 +150,22 @@ All notable changes are documented here. Releases use semantic versioning.
 - **Failures say why.** `update_marker` and `delete_marker` on a missing id, `title_card`, and
   `set_app_property` / `set_project_property` on a key that does not exist used to fail with no
   reason (shown as "unknown") or with Premiere's bare "Invalid parameter".
+- **`import_folder` imports again.** It called `importFiles` on the destination bin, which bins
+  do not have, so every file failed with "is not a function" (66 of 66 in one folder), and it
+  tried non-media files (.txt, .json, .log) too. Each folder's media now goes in through one
+  `app.project.importFiles(paths, true, bin, false)` call, non-media files are skipped, and every
+  imported item is found in the bin by its media path and reported with its id; a file that is
+  not there afterwards is listed as an error.
+- **`batch_execute` returns what each snippet returns.** A snippet written as a bare
+  `(function(){ ... })()` was wrapped as a function body with no `return`, so its value was
+  dropped and the caller saw only `success: true`. Such a snippet now gets the `return`, and every
+  result says `returned: true/false`.
+- `get_capabilities` finds the CEP panel installed system-wide
+  (`/Library/Application Support/Adobe/CEP/extensions`, and the Common Files folders on Windows)
+  and under the installer's folder name "MCP Bridge (CEP)"; it reported `not_detected` for a panel
+  that was installed and connected. When nothing is found it lists where it looked.
+- `verify_premiere_connection` explains its `readOnly: true`: the check changed nothing, which
+  says nothing about whether the server allows edits.
 - `set_project_property` now shares `set_app_property`'s checked write. Despite its name it has
   always written application preferences (`app.properties`), and it reported `verified: true`
   without comparing the read-back.
