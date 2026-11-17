@@ -1264,7 +1264,8 @@ export class PremiereProResources {
     return [
       '# Premiere Pro MCP — Operating Instructions',
       '',
-      'You are controlling Adobe Premiere Pro (26.3.x) through a verified MCP server.',
+      'You are controlling Adobe Premiere Pro through a verified MCP server. verify_premiere_connection',
+      'reports the exact Premiere version you are connected to; this text states none, for the same reason as below.',
       'Call get_capabilities for the exact tool/resource/prompt counts of THIS build and the active tool',
       'profile -- this text deliberately states no tool count, because a hardcoded one drifts out of date',
       'the moment the catalogue changes and a stale number is a lie the agent cannot detect.',
