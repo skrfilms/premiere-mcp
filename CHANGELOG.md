@@ -150,6 +150,22 @@ what the official MCP registry needs to list it.
 - **Failures say why.** `update_marker` and `delete_marker` on a missing id, `title_card`, and
   `set_app_property` / `set_project_property` on a key that does not exist used to fail with no
   reason (shown as "unknown") or with Premiere's bare "Invalid parameter".
+- **`import_folder` imports again.** It called `importFiles` on the destination bin, which bins
+  do not have, so every file failed with "is not a function" (66 of 66 in one folder), and it
+  tried non-media files (.txt, .json, .log) too. Each folder's media now goes in through one
+  `app.project.importFiles(paths, true, bin, false)` call, non-media files are skipped, and every
+  imported item is found in the bin by its media path and reported with its id; a file that is
+  not there afterwards is listed as an error.
+- **`batch_execute` returns what each snippet returns.** A snippet written as a bare
+  `(function(){ ... })()` was wrapped as a function body with no `return`, so its value was
+  dropped and the caller saw only `success: true`. Such a snippet now gets the `return`, and every
+  result says `returned: true/false`.
+- `get_capabilities` finds the CEP panel installed system-wide
+  (`/Library/Application Support/Adobe/CEP/extensions`, and the Common Files folders on Windows)
+  and under the installer's folder name "MCP Bridge (CEP)"; it reported `not_detected` for a panel
+  that was installed and connected. When nothing is found it lists where it looked.
+- `verify_premiere_connection` explains its `readOnly: true`: the check changed nothing, which
+  says nothing about whether the server allows edits.
 - `set_project_property` now shares `set_app_property`'s checked write. Despite its name it has
   always written application preferences (`app.properties`), and it reported `verified: true`
   without comparing the read-back.

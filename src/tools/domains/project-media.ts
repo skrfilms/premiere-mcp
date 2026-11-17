@@ -611,29 +611,51 @@ export class ProjectMediaTools extends ToolsBase {
         var importedItems = [];
         var errors = [];
         
+        // 2026-11-16 fix: a bin (ProjectItem) has no importFiles(); the old per-file
+        // targetBin.importFiles(...) threw "is not a function" for every file. Import each
+        // folder's media in ONE app.project.importFiles(paths, suppressUI, bin, false) call,
+        // skip non-media files (.txt/.json/.log were being attempted), then read each
+        // imported item back out of the bin by media path to report its id.
+        var MEDIA = {mp4:1,mov:1,m4v:1,mxf:1,avi:1,mkv:1,webm:1,mts:1,m2ts:1,wav:1,mp3:1,aif:1,aiff:1,m4a:1,aac:1,
+                     png:1,jpg:1,jpeg:1,tif:1,tiff:1,psd:1,exr:1,dpx:1,gif:1,bmp:1,srt:1,mogrt:1};
+        function isMedia(name) {
+          var s = String(name), dot = -1;
+          for (var q = s.length - 1; q >= 0; q--) { if (s.charAt(q) === '.') { dot = q; break; } }
+          return dot > 0 && MEDIA[s.substring(dot + 1).toLowerCase()] === 1;
+        }
+        function samePath(a, b) {
+          try { return new File(a).fsName === new File(b).fsName; } catch (e) { return String(a) === String(b); }
+        }
+        function findInBin(bin, path) {
+          for (var c = 0; c < bin.children.numItems; c++) {
+            var ch = bin.children[c], mp = '';
+            try { mp = ch.getMediaPath(); } catch (e) {}
+            if (mp && samePath(mp, path)) return ch;
+          }
+          return null;
+        }
         function importFiles(dir, targetBin) {
           var files = dir.getFiles();
+          var batch = [];
           for (var i = 0; i < files.length; i++) {
             var file = files[i];
             if (file instanceof File) {
-              try {
-                var item = targetBin.importFiles([file.fsName]);
-                if (item && item.length > 0) {
-                  importedItems.push({
-                    name: file.name,
-                    path: file.fsName,
-                    id: item[0].nodeId
-                  });
-                }
-              } catch (e) {
-                errors.push({
-                  file: file.name,
-                  error: e.toString()
-                });
-              }
+              if (isMedia(file.name)) batch.push(file.fsName);
             } else if (file instanceof Folder && ${recursive}) {
               importFiles(file, targetBin);
             }
+          }
+          if (!batch.length) return;
+          try {
+            app.project.importFiles(batch, true, targetBin, false);
+          } catch (e) {
+            errors.push({ file: dir.fsName, error: e.toString() });
+            return;
+          }
+          for (var b = 0; b < batch.length; b++) {
+            var it = findInBin(targetBin, batch[b]);
+            if (it) importedItems.push({ name: String(it.name), path: batch[b], id: it.nodeId });
+            else errors.push({ file: batch[b], error: 'not found in the target bin after import (unsupported, or already in the project elsewhere)' });
           }
         }
         
